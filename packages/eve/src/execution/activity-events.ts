@@ -87,7 +87,8 @@ export function projectActivityEvents(input: {
       ];
     }
     const id = actionId(lineage.id, result.callId);
-    const label = activityLabel(event.data.presentation?.[result.callId]?.label);
+    const presentation = event.data.presentation?.[result.callId];
+    const label = activityLabel(presentation?.label);
     return [
       ...(label === undefined
         ? []
@@ -97,6 +98,24 @@ export function projectActivityEvents(input: {
               eventId: `${id}:result:${input.eventId ?? input.at}`,
               kind: "action.label.updated" as const,
               label,
+            },
+          ]),
+      ...(presentation?.state === undefined
+        ? []
+        : [
+            {
+              eventId: `${id}:state:${input.eventId ?? input.at}`,
+              kind: "state.replaced" as const,
+              state: {
+                key: presentation.state.key,
+                parentWorkId: lineage.id,
+                replacedAt: input.at,
+                rootTurnId: lineage.rootTurnId,
+                sourceActionId: id,
+                sourceEventId: input.eventId ?? input.at,
+                sourceToolName: result.kind === "tool-result" ? result.toolName : "load_skill",
+                value: presentation.state.value,
+              },
             },
           ]),
       {

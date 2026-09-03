@@ -153,7 +153,12 @@ describe("projectActivityEvents", () => {
         at: "2026-01-01T00:00:02Z",
         event: {
           data: {
-            presentation: { "tool-1": { label: "Report ready" } },
+            presentation: {
+              "tool-1": {
+                label: "Report ready",
+                state: { key: "build_report", value: { sections: 3 } },
+              },
+            },
             result: {
               callId: "tool-1",
               kind: "tool-result",
@@ -176,6 +181,20 @@ describe("projectActivityEvents", () => {
         eventId: "action:work:root:turn:tool-1:result:result-1",
         kind: "action.label.updated",
         label: "Report ready",
+      },
+      {
+        eventId: "action:work:root:turn:tool-1:state:result-1",
+        kind: "state.replaced",
+        state: {
+          key: "build_report",
+          parentWorkId: "work:root:turn",
+          replacedAt: "2026-01-01T00:00:02Z",
+          rootTurnId: "turn",
+          sourceActionId: "action:work:root:turn:tool-1",
+          sourceEventId: "result-1",
+          sourceToolName: "build_report",
+          value: { sections: 3 },
+        },
       },
       {
         actionId: "action:work:root:turn:tool-1",
