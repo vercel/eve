@@ -233,71 +233,164 @@ non-workflow body receives.
 
 ### 3.8 Example: Devbox as a background durable tool
 
-One invocation owns the whole api-devbox task, including every
-attention-required round trip. There is no continuation argument and no
-"one active binding per api-devbox task" constraint: the run is the binding.
+Written against the api-devbox contract the v PR already codes to: one
+webhook URL registered at `createTask`, `taskStateChange` posts with
+`state ∈ { pending, running, attention-required, complete, errored }`, a
+`prompt` endpoint for follow-ups, and a result of
+`{ summary, exitStatus, error?, prs? }` read from `getTask`. `Hook` is an
+`AsyncIterable`, so one webhook receives every state change for the task's
+lifetime.
+
+One run owns the whole api-devbox task. The user's follow-ups — an answer to
+an attention-required prompt, or "now fix the review findings" after a
+completed review — all go through `ask`, so there is no continuation
+argument, no "one active binding" constraint, and no second tool.
 
 ```ts
 export default defineTool({
   execution: "background",
-  inputSchema: devboxInputSchema,
+  description: "Start repository work in api-devbox and see it through. Use once per task.",
+  inputSchema: devboxInputSchema, // repos, prompt, title?, assistant?, model?, pr?
   async *execute(input, ctx, task) {
     "use workflow";
 
-    const run = await startDevbox(input, ctx); // step: resolves the requester's Connect token
-    yield task.setState({ devboxTaskId: run.taskId, taskUrl: run.taskUrl }); // receipt
+    const events = createWebhook(); // registered before the task exists
+    const devbox = await createDevboxTask(input, events.url, ctx); // step: requester's Connect token
+    yield task.setState({ devboxTaskId: devbox.taskId, taskUrl: devbox.taskUrl, state: "pending" });
 
     try {
-      while (true) {
-        const done = createWebhook();
-        await subscribeDevbox(run.taskId, done.url, ctx); // step
-        const event = await (await done).json();
-
-        if (event.state === "completed") return await readDevboxResult(run.taskId, ctx);
-        if (event.state === "errored") throw new FatalError(`Devbox task ${run.taskId} failed`);
-
-        // attention-required: the human answers, in the same run.
-        const answer = await ask(ctx, {
-          prompt: event.message,
-          display: "text",
-          allowFreeform: true,
+      for await (const request of events) {
+        const change = parseTaskStateChange(await request.json()); // { taskId, state } or null
+        if (change === null || change.taskId !== devbox.taskId) continue; // unrelated or malformed post
+        yield task.setState({
+          devboxTaskId: devbox.taskId,
+          taskUrl: devbox.taskUrl,
+          state: change.state,
         });
-        yield { state: "resuming", devboxTaskId: run.taskId }; // progress
-        await continueDevbox(run.taskId, answer.text, ctx); // step
+
+        switch (change.state) {
+          case "pending":
+          case "running":
+            continue;
+
+          case "attention-required": {
+            // api-devbox does not carry the question in the webhook; the task page does.
+            const answer = await ask(ctx, {
+              prompt:
+                `Devbox needs your input to continue "${devbox.title}".\n` +
+                `Open ${devbox.taskUrl} to see what it is asking, then reply here.`,
+              display: "text",
+              allowFreeform: true,
+            });
+            await promptDevbox(devbox.taskId, answer.text ?? "", ctx); // step
+            continue;
+          }
+
+          case "complete": {
+            const result = await readDevboxTask(devbox.taskId, ctx); // step: authoritative
+            if (input.pr === false) {
+              // A review has no PR; the requester may want the findings acted on.
+              const next = await ask(ctx, {
+                prompt: `Review finished:\n\n${result.summary}\n\nApply these findings?`,
+                display: "confirmation",
+                options: [
+                  { id: "apply", label: "Apply the findings", style: "primary" },
+                  { id: "done", label: "Done" },
+                ],
+              });
+              if (next.optionId === "apply") {
+                await promptDevbox(devbox.taskId, "Apply the review findings and open a PR.", ctx);
+                continue; // back to waiting on the same webhook
+              }
+            }
+            return { summary: result.summary, prs: result.prs ?? [], taskUrl: devbox.taskUrl };
+          }
+
+          case "errored": {
+            const result = await readDevboxTask(devbox.taskId, ctx);
+            throw new FatalError(result.error ?? `Devbox task ${devbox.taskId} errored`);
+          }
+        }
       }
+      throw new FatalError(
+        `Webhook for Devbox task ${devbox.taskId} closed before a terminal state`,
+      );
     } finally {
-      if (ctx.abortSignal.aborted) await stopDevbox(run.taskId, ctx);
+      if (ctx.abortSignal.aborted) await stopDevbox(devbox.devboxId, ctx); // step
     }
   },
 });
 
-async function startDevbox(input: DevboxInput, ctx: ToolContext) {
+async function createDevboxTask(input: DevboxInput, webhookUrl: string, ctx: ToolContext) {
   "use step";
-  const { token } = await ctx.getToken(devboxUserAuth); // may park the run on sign-in (§3.6)
-  return createDevboxClient({
-    token,
-    onUnauthorized: () => ctx.requireAuth(devboxUserAuth),
-  }).createTask(input);
+  const client = await devboxClient(ctx);
+  const snapshot = await selectSnapshot(client, input.repos);
+  const set = await client.createTaskSet(input.title ?? deriveTitle(input.prompt));
+  const created = await client.createTask({
+    setId: set.set_id,
+    snapshotId: snapshot.id,
+    prompt: promptWithDeliverable(input),
+    assistant: input.assistant,
+    model: input.model,
+    webhookUrl,
+  });
+  return {
+    taskId: created.task_id,
+    devboxId: created.devbox_id,
+    title: input.title ?? deriveTitle(input.prompt),
+    taskUrl: devboxTaskUrl(created.task_id),
+  };
+}
+
+async function devboxClient(ctx: ToolContext) {
+  "use step";
+  const { token } = await ctx.getToken(devboxUserAuth); // parks the run on sign-in (§3.6)
+  return createDevboxClient({ token, onUnauthorized: () => ctx.requireAuth(devboxUserAuth) });
 }
 ```
 
-Every HITL constraint the integration doc lists holds:
+`promptDevbox`, `readDevboxTask`, and `stopDevbox` are one-call steps over
+the same client. Snapshot selection, title derivation, and the deliverable
+prompt are the PR's existing helpers, unchanged.
 
-- v owns every user-facing message. `ask` renders the question on v's channel;
-  Devbox is never a model-visible subagent.
-- attention-required does not complete the task. It parks the run on `ask`;
-  the task is `input_required` while the human answers and `working` again
-  after. No `input.requested` is authored by v; the framework owns it.
-- Sign-in is not a special state the tool returns. `getToken` in a step parks
-  the run the same way, under the requester's identity.
-- The callback is a signal; `readDevboxResult` reads authoritative state.
-- Cancellation stops the sandbox from `finally` (§7); `stop_devbox_task` goes.
-- Duplicate webhooks are harmless: each iteration mints a fresh webhook URL,
-  and a late post to a consumed one is rejected by the SDK.
+How each constraint from the integration doc is met:
 
-The relay workflow, relay route, `session.completed` adapter, `task`
-continuation argument, and `get_devbox_task` (for anything other than ad hoc
-status) are deleted.
+- **v owns every user-facing message.** The `ask` prompts are rendered on v's
+  channel as v's questions; the model never sees a Devbox turn. Devbox is not
+  a subagent.
+- **attention-required is not terminal.** The run parks on `ask`; the task is
+  `input_required` until the requester answers, then `working` again. The
+  answer is posted to api-devbox from the same run. api-devbox does not put
+  the question text in the webhook, so the prompt links the task page rather
+  than pretending to know what was asked.
+- **Only the requester answers.** `ask` already enforces this on Slack: another
+  user's click is rejected without resolving the request.
+- **Sign-in is not a state the tool returns.** `getToken` in a step parks the
+  run on `authorization.required` under the requester's identity; a later
+  401 is `requireAuth` on the same path.
+- **The callback is a signal.** Terminal states re-read the task; the webhook
+  body is never reported as the result.
+- **A review can be followed by a fix without a second launch.** The
+  `complete` branch of a `pr: false` task offers to apply the findings, which
+  is another prompt to the same api-devbox task on the same webhook.
+- **Cancellation reaches the sandbox.** `finally` stops the Devbox when
+  `ctx.abortSignal` fired (§7). `stop_devbox_task` goes away.
+- **Duplicate and out-of-order webhooks are harmless.** State posts for other
+  tasks are skipped; a repeated `attention-required` re-asks, which is the
+  right behaviour when the sandbox asked again; a repeated terminal state
+  after `return` is a post to a hook the run no longer reads.
+
+Deleted from the PR: the relay workflow, the relay route, the
+`session.completed`/`subagentName` adapter, the launch and follow-up
+fingerprint guards (step replay is the idempotency mechanism), the `task`
+continuation argument, `stop_devbox_task`, and `get_devbox_task` except as an
+ad hoc status tool.
+
+What the model sees, in order: the receipt
+`{ status: "working", taskId, devboxTaskId, taskUrl, state: "pending" }`; a
+`[Task state]` entry whose `state` tracks api-devbox; an `input.requested` on
+the channel whenever the body asks; and one terminal result. Nothing in
+between requires v to act.
 
 ## 4. Task state and messages
 
