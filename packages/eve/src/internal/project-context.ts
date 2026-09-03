@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
@@ -33,8 +33,7 @@ export type EveProjectContext =
     };
 
 function containsPath(parent: string, child: string): boolean {
-  const path = relative(parent, child);
-  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
+  return child === parent || child.startsWith(`${parent}${sep}`);
 }
 
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
