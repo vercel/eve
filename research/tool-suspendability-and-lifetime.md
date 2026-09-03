@@ -77,9 +77,7 @@ task, run under the existing task-delivery policy. A body that wants both sets
 state and then posts. Neither constructor is importable elsewhere; they live on
 `task` so the type system can withhold them by cell.
 
-The first `setState` observed by the launching turn is the receipt,
-`{ status: "working", taskId, ...view.state }`. Messages yielded before it are
-delivered after it.
+The model receives `{ status: "working", taskId }` as soon as the task is admitted. The receipt is independent of state: a body may set state later, park before setting it, or never set it. `taskId` and the task's private run addresses—not `view.state`—are what resume parked work.
 
 ### 3.2 Replies: `ask` and provider authorization
 
@@ -287,9 +285,7 @@ task-delivery policy.
   `TaskSetState` → `set-state`, `TaskMessage` → parent `send`, untagged →
   `action.partial` on the stream. The `wakeTaskUpdateParentStep` path for
   untagged reports is removed.
-- `createWorkflowToolBackgroundExecute` waits on the report channel for the
-  first `setState`, raced against the run's outcome, and merges it into the
-  receipt. No `setState` → `{ status: "working", taskId }`.
+- `createWorkflowToolBackgroundExecute` returns `{ status: "working", taskId }` after task admission. It never waits for a body yield.
 - The `"Background tools cannot return AsyncIterable"` guard goes; the
   step-lifetime executor iterates the body and sends each `setState` before
   completing with the return value.
@@ -350,7 +346,7 @@ Both are required for the Devbox migration.
   asks. There is no post-return path.
 - `view.state` is written only by `setState`; never derived from the tool
   result or the executor binding. The task run stays the single writer.
-- A receipt is observed exactly once, from the first `setState`.
+- A fixed `{ status: "working", taskId }` receipt is observed exactly once and never depends on `view.state`.
 - A token never enters a workflow body's replay log.
 - Subagent task behaviour is unchanged.
 
@@ -366,8 +362,7 @@ Both are required for the Devbox migration.
 - Unit: `applyTaskTransition` for `set-state` on each status; descriptor
   tagging; `defineTool` overload typing via `expectTypeOf`.
 - Integration: `setState` → `view.state` with no parent delivery;
-  `postMessage` → parent `send` with `view.state` untouched; receipt from the
-  first `setState` and the race against early return/throw; `getToken` in a
+  `postMessage` → parent `send` with `view.state` untouched; immediate receipt independent of state; `getToken` in a
   step of a background run resolves under the session identity; a step-raised
   authorization requirement parks the task `input_required` and resumes on
   callback; `getToken` in the body still throws.
