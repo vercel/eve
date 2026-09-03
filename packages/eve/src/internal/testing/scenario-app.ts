@@ -301,6 +301,10 @@ async function installScenarioDependencies(input: {
     return;
   }
 
+  // Generated scenario apps install public package dependencies. Pinning the
+  // registry keeps their outcome independent of a developer or runner's
+  // private registry configuration.
+  await writeFile(join(input.appRoot, ".npmrc"), "registry=https://registry.npmjs.org/\n");
   await runPnpmCommand({
     args: [
       "install",
