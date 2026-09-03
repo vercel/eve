@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import {
@@ -36,30 +36,22 @@ export async function resolveNamedAgentProjectContext(
 ): Promise<Extract<EveProjectContext, { kind: "workspace-member" | "standalone" }> | undefined> {
   const resolvedAppRoot = resolve(appRoot);
   const source = options.source ?? createDiskProjectSource();
-  let workspaceRoot = resolvedAppRoot;
+  const agentsRoot = dirname(resolvedAppRoot);
+  if (basename(agentsRoot) !== "agents") return undefined;
 
-  while (true) {
-    if (
-      workspaceRoot !== resolvedAppRoot &&
-      (await source.stat(join(workspaceRoot, "agent"))) === "directory"
-    ) {
-      return undefined;
-    }
-    const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
-    const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
-    if (workspace !== undefined && member !== undefined) {
-      return {
-        workspace,
-        environmentRoot: workspace.root,
-        kind: "workspace-member",
-        member,
-      };
-    }
+  const workspaceRoot = dirname(agentsRoot);
+  if ((await source.stat(join(workspaceRoot, "agent"))) === "directory") return undefined;
 
-    const parent = resolve(workspaceRoot, "..");
-    if (parent === workspaceRoot) return undefined;
-    workspaceRoot = parent;
-  }
+  const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
+  const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
+  if (workspace === undefined || member === undefined) return undefined;
+
+  return {
+    workspace,
+    environmentRoot: workspace.root,
+    kind: "workspace-member",
+    member,
+  };
 }
 
 /** Classify the current filesystem scope before command-specific policy runs. */

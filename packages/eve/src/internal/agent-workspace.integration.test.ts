@@ -103,4 +103,34 @@ describe("resolveAgentWorkspace", () => {
       member: { appRoot: supportRoot, name: "support" },
     });
   });
+
+  it("ignores unrelated agents directories above a standalone project", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-standalone-unrelated-agents-"));
+    const appRoot = join(root, "eve", "apps", "fixtures", "weather-agent");
+    await Promise.all([
+      mkdir(join(appRoot, "agent"), { recursive: true }),
+      mkdir(join(root, "agents", "apps"), { recursive: true }),
+    ]);
+
+    await expect(resolveEveProjectContext(appRoot)).resolves.toEqual({
+      appRoot,
+      environmentRoot: appRoot,
+      kind: "standalone",
+    });
+  });
+
+  it("preserves a standalone project boundary above an agents directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-standalone-boundary-"));
+    const appRoot = join(root, "agents", "support");
+    await Promise.all([
+      mkdir(join(root, "agent"), { recursive: true }),
+      mkdir(join(appRoot, "agent"), { recursive: true }),
+    ]);
+
+    await expect(resolveEveProjectContext(appRoot)).resolves.toEqual({
+      appRoot,
+      environmentRoot: appRoot,
+      kind: "standalone",
+    });
+  });
 });
