@@ -8,6 +8,7 @@ import { createNodeHarnessTools } from "#execution/node-step.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import { createExecutionHistoryView } from "#execution/history-view.js";
 import type { CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import {
   CODE_MODE_BRIDGE_REQUEST_LIMIT,
@@ -180,8 +181,9 @@ export async function executeCodeModeToolStep(input: {
   if (execute === undefined) {
     return { isError: true, output: `Tool "${input.toolName}" has no executor.` };
   }
+  // The turn's history as of dispatch: the same view a direct call would see.
   const options: ToolExecuteOptions = {
-    messages: [],
+    messages: createExecutionHistoryView(session).initial.messages,
     toolCallId: input.toolCallId,
   } as ToolExecuteOptions;
   try {
