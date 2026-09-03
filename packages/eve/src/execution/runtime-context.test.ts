@@ -12,6 +12,7 @@ import {
   SessionKey,
   ScheduleIdKey,
 } from "#context/keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 
 function createTestSession(
@@ -274,7 +275,7 @@ describe("buildRunContext", () => {
   it("grafts parent metadata onto the child's own kind", () => {
     const parentProjection = {
       kind: "channel:slack",
-      metadata: { threadTs: "1234.5678", userId: "U123" },
+      metadata: { audience: "public" as const, threadTs: "1234.5678", userId: "U123" },
     };
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
@@ -290,7 +291,18 @@ describe("buildRunContext", () => {
 
     const result = ctx.get(ChannelInstrumentationKey)!;
     expect(result.kind).toBe("subagent");
-    expect(result.metadata).toEqual({ threadTs: "1234.5678", userId: "U123" });
+    expect(result.metadata).toEqual({
+      audience: "public",
+      threadTs: "1234.5678",
+      userId: "U123",
+    });
+
+    setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toEqual({
+      audience: "public",
+      threadTs: "1234.5678",
+      userId: "U123",
+    });
   });
 
   it("uses the adapter's own projection when channelMetadata is not provided", () => {
