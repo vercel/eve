@@ -17,7 +17,7 @@ import {
 } from "#tools/durable-callbacks.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-import type { TaskExec } from "#tools/task.js";
+import type { TaskExec, TaskReceipt } from "#tools/task.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 
@@ -203,15 +203,15 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
 export interface BackgroundToolDefinition<
   TInput = unknown,
   TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
+> extends PublicToolDefinition<TInput, TaskReceipt> {
   readonly execution: "background";
   execute(
     input: TInput,
     ctx: ToolContext,
     task: TaskExec,
-  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
+  ): Promise<TOutput> | TOutput | AsyncIterable<unknown>;
   approval?: Approval<ApprovalContextInput<TInput>>;
-  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 type ToolOutputFromExecuteReturn<TReturn> =
@@ -221,7 +221,12 @@ type ToolOutputFromExecuteReturn<TReturn> =
       ? TOutput
       : TReturn;
 
-type BackgroundToolOutputFromExecuteReturn<TReturn> = ToolOutputFromExecuteReturn<TReturn>;
+type BackgroundToolOutputFromExecuteReturn<TReturn> =
+  TReturn extends AsyncGenerator<unknown, infer TOutput>
+    ? TOutput
+    : TReturn extends AsyncIterable<unknown>
+      ? null
+      : Awaited<TReturn>;
 
 type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
   execute(input: TInput, ctx: ToolContext): TReturn;
@@ -249,10 +254,7 @@ export function defineTool<
   description: BackgroundToolDefinition<unknown, unknown>["description"];
   execution: "background";
   inputSchema: TSchema;
-  outputSchema?: PublicToolDefinition<
-    unknown,
-    BackgroundToolOutputFromExecuteReturn<TReturn>
-  >["outputSchema"];
+  outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: BackgroundToolDefinition<

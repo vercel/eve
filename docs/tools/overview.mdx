@@ -69,6 +69,9 @@ yield task.setState({ jobId, status: "running" }); // durable model-visible stat
 yield task.postMessage("The export needs review."); // one new parent turn; state unchanged
 ```
 
+For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
+return value is available through the completed task's output.
+
 `setState` replaces the task's prior authored state. `postMessage` is the only yield that wakes the
 agent; use [`ask`](/docs/tools/workflows#ask-a-human-ask) when the body needs an answer from the human.
 Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,

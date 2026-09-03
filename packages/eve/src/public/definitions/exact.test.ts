@@ -25,7 +25,12 @@ import {
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, type TaskExec, type ToolDefinition } from "#public/tools/index.js";
+import {
+  defineTool,
+  type TaskExec,
+  type TaskReceipt,
+  type ToolDefinition,
+} from "#public/tools/index.js";
 import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
@@ -101,6 +106,9 @@ describe("definition helper exact inputs", () => {
     });
 
     expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
+    expectTypeOf<
+      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
+    >().toEqualTypeOf<TaskReceipt>();
     expect(backgroundTool.execution).toBe("background");
   });
 
