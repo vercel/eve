@@ -33,7 +33,7 @@
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
       "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["@eve/self-modification"],
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
           "install": {

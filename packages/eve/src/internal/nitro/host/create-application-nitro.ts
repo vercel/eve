@@ -802,6 +802,7 @@ interface ProductionApplicationNitroOptions {
    * function's environment for callback-URL minting behind a per-agent mount.
    */
   readonly publicRoutePrefix?: string;
+  readonly workspaceMember?: boolean;
 }
 
 /**
@@ -845,6 +846,7 @@ export async function createProductionApplicationNitro(
       agentName: preparedHost.compileResult.manifest.config.name,
       enabled: preset === "vercel",
       publicRoutePrefix: options.publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
     }),
   });
   await writeEveVersionedCacheMetadata(options.buildDir);

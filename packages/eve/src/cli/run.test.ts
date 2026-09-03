@@ -22,6 +22,14 @@ vi.mock("#cli/application-root.js", () => ({
 }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
+vi.mock("#internal/project-context.js", () => ({
+  findEveProjectContext: vi.fn(async () => undefined),
+  resolveEveProjectContext: vi.fn(async (appRoot: string) => ({
+    appRoot,
+    environmentRoot: appRoot,
+    kind: "standalone",
+  })),
+}));
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -1004,6 +1012,7 @@ describe("eve build output ownership", () => {
       profileOutputPath: resolve(process.cwd(), profilePath),
       skipVercelSandboxPrewarm: false,
       vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
   });
 
@@ -1026,6 +1035,7 @@ describe("eve build output ownership", () => {
         hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
         serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
       },
+      workspaceMember: false,
     });
   });
 

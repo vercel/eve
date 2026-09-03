@@ -1,5 +1,5 @@
 import type { Command } from "#compiled/commander/index.js";
-import type { AgentWorkspace } from "#internal/agent-workspace.js";
+import type { AgentWorkspace } from "#internal/project-context.js";
 import { createPrompter } from "#setup/prompter.js";
 
 import type { CliApplicationContext } from "./application-command.js";

@@ -131,6 +131,16 @@ export function isProjectMarkerEntry(name: string, entryType: DirectoryEntryType
 /**
  * Classifies a top-level agent-root entry according to the spec-legal grammar.
  */
+export function isDiscoverableAgentRootEntry(name: string, entryType: DirectoryEntryType): boolean {
+  const kind = classifyAgentRootEntry(name, entryType);
+  return (
+    kind !== "unknown" &&
+    kind !== "ignored-directory" &&
+    kind !== "lib-directory" &&
+    kind !== "memory-directory"
+  );
+}
+
 export function classifyAgentRootEntry(
   name: string,
   entryType: DirectoryEntryType,

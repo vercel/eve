@@ -54,7 +54,7 @@ async function createEnvironmentFixture(): Promise<string> {
   await mkdir(join(fixtureRoot, "agent"), { recursive: true });
   await writeFile(
     join(fixtureRoot, "package.json"),
-    `${JSON.stringify({ name: "eve-eval-env-test", private: true, type: "module" })}\n`,
+    `${JSON.stringify({ dependencies: { eve: "*" }, name: "eve-eval-env-test", private: true, type: "module" })}\n`,
   );
   await writeFile(
     join(fixtureRoot, "agent", "agent.mjs"),

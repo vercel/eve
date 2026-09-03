@@ -266,9 +266,6 @@ importers:
       '@chat-adapter/x':
         specifier: 4.34.0
         version: 4.34.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      '@eve/self-modification':
-        specifier: workspace:*
-        version: link:../../packages/eve-self-modification
       '@getdial/chat-sdk-adapter':
         specifier: 0.2.0
         version: 0.2.0(ai@7.0.84(zod@4.5.4))(chat@4.34.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.86.0(@babel/core@7.29.0(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
@@ -1508,23 +1505,13 @@ importers:
         version: 4.1.10(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/eve-self-modification:
-    dependencies:
-      eve:
-        specifier: workspace:^
-        version: link:../eve
-      just-bash:
-        specifier: 3.1.0
-        version: 3.1.0(supports-color@10.2.2)
     devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 25.9.1
+      eve:
+        specifier: workspace:*
+        version: link:../eve
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 4.1.10(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
 packages:
 
