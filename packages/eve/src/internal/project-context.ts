@@ -45,38 +45,15 @@ async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<bo
   );
 }
 
-async function hasNestedWorkspaceMember(root: string, source: ProjectSource): Promise<boolean> {
-  const entries = await source.readDirectory(join(root, "agents"));
-  for (const entry of entries) {
-    if (
-      entry.isDirectory() &&
-      !entry.name.startsWith(".") &&
-      (await source.stat(join(root, "agents", entry.name, "agent"))) === "directory"
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
   const agentsRoot = join(root, "agents");
   const entries = (await source.readDirectory(agentsRoot))
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .sort((left, right) => left.name.localeCompare(right.name));
-  if (entries.length === 0) {
-    throw new Error(`Invalid eve workspace at ${root}: agents/ has no members.`);
-  }
-
-  const members: AgentWorkspaceMember[] = [];
-  for (const entry of entries) {
+  const members = entries.map((entry) => {
     assertValidPublicAgentName(entry.name, "Agent workspace member");
-    const appRoot = join(agentsRoot, entry.name);
-    if ((await source.stat(join(appRoot, "agent"))) !== "directory") {
-      throw new Error(`Invalid eve workspace member at ${appRoot}: expected an agent/ directory.`);
-    }
-    members.push({ appRoot, name: entry.name });
-  }
+    return { appRoot: join(agentsRoot, entry.name), name: entry.name };
+  });
   return { members, root };
 }
 
@@ -96,11 +73,6 @@ export async function findEveProjectContext(
 
   const hasAgent = (await source.stat(join(projectRoot, "agent"))) === "directory";
   const hasAgents = (await source.stat(join(projectRoot, "agents"))) === "directory";
-  const hasWorkspace = hasAgents && (await hasNestedWorkspaceMember(projectRoot, source));
-  if (hasAgent && hasWorkspace) {
-    throw new Error(`Invalid eve project at ${projectRoot}: found both agent/ and agents/.`);
-  }
-
   if (hasAgent) {
     return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
   }

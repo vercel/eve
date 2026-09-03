@@ -62,27 +62,38 @@ describe("resolveEveProjectContext", () => {
     });
   });
 
-  it("rejects agent/ and agents/ at the same root", async () => {
+  it("treats agent/ as standalone even when agents/ also exists", async () => {
     const root = await createWorkspace();
     await mkdir(join(root, "agent"));
-    await expect(resolveEveProjectContext(root)).rejects.toThrow(/both agent\/ and agents\//);
+
+    await expect(resolveEveProjectContext(root)).resolves.toEqual({
+      appRoot: root,
+      environmentRoot: root,
+      kind: "standalone",
+    });
   });
 
-  it("rejects an empty workspace", async () => {
+  it("allows an empty workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-workspace-empty-"));
     await mkdir(join(root, "agents"));
     await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
 
-    await expect(resolveEveProjectContext(root)).rejects.toThrow(/agents\/ has no members/);
+    await expect(resolveEveProjectContext(root)).resolves.toMatchObject({
+      kind: "workspace",
+      workspace: { members: [], root },
+    });
   });
 
-  it("rejects a member without an agent directory", async () => {
+  it("does not validate member authoring layout while resolving a workspace", async () => {
     const root = await createWorkspace();
-    await mkdir(join(root, "agents", "incomplete"));
+    const appRoot = join(root, "agents", "flat");
+    await mkdir(appRoot);
+    await writeFile(join(appRoot, "agent.ts"), "export default {};\n");
 
-    await expect(resolveEveProjectContext(root)).rejects.toThrow(
-      /incomplete: expected an agent\/ directory/,
-    );
+    await expect(resolveEveProjectContext(appRoot)).resolves.toMatchObject({
+      kind: "workspace-member",
+      member: { appRoot, name: "flat" },
+    });
   });
 
   it("keeps conventional members discoverable without project metadata", async () => {
