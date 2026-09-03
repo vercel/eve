@@ -9,7 +9,6 @@ function reportingEval() {
   return defineEval({
     description:
       "A stock eve agent acknowledges accepted background work, keeps partial wakes silent, and reports once after settlement.",
-    tags: ["real-model"],
     async test(t) {
       const started =
         await t.send(`Please investigate these three independent checks using the built-in agent tool. Start them sequentially within this same turn: issue at most one agent call per model step, then use the next model step after its working receipt to issue the next call. Do not wait for a completed result before starting the next agent, and do not call other tools yourself.
@@ -121,7 +120,12 @@ function reportingEval() {
   });
 }
 
-export default Array.from({ length: 8 }, reportingEval);
+const repetitions = Number.parseInt(process.env.EVE_TASK_REPORTING_REPETITIONS ?? "8", 10);
+
+export default Array.from(
+  { length: Number.isInteger(repetitions) && repetitions > 0 ? repetitions : 8 },
+  reportingEval,
+);
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
   return turn.events.flatMap((event) =>
