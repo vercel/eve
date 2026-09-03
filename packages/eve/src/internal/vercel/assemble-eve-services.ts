@@ -52,6 +52,9 @@ export function assembleEveVercelServices(input: {
             ),
           };
     eveRoutes.push({ routeSrc: contribution.routeSrc, serviceName });
+    if (contribution.homeRouteSrc !== undefined) {
+      eveRoutes.push({ routeSrc: contribution.homeRouteSrc, serviceName });
+    }
   }
 
   return {

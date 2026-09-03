@@ -5,8 +5,9 @@
  */
 const EVE_DOCS_URL = "https://eve.dev/docs";
 
-const DEPLOYMENT_URL_PLACEHOLDER = "{{DEPLOYMENT_URL}}";
 const AGENT_NAME_PLACEHOLDER = "{{AGENT_NAME}}";
+const STATUS_DETAIL_PLACEHOLDER = "{{STATUS_DETAIL}}";
+const TERMINAL_PLACEHOLDER = "{{TERMINAL}}";
 
 const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="0 0 169 53" xmlns="http://www.w3.org/2000/svg">
     <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" fill="currentColor"></path>
@@ -202,11 +203,8 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     <div class="agent-row">
       <strong class="agent-name">${AGENT_NAME_PLACEHOLDER}</strong>
     </div>
-    <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>Agent is up and accepting messages.</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
-    <div class="terminal mono" role="group" aria-label="Send a message from your terminal">
-      <span class="terminal-prompt" aria-hidden="true">$</span>
-      <span class="terminal-cmd">eve dev ${DEPLOYMENT_URL_PLACEHOLDER}</span>
-    </div>
+    <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>${STATUS_DETAIL_PLACEHOLDER}</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
+    ${TERMINAL_PLACEHOLDER}
   </section>
 </main>
 </body>
@@ -254,6 +252,25 @@ function resolveDeploymentUrl(request: Request): string {
   return `${proto}://${host}`;
 }
 
+/** Render the shared lightweight deployment status page. */
+export function buildHomePageHtml(input: {
+  readonly name: string;
+  readonly statusDetail: string;
+  readonly terminalCommand?: string;
+}): string {
+  const terminal =
+    input.terminalCommand === undefined
+      ? ""
+      : `<div class="terminal mono" role="group" aria-label="Send a message from your terminal">
+      <span class="terminal-prompt" aria-hidden="true">$</span>
+      <span class="terminal-cmd">${escapeHtml(input.terminalCommand)}</span>
+    </div>`;
+
+  return HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () => escapeHtml(input.name))
+    .replace(STATUS_DETAIL_PLACEHOLDER, () => escapeHtml(input.statusDetail))
+    .replace(TERMINAL_PLACEHOLDER, () => terminal);
+}
+
 /**
  * Builds the barebones home page response for one request. Exposed
  * for tests so callers can supply a real {@link Request}; production
@@ -266,9 +283,11 @@ export function buildHomePageResponse(
   request: Request,
 ): Response {
   const deploymentUrl = resolveDeploymentUrl(request);
-  const html = HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () =>
-    escapeHtml(input.agentName),
-  ).replace(DEPLOYMENT_URL_PLACEHOLDER, () => escapeHtml(deploymentUrl));
+  const html = buildHomePageHtml({
+    name: input.agentName,
+    statusDetail: "Agent is up and accepting messages.",
+    terminalCommand: `eve dev ${deploymentUrl}`,
+  });
 
   return new Response(html, {
     headers: {
