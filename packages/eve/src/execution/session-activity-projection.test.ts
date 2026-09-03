@@ -89,6 +89,7 @@ describe("projectSessionActivity", () => {
   it("uses the durable partial event id for activity updates", () => {
     const event: MessageStreamEvent = {
       data: {
+        presentation: { "tool-1": { label: "Collecting sources" } },
         result: {
           callId: "tool-1",
           kind: "tool-result",
@@ -105,7 +106,6 @@ describe("projectSessionActivity", () => {
 
     expect(
       projectSessionActivity({
-        activityLabels: { "tool-1": "Collecting sources" },
         event,
         sessionId: "session-1",
       }),

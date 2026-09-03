@@ -654,15 +654,15 @@ describe("emitStreamContent action requests", () => {
       data: { result: { output: { results: ["partial"] } } },
       type: "action.partial",
     });
-    expect(vi.mocked(localEmit).mock.calls[3]?.[2]).toEqual({
-      "call-1": "Found 1 results",
+    expect(localEvents[3]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 results" } } },
     });
     expect(localEvents[4]).toMatchObject({
       data: { result: { output: { results: ["eve"] } } },
       type: "action.result",
     });
-    expect(vi.mocked(localEmit).mock.calls[4]?.[2]).toEqual({
-      "call-1": "Found 1 final results",
+    expect(localEvents[4]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 final results" } } },
     });
     expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
@@ -892,8 +892,8 @@ describe("emitStreamContent action requests", () => {
       "action.partial",
       "action.result",
     ]);
-    expect(vi.mocked(emit).mock.calls[1]?.[2]).toBeUndefined();
-    expect(vi.mocked(emit).mock.calls[2]?.[2]).toBeUndefined();
+    expect(vi.mocked(emit).mock.calls[1]?.[0]).not.toHaveProperty("data.presentation");
+    expect(vi.mocked(emit).mock.calls[2]?.[0]).not.toHaveProperty("data.presentation");
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

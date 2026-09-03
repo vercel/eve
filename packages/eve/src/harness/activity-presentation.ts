@@ -1,4 +1,4 @@
-import type { ActionActivityLabels } from "#harness/action-activity.js";
+import type { ActionPresentationByCallId } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { normalizeActivityText } from "#shared/activity-text.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -8,7 +8,7 @@ export function projectResultActivity(
   callId: string,
   input: JsonObject | undefined,
   output: unknown,
-): ActionActivityLabels | undefined {
+): ActionPresentationByCallId | undefined {
   return projectActivityText(definition?.activityResult, callId, input, output);
 }
 
@@ -17,7 +17,7 @@ export function projectUpdateActivity(
   callId: string,
   input: JsonObject | undefined,
   output: unknown,
-): ActionActivityLabels | undefined {
+): ActionPresentationByCallId | undefined {
   return projectActivityText(definition?.activityUpdate, callId, input, output);
 }
 
@@ -26,11 +26,11 @@ function projectActivityText(
   callId: string,
   input: JsonObject | undefined,
   value: unknown,
-): ActionActivityLabels | undefined {
+): ActionPresentationByCallId | undefined {
   if (project === undefined || input === undefined) return undefined;
   try {
     const text = normalizeActivityText(project(parseJsonObject(input), value));
-    return text === "" ? undefined : { [callId]: text };
+    return text === "" ? undefined : { [callId]: { label: text } };
   } catch {
     return undefined;
   }
