@@ -151,7 +151,6 @@ export default defineEval({
           ),
         );
       }
-      t.succeeded();
     } finally {
       // These isolated fixture sessions have finished the probe; retire their durable resources.
       for (const session of sessions) {
