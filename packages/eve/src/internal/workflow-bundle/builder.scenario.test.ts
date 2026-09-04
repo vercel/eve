@@ -805,15 +805,14 @@ describe("WorkflowBundleBuilder", () => {
         writeFile(
           toolPath,
           [
-            'import { defineTool } from "eve/tools";',
+            'import { defineWorkflowTool } from "eve/tools";',
             'import { sleep } from "workflow";',
             'import { describePlan, hashPlan } from "../lib/steps";',
             "",
-            "export default defineTool({",
+            "export default defineWorkflowTool({",
             '  description: "Deploy a service.",',
             '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
             "  async execute({ service }: { service: string }) {",
-            '    "use workflow";',
             "    const digest = await hashPlan(describePlan(service));",
             '    await sleep("1s");',
             "    return { digest };",
@@ -852,7 +851,7 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
       expect(workflowCode).toContain('"step//./agent/lib/steps//hashPlan"');
       expect(workflowCode).toContain("deploy ${service}");
-      expect(workflowCode).not.toContain("defineTool");
+      expect(workflowCode).not.toContain("defineWorkflowTool");
       expect(workflowCode).not.toContain("node:crypto");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });

@@ -6,10 +6,10 @@ const FILE = "/app/agent/tools/deploy.ts";
 
 function toolModule(execute: string): string {
   return [
-    'import { defineTool } from "eve/tools";',
+    'import { defineWorkflowTool } from "eve/tools";',
     'import { z } from "zod";',
     "",
-    "export default defineTool({",
+    "export default defineWorkflowTool({",
     '  description: "Deploy",',
     "  inputSchema: z.object({ service: z.string() }),",
     execute,
@@ -92,28 +92,73 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     );
   });
 
-  it("hoists the execute method of a plain object default export", async () => {
-    const source = [
-      "export default {",
-      '  description: "d",',
-      "  async execute(input) {",
-      '    "use workflow";',
-      "    return input;",
-      "  },",
-      "};",
-      "",
-    ].join("\n");
+  it("rejects a workflow executor on a bare tool object", async () => {
+    const source = 'export default { async execute() {\n"use workflow";\nreturn 1; } };';
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      "Workflow executors require defineWorkflowTool()",
+    );
+  });
 
+  it("makes a workflow tool durable without a directive", async () => {
+    const source = toolModule("async execute(input) { return input; },");
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+    expect(prepared).toMatchObject({ executeWorkflow: "execute", hasWorkflowDirective: true });
+    expect(prepared.source).toContain('"use workflow";');
+  });
 
-    expect(prepared.source).toContain("  execute,\n};");
-    expect(prepared.source).toContain('async function execute(input) {\n    "use workflow";');
+  it.each(["async (input) => input", "async () => ({ ok: true })"])(
+    "compiles an expression executor: %s",
+    async (execute) => {
+      const source = `import { defineWorkflowTool } from "eve/tools";\nexport default defineWorkflowTool({ execute: ${execute} });`;
+      const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+      expect(prepared).toMatchObject({ executeWorkflow: "execute", hasWorkflowDirective: true });
+      expect(prepared.source).toContain('"use workflow";');
+      expect(prepared.source).toContain("return (");
+    },
+  );
+
+  it.each([
+    ['import { defineWorkflowTool as durable } from "eve/tools";', "durable"],
+    ['import * as tools from "eve/tools";', "tools.defineWorkflowTool"],
+  ])("recognizes imported aliases: %s", async (binding, definer) => {
+    const source = `${binding}\nexport default ${definer}({ async execute(input) { return input; } });`;
+    await expect(
+      prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
+    ).resolves.toMatchObject({ executeWorkflow: "execute", hasWorkflowDirective: true });
+  });
+
+  it("marks a referenced local async function as the workflow executor", async () => {
+    const source =
+      'import { defineWorkflowTool } from "eve/tools";\nexport default defineWorkflowTool({ execute: deploy });\nasync function deploy(input) { return input; }';
+    await expect(
+      prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
+    ).resolves.toMatchObject({ executeWorkflow: "deploy", hasWorkflowDirective: true });
+  });
+
+  it.each(["execute() { return 1; }", "execute: imported"])(
+    "rejects an executor it cannot compile: %s",
+    async (execute) => {
+      const source = `import { defineWorkflowTool } from "eve/tools";\nexport default defineWorkflowTool({ ${execute} });`;
+      await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+        "requires an async execute body or a local top-level async function reference",
+      );
+    },
+  );
+
+  it("rejects use workflow on defineTool", async () => {
+    const source = toolModule('async execute() {\n"use workflow";\nreturn 1; },').replaceAll(
+      "defineWorkflowTool",
+      "defineTool",
+    );
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      "Workflow executors require defineWorkflowTool()",
+    );
   });
 
   it("keeps a referenced top-level workflow function as is", async () => {
     const source = [
-      'import { defineTool } from "eve/tools";',
-      'export default defineTool({ description: "d", inputSchema: {}, execute: deploy });',
+      'import { defineWorkflowTool } from "eve/tools";',
+      'export default defineWorkflowTool({ description: "d", inputSchema: {}, execute: deploy });',
       "async function deploy(input: unknown) {",
       '  "use workflow";',
       "  return input;",
@@ -183,7 +228,7 @@ describe("prepareAuthoredWorkflowDirectives", () => {
   });
 
   it("rejects a directive the SDK's line-based pre-scan cannot see", async () => {
-    const source = `export default { description: "d", async execute() { "use workflow"; return 1; } };\n`;
+    const source = `export async function standalone() { "use workflow"; return 1; }\n`;
 
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
       /"use workflow" in .* is not on its own line/u,

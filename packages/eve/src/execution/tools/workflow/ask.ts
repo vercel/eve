@@ -9,8 +9,7 @@ import { workflowToolRunAnswerToken } from "#harness/workflow-tool-runs.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
-// `Symbol.for`, not a module-local WeakMap: `ask()` ships via the `eve/workflow`
-// entry while `attachWorkflowToolRunContext` runs from `body.ts`, and those may
+// `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
 // be different bundled copies of this module.
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 

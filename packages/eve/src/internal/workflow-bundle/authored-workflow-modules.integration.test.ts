@@ -29,13 +29,12 @@ describe("discoverAuthoredWorkflowModules", () => {
   it("separates workflow modules from step-only modules and skips the rest", async () => {
     const tool = await write(
       "agent/tools/deploy.ts",
-      `import { defineTool } from "eve/tools";
+      `import { defineWorkflowTool } from "eve/tools";
 import { plan } from "../lib/plan.ts";
-export default defineTool({
+export default defineWorkflowTool({
   description: "d",
   inputSchema: {},
   async execute(input) {
-    "use workflow";
     return plan(input);
   },
 });`,
@@ -85,18 +84,18 @@ export default defineTool({
     await write(
       "src/app/layout.js",
       `export default function RootLayout({ children }) {
-  return <html><body><code>import { agent } from "eve/workflow"</code>{children}</body></html>;
+  return <html><body><code>defineWorkflowTool is only text here</code>{children}</body></html>;
 }`,
     );
     const tool = await write(
       "agent/tools/deploy.ts",
-      `export default {
+      `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({
   description: "d",
   async execute() {
-    "use workflow";
     return 1;
   },
-};`,
+});`,
     );
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
@@ -116,7 +115,7 @@ export default defineTool({
   });
 
   it("rejects a directive that is not on its own line instead of compiling half of it", async () => {
-    const source = `export default { description: "d", async execute() { "use workflow"; return 1; } };`;
+    const source = `export async function standalone() { "use workflow"; return 1; }`;
     await write("agent/tools/inline.ts", source);
 
     // Discovery pre-scans by line, as the SDK does, and never sees this file;

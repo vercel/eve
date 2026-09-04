@@ -1,14 +1,11 @@
-import { defineTool } from "eve/tools";
-import { agent } from "eve/workflow";
+import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Run one subagent from a waiting workflow tool.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
-    "use workflow";
-
-    return await agent(ctx, {
+    return await ctx.agent({
       key: "blocking-child",
       message: `${service}:blocking`,
       target: "workflow-marker",

@@ -1,3 +1,5 @@
+import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
@@ -101,6 +103,18 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   const record = expectObjectRecord(value, message);
+  const workflowId = readWorkflowFunctionId(record.execute);
+  if (isWorkflowToolDefinition(value)) {
+    if (workflowId === undefined) {
+      throw new Error(
+        `${message} defineWorkflowTool() requires a compiled workflow executor. Export defineWorkflowTool({ execute: async (...) => { ... } }) as the default export of a static tool module.`,
+      );
+    }
+  } else if (workflowId !== undefined) {
+    throw new Error(
+      `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
+    );
+  }
   expectOnlyKnownKeys(
     record,
     [

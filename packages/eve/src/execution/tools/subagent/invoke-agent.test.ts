@@ -36,9 +36,9 @@ describe("workflow helper context errors", () => {
     const ctx = context as ToolContext;
     await expect(
       agent(ctx, { key: "review", target: "reviewer", message: "Review" }),
-    ).rejects.toThrow('agent() from "eve/workflow" requires the context of an eve workflow tool.');
+    ).rejects.toThrow("ctx.agent() requires a defineWorkflowTool() executor context.");
     expect(() => ask(ctx, { prompt: "Continue?" })).toThrow(
-      'ask() from "eve/workflow" requires the context of an eve workflow tool.',
+      "ctx.ask() requires a defineWorkflowTool() executor context.",
     );
     expect(mocks.createHook).not.toHaveBeenCalled();
     expect(mocks.resumeHook).not.toHaveBeenCalled();

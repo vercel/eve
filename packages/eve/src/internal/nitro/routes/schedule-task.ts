@@ -6,9 +6,6 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createLogger, logError } from "#internal/logging.js";
-
-const log = createLogger("schedule.dispatch");
 
 /**
  * Dispatches one eve authored schedule via the execution engine.
@@ -61,12 +58,7 @@ export async function dispatchScheduleTaskFromArtifacts(
   const result = await dispatcher.trigger(dispatchInput);
 
   if (result.waitUntilTasks.length > 0) {
-    const tasks = await Promise.allSettled(result.waitUntilTasks);
-    for (const task of tasks) {
-      if (task.status === "rejected") {
-        logError(log, "schedule background task failed", task.reason, { schedule: schedule.name });
-      }
-    }
+    await Promise.allSettled(result.waitUntilTasks);
   }
 
   return {

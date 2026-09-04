@@ -45,7 +45,7 @@ export async function transformDynamicToolExecute(
   source: string,
   workflowFunctions: ReadonlySet<string> = NO_WORKFLOW_FUNCTIONS,
 ): Promise<{ code: string } | null> {
-  if (!source.includes("defineTool")) return null;
+  if (!source.includes("defineTool") && !source.includes("defineWorkflowTool")) return null;
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
   const defineToolAliases = findDefineToolAliases(ast);
@@ -80,9 +80,14 @@ function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
       return false;
     }
     for (const specifier of node.specifiers ?? []) {
+      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
+        aliases.add(`${specifier.local.name}.defineWorkflowTool`);
+      }
       if (
         specifier.type === "ImportSpecifier" &&
-        (specifier.imported?.name ?? specifier.imported?.value) === "defineTool" &&
+        ["defineTool", "defineWorkflowTool"].includes(
+          String(specifier.imported?.name ?? specifier.imported?.value),
+        ) &&
         specifier.local?.name
       ) {
         aliases.add(specifier.local.name);
@@ -91,6 +96,13 @@ function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
     return false;
   });
   return aliases;
+}
+
+function readDefinerName(callee: AstNode | undefined): string | undefined {
+  if (callee?.type === "Identifier") return callee.name;
+  if (callee?.type !== "MemberExpression" || callee.object?.type !== "Identifier") return undefined;
+  const property = callee.computed ? callee.property?.value : callee.property?.name;
+  return typeof property === "string" ? `${callee.object.name}.${property}` : undefined;
 }
 
 function walkForCallbacks(
@@ -118,9 +130,7 @@ function walkForCallbacks(
 
   if (
     node.type === "CallExpression" &&
-    node.callee?.type === "Identifier" &&
-    node.callee.name !== undefined &&
-    context.defineToolAliases.has(node.callee.name) &&
+    context.defineToolAliases.has(readDefinerName(node.callee) ?? "") &&
     node.arguments?.length === 1 &&
     node.arguments[0]?.type === "ObjectExpression"
   ) {

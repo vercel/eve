@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Report unsupported `eve/workflow` helper calls and workflow directives on channel or schedule handlers at build time when their callback context is known. Runtime errors now identify the helper and required context, and rejected schedule background work is logged.
+Define durable tools with `defineWorkflowTool` from `eve/tools`; its executor runs as a workflow automatically and receives `ctx.agent` and `ctx.ask`. Replace workflow-backed `defineTool` calls with this API and remove imports from the deleted `eve/workflow` entry point.

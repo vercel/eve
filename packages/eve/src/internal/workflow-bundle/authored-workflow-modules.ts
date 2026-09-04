@@ -59,7 +59,8 @@ export async function discoverAuthoredWorkflowModules(
     if (!isAuthoredApplicationModule(filePath, appRoot) || isGeneratedWorkflowFile(filePath))
       continue;
     const source = await readFile(filePath, "utf8");
-    if (!detectWorkflowPatterns(source).hasDirective) continue;
+    if (!detectWorkflowPatterns(source).hasDirective && !source.includes("defineWorkflowTool"))
+      continue;
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath, source });
     if (!prepared.hasDirectives) continue;
     directiveModules.push(filePath);

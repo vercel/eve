@@ -94,7 +94,7 @@ export interface PublicToolDefinitionWithExecuteFn<
 
 /**
  * A question a workflow tool asks the human on the session's channel, sent
- * with `ask` from `eve/workflow`. Channels render it the way they render
+ * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the way they render
  * `ask_question` and tool approvals.
  */
 export interface ToolInputRequest {
@@ -125,10 +125,8 @@ export interface ToolInputResponse {
  * Extends {@link SessionContext} with token accessors. Passing a provider
  * resolves that provider inline, which lets one tool use multiple credentials.
  *
- * A tool whose `execute` is a workflow (`"use workflow"`) receives the same
- * context inside its durable body, except that `getSandbox`, `getSkill`,
- * `getToken`, and `requireAuth` are unavailable there and throw when touched —
- * read credentials inside a `"use step"` function instead.
+ * Workflow tools use the separate `WorkflowToolContext` provided by
+ * `defineWorkflowTool`.
  */
 export type ToolContext = SessionContext & {
   /**
@@ -342,9 +340,20 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput> {
+  return stampToolDefinition(definition, "defineTool");
+}
+
+export function stampToolDefinition<
+  T extends {
+    readonly description: string;
+    readonly execute: (...args: never[]) => unknown;
+    readonly approval?: Approval<never>;
+    readonly toModelOutput?: (...args: never[]) => unknown;
+  },
+>(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
   if ((definition as { readonly auth?: unknown }).auth !== undefined) {
     throw new Error(
-      `defineTool: The "auth" field is no longer supported. ` +
+      `${definer}: The "auth" field is no longer supported. ` +
         `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
     );
   }
@@ -352,7 +361,7 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
-      approval: definition.approval as Approval<never> | undefined,
+      approval: definition.approval,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

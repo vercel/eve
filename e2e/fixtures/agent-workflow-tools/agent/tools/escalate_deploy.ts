@@ -1,5 +1,4 @@
-import { defineTool } from "eve/tools";
-import { ask } from "eve/workflow";
+import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
 import { z } from "zod";
 
@@ -10,13 +9,11 @@ import { describePlan } from "../lib/plan.ts";
  * nobody answers before the sleep, the run withdraws the request and returns
  * a timeout instead of parking forever.
  */
-export default defineTool({
+export default defineWorkflowTool({
   description: "Ask for deploy approval, but give up if no one answers in time.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
-    "use workflow";
-
-    const pending = ask(ctx, {
+    const pending = ctx.ask({
       display: "confirmation",
       options: [
         { id: "approve", label: "Deploy", style: "primary" },

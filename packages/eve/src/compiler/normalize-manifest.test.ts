@@ -25,6 +25,7 @@ import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -114,14 +115,14 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
-  it("derives workflow handling from programmatic executor metadata", async () => {
+  it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
     Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
     const sourceRegistry = registry([
       {
         logicalPath: "tools/durable.ts",
         loadNamespace: async () => ({
-          default: defineTool({
+          default: defineWorkflowTool({
             description: "Runs durably.",
             execute,
             inputSchema: { type: "object" },

@@ -2,7 +2,6 @@ import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
-import { validateWorkflowHelperContexts } from "#internal/workflow-bundle/workflow-helper-context.js";
 
 const HOISTED_EXECUTE_NAME = "execute";
 
@@ -31,6 +30,11 @@ type AstNode = {
   typeParameters?: AstNode | null;
   value?: unknown;
   arguments?: AstNode[];
+  callee?: AstNode;
+  source?: AstNode;
+  imported?: AstNode;
+  object?: AstNode;
+  property?: AstNode;
 };
 
 type AstProgram = { body?: AstNode[] };
@@ -50,7 +54,7 @@ export interface AuthoredWorkflowDirectiveSource {
 
 /**
  * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A tool's `execute` method is hoisted
+ * whose first statement is the directive. A `defineWorkflowTool` executor is marked and hoisted
  * into that shape here; every other placement is a build error, because an
  * ignored directive would run side effects inline in a replayed body.
  */
@@ -58,9 +62,55 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  const program = (await parseWithNitroRolldownAst(input.filePath, input.source)) as AstProgram;
-  validateWorkflowHelperContexts(input, program);
+  const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
+  const program = (await parseWithNitroRolldownAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
+  if (body.some((node) => node.source?.value === "eve/workflow")) {
+    throw new Error(
+      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(input) or ctx.ask(request) in its executor.`,
+    );
+  }
+  const workflowTool = isDefaultWorkflowTool(body);
+  if (workflowTool) {
+    const property = findDefaultExportExecuteProperty(body);
+    const value = property?.value;
+    const fn =
+      isAstNode(value) && value.type === "Identifier"
+        ? body
+            .map((node) => node.declaration ?? node)
+            .find((node) => node.type === "FunctionDeclaration" && node.id?.name === value.name)
+        : isAstNode(value) && isFunctionLike(value)
+          ? value
+          : undefined;
+    if (
+      fn === undefined ||
+      fn.async !== true ||
+      !isAstNode(fn.body) ||
+      (fn.body.type !== "BlockStatement" && fn.type !== "ArrowFunctionExpression")
+    ) {
+      throw new Error(
+        `${input.filePath}: defineWorkflowTool() requires an async execute body or a local top-level async function reference.`,
+      );
+    }
+    if (fn.body.type !== "BlockStatement" && property !== undefined) {
+      if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
+        throw new Error(
+          `${input.filePath}: defineWorkflowTool() needs to hoist execute; rename the existing top-level "execute" binding.`,
+        );
+      }
+      return prepareAuthoredWorkflowDirectives({
+        ...input,
+        source: hoistExecuteMethod(input.source, property, fn),
+      });
+    }
+    if (readLeadingDirective(fn) === undefined) {
+      const offset = (fn.body.start ?? 0) + 1;
+      return prepareAuthoredWorkflowDirectives({
+        ...input,
+        source: `${input.source.slice(0, offset)}\n"use workflow";\n${input.source.slice(offset)}`,
+      });
+    }
+  }
 
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
@@ -69,7 +119,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
           `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
-          ` or, for "use workflow", the "execute" method of the module's default export.`,
+          ` or the "execute" method of a default-exported defineWorkflowTool().`,
       );
     }
   }
@@ -93,7 +143,14 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     isFunctionLike(executeProperty.value)
       ? executeProperty.value
       : undefined;
-  if (executeFunction !== undefined) allowed.add(executeFunction);
+  if (executeFunction !== undefined) {
+    if (!workflowTool && readLeadingDirective(executeFunction) === "use workflow") {
+      throw new Error(
+        `${input.filePath}: Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
+      );
+    }
+    allowed.add(executeFunction);
+  }
 
   const found = collectDirectiveFunctions(program as AstNode);
   if (found.length === 0) {
@@ -115,7 +172,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or, for "use workflow", the "execute" method of the module's default export.`,
+          ` or the "execute" method of a default-exported defineWorkflowTool().`,
       );
     }
     if (entry.fn.async !== true) {
@@ -210,7 +267,11 @@ function hoistExecuteMethod(source: string, property: AstNode, fn: AstNode): str
       : source.slice(first.start, last.end);
   const typeParametersText = sliceNode(source, fn.typeParameters);
   const returnTypeText = sliceNode(source, fn.returnType);
-  const bodyText = source.slice(fn.body.start, fn.body.end);
+  const originalBody = source.slice(fn.body.start, fn.body.end);
+  const bodyText =
+    fn.body.type === "BlockStatement"
+      ? originalBody
+      : `{\n"use workflow";\nreturn (${originalBody});\n}`;
   const star = fn.generator === true ? "*" : "";
   const declaration = `async function${star} ${HOISTED_EXECUTE_NAME}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
 
@@ -307,4 +368,30 @@ function visit(node: AstNode, visitor: (node: AstNode) => void): void {
 
 function isAstNode(value: unknown): value is AstNode {
   return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
+}
+
+function isDefaultWorkflowTool(body: readonly AstNode[]): boolean {
+  const call = body.find((node) => node.type === "ExportDefaultDeclaration")?.declaration;
+  if (call?.type !== "CallExpression") return false;
+  return body.some(
+    (node) =>
+      node.type === "ImportDeclaration" &&
+      node.source?.value === "eve/tools" &&
+      node.specifiers?.some((specifier) => {
+        if (specifier.type === "ImportSpecifier") {
+          return (
+            readPropertyName(specifier.imported) === "defineWorkflowTool" &&
+            call.callee?.type === "Identifier" &&
+            call.callee.name === specifier.local?.name
+          );
+        }
+        return (
+          specifier.type === "ImportNamespaceSpecifier" &&
+          call.callee?.type === "MemberExpression" &&
+          call.callee.object?.name === specifier.local?.name &&
+          (call.callee.computed !== true || call.callee.property?.type === "Literal") &&
+          readPropertyName(call.callee.property) === "defineWorkflowTool"
+        );
+      }),
+  );
 }

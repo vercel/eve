@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
@@ -23,7 +22,11 @@ import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#tools/schema.js";
+import {
+  defineWorkflowTool,
+  type BlockingWorkflowToolDefinition,
+} from "#tools/workflow-definition.js";
+import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
   additionalProperties: false,
@@ -58,32 +61,21 @@ async function createWorkflowToolRuntime(input: {
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
 }): Promise<TestRuntime> {
-  const tool: ResolvedToolDefinition = {
-    description: `Deploys a service (${input.toolName}).`,
-    execute: input.execute as ResolvedToolDefinition["execute"],
-    inputSchema: input.inputSchema ?? DEPLOY_INPUT_SCHEMA,
-    logicalPath: `tools/${input.toolName}.ts`,
-    name: input.toolName,
-    owner: { kind: "application" },
-    sourceId: `tools/${input.toolName}.ts`,
-    sourceKind: "module",
-  };
-  const runtime = await createTestRuntime({ agent: { name: input.agentName }, tools: [tool] });
-  const manifestTool = runtime.manifest.tools.find((entry) => entry.name === input.toolName);
-  if (manifestTool === undefined) {
-    throw new Error(`Expected ${input.toolName} to be present in the test manifest.`);
-  }
-  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-    default: { description: tool.description, execute: input.execute },
-  };
-  // The compiler derives the workflow id from authored source; an in-memory tool
-  // has none, so record the id the test tier's transform stamped on the fixture.
-  const workflowId = Reflect.get(input.execute, "workflowId");
-  expect(workflowId).toEqual(expect.any(String));
-  Object.assign(manifestTool, {
-    behavior: { availability: [], handling: { kind: "workflow-tool", workflowId } },
+  return await createTestRuntime({
+    agent: { name: input.agentName },
+    modules: [
+      {
+        logicalPath: `tools/${input.toolName}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Deploys a service (${input.toolName}).`,
+            execute: input.execute as BlockingWorkflowToolDefinition["execute"],
+            inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
+          }),
+        }),
+      },
+    ],
   });
-  return runtime;
 }
 
 /** Ids of every workflow tool run in the shared world, so a test can spot the one it started. */

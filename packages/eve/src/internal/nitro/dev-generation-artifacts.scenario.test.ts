@@ -556,16 +556,16 @@ describe("development generation artifacts", () => {
         "agent/instructions.md": "Use the available tools.",
         "agent/lib/plan.mjs": 'export const PLAN_PREFIX = "plan:";\n',
         "agent/tools/deploy.mjs": [
+          'import { defineWorkflowTool } from "eve/tools";',
           'import { PLAN_PREFIX } from "../lib/plan.mjs";',
           "",
-          "export default {",
+          "export default defineWorkflowTool({",
           '  description: "Deploy a service.",',
           '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
           "  async execute({ service }) {",
-          '    "use workflow";',
           "    return { plan: await planDeploy(service) };",
           "  },",
-          "};",
+          "});",
           "",
           "async function planDeploy(service) {",
           '  "use step";',
@@ -578,6 +578,7 @@ describe("development generation artifacts", () => {
           "",
         ].join("\n"),
       },
+      installDependencies: true,
       name: "authored-workflow-tools-generation",
     });
 
