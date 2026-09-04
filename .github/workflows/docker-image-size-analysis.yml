@@ -100,6 +100,8 @@ jobs:
             test "$(id -un)" = vercel-sandbox
             test "$(stat -c %U /workspace)" = vercel-sandbox
             test "$(stat -c %U /usr/local/bin/node)" = root
+            node --version
+            ! command -v python
             test "$(npm prefix -g)" = "$HOME/.local"
             test "$(pnpm bin -g)" = "$PNPM_HOME/bin"
             test -d "$HOME/.local/bin"
