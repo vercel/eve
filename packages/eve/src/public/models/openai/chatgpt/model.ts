@@ -4,7 +4,6 @@ import type {
   LanguageModelV4CallOptions,
 } from "#compiled/@ai-sdk/provider/index.js";
 import { createCodexFetch, type CodexTransportOptions } from "./transport.js";
-import { isObject } from "#shared/guards.js";
 
 const CODEX_LOCAL_AUTH_API_KEY = "codex-local-auth";
 
@@ -30,8 +29,9 @@ export function createCodexSubscriptionModel(
     name: "codex",
   }).responses(model);
 
-  // The Codex backend rejects stored responses and server-side item ids, so
-  // every call goes through normalizeCodexCallOptions before delegation.
+  // The Codex backend rejects stored responses, so every call goes through
+  // normalizeCodexCallOptions before delegation. The transport removes
+  // server-side item ids after the provider has used them to assemble history.
   return {
     specificationVersion: openaiModel.specificationVersion,
     provider: openaiModel.provider,
@@ -64,7 +64,7 @@ function normalizeCodexCallOptions(
 
   return {
     ...rest,
-    prompt: stripOpenAIItemIdsFromPrompt(prompt),
+    prompt,
     providerOptions: {
       ...providerOptions,
       openai: {
@@ -90,66 +90,4 @@ function hoistSystemInstructions(prompt: LanguageModelV4CallOptions["prompt"]): 
     instructions: systemContent.join("\n\n"),
     prompt: prompt.filter((message) => message.role !== "system"),
   };
-}
-
-function stripOpenAIItemIdsFromPrompt(
-  prompt: LanguageModelV4CallOptions["prompt"],
-): LanguageModelV4CallOptions["prompt"] {
-  return stripOpenAIItemIds(prompt, new WeakMap()) as LanguageModelV4CallOptions["prompt"];
-}
-
-/**
- * Copy-on-write: rebuilds only the spine of paths that actually carry an
- * OpenAI `itemId`, so untouched prompt content — the bulk of a long
- * conversation, tool outputs, file parts — is shared, not cloned, on every
- * model call.
- */
-function stripOpenAIItemIds(value: unknown, memo: WeakMap<object, unknown>): unknown {
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-  const memoized = memo.get(value);
-  if (memoized !== undefined) {
-    return memoized;
-  }
-  // In-progress marker: a cycle resolves to the original reference.
-  memo.set(value, value);
-
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const stripped = stripOpenAIItemIds(item, memo);
-      if (stripped !== item) changed = true;
-      return stripped;
-    });
-    const result = changed ? next : value;
-    memo.set(value, result);
-    return result;
-  }
-
-  if (!isObject(value)) {
-    return value;
-  }
-
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, entryValue] of Object.entries(value)) {
-    let stripped = stripOpenAIItemIds(entryValue, memo);
-    if (key === "providerOptions" || key === "providerMetadata") {
-      stripped = withoutOpenAIItemId(stripped);
-    }
-    if (stripped !== entryValue) changed = true;
-    next[key] = stripped;
-  }
-  const result = changed ? next : value;
-  memo.set(value, result);
-  return result;
-}
-
-function withoutOpenAIItemId(value: unknown): unknown {
-  if (!isObject(value) || !isObject(value.openai) || !("itemId" in value.openai)) {
-    return value;
-  }
-  const { itemId: _itemId, ...openaiOptions } = value.openai;
-  return { ...value, openai: openaiOptions };
 }

@@ -45,7 +45,10 @@ describe("Codex direct transport", () => {
     });
 
     const response = await codexFetch("https://api.openai.com/v1/responses", {
-      body: '{"stream":true}',
+      body: JSON.stringify({
+        input: [{ type: "reasoning", id: "rs_1", encrypted_content: "encrypted-reasoning" }],
+        stream: true,
+      }),
       method: "POST",
     });
 
@@ -56,7 +59,66 @@ describe("Codex direct transport", () => {
       "Bearer stale-token",
       "Bearer fresh-token",
     ]);
-    expect(requests.map((request) => request.body)).toEqual(['{"stream":true}', '{"stream":true}']);
+    expect(requests.map((request) => JSON.parse(request.body ?? "{}"))).toEqual([
+      {
+        input: [{ type: "reasoning", encrypted_content: "encrypted-reasoning" }],
+        stream: true,
+      },
+      {
+        input: [{ type: "reasoning", encrypted_content: "encrypted-reasoning" }],
+        stream: true,
+      },
+    ]);
+  });
+
+  it("removes response item ids without changing stateless replay data", async () => {
+    const requests: RecordedRequest[] = [];
+    const codexFetch = createCodexFetch({
+      broker: fakeBroker([{ token: "access-token" }]),
+      codexApiEndpoint: CODEX_ENDPOINT,
+      fetch: createRecordingFetch(requests),
+    });
+
+    await codexFetch("https://api.openai.com/v1/responses", {
+      body: JSON.stringify({
+        input: [
+          {
+            type: "reasoning",
+            id: "rs_1",
+            encrypted_content: "encrypted-reasoning",
+            summary: [{ type: "summary_text", text: "summary" }],
+          },
+          {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "lookup",
+            arguments: '{"id":"argument-id"}',
+          },
+        ],
+        stream: true,
+      }),
+      headers: { "content-length": "999", "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(requests[0]?.headers.has("content-length")).toBe(false);
+    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
+      input: [
+        {
+          type: "reasoning",
+          encrypted_content: "encrypted-reasoning",
+          summary: [{ type: "summary_text", text: "summary" }],
+        },
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "lookup",
+          arguments: '{"id":"argument-id"}',
+        },
+      ],
+      stream: true,
+    });
   });
 
   it("does not replay a Request body after 401", async () => {

@@ -1,4 +1,5 @@
 import { getDefaultCodexTokenBroker, type CodexTokenBroker } from "./token-broker.js";
+import { isObject } from "#shared/guards.js";
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
@@ -55,7 +56,32 @@ function authenticatedInit(
   headers.set("originator", "eve");
   if (token.accountId !== undefined) headers.set("ChatGPT-Account-Id", token.accountId);
   else headers.delete("ChatGPT-Account-Id");
-  return fetchInit(input, init, headers);
+  const resolved = fetchInit(input, init, headers);
+  const body = withoutResponseItemIds(resolved.body);
+  if (body === resolved.body) return resolved;
+  headers.delete("content-length");
+  return { ...resolved, body, headers };
+}
+
+function withoutResponseItemIds(body: RequestInit["body"]): RequestInit["body"] {
+  if (typeof body !== "string") return body;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isObject(parsed) || !Array.isArray(parsed.input)) return body;
+
+  let changed = false;
+  const input = parsed.input.map((item) => {
+    if (!isObject(item) || !("id" in item)) return item;
+    const { id: _id, ...rest } = item;
+    changed = true;
+    return rest;
+  });
+  return changed ? JSON.stringify({ ...parsed, input }) : body;
 }
 
 function isReplayable(input: FetchInput, init: RequestInit | undefined): boolean {
