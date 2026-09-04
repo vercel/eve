@@ -1345,6 +1345,9 @@ importers:
       '@types/json-schema':
         specifier: 7.0.15
         version: 7.0.15
+      '@types/picomatch':
+        specifier: 4.0.2
+        version: 4.0.2
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.15
@@ -1447,6 +1450,9 @@ importers:
       picocolors:
         specifier: 'catalog:'
         version: 1.1.1
+      picomatch:
+        specifier: 4.0.5
+        version: 4.0.5
       react:
         specifier: 'catalog:'
         version: 19.2.6
@@ -7367,6 +7373,9 @@ packages:
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
+
+  '@types/picomatch@4.0.2':
+    resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
 
   '@types/pngjs@6.0.5':
     resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
@@ -21790,6 +21799,8 @@ snapshots:
       '@types/node': 25.9.1
       pg-protocol: 1.15.0
       pg-types: 2.2.0
+
+  '@types/picomatch@4.0.2': {}
 
   '@types/pngjs@6.0.5':
     dependencies:

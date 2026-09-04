@@ -5,6 +5,7 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import type { CompileWorkspaceContext } from "#compiler/workspace-context.js";
 import {
   type AgentModuleBinding,
   type AgentSourceRegistry,
@@ -26,6 +27,7 @@ const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definiti
 export interface ManifestCompileContext {
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
   readonly registries: readonly AgentSourceRegistry[];
+  readonly workspace?: CompileWorkspaceContext;
 }
 
 export interface ModuleBackedDefinitionLoadOptions {
