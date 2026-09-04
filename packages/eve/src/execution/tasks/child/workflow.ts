@@ -1,5 +1,6 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
+import type { ActivityObserverConfig } from "#channel/types.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
@@ -41,6 +42,7 @@ import {
 } from "#tasks/types.js";
 
 export interface TaskRunWorkflowInput {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly initialView: TaskView;
   readonly parentContinuationToken: string;
   readonly taskInboxToken: string;
@@ -103,7 +105,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       throw error;
     }
 
-    await appendTaskViewStep({ view });
+    await appendTaskViewStep({ activityObserver: input.activityObserver, view });
     while (!isFinished()) {
       const read = await raceChannelReads(
         bodyReader === undefined ? readers : [...readers, bodyReader],
@@ -244,7 +246,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     const result = applyTaskTransition(view, command);
     if (result.action !== "accepted") return;
     view = result.view;
-    await appendTaskViewStep({ view });
+    await appendTaskViewStep({ activityObserver: input.activityObserver, view });
     if (command.kind === "cancel") {
       bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
       if (bodyReader === undefined) executorSettled = true;

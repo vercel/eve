@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deliverTaskInputResponsesStep,
   formatTaskNotification,
+  projectTaskActivity,
   wakeTaskAgentRequestParentStep,
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
@@ -53,6 +54,74 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
     },
   },
 ];
+
+describe("projectTaskActivity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("projects terminal task settlement", () => {
+    expect(
+      projectTaskActivity({
+        activityObserver: {
+          sink: {
+            url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+            version: 1,
+          },
+          workIdentity: {
+            id: "work:task",
+            kind: "task",
+            rootSessionId: "root",
+            rootTurnId: "turn",
+          },
+        },
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: notificationCases[0]!.view,
+      }),
+    ).toEqual([
+      expect.objectContaining({ kind: "work.settled", outcome: "completed", workId: "work:task" }),
+    ]);
+  });
+
+  it("projects task work when its initial view is written", () => {
+    const workIdentity = {
+      id: "work:task",
+      kind: "task" as const,
+      name: "export",
+      parentId: "work:root",
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    expect(
+      projectTaskActivity({
+        activityObserver: {
+          sink: {
+            url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+            version: 1,
+          },
+          workIdentity,
+        },
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: { metadata, status: "working", taskId: "task-1" },
+      }),
+    ).toEqual([
+      {
+        eventId: "work:task:started",
+        kind: "work.started",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        work: workIdentity,
+      },
+    ]);
+  });
+
+  it("does nothing without activity observation", () => {
+    expect(
+      projectTaskActivity({
+        activityObserver: undefined,
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: { metadata, status: "working", taskId: "task-1" },
+      }),
+    ).toEqual([]);
+  });
+});
 
 describe("formatTaskNotification", () => {
   it.each(notificationCases)(

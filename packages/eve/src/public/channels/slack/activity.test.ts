@@ -5,6 +5,7 @@ import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import {
   buildSlackActivityRenderers,
+  experimental_slackActivityRenderer,
   selectSlackActivityStatus,
   experimental_slackActivityStatus,
 } from "#public/channels/slack/activity.js";
@@ -46,7 +47,87 @@ describe("Slack status activity", () => {
     expect(presentation?.renderers).toHaveLength(1);
     expect(
       presentation?.destination({ channelId: "C1", secret: "hidden", threadTs: "T1" }),
-    ).toEqual({ channelId: "C1", installationTeamId: null, threadTs: "T1" });
+    ).toEqual({
+      channelId: "C1",
+      installationTeamId: null,
+      teamId: null,
+      threadTs: "T1",
+      triggeringUserId: null,
+    });
+  });
+
+  it("installs an experimental custom renderer", async () => {
+    const render = vi.fn(async ({ state }: { readonly state: number | undefined }) =>
+      state === undefined ? 1 : state + 1,
+    );
+    const dispose = vi.fn(async () => undefined);
+    const custom = experimental_slackActivityRenderer<number>({
+      id: "custom.activity.v1",
+      render,
+      dispose,
+    });
+    const [renderer] = buildSlackActivityRenderers({ botToken: undefined, renderers: [custom] });
+    const activitySnapshot = snapshot([
+      { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
+    ]);
+
+    await expect(
+      renderer?.render({
+        destination: {
+          channelId: "C1",
+          installationTeamId: "T1",
+          teamId: null,
+          threadTs: "M1",
+          triggeringUserId: null,
+        },
+        snapshot: activitySnapshot,
+        state: undefined,
+      }),
+    ).resolves.toBe(1);
+    await renderer?.dispose?.({
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
+      state: 1,
+    });
+
+    expect(render).toHaveBeenCalledWith({
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
+      snapshot: activitySnapshot,
+      state: undefined,
+    });
+    expect(dispose).toHaveBeenCalledWith({
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
+      state: 1,
+    });
+  });
+
+  it("rejects invalid experimental custom renderers", () => {
+    expect(() =>
+      experimental_slackActivityRenderer({ id: "", render: async () => undefined }),
+    ).toThrow("ids must be non-empty");
+    expect(() =>
+      experimental_slackActivityRenderer({
+        id: experimental_slackActivityStatus().id,
+        render: async () => undefined,
+      }),
+    ).toThrow("reserved by eve");
   });
 
   it("rejects duplicate renderer configuration", () => {

@@ -1,15 +1,21 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type { SessionAuthContext, SessionCommand } from "#channel/types.js";
+import type {
+  ActivityObserverConfig,
+  SessionAuthContext,
+  SessionCommand,
+} from "#channel/types.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
+import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
@@ -30,7 +36,10 @@ const log = createLogger("execution.tasks.run");
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
+export async function appendTaskViewStep(input: {
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly view: TaskView;
+}): Promise<void> {
   "use step";
 
   const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
@@ -40,6 +49,43 @@ export async function appendTaskViewStep(input: { readonly view: TaskView }): Pr
   } finally {
     writer.releaseLock();
   }
+
+  const events = projectTaskActivity({
+    activityObserver: input.activityObserver,
+    settledAt: new Date().toISOString(),
+    view: input.view,
+  });
+  void submitActivity({ events, sink: input.activityObserver?.sink });
+}
+
+export function projectTaskActivity(input: {
+  readonly activityObserver: ActivityObserverConfig | undefined;
+  readonly settledAt: string;
+  readonly view: TaskView;
+}): readonly ActivityEventV1[] {
+  const work = input.activityObserver?.workIdentity;
+  if (work === undefined) return [];
+  const status = input.view.status;
+  if (status === "working") {
+    return [
+      {
+        eventId: `${work.id}:started`,
+        kind: "work.started",
+        startedAt: input.settledAt,
+        work,
+      },
+    ];
+  }
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") return [];
+  return [
+    {
+      eventId: `${work.id}:settled:${status}`,
+      kind: "work.settled",
+      outcome: status,
+      settledAt: input.settledAt,
+      workId: work.id,
+    },
+  ];
 }
 
 /**

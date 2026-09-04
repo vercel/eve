@@ -3,6 +3,7 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * Callers compose these primitives around their own executor policy.
  */
+import type { ActivityObserverConfig } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import {
   readLatestTaskView,
@@ -58,6 +59,7 @@ export function prepareBackgroundTask(input: {
 
 /** Starts a lifecycle-only task run for a non-workflow external executor. */
 export async function beginBackgroundTask(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
   readonly metadata: TaskMetadata;
   readonly parentSessionId: string;
@@ -67,6 +69,7 @@ export async function beginBackgroundTask(input: {
 }): Promise<BackgroundTask> {
   const task = prepareBackgroundTask(input);
   await startTaskRun({
+    activityObserver: input.activityObserver,
     taskInboxToken: task.taskInboxToken,
     initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
     parentContinuationToken: sessionCommandHookToken(input.session.sessionId),
