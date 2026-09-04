@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { isGeneratedWorkflowFile } from "#compiled/@workflow/builders/index.js";
 
@@ -80,6 +80,8 @@ async function collectSourceFiles(root: string): Promise<string[]> {
     for (const entry of entries) {
       const entryPath = join(directory, entry.name);
       if (entry.isDirectory()) {
+        // Seeded sandbox files are assets, including copied application or framework source.
+        if (entry.name === "workspace" && basename(directory) === "sandbox") continue;
         if (!isIgnoredDirectory(entry.name)) await visit(entryPath);
         continue;
       }

@@ -764,12 +764,26 @@ describe("WorkflowBundleBuilder", () => {
     const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
     const toolPath = join(appRoot, "agent", "tools", "deploy.ts");
     const stepsPath = join(appRoot, "agent", "lib", "steps.ts");
+    const sandboxSourceRoot = join(appRoot, "agent", "sandbox", "workspace", "eve-source");
 
     try {
       await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
       await mkdir(join(appRoot, "agent", "lib"), { recursive: true });
       await mkdir(join(appRoot, "node_modules", "vendored"), { recursive: true });
+      await mkdir(sandboxSourceRoot, { recursive: true });
       await Promise.all([
+        writeFile(
+          join(sandboxSourceRoot, "agent.js"),
+          'export default { execute() { "use workflow"; return 1; } };',
+        ),
+        writeFile(
+          join(sandboxSourceRoot, "flow.js"),
+          'import { missing } from "uninstalled-sandbox-dependency";\nexport async function copiedWorkflow() { "use workflow"; return missing(); }',
+        ),
+        writeFile(
+          join(sandboxSourceRoot, "step.js"),
+          'export async function copiedStep() { "use step"; return 1; }',
+        ),
         writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
         writeFile(
           flowFilePath,
@@ -851,6 +865,7 @@ describe("WorkflowBundleBuilder", () => {
       expect(stepsSource).toContain("agent/lib/steps.ts");
       expect(stepsSource).toContain("agent/lib/run.ts");
       expect(stepsSource).not.toContain("vendored");
+      expect(stepsSource).not.toContain("eve-source");
 
       const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
       const encodedChunksMatch = workflowsSource.match(
@@ -864,6 +879,8 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).toContain("deploy ${service}");
       expect(workflowCode).not.toContain("defineWorkflowTool");
       expect(workflowCode).not.toContain("node:crypto");
+      expect(workflowCode).not.toContain("copiedWorkflow");
+      expect(workflowCode).not.toContain("copiedStep");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

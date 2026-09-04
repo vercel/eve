@@ -90,6 +90,8 @@ agent/sandbox/
 
 Every file under `workspace/` mirrors into the sandbox cwd with its structure intact, and eve lists the top-level entries to the model in the prompt automatically. `agent/skills/` files are materialized separately under `$HOME/.agents/skills/`, so `agent/sandbox/workspace/skills/...` is an ordinary workspace subtree when you choose to author one.
 
+Files under `sandbox/workspace/` are sandbox assets. eve excludes them from application workflow discovery, so copied source containing `"use workflow"` or `"use step"` does not register application workflows or steps. This also applies to subagents' sandbox workspaces.
+
 ## Overriding the sandbox
 
 To add setup, seed files, or pick a backend, author `defineSandbox`. There are two layouts:

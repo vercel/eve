@@ -25,6 +25,38 @@ afterEach(async () => {
 });
 
 describe("discoverAuthoredWorkflowModules", () => {
+  it.each(["agent", "agent/subagents/researcher", "custom-agent"])(
+    "skips sandbox workspace source under %s",
+    async (agentRoot) => {
+      await write(
+        `${agentRoot}/sandbox/workspace/eve-source/src/tools/framework/agent.js`,
+        `export default { execute() { "use workflow"; return 1; } };`,
+      );
+      await write(
+        `${agentRoot}/sandbox/workspace/eve-source/src/flow.js`,
+        `import { missing } from "uninstalled-sandbox-dependency";
+export async function copiedWorkflow() { "use workflow"; return missing(); }`,
+      );
+      await write(
+        `${agentRoot}/sandbox/workspace/eve-source/src/step.js`,
+        `export async function copiedStep() { "use step"; return 1; }`,
+      );
+      const authoredPaths = await Promise.all(
+        [
+          `${agentRoot}/sandbox/sandbox.ts`,
+          `${agentRoot}/sandbox/workspace-helper.ts`,
+          `${agentRoot}/sandbox/workspace-tools/helper.ts`,
+          `${agentRoot}/workspace/helper.ts`,
+        ].map((path) => write(path, `export async function helper() { "use step"; return 1; }`)),
+      );
+
+      await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
+        directiveModules: authoredPaths.sort(),
+        workflowModules: [],
+      });
+    },
+  );
+
   it("separates workflow modules from step-only modules and skips the rest", async () => {
     const tool = await write(
       "agent/tools/deploy.ts",
