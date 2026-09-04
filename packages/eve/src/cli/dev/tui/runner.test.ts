@@ -3562,6 +3562,7 @@ describe("EveTUIRunner boot setup detection", () => {
   it("runs initial onboarding as one-way model and registry phases", async () => {
     const order: string[] = [];
     const results: string[] = [];
+    const stages: string[] = [];
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
       return command.name === "model"
@@ -3584,12 +3585,15 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: { handle },
     });
 
     await runner.run();
 
     expect(order).toEqual(["model", "prompt"]);
+    expect(stages).toEqual(["model_provider", "model_provider_error"]);
     expect(results).toContain("/model failed: provider unavailable");
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "model", argument: "" },
@@ -3619,6 +3623,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
   it("moves from Model to Channels and preserves diagnostics after a failed registry phase", async () => {
     const order: string[] = [];
+    const stages: string[] = [];
     const end = vi.fn(() => order.push("end"));
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
@@ -3640,12 +3645,15 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: { handle },
     });
 
     await runner.run();
 
     expect(order).toEqual(["model", "add", "end", "prompt"]);
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_error"]);
     expect(end).toHaveBeenCalledWith({ preserveDiagnostics: true });
     expect(handle).toHaveBeenNthCalledWith(
       2,
@@ -3669,6 +3677,7 @@ describe("EveTUIRunner boot setup detection", () => {
   it("keeps the completed /add result after onboarding", async () => {
     const renderCommandInvocation = vi.fn();
     const renderCommandResult = vi.fn();
+    const stages: string[] = [];
     const runner = new EveTUIRunner({
       session: sessionYielding([]),
       renderer: fakeRenderer({
@@ -3681,6 +3690,8 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: {
         handle: async (command) =>
           command.name === "model"
@@ -3691,12 +3702,14 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_completed"]);
     expect(renderCommandInvocation).toHaveBeenCalledWith("/add", undefined);
     expect(renderCommandResult).toHaveBeenCalledWith("Added Web Chat", "success");
   });
 
   it("does not render a detached /add dismissed result when onboarding is cancelled", async () => {
     const renderCommandResult = vi.fn();
+    const stages: string[] = [];
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => undefined),
       renderCommandResult,
@@ -3709,6 +3722,8 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       getVercelAuthStatus: vi.fn(async () => "authenticated" as const),
       promptCommandHandler: {
         handle: async (command) =>
@@ -3720,6 +3735,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_cancelled"]);
     expect(renderCommandResult).not.toHaveBeenCalledWith("/add dismissed.", expect.anything());
   });
 

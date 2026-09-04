@@ -137,7 +137,7 @@ export function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
   applicationContext: CliApplicationContext,
-  telemetry: Pick<EveCliTelemetry, "trackDevContext">,
+  telemetry: Pick<EveCliTelemetry, "trackDevContext" | "trackSetupStep" | "trackSetupTerminal">,
 ): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
@@ -196,7 +196,9 @@ export function createCliProgram(
       }
 
       const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
-      await runExtensionInitCommand(logger, applicationContext.root, target);
+      await runExtensionInitCommand(logger, applicationContext.root, target, undefined, (step) => {
+        telemetry.trackSetupStep({ flow: "extension_init", step });
+      });
     });
 
   extension
@@ -246,12 +248,24 @@ export function createCliProgram(
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, applicationContext.root, target, {
-          agents: options.agents,
-          channelWebNextjs: options.channelWebNextjs,
-          model: options.model,
-          reasoning: options.reasoning,
-        });
+        await runInitCommand(
+          logger,
+          applicationContext.root,
+          target,
+          {
+            agents: options.agents,
+            channelWebNextjs: options.channelWebNextjs,
+            model: options.model,
+            reasoning: options.reasoning,
+          },
+          undefined,
+          (step) => {
+            telemetry.trackSetupStep({ flow: "init", step });
+          },
+          (step, result) => {
+            telemetry.trackSetupTerminal({ flow: "init", step, result });
+          },
+        );
       },
     );
 
@@ -417,6 +431,8 @@ export function createCliProgram(
             applicationRoot: applicationContext.root,
             existingLocalServer: existingLocalDevelopmentServer,
             lifecycle,
+            onOnboardingStep: telemetry.trackSetupStep,
+            onOnboardingTerminal: telemetry.trackSetupTerminal,
             options,
             remoteTarget,
             runDevelopmentTui: runtime.runDevelopmentTui,
@@ -518,6 +534,8 @@ export function createCliProgram(
               applicationRoot: applicationContext.root,
               existingLocalServer: false,
               lifecycle,
+              onOnboardingStep: telemetry.trackSetupStep,
+              onOnboardingTerminal: telemetry.trackSetupTerminal,
               options,
               report: onBootProgress,
               runDevelopmentTui: runtime.runDevelopmentTui,

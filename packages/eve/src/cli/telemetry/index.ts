@@ -20,9 +20,34 @@ export type EveCliTelemetryEvent = {
   readonly value: string;
 };
 
+export type EveCliSetupFlow = "init" | "extension_init" | "onboarding";
+export type EveCliSetupStep =
+  | "resolve_target"
+  | "scaffold"
+  | "install_dependencies"
+  | "initialize_git"
+  | "handoff"
+  | "model_provider"
+  | "model_settings"
+  | "registry_channels"
+  | "registry_integrations"
+  | "registry_review"
+  | "registry_install";
+export type EveCliSetupTerminalResult = "completed" | "cancelled" | "error";
+
 export type EveCliTelemetry = {
   trackCommand(command: string): void;
   trackDevContext(context: { target: "local" | "remote"; ui: "tui" | "headless" }): void;
+  trackSetupStep(input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    registrySelectedCount?: number;
+  }): void;
+  trackSetupTerminal(input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    result: EveCliSetupTerminalResult;
+  }): void;
   trackOutcome(outcome: "success" | "usage_error" | "error"): void;
   notify(logger: { error(message: string): void }): Promise<void>;
   flush(): Promise<void>;
@@ -109,6 +134,9 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     event("stdin_is_tty", process.stdin.isTTY ? "true" : "false"),
   ];
   const sessionId = randomUUID();
+  const setupEvents: EveCliTelemetryEvent[] = [];
+  let activeSetup: { flow: EveCliSetupFlow; step: EveCliSetupStep } | undefined;
+  let setupTerminalRecorded = false;
 
   return {
     trackCommand(command) {
@@ -117,7 +145,28 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     trackDevContext(context) {
       events.push(event("target", context.target), event("ui", context.ui));
     },
+    trackSetupStep(input) {
+      activeSetup = { flow: input.flow, step: input.step };
+      setupEvents.push(event("setup_flow", input.flow), event("setup_step", input.step));
+      if (input.registrySelectedCount !== undefined) {
+        setupEvents.push(event("registry_selected_count", String(input.registrySelectedCount)));
+      }
+    },
+    trackSetupTerminal(input) {
+      setupTerminalRecorded = true;
+      setupEvents.push(
+        event("setup_flow", input.flow),
+        event("setup_terminal_step", input.step),
+        event("setup_terminal_result", input.result),
+      );
+    },
     trackOutcome(outcome) {
+      if (activeSetup !== undefined && !setupTerminalRecorded) {
+        this.trackSetupTerminal({
+          ...activeSetup,
+          result: outcome === "success" ? "completed" : "error",
+        });
+      }
       events.push(event("outcome", outcome));
     },
     async notify(logger) {
@@ -145,13 +194,16 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     async flush() {
       if (!(await isEnabled()) || events.length === 0) return;
       try {
-        const identity = isEphemeralEveTelemetryEnvironment()
+        const ephemeralIdentity = isEphemeralEveTelemetryEnvironment();
+        const identity = ephemeralIdentity
           ? createEveTelemetryIdentity()
           : await readOrCreateEveTelemetryIdentity();
         events.push(
+          event("identity_kind", ephemeralIdentity ? "ephemeral" : "persistent"),
           event("installation_id", identity.installationId),
           event("project_id", await resolveEveTelemetryProjectId({ identity })),
         );
+        events.push(...setupEvents);
       } catch {
         return;
       }

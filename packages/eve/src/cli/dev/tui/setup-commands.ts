@@ -65,6 +65,16 @@ export interface TuiSetupCommandInput {
   initialRegistryAddress?: string;
   /** Presentation and navigation supplied by an enclosing setup journey. */
   registryPlannerContext?: RegistryPlannerContext;
+  onOnboardingScreen?: (input: {
+    screen:
+      | "model_provider"
+      | "model_settings"
+      | "registry_channels"
+      | "registry_integrations"
+      | "registry_review"
+      | "registry_install";
+    registrySelectedCount?: number;
+  }) => void;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
@@ -281,6 +291,9 @@ async function executeSetupCommand(
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
+        if (input.onOnboardingScreen !== undefined) {
+          modelInput.onScreen = (screen) => input.onOnboardingScreen?.({ screen });
+        }
         modelInput.withExclusiveTerminal = (task) =>
           renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
@@ -320,6 +333,7 @@ async function executeSetupCommand(
           signal,
           initialAddress: input.initialRegistryAddress,
           plannerContext: input.registryPlannerContext,
+          onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
         });

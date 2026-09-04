@@ -20,6 +20,11 @@ import {
   ClientSession,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
+import type {
+  EveCliSetupFlow,
+  EveCliSetupStep,
+  EveCliSetupTerminalResult,
+} from "#cli/telemetry/index.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -376,6 +381,18 @@ export interface PromptCommandHandlerContext {
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
   readonly registryPlannerContext?: RegistryPlannerContext;
+  readonly onOnboardingScreen?: (input: {
+    screen: Extract<
+      EveCliSetupStep,
+      | "model_provider"
+      | "model_settings"
+      | "registry_channels"
+      | "registry_integrations"
+      | "registry_review"
+      | "registry_install"
+    >;
+    registrySelectedCount?: number;
+  }) => void;
   /** Overrides the standalone command title inside a composed setup journey. */
   readonly setupFlowTitle?: string;
   /** Progress owned by an enclosing journey while this command runs. */
@@ -451,6 +468,17 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   onboard?: boolean;
+  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
+  onOnboardingStep?: (input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    registrySelectedCount?: number;
+  }) => void;
+  onOnboardingTerminal?: (input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    result: EveCliSetupTerminalResult;
+  }) => void;
   /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
@@ -508,6 +536,8 @@ export class EveTUIRunner {
   readonly #startup?: TuiStartup;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
+  readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
   #initialOnboardingActive = false;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
@@ -623,6 +653,8 @@ export class EveTUIRunner {
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
+    this.#onOnboardingStep = options.onOnboardingStep;
+    this.#onOnboardingTerminal = options.onOnboardingTerminal;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -1749,6 +1781,7 @@ export class EveTUIRunner {
       readonly trigger: "startup" | "command";
       readonly initialModelStep?: "provider";
       readonly registryPlannerContext?: RegistryPlannerContext;
+      readonly onOnboardingScreen?: PromptCommandHandlerContext["onOnboardingScreen"];
       readonly setupFlowTitle?: string;
       readonly setupFlowNavigation?: PlannerNavigation;
       readonly keepSetupFlowOpen?: true;
@@ -1791,28 +1824,65 @@ export class EveTUIRunner {
       trigger: "startup" as const,
     };
 
-    const modelOutcome = await this.#executeExtensionCommand(
-      { type: "extension", name: "model", argument: "" },
-      title,
-      {
-        ...journey,
-        suppressSuccessfulTranscript: true,
-        initialModelStep: "provider",
-        setupFlowNavigation: this.#onboardingNavigation(0),
-      },
-    );
+    let activeStep: EveCliSetupStep = "model_provider";
+    const onOnboardingScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
+      input,
+    ) => {
+      activeStep = input.screen;
+      this.#onOnboardingStep?.({
+        flow: "onboarding",
+        step: input.screen,
+        registrySelectedCount: input.registrySelectedCount,
+      });
+    };
+    onOnboardingScreen({ screen: "model_provider" });
+    let modelOutcome: PromptCommandOutcome | undefined;
+    try {
+      modelOutcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "model", argument: "" },
+        title,
+        {
+          ...journey,
+          suppressSuccessfulTranscript: true,
+          initialModelStep: "provider",
+          setupFlowNavigation: this.#onboardingNavigation(0),
+          onOnboardingScreen,
+        },
+      );
+    } catch (error) {
+      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
+      throw error;
+    }
     if (modelOutcome?.tone === "error" || modelOutcome?.cancelled === true) {
+      this.#onOnboardingTerminal?.({
+        flow: "onboarding",
+        step: activeStep,
+        result: modelOutcome.cancelled === true ? "cancelled" : "error",
+      });
       this.#renderer.setupFlow?.end({ preserveDiagnostics: modelOutcome.tone === "error" });
       return;
     }
 
     let addOutcome: PromptCommandOutcome | undefined;
+    activeStep = "registry_channels";
+    const onRegistryScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
+      input,
+    ) => {
+      activeStep = input.screen;
+      this.#onOnboardingStep?.({
+        flow: "onboarding",
+        step: input.screen,
+        registrySelectedCount: input.registrySelectedCount,
+      });
+    };
     try {
+      onRegistryScreen({ screen: "registry_channels" });
       addOutcome = await this.#executeExtensionCommand(
         { type: "extension", name: "add", argument: "" },
         title,
         {
           ...journey,
+          onOnboardingScreen: onRegistryScreen,
           registryPlannerContext: {
             prefixSteps: [{ label: "Model", complete: true }],
             reviewMessage: "Review your agent",
@@ -1821,7 +1891,22 @@ export class EveTUIRunner {
           },
         },
       );
+    } catch (error) {
+      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
+      throw error;
     } finally {
+      if (addOutcome !== undefined) {
+        this.#onOnboardingTerminal?.({
+          flow: "onboarding",
+          step: activeStep,
+          result:
+            addOutcome.cancelled === true
+              ? "cancelled"
+              : addOutcome.tone === "error"
+                ? "error"
+                : "completed",
+        });
+      }
       // `/add` is the final onboarding phase. Release the shared panel so the
       // ordinary chat prompt can own input, retaining deploy/setup evidence on failure.
       this.#renderer.setupFlow?.end({ preserveDiagnostics: addOutcome?.tone === "error" });

@@ -59,6 +59,13 @@ import { resolveInitTarget } from "./init-target.js";
 
 export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.js";
 
+export type InitSetupStep =
+  | "resolve_target"
+  | "scaffold"
+  | "install_dependencies"
+  | "initialize_git"
+  | "handoff";
+
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
   confirmInitInNonEmptyDirectory: typeof confirmInitInNonEmptyDirectory;
@@ -360,8 +367,9 @@ async function runInitSteps(input: {
   options: InitCommandOptions;
   parentDirectory: string;
   target: string | undefined;
+  trackStep?: (step: InitSetupStep) => void;
 }): Promise<InitResult> {
-  const { dependencies, logger, options, parentDirectory, target } = input;
+  const { dependencies, logger, options, parentDirectory, target, trackStep } = input;
   const debug = isLogLevelEnabled("debug");
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const initTarget = await resolveInitTarget({ parentDirectory, target });
@@ -371,6 +379,7 @@ async function runInitSteps(input: {
   progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
+    trackStep?.("scaffold");
     progress.update(initTarget.kind === "fresh" ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
     const agentStartedAt = dependencies.now();
@@ -462,6 +471,7 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger);
     }
 
+    trackStep?.("install_dependencies");
     progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
@@ -532,6 +542,7 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
+      trackStep?.("initialize_git");
       progress.update("Initializing Git repository");
       initLog.debug("initializing git repository");
       return {
@@ -567,7 +578,10 @@ export async function runInitCommand(
   target: string | undefined,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
+  trackStep?: (step: InitSetupStep) => void,
+  trackTerminal?: (step: InitSetupStep, result: "completed" | "cancelled" | "error") => void,
 ): Promise<void> {
+  trackStep?.("resolve_target");
   if (
     await addAgentsToWorkspace(
       logger,
@@ -576,17 +590,31 @@ export async function runInitCommand(
       options,
       dependencies.validateModelSlug,
     )
-  )
+  ) {
+    trackStep?.("handoff");
+    trackTerminal?.("handoff", "completed");
     return;
+  }
 
   let result: InitResult;
   try {
-    result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
+    result = await runInitSteps({
+      dependencies,
+      logger,
+      options,
+      parentDirectory,
+      target,
+      trackStep,
+    });
   } catch (error) {
-    if (error instanceof WizardCancelledError) return;
+    if (error instanceof WizardCancelledError) {
+      trackTerminal?.("resolve_target", "cancelled");
+      return;
+    }
     throw error;
   }
 
+  trackStep?.("handoff");
   if (result.kind === "created") {
     logger.log(
       `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,

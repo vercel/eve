@@ -12,9 +12,9 @@ eve collects usage data from its CLI to help improve its commands and developmen
 eve sends the following information to Vercel:
 
 - The eve version, operating system, CPU architecture, and whether stdin is a terminal.
-- The command you ran and whether it succeeded, had a usage error, or failed.
+- The command you ran, its outcome, and setup or onboarding steps when applicable.
 - For `eve dev`, whether you connected to a local or remote agent and whether the UI was interactive or headless.
-- Random identifiers for the CLI session, your eve installation, and the project.
+- Random identifiers for the CLI session, installation, and project, plus whether the installation and project identifiers are ephemeral or persistent.
 
 The project identifier lets eve group usage from the same project without sending its name or location. eve derives it from the Git remote when available, otherwise `REPOSITORY_URL` or the working directory, and transforms that value before sending it.
 

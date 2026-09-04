@@ -1,3 +1,8 @@
+import type {
+  EveCliSetupFlow,
+  EveCliSetupStep,
+  EveCliSetupTerminalResult,
+} from "#cli/telemetry/index.js";
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -38,6 +43,17 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly onboard?: boolean;
+  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
+  readonly onOnboardingStep?: (input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    registrySelectedCount?: number;
+  }) => void;
+  readonly onOnboardingTerminal?: (input: {
+    flow: EveCliSetupFlow;
+    step: EveCliSetupStep;
+    result: EveCliSetupTerminalResult;
+  }) => void;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
@@ -141,6 +157,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     headers,
     initialInput,
     onboard,
+    onOnboardingStep,
+    onOnboardingTerminal,
     onBootProgress,
     lifecycle,
     startup,
@@ -189,6 +207,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.startup = startup;
   }
   if (onboard !== undefined) options.onboard = onboard;
+  if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
+  if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;
