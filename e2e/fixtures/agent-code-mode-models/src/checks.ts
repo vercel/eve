@@ -43,15 +43,3 @@ export function concurrentBalances(
     Math.min(...reads.map((call) => call.finished ?? Number.NEGATIVE_INFINITY))
   );
 }
-
-export function parseAnswer(message: string | undefined): unknown {
-  const text = message
-    ?.trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  try {
-    return JSON.parse(text ?? "");
-  } catch {
-    return undefined;
-  }
-}
