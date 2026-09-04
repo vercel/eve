@@ -10,18 +10,18 @@ import { equals, satisfies } from "eve/evals/expect";
 const cases = [
   {
     parentActive: false,
-    correction: true,
+    steering: true,
     description: "after the parent acknowledges delegation",
   },
-  { parentActive: true, correction: true, description: "while the parent also has an active turn" },
+  { parentActive: true, steering: true, description: "while the parent also has an active turn" },
   {
     parentActive: true,
-    correction: false,
+    steering: false,
     description: "an unrelated follow-up preserves the work",
   },
 ] as const;
 
-export default cases.map(({ parentActive, correction, description }) =>
+export default cases.map(({ parentActive, steering, description }) =>
   defineEval({
     description: `Background subagent steering: ${description}.`,
     // The parent chooses whether and how to redirect work. A scripted parent
@@ -32,8 +32,8 @@ export default cases.map(({ parentActive, correction, description }) =>
       const threadId = crypto.randomUUID();
       const memo = crypto.randomUUID();
       const original = `WORKER-RESULT:ORIGINAL:${memo}`;
-      const corrected = `WORKER-RESULT:CORRECTED:${memo}`;
-      const expected = correction ? corrected : original;
+      const steered = `WORKER-RESULT:STEERED:${memo}`;
+      const expected = steering ? steered : original;
       const sessionId = await postMessage(
         t,
         threadId,
@@ -108,15 +108,15 @@ export default cases.map(({ parentActive, correction, description }) =>
                   event.type,
                 ),
               ),
-            "the correction arrives before the original child turn settles",
+            "the follow-up arrives before the original child turn settles",
           ),
         );
 
         const followUpSessionId = await postMessage(
           t,
           threadId,
-          correction
-            ? "Correction to the assignment you just delegated: use CORRECTED instead of ORIGINAL. Redirect that same worker now, preserving its original memo. This replaces the first request; do not start an independent assignment or report the original result. Stop your own wait, if any."
+          steering
+            ? "Steer the assignment you just delegated: use STEERED instead of ORIGINAL. Redirect that same worker now, preserving its original memo. This replaces the first request; do not start an independent assignment or report the original result. Stop your own wait, if any."
             : "Unrelated follow-up: stop your own wait and reply with SIDE-QUESTION-OK. Leave the existing background assignment running, and relay its result when it completes.",
         );
         await t.require(followUpSessionId, equals(sessionId));
@@ -129,7 +129,7 @@ export default cases.map(({ parentActive, correction, description }) =>
           parentSession = activeParent.session;
         }
         // Observe through the result-bearing task wake, not just the parent's
-        // acknowledgment of the correction or an AGENT_BUSY failure wake.
+        // acknowledgment of the steering message or an AGENT_BUSY failure wake.
         for (let attempt = 0; attempt < 6; attempt++) {
           const next =
             pendingParent ??
@@ -143,7 +143,7 @@ export default cases.map(({ parentActive, correction, description }) =>
               (event) =>
                 event.type === "message.received" &&
                 (JSON.stringify(event.data.message).includes(original) ||
-                  JSON.stringify(event.data.message).includes(corrected)),
+                  JSON.stringify(event.data.message).includes(steered)),
             )
           ) {
             break;
@@ -172,7 +172,7 @@ export default cases.map(({ parentActive, correction, description }) =>
         const childWasCancelled = firstChildTurn.events.some(
           (event) => event.type === "turn.cancelled",
         );
-        if (correction && childWasCancelled) {
+        if (steering && childWasCancelled) {
           // Also permits cancel-and-resume of the same child; no specific
           // control API or task-id lifetime is required by these assertions.
           const resumed = await t.target
@@ -185,7 +185,7 @@ export default cases.map(({ parentActive, correction, description }) =>
           firstChildTurn.notEvent("turn.cancelled");
           firstChildTurn.messageIncludes(expected);
         }
-        if (correction) {
+        if (steering) {
           firstChildTurn.eventsSatisfy(
             "the original child never emits the superseded result",
             (events) =>
@@ -230,7 +230,7 @@ export default cases.map(({ parentActive, correction, description }) =>
           replies.some((message) => message.includes(expected)),
           equals(true),
         );
-        if (correction)
+        if (steering)
           t.check(
             replies.some((message) => message.includes(original)),
             equals(false),

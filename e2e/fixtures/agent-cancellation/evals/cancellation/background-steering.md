@@ -1,8 +1,8 @@
 # Background subagent steering
 
-A correction must reach the existing background child before its original work completes, preserve its context, and produce one corrected result; an unrelated follow-up must leave that work running.
+Steering must reach the existing background child before its original work completes, preserve its context, and produce one result reflecting the updated instructions; an unrelated follow-up must leave that work running.
 
-This is a provisional acceptance contract for a follow-up that corrects an
+This is a provisional acceptance contract for steering an
 already-delegated assignment. These evals use synthetic assignments to detect
 duplicate delegation and superseded results.
 
@@ -10,19 +10,19 @@ duplicate delegation and superseded results.
 
 [background-steering.eval.ts][eval] exports three cases:
 
-| Case   | Parent when the follow-up arrives     | Expected child behavior                                                    |
-| ------ | ------------------------------------- | -------------------------------------------------------------------------- |
-| `0000` | Finished acknowledging the delegation | Apply the correction to the same child session.                            |
-| `0001` | Waiting in its own tool call          | Cancel the parent turn and apply the correction to the same child session. |
-| `0002` | Waiting in its own tool call          | Answer an unrelated question; the original child finishes normally.        |
+| Case   | Parent when the follow-up arrives     | Expected child behavior                                                          |
+| ------ | ------------------------------------- | -------------------------------------------------------------------------------- |
+| `0000` | Finished acknowledging the delegation | Apply the steering message to the same child session.                            |
+| `0001` | Waiting in its own tool call          | Cancel the parent turn and apply the steering message to the same child session. |
+| `0002` | Waiting in its own tool call          | Answer an unrelated question; the original child finishes normally.              |
 
 The eval observes the child's pending tool call before sending the follow-up
 through the authored channel with `turnPolicy: "steer"`. The
 [worker][worker] uses the same real matrix model as the parent and the existing
 bounded [cancellation wait][wait] (90 seconds). Its [instructions][instructions]
-ask it to return `WORKER-RESULT:ORIGINAL:<memo>` unless a correction replaces
-the label. The model must interpret the correction, retain the original memo,
-and return `WORKER-RESULT:CORRECTED:<memo>`; no scripted responder selects the
+ask it to return `WORKER-RESULT:ORIGINAL:<memo>` unless steering replaces
+the label. The model must interpret the steering message, retain the original memo,
+and return `WORKER-RESULT:STEERED:<memo>`; no scripted responder selects the
 answer.
 
 Assertions inspect the child stream and the parent's result-bearing task wake.
@@ -35,14 +35,14 @@ late delivery.
 The unrelated case must finish normally. Reset cleans up admitted tasks even
 when an assertion fails.
 
-Same-child continuation is provisional. The eval permits either an in-turn
-correction or cancellation followed by a new turn in that same child session;
+Same-child continuation is provisional. The eval permits either in-turn
+steering or cancellation followed by a new turn in that same child session;
 it does not fix the task-id lifetime or require a particular steering tool.
-It permits an acknowledgment of the correction; acknowledgment wording and
+It permits an acknowledgment of the steering message; acknowledgment wording and
 count are outside this contract.
 
 Both parent and child use the matrix model: the parent must identify and route
-the correction, and the child must apply it while retaining context. These cases carry `real-model`, so
+the steering message, and the child must apply it while retaining context. These cases carry `real-model`, so
 mock world suites exclude them. They are acceptance tests, not assertions that
 the existing limitation should remain. No expected-failure inversion or skip
 hides a failure. Run them in CI from this fixture with
