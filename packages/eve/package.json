@@ -196,6 +196,11 @@
       "import": "./dist/src/public/models/openai/index.js",
       "default": "./dist/src/public/models/openai/index.js"
     },
+    "./models/orcarouter": {
+      "types": "./dist/src/public/models/orcarouter/index.d.ts",
+      "import": "./dist/src/public/models/orcarouter/index.js",
+      "default": "./dist/src/public/models/orcarouter/index.js"
+    },
     "./connections": {
       "types": "./dist/src/public/connections/index.d.ts",
       "import": "./dist/src/public/connections/index.js",
