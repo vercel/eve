@@ -25,6 +25,7 @@ import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -114,6 +115,36 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("compiles a workflow tool with programmatic executor metadata", async () => {
+    const execute = async () => ({ ok: true });
+    Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/durable.ts",
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: "Runs durably.",
+            execute,
+            inputSchema: { type: "object" },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
+      availability: [],
+      handling: {
+        kind: "workflow-tool",
+        workflowId: "workflow//example/tool//execute",
+      },
+      shape: { lifetime: "step", suspend: "workflow" },
+    });
+  });
+
   it("preserves selected native behavior through serialization and runtime preparation", async () => {
     const sourceRegistry = registry([
       {
@@ -178,7 +209,10 @@ describe("compileAgentManifest source graph", () => {
     });
     const selected = compiled.tools.find((tool) => tool.name === "agent");
     expect(selected).toMatchObject({ hasExecute: true, logicalPath: "tools/agent.ts" });
-    expect(selected?.behavior).toBeUndefined();
+    expect(selected?.behavior).toEqual({
+      availability: [],
+      shape: { lifetime: "step", suspend: "none" },
+    });
 
     const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
       frameworkAgentSourceRegistry,
@@ -186,7 +220,10 @@ describe("compileAgentManifest source graph", () => {
     ]);
     const graph = await resolveRuntimeAgentGraph({ manifest: compiled, moduleMap });
     const resolved = graph.root.toolRegistry.toolsByName.get("agent")?.definition;
-    expect(resolved?.behavior).toBeUndefined();
+    expect(resolved?.behavior).toEqual({
+      availability: [],
+      shape: { lifetime: "step", suspend: "none" },
+    });
     expect(await resolved?.execute?.({}, {} as never)).toEqual({ ordinary: true });
     expect(execute).toHaveBeenCalledOnce();
   });

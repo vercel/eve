@@ -8,7 +8,7 @@ import {
 import type { SessionCommand } from "#channel/types.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { cancelRun, getHookByToken, getWorld } from "#internal/workflow/runtime.js";
+import { cancelRun, getRawHookByToken, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
 /** Settles side effects owned by a session candidate that lost its continuation claim. */
@@ -57,7 +57,7 @@ async function resolveOwnerSessionId(input: {
   if (input.ownerSessionId !== undefined) return input.ownerSessionId;
 
   try {
-    const hook = await getHookByToken(input.continuationToken);
+    const hook = await getRawHookByToken(input.continuationToken);
     if (typeof hook.runId === "string" && hook.runId.length > 0) return hook.runId;
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;

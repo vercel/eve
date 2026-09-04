@@ -129,6 +129,11 @@ export interface SessionLimits {
    * eve refuses to start another model call.
    */
   readonly maxOutputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported model token cost this durable session may spend,
+   * in US dollars, before eve refuses to start another model call.
+   */
+  readonly maxTokenCostUsdPerSession?: number;
 }
 
 /**

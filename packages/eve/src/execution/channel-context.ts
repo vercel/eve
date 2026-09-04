@@ -11,13 +11,18 @@ export function setChannelContext(
     readonly channelName?: string;
   } = {},
 ): void {
+  const existing = ctx.get(ChannelInstrumentationKey);
+  const projection = buildChannelInstrumentationProjection({
+    adapter,
+    channelName: options.channelName,
+    existingKind: existing?.kind,
+  });
   ctx.set(ChannelKey, adapter);
-  ctx.set(
-    ChannelInstrumentationKey,
-    buildChannelInstrumentationProjection({
-      adapter,
-      channelName: options.channelName,
-      existingKind: ctx.get(ChannelInstrumentationKey)?.kind,
-    }),
-  );
+  ctx.set(ChannelInstrumentationKey, {
+    ...projection,
+    metadata:
+      adapter.instrumentation?.metadata === undefined && existing !== undefined
+        ? existing.metadata
+        : projection.metadata,
+  });
 }

@@ -30,7 +30,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
 
     const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
     const from = createWorkflowBodyRef(bodyInput);
-    const body = executeWorkflowBody(bodyInput, control.signal).then((outcome) => {
+    const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
       if (outcome.status === "completed") return outcome.output;
       if (outcome.status === "failed") throw outcome.error;
       throw control.signal.reason ?? new Error(outcome.reason ?? "Workflow tool run cancelled.");

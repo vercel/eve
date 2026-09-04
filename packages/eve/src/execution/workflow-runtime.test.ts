@@ -13,6 +13,7 @@ import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
+  waitForCommandHookOwner,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   startWorkflowOnCurrentDeployment,
@@ -28,6 +29,8 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 
 const getHookByTokenMock = vi.fn();
+const getRawHookByTokenMock = vi.fn();
+const world = { hooks: { getByToken: getRawHookByTokenMock } };
 const getRunMock = vi.fn();
 const getWorldMock = vi.fn();
 const resumeHookMock = vi.fn();
@@ -50,11 +53,13 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 beforeEach(() => {
   cancelRunMock.mockResolvedValue(undefined);
   getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
-  getWorldMock.mockResolvedValue("world");
+  getWorldMock.mockResolvedValue(world);
+  getRawHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
 
 afterEach(() => {
   getHookByTokenMock.mockReset();
+  getRawHookByTokenMock.mockReset();
   getRunMock.mockReset();
   getWorldMock.mockReset();
   resumeHookMock.mockReset();
@@ -291,9 +296,9 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
-    getHookByTokenMock
-      .mockResolvedValueOnce(currentSessionHook("eve:token"))
-      .mockRejectedValue(new HookNotFoundError(sessionCommandHookToken("session-1")));
+    getRawHookByTokenMock.mockRejectedValue(
+      new HookNotFoundError(sessionCommandHookToken("session-1")),
+    );
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -306,7 +311,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       reason: "User requested /new",
       version: 1,
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(getRawHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 });
 
@@ -324,26 +329,49 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
   }
 
   it("returns the owning session id from the hook lookup", async () => {
-    getHookByTokenMock.mockResolvedValue({ runId: "owner-session" });
+    getRawHookByTokenMock.mockResolvedValue({ runId: "owner-session" });
 
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toEqual({
       sessionId: "owner-session",
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
+    expect(getRawHookByTokenMock).toHaveBeenCalledWith("test:token");
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("returns undefined for an unknown token", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("test:token"));
+    getRawHookByTokenMock.mockRejectedValue(new HookNotFoundError("test:token"));
 
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toBeUndefined();
   });
 
   it("rethrows unexpected lookup failures", async () => {
     const failure = new Error("transient backing-store outage");
-    getHookByTokenMock.mockRejectedValue(failure);
+    getRawHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
+  });
+});
+
+describe("waitForCommandHookOwner", () => {
+  it("resolves the winning run without hydrating hook metadata", async () => {
+    getRawHookByTokenMock.mockResolvedValue({
+      get metadata() {
+        throw new Error("Ownership must not read encrypted metadata.");
+      },
+      runId: "winning-run",
+    });
+
+    await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("does not turn storage failures into missing ownership", async () => {
+    const failure = new Error("backing store unavailable");
+    getRawHookByTokenMock.mockRejectedValue(failure);
+
+    await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
+    expect(getRawHookByTokenMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -632,7 +660,7 @@ describe("createWorkflowRuntime#createSession", () => {
       }),
     ).rejects.toBe(failure);
 
-    expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "collector-run", {
       cancelReason: "Root session creation did not complete",
     });
   });

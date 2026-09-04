@@ -282,7 +282,10 @@ function modelMenuRows(
  * external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
+  /** Selected agent root whose authored model settings are edited. */
   appRoot: string;
+  /** Project root for shared provider configuration and Vercel credentials. */
+  environmentRoot?: string;
   prompter: Prompter;
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
@@ -294,6 +297,7 @@ export async function runModelFlow(input: {
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
   const { appRoot, prompter, signal } = input;
+  const environmentRoot = input.environmentRoot ?? appRoot;
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applySettings: changeAgentModelSettings,
@@ -316,10 +320,10 @@ export async function runModelFlow(input: {
       Promise.all([
         deps.readCurrentModel(appRoot),
         deps.resolveAvailableProviders(
-          appRoot,
+          environmentRoot,
           signal === undefined ? { env: process.env } : { signal, env: process.env },
         ),
-        deps.readProviderSelection(appRoot),
+        deps.readProviderSelection(environmentRoot),
         fetchCatalog(signal).catch((): GatewayCatalogModel[] | undefined => undefined),
       ]),
   );
@@ -457,7 +461,7 @@ export async function runModelFlow(input: {
     }
 
     const result = await deps.runProviderFlow({
-      appRoot,
+      appRoot: environmentRoot,
       prompter,
       signal,
       availableProviders,
@@ -506,7 +510,7 @@ export async function runModelFlow(input: {
     lastApply = await deps.applySettings({ appRoot, patch });
   }
   if (commitDraft && nextProviderSelection !== undefined && lastApply?.kind !== "rejected") {
-    await deps.writeProviderSelection(appRoot, nextProviderSelection);
+    await deps.writeProviderSelection(environmentRoot, nextProviderSelection);
     committedProviderSelection = nextProviderSelection;
   }
   if (lastApply !== undefined && committedProviderSelection === undefined) {

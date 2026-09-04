@@ -260,6 +260,7 @@ function createResolvedAgentConfig(
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      maxTokenCostUsdPerSession: manifest.config.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }

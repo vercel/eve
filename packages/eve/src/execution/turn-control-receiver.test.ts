@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
@@ -13,6 +15,10 @@ const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("./cancel-indexed-session-tasks-step.js", () => ({
+  cancelAllIndexedSessionTasksStep: vi.fn(),
 }));
 
 vi.mock("./forward-turn-delivery-step.js", () => ({
@@ -250,6 +256,23 @@ describe("TurnControlReceiver", () => {
     ]);
   });
 
+  it("cancels indexed tasks and preserves active turn cancellation", async () => {
+    installControlHook([parkResult()], true);
+
+    await runReceiver([], {
+      commandInbox: createCommandInbox([{ kind: "cancel", tasks: true } as never]),
+    });
+
+    expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
+      serializedContext: {},
+      sessionState: expect.objectContaining({ sessionId: "session" }),
+    });
+    expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
+      payload: { tasks: true },
+      token: "turn-control:cancel",
+    });
+  });
+
   it("forwards cancel and reset through the active turn's private hook", async () => {
     installControlHook([parkResult()], true);
     const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
@@ -289,6 +312,7 @@ function runReceiver(
     commandInbox: options.commandInbox ?? createCommandInbox(),
     expectedTurnId: "turn_0",
     seenTaskDeliveries: options.seenTaskDeliveries,
+    stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState: createState() }),
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());

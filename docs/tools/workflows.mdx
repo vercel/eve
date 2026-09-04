@@ -4,19 +4,20 @@ description: "Define durable workflow tools that wait for people, webhooks, or t
 url: /tools/workflows
 ---
 
-A workflow tool is an authored tool whose `execute` function starts with `"use workflow"`. Each
-call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
+A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`, with
+`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
 delegate work to subagents, or coordinate retryable steps over a long period.
 
-By default, the model's tool call waits for the run's return value. While the run is suspended, the
-turn is parked and holds no compute. Set `execution: "background"` when the conversation should
-continue; the model receives a task receipt, and eve wakes the agent with the result when the run
-ends.
+Durable suspension and background execution are independent. `defineWorkflowTool` lets the body
+suspend at durable waits without holding compute. `execution: "background"` determines whether
+the parent agent receives a task receipt and continues before the body finishes. A workflow can
+suspend in either execution mode; running in the background does not require a suspension.
 
-Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`,
-`createHook`, `createWebhook`, `sleep`, retries, and replay. eve adds `ask` from `eve/workflow` for
-questions answered through the session's channel and `agent` for durable subagent delegation. Each
-`yield` becomes a durable progress report.
+Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
+`createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
+the session's channel and `ctx.agent` for durable subagent delegation. Use `yield` to report
+progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
+stay in local variables in the workflow body.
 
 A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
 as `deploy`.
@@ -24,19 +25,17 @@ as `deploy`.
 ## Define a workflow tool
 
 ```ts title="agent/tools/deploy.ts"
-import { defineTool } from "eve/tools";
-import { ask } from "eve/workflow";
+import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 import { computePlan, runDeploy, type DeployPlan } from "../lib/deploy";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Deploy a service to production. Pauses for a human to approve the plan.",
   inputSchema: z.object({ service: z.string() }),
   async execute({ service }, ctx) {
     "use workflow";
-
     const plan = await planDeploy(service);
-    const answer = await ask(ctx, {
+    const answer = await ctx.ask({
       prompt: `Deploy ${service}?\n\n${plan.summary}`,
       display: "confirmation",
       options: [
@@ -68,39 +67,91 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 
 ### Rules
 
-- `"use workflow"` goes on its own line as the first statement of `execute`, or of a top-level
-  `async function` you reference as `execute: deploy`.
+- Export `defineWorkflowTool({ ... })` as the default export. Its `execute` must be an async
+  function or async generator, written inline or referenced as a top-level `async function` in
+  the same module or an imported application module. Start the executor with `"use workflow"`
+  as its first statement. A missing
+  directive is a build error, even if another function in the module has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
   step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
   is replayed and must stay deterministic.
 - Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body.
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
-- In the body, `ctx` has `session`, `callId`, `toolName`, and `abortSignal`. `getSandbox`,
-  `getSkill`, `getToken`, and `requireAuth` throw there; read credentials in a step instead.
+- In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, and `ask`.
+  `getSandbox`, `getSkill`, `getToken`, and `requireAuth` are not part of `WorkflowToolContext`.
+  Read credentials from `process.env` in a step; session-scoped workflow authorization is not yet available.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
+`ctx.agent` and `ctx.ask` are available only on `WorkflowToolContext`. Ordinary tools, channel
+handlers, and schedule handlers do not receive these methods. A shared helper may accept
+`WorkflowToolContext` from `eve/tools` and use the context supplied by a workflow tool body.
+
+Workflow executors require `defineWorkflowTool`. Adding `"use workflow"` to `defineTool`, a bare
+tool object, a channel handler, or a schedule handler fails the build. To start a session from a
+channel or schedule, use the [channel operations](/docs/channels/custom#channel-operations-and-session-handles)
+or [schedule handler](/docs/schedules#handler-form-run) APIs.
+
+### Migrate an existing workflow tool
+
+Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
+and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(input)` and `ctx.ask(request)`.
+The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`, `AgentInput`,
+`ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
+
 ## Wait or run in the background
 
-|                          | default                             | `execution: "background"`                   |
-| ------------------------ | ----------------------------------- | ------------------------------------------- |
-| tool result              | the run's return value              | `{ status: "working", taskId }`             |
-| turn while the run lives | parked                              | continues                                   |
-| when the run ends        | result lands in the tool call       | agent is woken with the result or the error |
-| progress (`yield`)       | `action.partial` on the turn        | wakes the agent with a note                 |
-| cancel                   | cancelling the turn cancels the run | `task_cancel`, or the session ending        |
+Both modes support the same durable waits. Choose the execution mode based on when the parent
+agent should receive a tool result:
 
-Wait when the model needs the answer to continue. Go background when the wait may outlive the
-conversation or the user should keep talking in the meantime. Background tools need no root-agent
-flag.
+|                              | Default execution                                   | `execution: "background"`                                            |
+| ---------------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
+| Tool result                  | The workflow's output after it finishes.            | `{ status: "working", taskId }` before the body finishes.            |
+| Parent turn                  | Waits for this tool call to finish.                 | Continues after receiving the receipt.                               |
+| Durable wait inside the body | Suspends the workflow; the tool call stays pending. | Suspends the workflow; the parent can continue independently.        |
+| When the run ends            | Settles the pending tool call.                      | Sends a task completion or failure notification to the parent agent. |
+| Cancel                       | Cancelling the turn cancels the run.                | `task_cancel`, or the session ending.                                |
 
-## Ask a human: `ask`
+Use default execution when the model needs the answer to continue. Use background execution when
+the conversation should continue while the task is pending. Background tools need no root-agent
+flag. Ordinary `defineTool` also accepts `execution: "background"`, but its executor still runs
+inside the initiating step and cannot suspend at workflow waits. See the
+[tool execution comparison](/docs/tools#background-execution).
+
+### How suspension works
+
+Suspension happens when a workflow must wait for an unresolved durable operation, such as
+`ctx.ask`, an awaited hook or webhook, or `sleep`. The runtime persists the wait and releases the
+workflow's compute. When the answer, event, or timer arrives, the runtime replays the workflow,
+reuses recorded step results, and continues past the wait. Put side effects in `"use step"`
+functions so replay does not repeat completed effects.
+
+Consider a body that reports progress and then asks for approval:
 
 ```ts
-import { ask } from "eve/workflow";
+async *execute(input, ctx) {
+  "use workflow";
+  yield { status: "awaiting approval" };
+  const answer = await ctx.ask({ prompt: "Continue?", display: "confirmation" });
+  return { answer };
+}
+```
 
-const answer = await ask(ctx, {
+The yield reports a snapshot, and eve advances the generator to `ctx.ask`. Awaiting the unanswered
+request is the durable wait. In default execution, the original tool call remains pending until
+the answer arrives and the body returns. With `execution: "background"`, the original call has
+already returned a task receipt, and the workflow can suspend while the conversation continues.
+Answering resumes the body in either mode.
+
+`yield` itself does not wait for approval or switch a tool into background execution. An ordinary
+Promise or Node.js timer inside a step also does not create a durable workflow suspension; use
+the workflow operations for waits that must survive a restart.
+
+## Ask a human: `ctx.ask`
+
+```ts
+const answer = await ctx.ask({
   prompt: string,
   display?: "confirmation" | "select" | "text",
   options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
@@ -108,13 +159,12 @@ const answer = await ask(ctx, {
 }); // { optionId?: string; text?: string }
 ```
 
-`ask` publishes an `input.requested` event on the session — rendered the way channels render
-`ask_question` and tool approvals — and returns the hook the answer resumes, the way `createHook`
-returns one. Awaiting it suspends the run until a response arrives. Because it is a hook, it composes
-with the SDK's own constructs; race it against a deadline:
+`ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
+`ask_question` and tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+It composes with the SDK's own constructs; race it against a deadline:
 
 ```ts
-const pending = ask(ctx, { prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
+const pending = ctx.ask({ prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
 const answer = await Promise.race([pending, sleep("4h")]);
 if (answer === undefined) return { deployed: false, reason: "timed out" };
 ```
@@ -128,16 +178,14 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
   normal `turnPolicy`.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
-and can only show the model's input. Both compose: `approval` before the run, `ask` inside it.
+and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
 
-## Delegate work: `agent`
+## Delegate work: `ctx.agent`
 
 Workflow tools can call a visible subagent and wait for its result:
 
 ```ts
-import { agent } from "eve/workflow";
-
-const result = await agent(ctx, {
+const result = await ctx.agent({
   key: "security-review",
   target: "reviewer",
   message: "Review the deployment plan for security risks.",
@@ -151,23 +199,49 @@ keys. `target` is the model-visible subagent name; pass `agentId` to continue an
 
 ## Report progress: `yield`
 
-A workflow body may be an async generator. Each `yield` is a durable progress snapshot; the return
-value is the result, or the last `yield` when the body returns nothing.
+A workflow body may be an async generator. Ordinary yields report progress in both execution
+modes. After processing a yield, eve advances the generator; use an awaited workflow operation
+when the body needs to suspend.
 
-```ts
-async *execute({ service }, ctx) {
-  "use workflow";
-  yield { status: "planning" };
-  const plan = await planDeploy(service);
-  yield { status: "deploying" };
-  return { deployed: true, url: await applyDeploy(plan) };
-}
+| Operation                         | Default execution                                                 | `execution: "background"`                                              |
+| --------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `yield value`                     | Emits an `action.partial` snapshot for the pending tool call.     | Emits stream-only task progress; does not request a parent-agent turn. |
+| `yield task.postMessage(message)` | Unavailable; there is no `task` argument.                         | Sends a message requesting a parent-agent turn; the task stays open.   |
+| `return value`                    | Settles the tool call with its output.                            | Completes the task and delivers its output in a later notification.    |
+| No return value                   | Uses the last yield as output, or `null` if there were no yields. | Completes with `null`; yielded progress is not the task output.        |
+
+For default execution, an explicit `return null` also falls back to the last yield. Prefer an
+explicit object return when progress snapshots and the final result have different shapes.
+Progress snapshots are last-write-wins by tool call id and do not enter model history as
+intermediate tool results. A snapshot used as the final output does enter history as the tool result.
+
+This background workflow reports progress, sends the parent one message, and then suspends:
+
+```ts title="agent/tools/remind_with_progress.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "workflow";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Schedule a reminder and report progress before waiting.",
+  inputSchema: z.object({ note: z.string(), delay: z.string() }),
+  execution: "background",
+  async *execute({ note, delay }, ctx, task) {
+    "use workflow";
+    yield { status: "preparing reminder" }; // Stream-only progress.
+    yield task.postMessage(`Reminder scheduled for ${delay}.`); // Parent-agent message.
+    await sleep(delay); // Durable suspension while the timer is pending.
+    return { reminder: note }; // Task completion notification.
+  },
+});
 ```
 
-For a waiting tool each `yield` streams as an `action.partial` event, last-write-wins by tool call
-id, and never enters model history — the same contract as an in-process generator tool. For a
-background tool each `yield` wakes the owning agent with a note. Returning ends the run with the
-result; throwing ends it with the failure.
+Calling `task.postMessage` constructs a descriptor; yielding it sends the message. It does not
+wait for a reply. Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer.
+Removing `execution: "background"` requires removing the `task` argument and message yield; the
+ordinary progress yield and `await sleep(delay)` still work, but the model waits for the final
+reminder as the tool result. See [yield and return](/docs/tools#yield-and-return) for the different
+final-output rules of ordinary `defineTool` generators.
 
 ## Cancel and clean up: `ctx.abortSignal`
 
@@ -200,9 +274,8 @@ first.
 ```ts
 async execute({ service }, ctx) {
   "use workflow";
-
   const plan = await planDeploy(service);
-  const pending = ask(ctx, { prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
+  const pending = ctx.ask({ prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
 
   let answer = await Promise.race([pending, sleep("4h")]);
   if (answer === undefined) {
@@ -222,17 +295,16 @@ and returning withdraws the request.
 ### Wait for an external system to call back
 
 ```ts title="agent/tools/render_video.ts"
-import { defineTool } from "eve/tools";
+import { defineWorkflowTool } from "eve/tools";
 import { createWebhook, FatalError } from "workflow";
 import { z } from "zod";
 import { submitRender } from "../lib/render";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Render a video. Returns the URL once the render farm finishes.",
   inputSchema: z.object({ projectId: z.string() }),
   async execute({ projectId }) {
     "use workflow";
-
     const done = createWebhook();
     const jobId = await submitRender(projectId, done.url);
     const callback = await done;
@@ -250,19 +322,17 @@ system posts to it when it is done. Nothing runs in between.
 ### Ask now, act when answered
 
 ```ts title="agent/tools/refund_order.ts"
-import { defineTool } from "eve/tools";
-import { ask } from "eve/workflow";
+import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 import { issueRefund } from "../lib/refunds";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Request approval to refund an order, then issue the refund once approved.",
   inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
   execution: "background",
   async execute({ orderId, amount }, ctx) {
     "use workflow";
-
-    const decision = await ask(ctx, {
+    const decision = await ctx.ask({
       prompt: `Refund $${amount} on order ${orderId}?`,
       display: "confirmation",
       options: [
@@ -283,11 +353,11 @@ on the channel. When it is answered, the refund runs and the agent is woken with
 ### Remind me later
 
 ```ts title="agent/tools/remind.ts"
-import { defineTool } from "eve/tools";
+import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
 import { z } from "zod";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Remind the user about something after a delay.",
   inputSchema: z.object({ note: z.string(), delay: z.string() }),
   execution: "background",
@@ -317,6 +387,7 @@ session's task index, can be cancelled with `task_cancel`, and are cancelled whe
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the run.
 
-Identity follows the tool. The workflow id derives from the tool's path, so renaming or moving the
-file creates a new workflow. Runs in flight finish on the deployment that started them; a run that
+The workflow id derives from the executor's module path and function name. Inline executors use
+the tool module and the name `execute`; imported executors use their declaring module and name.
+Renaming or moving that function creates a new workflow. Runs in flight finish on the deployment that started them; a run that
 resumes on a deployment without its tool fails with an error naming the missing workflow.

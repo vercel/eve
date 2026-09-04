@@ -107,7 +107,7 @@ import {
 } from "#harness/turn-tag-state.js";
 import {
   applySessionLimitContinuation,
-  enforceSessionTokenLimit,
+  enforceSessionUsageLimit,
 } from "#harness/session-limit-enforcement.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
@@ -131,6 +131,11 @@ import {
 } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import {
+  clearTurnClientContextState,
+  getTurnClientContextState,
+  setTurnClientContextState,
+} from "#harness/turn-client-context.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateHistoryEventEmitted,
@@ -933,11 +938,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
-    const clientContext = readClientContext(effectiveStepInput);
+    const turnId = activeTurnId(emissionState);
+    const storedClientContext = getTurnClientContextState(pending.session.state, turnId);
+    const clientContext =
+      pending.deferredContext === true ? undefined : readClientContext(effectiveStepInput);
+    const activeClientContext = clientContext ?? storedClientContext?.messages;
     const ephemeralContextMessages: ModelMessage[] =
-      clientContext === undefined || pending.deferredContext === true
-        ? []
-        : clientContext.map((content) => ({ content, role: "user" }));
+      activeClientContext?.map((content) => ({ content, role: "user" })) ?? [];
     const preparedTurnInput: ModelMessage[] = [];
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
@@ -1059,15 +1066,34 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
+    // Keep the insertion point stable when a later durable step reconstructs
+    // the model-only prompt, preserving the full prompt prefix within the turn.
+    let turnClientContext = storedClientContext;
+    if (clientContext !== undefined) {
+      turnClientContext = {
+        insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
+        messages: [...clientContext],
+        turnId,
+      };
+    }
+    if (turnClientContext !== undefined) {
+      session = setTurnClientContextState(session, turnClientContext);
+    }
+
     messages = [...messages, ...preparedTurnInput];
 
     const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
-      if (ephemeralContextMessages.length === 0) return [...durableMessages];
+      if (turnClientContext === undefined || turnClientContext.messages.length === 0) {
+        return [...durableMessages];
+      }
 
-      const insertionIndex = Math.max(0, durableMessages.length - preparedTurnInput.length);
+      const insertionIndex = Math.min(
+        Math.max(0, turnClientContext.insertionIndex),
+        durableMessages.length,
+      );
       return [
         ...durableMessages.slice(0, insertionIndex),
-        ...ephemeralContextMessages,
+        ...turnClientContext.messages.map((content) => ({ content, role: "user" as const })),
         ...durableMessages.slice(insertionIndex),
       ];
     };
@@ -1113,6 +1139,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
+    const clientContextTailLength =
+      turnClientContext === undefined
+        ? undefined
+        : Math.max(0, messages.length - turnClientContext.insertionIndex);
     const compaction = await maybeCompact({
       abortSignal: config.abortSignal,
       auth: ctx?.get(AuthKey) ?? null,
@@ -1131,6 +1161,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = compaction.session;
     if (compaction.compacted) {
       messages = compaction.messages;
+      if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
+        turnClientContext = {
+          ...turnClientContext,
+          insertionIndex: Math.max(0, messages.length - clientContextTailLength),
+        };
+        session = setTurnClientContextState(session, turnClientContext);
+      }
     }
     projectedMessages = normalizeModelMessages(
       projectHistory(createModelMessages(messages), session.state),
@@ -1517,7 +1554,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return pendingWorkflowInterrupt;
     }
 
-    const limitResult = await enforceSessionTokenLimit({
+    const limitResult = await enforceSessionUsageLimit({
       config,
       emit,
       emissionState,
@@ -1779,7 +1816,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       emissionState,
       durableModelPromptMessageCount:
-        ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
+        turnClientContext === undefined || turnClientContext.messages.length === 0
+          ? projectedMessages.length
+          : undefined,
       promptMessages: messages,
       result,
       runStep,
@@ -2764,6 +2803,7 @@ async function finishTaskTurn(input: {
 }): Promise<StepResult> {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
+  session = clearTurnClientContextState(session);
 
   if (schema === undefined) {
     if (emit) {
@@ -2813,6 +2853,7 @@ async function finishConversationTurn(input: {
 }): Promise<StepResult> {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
+  session = clearTurnClientContextState(session);
 
   if (schema === undefined) {
     if (emit) {

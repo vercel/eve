@@ -1,5 +1,46 @@
 # eve
 
+## 0.51.1
+
+### Patch Changes
+
+- 38fd8d9: Honor the `image` option passed to `vercel()` when creating fresh Vercel Sandbox instances.
+- 9d0df26: Extension packages can expose built-in extension distributions from package export subpaths.
+- 98f45ea: Avoid loading interactive prompt dependencies when running non-interactive CLI commands such as `eve build` in an agent workspace.
+- 3b73073: Run each opt-in `sleep` tool call as its own durable workflow. Parallel calls still resume the turn after the longest wait, while sleep now follows the same execution and cancellation lifecycle as other workflow-backed tools.
+- 4ee6715: Release local Workflow stream listeners when client stream followers reconnect or stop.
+- 9091777: Allow clients to cancel every background task owned by a session with `session.cancel({ tasks: true })`. Timed-out eval cases now reset their owned sessions before the next case starts so background work cannot leak across cases.
+- 73aec25: Add an optional per-session model token-cost limit in US dollars. Sessions pause for approval before another model call after reported cost reaches the limit, following the existing token-limit continuation flow.
+- 98f45ea: Only classify agent-shaped, package-less `agents/` children as eve workspace members. Independently packaged agents remain standalone, while unrelated `agents/` directories no longer override flat standalone projects.
+- 30a6325: Allow Slack channels to register experimental custom activity renderers that consume activity snapshots and retain renderer-owned state between updates.
+- 1909295: Fix multi-agent setup flows so `eve init --agents` asks which agent to run, while shared AI Gateway, integration, and deployment setup uses the project root.
+- 0ca3ef7: Expose workflow run and Vercel deployment references for failed MCP invocations instead of opaque workflow error payloads.
+- d594b94: Separate default memory namespaces for agents mounted under different route prefixes in the same Vercel project.
+- a6e72c4: `eve/self-modification` now uses the same AI Gateway model catalog validation as `/model`.
+- 0e2e10d: Resolve eve project ownership from the nearest `package.json` that declares `dependencies.eve`, then classify its `agent/` or `agents/` shape. This avoids incorrect environment and CLI behavior in repositories that only use eve as development tooling.
+- 30a6325: Add experimental Unicode tree and native streaming plan Slack activity renderers. The plan keeps stable top-level tasks, appends descendant lifecycle updates, and compacts completed streams to top-level work.
+- 9de667a: Refresh workspace tooling and vendored dependencies, including stable Next.js releases and the latest Drives-capable Vercel Sandbox v3 beta.
+- e83e50e: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases (`@workflow/core` 5.0.0-beta.48). Sessions now claim their inbox hook in-process instead of taking an extra queue hop at start, so a new session reaches its first turn one delivery sooner.
+- 00cc672: The experimental self-modification extension is bundled with eve, so registry installs no longer add a separate package.
+
+## 0.51.0
+
+### Minor Changes
+
+- aae2631: Background workflow tools now execute as their task's durable workflow run, subagents can be invoked directly from waiting workflow tools and workflow sandboxes, and workflow `agent()` calls require a replay-stable `key`.
+
+### Patch Changes
+
+- fc123f4: Discover multi-agent projects from their `agents/` directory, add consistent `--agent` selection to agent-scoped CLI commands, and let `eve init --agents <name,...>` create or extend an agent workspace.
+- b03290a: Preserve background execution for durable dynamic tools so replayed callbacks receive their task runtime.
+- 6e630b4: Deploy conventional `agents/<name>/agent/` workspaces as inferred peer Vercel services at `/<name>/eve/v1/*`, with no generated `vercel.json` step.
+- ecf0b6a: Prevent Vercel Blob file memory from receiving compressed responses with weak ETags that cannot be used for conditional writes. Blob reads now request identity encoding so memory documents continue saving as they grow.
+- 4c45d2f: Fix file-memory setup failing after it creates a Vercel Blob store when the project uses Vercel CLI 57. Setup now connects the store without passing that release an unsupported output flag, so retrying repairs the partial setup normally.
+- bad0813: Fix the sandbox base image so a non-interactive `bash -lc` login shell exits cleanly as `vercel-sandbox`. Ubuntu's default `.bash_logout` ran `clear_console` on exit, which wrote `TERM environment variable not set.` to stderr and, under `set -e`, turned a successful `exit 0` into exit 1 on Vercel Sandbox. `sudo` no longer warns about unresolvable sandbox hostnames, `$HOME/.local/bin` exists on `PATH` for user-scoped installs, and Node is root-owned on every architecture.
+- f9b760a: Ignore unrelated ancestor `agents/` directories when resolving standalone projects so local CLI commands do not misclassify neighboring repositories as agent workspaces.
+- 3cccd71: Preserve inherited channel audience metadata when local subagents persist adapter state. Public parent traces now continue capturing local child inputs and outputs while destination-specific redaction remains independent.
+- 29b9056: Run approved background tool calls even when the AI SDK skips its input callback during resume.
+
 ## 0.50.0
 
 ### Minor Changes

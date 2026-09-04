@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
   askThenRaceWorkflow,
+  backgroundDeployWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
@@ -21,7 +22,11 @@ import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#tools/schema.js";
+import {
+  defineWorkflowTool,
+  type BlockingWorkflowToolDefinition,
+} from "#tools/workflow-definition.js";
+import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
   additionalProperties: false,
@@ -53,34 +58,24 @@ function buildSerializedContext(input: {
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
   readonly execute: (...args: never[]) => unknown;
+  readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
 }): Promise<TestRuntime> {
-  const tool: ResolvedToolDefinition = {
-    description: `Deploys a service (${input.toolName}).`,
-    execute: input.execute as ResolvedToolDefinition["execute"],
-    inputSchema: DEPLOY_INPUT_SCHEMA,
-    logicalPath: `tools/${input.toolName}.ts`,
-    name: input.toolName,
-    owner: { kind: "application" },
-    sourceId: `tools/${input.toolName}.ts`,
-    sourceKind: "module",
-  };
-  const runtime = await createTestRuntime({ agent: { name: input.agentName }, tools: [tool] });
-  const manifestTool = runtime.manifest.tools.find((entry) => entry.name === input.toolName);
-  if (manifestTool === undefined) {
-    throw new Error(`Expected ${input.toolName} to be present in the test manifest.`);
-  }
-  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-    default: { execute: input.execute },
-  };
-  // The compiler derives the workflow id from authored source; an in-memory tool
-  // has none, so record the id the test tier's transform stamped on the fixture.
-  const workflowId = Reflect.get(input.execute, "workflowId");
-  expect(workflowId).toEqual(expect.any(String));
-  Object.assign(manifestTool, {
-    behavior: { availability: [], handling: { kind: "workflow-tool", workflowId } },
+  return await createTestRuntime({
+    agent: { name: input.agentName },
+    modules: [
+      {
+        logicalPath: `tools/${input.toolName}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Deploys a service (${input.toolName}).`,
+            execute: input.execute as BlockingWorkflowToolDefinition["execute"],
+            inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
+          }),
+        }),
+      },
+    ],
   });
-  return runtime;
 }
 
 /** Ids of every workflow tool run in the shared world, so a test can spot the one it started. */
@@ -130,6 +125,31 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 }
 
 describe("workflow tools", () => {
+  it("runs the framework sleep tool through the workflow tool path", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-sleep",
+      execute: executeSleepTool,
+      inputSchema: SLEEP_INPUT_SCHEMA,
+      toolName: "sleep",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Run sleep" },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-tool-sleep",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('"waitedSeconds":1');
+  });
+
   it("parks the turn on a workflow tool and resumes with its return value", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-wait",
@@ -350,7 +370,7 @@ describe("workflow tools", () => {
   it("runs a background workflow tool as its task's executor", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background",
-      execute: reportingDeployWorkflow,
+      execute: backgroundDeployWorkflow,
       toolName: "report_deploy",
     });
 
@@ -387,7 +407,8 @@ describe("workflow tools", () => {
           notifications.push(eventsText(filterEventsByType(woken, "message.received")));
         }
         const text = notifications.join("\n");
-        expect(text).toContain("update: planned api");
+        expect(text).toContain("Review plan:api");
+        expect(text).not.toContain("update: planned api");
         expect(text).toContain("is completed");
         expect(text).toContain("plan:api");
       } finally {

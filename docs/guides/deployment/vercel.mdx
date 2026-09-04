@@ -63,11 +63,13 @@ my-project/
         └── agent/
 ```
 
-An `agents/` directory marks the project as a workspace. eve validates and discovers only direct `agents/<name>/agent/` children. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. Run an agent-specific command from a child directory or pass `--agent <name>` at the workspace root; interactive commands open a picker when the name is omitted. Run project-level build, link, and deploy commands from the workspace root. The workspace root owns the project package, dependencies, and build scripts.
+In an eve workspace, eve discovers direct `agents/<name>/` children that contain nested or flat agent files and do not have their own `package.json`. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. A child with its own `package.json` is a separate package rather than a member of the parent eve workspace. Run an agent-specific command from a member directory or pass `--agent <name>` at the workspace root; interactive commands open a picker when the name is omitted. Run project-level build, link, and deploy commands from the workspace root. Workspace members share the root package, dependencies, and build scripts.
 
 Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
 
 With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
+
+An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
 
 Deploy the linked project to production:
 

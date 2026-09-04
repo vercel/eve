@@ -44,7 +44,6 @@ import { preserveSerializedInstrumentationState } from "#instrumentation/state.j
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
@@ -554,9 +553,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // again after this cancellation settles.
     const interrupted = serializeContext(ctx);
     const retained = readRetainedBackgroundToolResult(ctx);
-    const cancelledSession = await preserveCancelledTurnMessage(
-      retained?.backgroundTaskSession ?? initialSession,
-      resolved,
+    // Runs inside the ALS scope: preserving the message stages its
+    // attachments, and `stageAttachmentsToSandbox` reads the sandbox off the
+    // active context. The harness step's own scope closed when it threw, so
+    // without this the cancellation epilogue fails with "No active eve
+    // context" whenever the discarded turn carried a file part.
+    const cancelledSession = await contextStorage.run(ctx, () =>
+      preserveCancelledTurnMessage(retained?.backgroundTaskSession ?? initialSession, resolved),
     );
     return {
       action: "cancelled",
@@ -583,8 +586,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   stepResult = { ...stepResult, session: rekeyed };
 
   const nextState = createDurableSessionState({ session: stepResult.session });
-  const sleepDurationMs = readTurnSleepDurationMs(ctx);
-  const sleepTransition = sleepDurationMs === undefined ? {} : { sleepDurationMs };
   const backgroundTransition =
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
@@ -611,7 +612,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...backgroundTransition,
       output: stepResult.next.output,
       isError: stepResult.next.isError,
-      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
@@ -628,7 +628,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         action: "dispatch-workflow-tasks",
         ...backgroundTransition,
         pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-        ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };
@@ -646,7 +645,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         action: "park",
         ...backgroundTransition,
         ...pending,
-        ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: createDurableSessionState({ session: reportedSession }),
         settled: {
@@ -661,7 +659,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       action: "park",
       ...backgroundTransition,
       ...pending,
-      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
@@ -671,7 +668,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   return {
     action: "continue",
     ...backgroundTransition,
-    ...sleepTransition,
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };

@@ -1,9 +1,23 @@
 import type { Command } from "#compiled/commander/index.js";
-import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 
 interface ProjectCommandLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+/**
+ * Resolves standalone projects without using application discovery, which
+ * deliberately selects an individual agent and cannot represent a workspace
+ * root. Workspace members remain unchanged so the command can explain that
+ * deployment and linking belong at the workspace root.
+ */
+function projectCommand(command: Command, applicationContext: CliApplicationContext): Command {
+  return command.hook("preAction", async () => {
+    const context = await findEveProjectContext(applicationContext.root);
+    if (context?.kind === "standalone") applicationContext.root = context.appRoot;
+  });
 }
 
 /** Registers project-level Vercel commands without eagerly loading their flows. */
@@ -12,7 +26,7 @@ export function registerProjectCommands(input: {
   logger: ProjectCommandLogger;
   applicationContext: CliApplicationContext;
 }): void {
-  applicationCommand(input.program.command("link"), input.applicationContext)
+  projectCommand(input.program.command("link"), input.applicationContext)
     .description("Link this directory to a Vercel project and pull AI Gateway credentials.")
     .option("--non-interactive", "Run without interactive prompts")
     .option("--project <name-or-id>", "Vercel project name or ID")
@@ -22,7 +36,7 @@ export function registerProjectCommands(input: {
       await runLinkCommand(input.logger, input.applicationContext.root, undefined, options);
     });
 
-  applicationCommand(input.program.command("deploy"), input.applicationContext)
+  projectCommand(input.program.command("deploy"), input.applicationContext)
     .description("Deploy the agent to Vercel production (links first if needed).")
     .option("--non-interactive", "Run without interactive prompts")
     .option("--project <name-or-id>", "Vercel project name or ID")

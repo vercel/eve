@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  locateExtensionMount,
   locateExtensionMountPackage,
   mountNamespace,
   packageStateNamespace,
@@ -34,6 +35,42 @@ describe("packageStateNamespace", () => {
 });
 
 describe("locateExtensionMountPackage", () => {
+  it("resolves a package-local built-in extension without a compatibility manifest", async () => {
+    const appRoot = "/repo/apps/agent";
+    const agentRoot = `${appRoot}/agent`;
+    const packageRoot = `${appRoot}/node_modules/eve`;
+    const source = createMemoryProjectSource({
+      files: {
+        [`${agentRoot}/extensions/selfmod.ts`]:
+          'export { default } from "eve/self-modification";\n',
+        [`${packageRoot}/package.json`]: JSON.stringify({
+          name: "eve",
+          eve: {
+            builtInExtensions: {
+              "./self-modification": { dist: "dist/src/self-modification/extension" },
+            },
+          },
+        }),
+      },
+    });
+
+    const result = await locateExtensionMount({
+      source,
+      agentRoot,
+      appRoot,
+      mount: createModuleSourceRef({ logicalPath: "extensions/selfmod.ts" }),
+      namespace: "selfmod",
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.location).toMatchObject({
+      packageName: "eve",
+      packageRoot,
+      sourceRoot: `${packageRoot}/dist/src/self-modification/extension`,
+      specifier: "eve/self-modification",
+    });
+  });
+
   it("resolves source and dist roots before the distribution exists", async () => {
     const appRoot = "/repo/apps/agent";
     const agentRoot = `${appRoot}/agent`;

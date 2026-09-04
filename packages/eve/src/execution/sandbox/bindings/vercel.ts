@@ -79,10 +79,11 @@ export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
   const loadSandboxModule =
-    input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
+    input.loadSandboxModule ??
+    (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
   const loadDeleteSandboxModule =
     input.loadDeleteSandboxModule ??
-    (async () => await import("#compiled/@vercel/sandbox-delete/index.js"));
+    (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...input.createOptions,

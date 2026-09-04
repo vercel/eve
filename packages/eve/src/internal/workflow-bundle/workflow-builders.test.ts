@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
+import {
+  resolveInstalledPackageInfo,
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
@@ -48,6 +52,31 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.code).toContain(
       'globalThis.__private_workflows.set("workflow//eve//subagentToolExecuteWorkflow", subagentToolExecuteWorkflow);',
     );
+  });
+
+  it("stamps versioned package workflow metadata without consuming the framework body", async () => {
+    const filename = "src/execution/tools/sleep.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      [
+        "export async function executeSleepTool(): Promise<string> {",
+        '  "use workflow";',
+        '  return "done";',
+        "}",
+        "",
+      ].join("\n"),
+      "metadata",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.code).toContain('"use workflow";');
+    expect(transformed.code).toContain('return "done";');
+    const packageInfo = resolveInstalledPackageInfo();
+    expect(transformed.code).toContain(
+      `executeSleepTool.workflowId = "workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool";`,
+    );
+    expect(transformed.code).not.toContain("__private_workflows.set");
   });
 
   it("registers step functions in step mode", async () => {
@@ -239,20 +268,19 @@ describe("applyWorkflowTransform for authored application modules", () => {
   const toolPath = "/app/agent/tools/deploy.ts";
   const toolSource = [
     'import { readFile } from "node:fs/promises";',
-    'import { defineTool } from "eve/tools";',
-    'import { ask } from "eve/workflow";',
+    'import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";',
     'import { sleep } from "workflow";',
     'import { z } from "zod";',
     "",
     'const APPROVE = [{ id: "approve", label: "Deploy" }];',
     "",
-    "export default defineTool({",
+    "export default defineWorkflowTool({",
     '  description: "Deploy",',
     "  inputSchema: z.object({ service: z.string() }),",
-    "  async execute({ service }: { service: string }, ctx: ToolContext) {",
+    "  async execute({ service }: { service: string }, ctx: WorkflowToolContext) {",
     '    "use workflow";',
     "    const plan = await planDeploy(service);",
-    "    const answer = await (await ask(ctx, { prompt: plan, options: APPROVE }));",
+    "    const answer = await ctx.ask({ prompt: plan, options: APPROVE });",
     '    await sleep("1s");',
     '    return { deployed: answer.optionId === "approve" };',
     "  },",
@@ -296,10 +324,28 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).toContain("const APPROVE = ");
     expect(transformed.code).toContain('import { sleep } from "workflow";');
     expect(transformed.code).not.toContain("export default");
-    expect(transformed.code).not.toContain("defineTool");
+    expect(transformed.code).not.toContain("defineWorkflowTool");
     expect(transformed.code).not.toContain("zod");
     expect(transformed.code).not.toContain("node:fs/promises");
     expect(transformed.code).not.toContain('"use workflow"');
+  });
+
+  it("removes a namespace-imported workflow definition from the driver", async () => {
+    const source = toolSource
+      .replace("import { defineWorkflowTool, type WorkflowToolContext }", "import * as tools")
+      .replace("defineWorkflowTool({", "tools.defineWorkflowTool({");
+    const transformed = await applyWorkflowTransform(
+      "agent/tools/deploy.ts",
+      source,
+      "workflow",
+      toolPath,
+      appRoot,
+    );
+    expect(transformed.code).not.toContain("export default");
+    expect(transformed.code).not.toContain("eve/tools");
+    expect(transformed.workflowManifest.workflows?.["agent/tools/deploy.ts"]?.execute).toEqual({
+      workflowId: "workflow//./agent/tools/deploy//execute",
+    });
   });
 
   it("registers steps and stubs the workflow body in step mode", async () => {
@@ -320,7 +366,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).toContain(
       "You attempted to execute workflow execute function directly",
     );
-    expect(transformed.code).toContain("export default defineTool({");
+    expect(transformed.code).toContain("export default defineWorkflowTool({");
     expect(transformed.code).toContain("  execute,\n");
     expect(transformed.code).toContain('import { z } from "zod";');
   });

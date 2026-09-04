@@ -29,8 +29,7 @@ import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
-import vercelSandboxDelete from "./@vercel/sandbox-delete.mjs";
-import vercelSandboxStable from "./@vercel/sandbox-stable.mjs";
+import vercelSandboxDrives from "./@vercel/sandbox-drives.mjs";
 import workflowBuilders from "./@workflow/builders.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
@@ -39,6 +38,7 @@ import workflowWorld from "./@workflow/world.mjs";
 import workflowWorldLocal from "./@workflow/world-local.mjs";
 import workflowWorldVercel from "./@workflow/world-vercel.mjs";
 
+import clackCore from "./@clack/core.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
@@ -64,6 +64,7 @@ export const MODULES = [
   chatAdapterSlack,
   chatAdapterStateMemory,
   chatAdapterTwilio,
+  clackCore,
   chokidar,
   commander,
   eventsourceParserStream,
@@ -95,8 +96,7 @@ export const MODULES = [
   vercelOidc,
   vercelOtel,
   vercelSandbox,
-  vercelSandboxDelete,
-  vercelSandboxStable,
+  vercelSandboxDrives,
   workflowBuilders,
   workflowCore,
   workflowErrors,

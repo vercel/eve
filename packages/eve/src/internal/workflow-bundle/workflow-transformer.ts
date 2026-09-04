@@ -21,7 +21,7 @@ const BUILTIN_STEP_NAMES = new Set([
   "__builtin_set_attributes",
 ]);
 
-type WorkflowDirectiveMode = "workflow" | "step" | "client" | false;
+type WorkflowDirectiveMode = "workflow" | "step" | "client" | "metadata" | false;
 
 type DirectiveFunction = {
   directive: WorkflowDirective;
@@ -71,6 +71,7 @@ type AstNode = {
   kind?: string;
   local?: { name?: string } | null;
   name?: string;
+  object?: AstNode | null;
   source?: AstNode | null;
   start?: number;
   specifiers?: AstNode[];
@@ -151,6 +152,8 @@ export async function transformWorkflowDirectives(input: {
           start: fn.rangeStart,
           text: `${exportPrefix}var ${fn.name} = globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(stepId)});`,
         });
+      } else if (input.mode === "metadata") {
+        continue;
       } else {
         replacements.push({ end: fn.directiveEnd, start: fn.directiveStart, text: "" });
 
@@ -177,6 +180,8 @@ export async function transformWorkflowDirectives(input: {
       suffixes.push(
         `globalThis.${WORKFLOW_REGISTRY_GLOBAL}.set(${JSON.stringify(workflowId)}, ${fn.name});`,
       );
+    } else if (input.mode === "metadata") {
+      suffixes.push(`${fn.name}.workflowId = ${JSON.stringify(workflowId)};`);
     } else {
       replacements.push({
         end: fn.directiveEnd,
@@ -423,7 +428,8 @@ function removeEveDefinerDefaultExport(
     const call = node.declaration;
     if (call?.type !== "CallExpression" || node.end === undefined) continue;
     const callee = call.callee;
-    if (callee?.type !== "Identifier" || !eveBindings.has(callee.name ?? "")) continue;
+    const binding = callee?.type === "MemberExpression" ? callee.object : callee;
+    if (binding?.type !== "Identifier" || !eveBindings.has(binding.name ?? "")) continue;
     removals.push({ end: node.end, start: node.start, text: "" });
   }
 

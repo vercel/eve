@@ -24,6 +24,7 @@ export default {
         kind: "vendored",
         compiledPath: "@ai-sdk/provider-utils",
       },
+      "zod/v4": { kind: "vendored", compiledPath: "zod" },
     },
   }),
 };

@@ -15,29 +15,27 @@
  * on a separate "reset" code path. Session totals stay in the same state record
  * and keep accumulating until the durable session ends.
  *
- * `TokenUsageTotals` carries `costUsd`/`sawCost` alongside the token counts
- * for the `$eve.*` dashboard tags and session limits — fields the
- * cross-cutting {@link TokenUsage} contract (subagent results, callback
- * bodies, usage spans) does not carry. {@link toUsage} projects a total down
- * to that shared shape at the one site (the driver's `done` action) where a
- * session total crosses into it.
+ * `TokenUsageTotals` carries `sawCost` alongside the shared token and token-cost
+ * fields so observability can distinguish an unreported cost from a reported
+ * zero. {@link toUsage} drops that internal marker when a total crosses into
+ * the shared {@link TokenUsage} contract.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import {
-  findRuntimeTokenLimitViolation,
-  grantRuntimeTokenLimits,
-  remainingRuntimeTokenQuota,
-  resolveRuntimeTokenLimits,
-  type SessionRuntimeTokenLimits,
-  type SessionTokenLimitViolation,
-} from "#harness/session-token-limits.js";
+  findRuntimeUsageLimitViolation,
+  grantRuntimeUsageLimits,
+  remainingRuntimeUsageQuota,
+  resolveRuntimeUsageLimits,
+  type SessionRuntimeUsageLimits,
+  type SessionUsageLimitViolation,
+} from "#harness/session-usage-limits.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-export type { SessionRuntimeTokenLimits, SessionTokenLimitViolation };
+export type { SessionRuntimeUsageLimits, SessionUsageLimitViolation };
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
-const SESSION_RUNTIME_TOKEN_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
+const SESSION_RUNTIME_USAGE_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -85,6 +83,7 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
   return {
     cacheReadTokens: totals.cacheReadTokens,
     cacheWriteTokens: totals.cacheWriteTokens,
+    costUsd: totals.sawCost ? totals.costUsd : undefined,
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
   };
@@ -95,73 +94,73 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
  * absent when the configured limit leaves it uncapped. Before any granted
  * continuation the runtime limit equals the configured limit; each grant
  * re-anchors it to `usage + configured limit` via
- * {@link bumpSessionRuntimeTokenLimits}.
+ * {@link bumpSessionRuntimeUsageLimits}.
  */
-export function getSessionRuntimeTokenLimits(
+export function getSessionRuntimeUsageLimits(
   session: Pick<HarnessSession, "limits" | "state">,
-): SessionRuntimeTokenLimits {
-  const stored = session.state?.[SESSION_RUNTIME_TOKEN_LIMIT_KEY] as
-    | SessionRuntimeTokenLimits
+): SessionRuntimeUsageLimits {
+  const stored = session.state?.[SESSION_RUNTIME_USAGE_LIMIT_KEY] as
+    | SessionRuntimeUsageLimits
     | undefined;
-  return resolveRuntimeTokenLimits({
-    configured: configuredSessionTokenLimits(session),
+  return resolveRuntimeUsageLimits({
+    configured: configuredSessionUsageLimits(session),
     stored,
   });
 }
 
 /**
- * Bumps the runtime token limits after the user grants a continuation:
- * each capped axis is re-anchored to `current usage + configured limit`, so
- * one approval always buys one full configured window from the moment of
- * the grant (even when the last model call overshot by more than a window).
- * Both axes bump together so a session near two limits gets one prompt, not
- * two back-to-back. The configured limits never change.
+ * Bumps the runtime usage limits after the user grants a continuation. Each
+ * capped axis is re-anchored to `current usage + configured limit`, so one
+ * approval buys one full configured window even after an overshoot. All axes
+ * bump together to avoid back-to-back prompts. Configured limits never change.
  */
-export function bumpSessionRuntimeTokenLimits(session: HarnessSession): HarnessSession {
+export function bumpSessionRuntimeUsageLimits(session: HarnessSession): HarnessSession {
   const usage = getSessionTokenUsage(session);
-  const bumped = grantRuntimeTokenLimits({
-    configured: configuredSessionTokenLimits(session),
+  const bumped = grantRuntimeUsageLimits({
+    configured: configuredSessionUsageLimits(session),
     usage,
   });
   return {
     ...session,
     state: {
       ...session.state,
-      [SESSION_RUNTIME_TOKEN_LIMIT_KEY]: bumped satisfies SessionRuntimeTokenLimits,
+      [SESSION_RUNTIME_USAGE_LIMIT_KEY]: bumped satisfies SessionRuntimeUsageLimits,
     },
   };
 }
 
 /**
- * Remaining lifetime-token quota under the runtime limits, per axis.
+ * Remaining lifetime usage quota under the runtime limits, per axis.
  * `false` marks an uncapped axis. This is the pool a delegated child's
  * budget is granted from.
  */
-export function getSessionRemainingTokenQuota(session: Pick<HarnessSession, "limits" | "state">): {
+export function getSessionRemainingUsageQuota(session: Pick<HarnessSession, "limits" | "state">): {
+  costUsd: number | false;
   inputTokens: number | false;
   outputTokens: number | false;
 } {
   const usage = getSessionTokenUsage(session);
-  const runtime = getSessionRuntimeTokenLimits(session);
-  return remainingRuntimeTokenQuota({ runtime, usage });
+  const runtime = getSessionRuntimeUsageLimits(session);
+  return remainingRuntimeUsageQuota({ runtime, usage });
 }
 
-export function getSessionTokenLimitViolation(
+export function getSessionUsageLimitViolation(
   session: Pick<HarnessSession, "limits" | "state">,
-): SessionTokenLimitViolation | null {
+): SessionUsageLimitViolation | null {
   const usage = getSessionTokenUsage(session);
-  const runtime = getSessionRuntimeTokenLimits(session);
-  return findRuntimeTokenLimitViolation({
-    configured: configuredSessionTokenLimits(session),
+  const runtime = getSessionRuntimeUsageLimits(session);
+  return findRuntimeUsageLimitViolation({
+    configured: configuredSessionUsageLimits(session),
     runtime,
     usage,
   });
 }
 
-function configuredSessionTokenLimits(
+function configuredSessionUsageLimits(
   session: Pick<HarnessSession, "limits">,
-): SessionRuntimeTokenLimits {
+): SessionRuntimeUsageLimits {
   return {
+    costUsd: session.limits?.maxTokenCostUsdPerSession,
     inputTokens: session.limits?.maxInputTokensPerSession,
     outputTokens: session.limits?.maxOutputTokensPerSession,
   };
@@ -191,6 +190,7 @@ export function takeSessionUsageDelta(session: HarnessSession): {
     delta: {
       cacheReadTokens: totals.cacheReadTokens - reported.cacheReadTokens,
       cacheWriteTokens: totals.cacheWriteTokens - reported.cacheWriteTokens,
+      costUsd: totals.sawCost || reported.sawCost ? totals.costUsd - reported.costUsd : undefined,
       inputTokens: totals.inputTokens - reported.inputTokens,
       outputTokens: totals.outputTokens - reported.outputTokens,
     },

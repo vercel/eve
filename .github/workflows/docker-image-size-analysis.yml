@@ -99,11 +99,19 @@ jobs:
             set -euo pipefail
             test "$(id -un)" = vercel-sandbox
             test "$(stat -c %U /workspace)" = vercel-sandbox
+            test "$(stat -c %U /usr/local/bin/node)" = root
             test "$(npm prefix -g)" = "$HOME/.local"
             test "$(pnpm bin -g)" = "$PNPM_HOME/bin"
+            test -d "$HOME/.local/bin"
             git init --quiet /workspace
             git -C /workspace remote add origin https://github.com/vercel/eve.git
             sudo -n true
+            # Backends run authored commands through a non-interactive `bash -lc`
+            # login shell. Exiting it must be silent and preserve the exit status.
+            test ! -e "$HOME/.bash_logout"
+            test -z "$(bash -lc "exit 0" 2>&1)"
+            bash -lc "set -euo pipefail; exit 0"
+            bash -lc "exit 3" || test "$?" = 3
           '
 
       - name: Generate Docker image size report

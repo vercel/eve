@@ -3,6 +3,8 @@ import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
 import type { CompiledChannelDefinition } from "#compiler/manifest.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { workflowCallbackErrorMessage } from "#shared/workflow-tool-context.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
@@ -46,6 +48,14 @@ export async function compileChannelDefinition(
     rawValue,
     `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
+
+  for (const route of definition.routes) {
+    if (readWorkflowFunctionId(route.handler) !== undefined) {
+      throw new Error(
+        `${source.logicalPath} (${route.method} ${route.path}): ${workflowCallbackErrorMessage("channel")}`,
+      );
+    }
+  }
 
   return {
     definitions: definition.routes.map((route) => ({

@@ -22,38 +22,54 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 25,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    ],
-    dropped: { 15: "TaskExec replaces stageEffect with send" },
+    current: 29,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29],
+    dropped: {
+      14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      15: "TaskExec replaces stageEffect with send",
+      16: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      17: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      18: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      19: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      20: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      21: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      22: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+    },
   },
   dynamicTool: {
-    current: 25,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25,
-    ],
+    current: 28,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
     },
   },
   channel: {
-    current: 14,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14],
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   schedule: {
-    current: 7,
-    supported: [1, 2, 3, 4, 6, 7],
+    current: 9,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   subagent: {
-    current: 7,
-    supported: [3, 4, 6, 7],
+    current: 8,
+    supported: [3, 4, 6, 7, 8],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -61,16 +77,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 12,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12],
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   hook: {
-    current: 18,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18],
+    current: 20,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -86,22 +102,22 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 15,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 16,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16],
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
+  state: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */

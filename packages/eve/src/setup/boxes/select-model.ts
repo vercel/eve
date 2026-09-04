@@ -1,6 +1,9 @@
-import { z } from "#compiled/zod/index.js";
 import { AI_GATEWAY_MODELS_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import {
+  parseGatewayModelCatalog,
+  type GatewayCatalogModel,
+} from "#shared/gateway-model-catalog.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
 import type { SetupState } from "../state.js";
@@ -9,30 +12,7 @@ const FETCH_TIMEOUT_MS = 5000;
 const WEB_SEARCH_TAG = "web-search";
 const MODEL_PROMPT_MESSAGE = "Which model should your agent use?";
 
-const gatewayCatalogModelSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: z.string(),
-  owned_by: z.string(),
-  /** Public release timestamp in Unix seconds. Missing values sort last. */
-  released: z.number().finite().optional().catch(undefined),
-  tags: z.array(z.string()).optional().catch(undefined),
-  /** Per-tier pricing; the `service_tiers` keys reveal Fast mode (priority) support. */
-  pricing: z
-    .object({ service_tiers: z.record(z.string(), z.unknown()).optional().catch(undefined) })
-    .optional()
-    .catch(undefined),
-});
-
-const gatewayCatalogSchema = z.object({ data: z.array(z.unknown()) }).transform(({ data }) =>
-  data.flatMap((entry) => {
-    const result = gatewayCatalogModelSchema.safeParse(entry);
-    return result.success ? [result.data] : [];
-  }),
-);
-
-/** One model entry from the AI Gateway catalog response. */
-export type GatewayCatalogModel = z.infer<typeof gatewayCatalogModelSchema>;
+export type { GatewayCatalogModel } from "#shared/gateway-model-catalog.js";
 
 function modelOption(
   value: string,
@@ -85,24 +65,13 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
     const res = await vercelGatewayFetch(AI_GATEWAY_MODELS_URL, { signal: requestSignal });
     if (!res.ok) throw new Error(`AI Gateway model catalog request failed (${res.status}).`);
-    return parseGatewayCatalog(await res.json());
+    return parseGatewayModelCatalog(await res.json());
   } finally {
     clearTimeout(timeout);
   }
 }
 
-/**
- * Validates a Gateway catalog response. A malformed payload throws (the
- * picker then falls back to the static shortlist), but a malformed entry is
- * skipped: one experimental entry shape must not take down the whole catalog.
- */
-export function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
-  const result = gatewayCatalogSchema.safeParse(input);
-  if (!result.success) {
-    throw new Error("AI Gateway returned an invalid model catalog.");
-  }
-  return result.data;
-}
+export { parseGatewayModelCatalog as parseGatewayCatalog } from "#shared/gateway-model-catalog.js";
 
 /** Position in the curated shortlist, or its length for everything else. */
 function featuredPriority(id: string): number {

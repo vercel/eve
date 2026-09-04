@@ -61,9 +61,24 @@ async function rewriteDeclarationSpecifiers(declarationRoot) {
   }
 }
 
-async function emitDeclarations(tempRoot, { contractRoot, eveRoot }) {
+async function emitDeclarations(tempRoot, configuration, { contractRoot, eveRoot }) {
   const declarationRoot = join(tempRoot, "declarations");
   await mkdir(declarationRoot, { recursive: true });
+  const tsconfigPath = join(tempRoot, "tsconfig.json");
+  await writeFile(
+    tsconfigPath,
+    JSON.stringify({
+      extends: join(contractRoot, "tsconfig.json"),
+      include: [
+        join(contractRoot, "entrypoints/**/*.ts"),
+        ...Object.entries(configuration.contracts ?? {}).flatMap(([capability, contract]) =>
+          contract.supported
+            .filter((version) => version < contract.current)
+            .map((version) => join(contractRoot, "compatibility", capability, `v${version}.ts`)),
+        ),
+      ],
+    }),
+  );
   execFileSync(process.execPath, [join(eveRoot, "scripts/vendor-compiled.mjs")], {
     cwd: eveRoot,
     stdio: ["ignore", "pipe", "pipe"],
@@ -76,7 +91,7 @@ async function emitDeclarations(tempRoot, { contractRoot, eveRoot }) {
     [
       tsc,
       "-p",
-      join(contractRoot, "tsconfig.json"),
+      tsconfigPath,
       "--outDir",
       declarationRoot,
       "--declarationMap",
@@ -172,7 +187,10 @@ export async function generateCapabilityReports(
   await mkdir(cacheRoot, { recursive: true });
   const tempRoot = await mkdtemp(join(cacheRoot, "extension-contracts-"));
   try {
-    const declarationRoot = await emitDeclarations(tempRoot, { contractRoot, eveRoot });
+    const declarationRoot = await emitDeclarations(tempRoot, configuration, {
+      contractRoot,
+      eveRoot,
+    });
     const capabilities = Object.keys(configuration.current);
     const configs = [];
     for (const [capability, version] of Object.entries(configuration.current)) {

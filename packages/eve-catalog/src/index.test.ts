@@ -122,13 +122,13 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
   });
 
-  it("exposes Upstash AgentKit as an extension", () => {
-    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("extension");
+  it("exposes Upstash AgentKit as a memory provider", () => {
+    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("memory");
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
-  it("exposes Kybernesis Arcana as an extension", () => {
-    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+  it("exposes Kybernesis Arcana as a memory provider", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("memory");
     expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
   });
 

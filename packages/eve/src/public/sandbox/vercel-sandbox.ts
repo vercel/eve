@@ -1,4 +1,4 @@
-import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox-drives/index.js";
 
 type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
@@ -29,10 +29,14 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * are excluded: the framework owns those and overrides any
  * author-supplied values.
  *
- * `runtime` is excluded as well: eve always boots its sandboxes from the
- * published `vcr.vercel.com/vercel/eve/base` image tagged with the installed
- * eve version or `EVE_SANDBOX_IMAGE_TAG` when set, which is mutually exclusive
- * with a stock runtime.
+ * `runtime` is excluded: eve defaults to its published
+ * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version
+ * or `EVE_SANDBOX_IMAGE_TAG` when `image` is not supplied. Both are mutually
+ * exclusive with a stock runtime.
+ *
+ * `image` is honored for fresh templates and template-less sessions. A
+ * snapshot `source` takes precedence because the Vercel SDK makes it mutually
+ * exclusive with `image`.
  *
  * `source` is honored only on the template create at prewarm time, so
  * an author-supplied snapshot, git revision, or tarball becomes the

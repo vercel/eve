@@ -81,6 +81,10 @@ export async function createSessionStep(input: {
         configured: effectiveAgent.limits?.maxOutputTokensPerSession,
         inherited: input.inheritedLimits?.maxOutputTokensPerSession,
       }),
+      maxTokenCostUsdPerSession: resolveInheritedTokenLimit({
+        configured: effectiveAgent.limits?.maxTokenCostUsdPerSession,
+        inherited: input.inheritedLimits?.maxTokenCostUsdPerSession,
+      }),
     },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,

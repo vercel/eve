@@ -365,6 +365,7 @@ describe("createSession", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        maxTokenCostUsdPerSession: 1.5,
       },
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent(),
@@ -379,10 +380,12 @@ describe("createSession", () => {
     expect(durable.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
     expect(hydrated.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
   });
 

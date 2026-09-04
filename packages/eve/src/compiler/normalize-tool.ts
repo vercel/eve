@@ -6,9 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import type { AgentModuleBinding } from "#compiler/source-graph.js";
-import { resolveAuthoredPackageRoot } from "#internal/authored-module-loader.js";
-import { readAuthoredExecuteWorkflowId } from "#internal/workflow-bundle/authored-workflow-modules.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -108,14 +106,20 @@ export async function compileToolEntry(
     };
   }
 
-  const workflowId = await readToolWorkflowId(options.binding);
+  const workflowId = readWorkflowFunctionId(entry.definition.execute);
+  const shape = {
+    lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
+    suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
+  };
   return {
     kind: "tool",
     definition: {
       behavior:
         workflowId === undefined
-          ? entry.definition.behavior
-          : { availability: [], handling: { kind: "workflow-tool", workflowId } },
+          ? entry.definition.behavior === undefined
+            ? { availability: [], shape }
+            : { ...entry.definition.behavior, shape }
+          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
@@ -130,13 +134,4 @@ export async function compileToolEntry(
       sourceKind: "module",
     },
   };
-}
-
-async function readToolWorkflowId(binding: AgentModuleBinding): Promise<string | undefined> {
-  if (binding.backing.kind !== "filesystem") return undefined;
-  const filePath = binding.backing.sourcePath;
-  return await readAuthoredExecuteWorkflowId({
-    appRoot: resolveAuthoredPackageRoot(filePath),
-    filePath,
-  });
 }

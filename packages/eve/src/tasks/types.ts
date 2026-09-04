@@ -30,6 +30,7 @@ export type TaskInputRequest = JsonValue;
 export interface TaskUsage {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
+  readonly costUsd?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
@@ -39,6 +40,7 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const cacheReadTokens = readUsageAxis(value, "cacheReadTokens");
   const cacheWriteTokens = readUsageAxis(value, "cacheWriteTokens");
+  const costUsd = readUsageAxis(value, "costUsd");
   const inputTokens = readUsageAxis(value, "inputTokens");
   const outputTokens = readUsageAxis(value, "outputTokens");
   if (
@@ -49,7 +51,15 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   ) {
     return undefined;
   }
-  return { cacheReadTokens, cacheWriteTokens, inputTokens, outputTokens };
+  const usage: {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costUsd?: number;
+    inputTokens: number;
+    outputTokens: number;
+  } = { cacheReadTokens, cacheWriteTokens, inputTokens, outputTokens };
+  if (costUsd !== undefined) usage.costUsd = costUsd;
+  return usage;
 }
 
 function readUsageAxis(value: object, key: string): number | undefined {
@@ -129,6 +139,15 @@ export interface TaskCommandHookPayload {
   readonly command: TaskCommand;
 }
 
+/** One authored message delivered to the parent as a new turn. */
+export interface TaskInboundMessage {
+  readonly callId: string;
+  readonly kind: "task-message";
+  readonly message: string;
+  readonly messageIndex: number;
+  readonly messageEpoch: string;
+}
+
 /** Intermediate progress reported by an executor. */
 export interface TaskInboundUpdate {
   readonly callId: string;
@@ -165,6 +184,7 @@ export interface TaskInboundAnswerInput {
 export type TaskRunInboundPayload =
   | TaskCommandHookPayload
   | TaskInboundAnswerInput
+  | TaskInboundMessage
   | TaskInboundUpdate;
 
 /** Generic task-owned request sent through the parent session payload. */
@@ -211,6 +231,15 @@ export interface TaskAgentRequestDelivery {
   readonly taskId: string;
 }
 
+export interface TaskProgress {
+  readonly callId: string;
+  readonly kind: "task-progress";
+  readonly taskId: string;
+  readonly update: JsonValue;
+  readonly updateIndex: number;
+}
+
+export const TASK_PROGRESS_STREAM_NAMESPACE = "eve.task.progress";
 export const TASK_VIEW_STREAM_NAMESPACE = "eve.task";
 
 export function isTerminalTaskStatus(status: TaskStatus): boolean {

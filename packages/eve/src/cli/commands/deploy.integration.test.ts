@@ -28,7 +28,11 @@ class TestLogger implements DeployCliLogger {
 async function createWorkspaceProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-workspace-"));
   await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
-  await writeFile(join(projectRoot, "package.json"), JSON.stringify({ private: true }), "utf8");
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ dependencies: { eve: "*" }, private: true }),
+    "utf8",
+  );
   return projectRoot;
 }
 
@@ -38,7 +42,7 @@ async function createAgentProject(): Promise<string> {
   await writeFile(join(projectRoot, "agent/agent.ts"), "export default {};\n", "utf8");
   await writeFile(
     join(projectRoot, "package.json"),
-    `${JSON.stringify({ name: "my-agent", dependencies: {} }, null, 2)}\n`,
+    `${JSON.stringify({ name: "my-agent", dependencies: { eve: "*" } }, null, 2)}\n`,
     "utf8",
   );
   return projectRoot;

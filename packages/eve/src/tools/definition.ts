@@ -17,20 +17,13 @@ import {
 } from "#tools/durable-callbacks.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-import type { TaskDelegated, TaskExec, TaskReceipt } from "#tools/task.js";
+import type { TaskExec, TaskReceipt } from "#tools/task.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
-export type {
-  TaskBinding,
-  TaskDelegated,
-  TaskExec,
-  TaskExecutorBinding,
-  TaskReceipt,
-  TaskSendCommand,
-} from "#tools/task.js";
+export type { TaskExec, TaskExecutorBinding, TaskReceipt } from "#tools/task.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
@@ -101,7 +94,7 @@ export interface PublicToolDefinitionWithExecuteFn<
 
 /**
  * A question a workflow tool asks the human on the session's channel, sent
- * with `ask` from `eve/workflow`. Channels render it the way they render
+ * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the way they render
  * `ask_question` and tool approvals.
  */
 export interface ToolInputRequest {
@@ -132,10 +125,8 @@ export interface ToolInputResponse {
  * Extends {@link SessionContext} with token accessors. Passing a provider
  * resolves that provider inline, which lets one tool use multiple credentials.
  *
- * A tool whose `execute` is a workflow (`"use workflow"`) receives the same
- * context inside its durable body, except that `getSandbox`, `getSkill`,
- * `getToken`, and `requireAuth` are unavailable there and throw when touched —
- * read credentials inside a `"use step"` function instead.
+ * Workflow tools use the separate `WorkflowToolContext` provided by
+ * `defineWorkflowTool`.
  */
 export type ToolContext = SessionContext & {
   /**
@@ -210,15 +201,15 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
 export interface BackgroundToolDefinition<
   TInput = unknown,
   TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
+> extends PublicToolDefinition<TInput, TaskReceipt> {
   readonly execution: "background";
   execute(
     input: TInput,
     ctx: ToolContext,
     task: TaskExec,
-  ): Promise<TaskDelegated | TOutput> | TaskDelegated | TOutput | AsyncIterable<TOutput>;
+  ): Promise<TOutput> | TOutput | AsyncIterable<unknown>;
   approval?: Approval<ApprovalContextInput<TInput>>;
-  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 type ToolOutputFromExecuteReturn<TReturn> =
@@ -229,11 +220,11 @@ type ToolOutputFromExecuteReturn<TReturn> =
       : TReturn;
 
 type BackgroundToolOutputFromExecuteReturn<TReturn> =
-  ToolOutputFromExecuteReturn<TReturn> extends infer TOutput
-    ? TOutput extends TaskDelegated<infer TData>
-      ? TaskReceipt<TData>
-      : TOutput
-    : never;
+  TReturn extends AsyncGenerator<unknown, infer TOutput>
+    ? TOutput
+    : TReturn extends AsyncIterable<unknown>
+      ? null
+      : Awaited<TReturn>;
 
 type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
   execute(input: TInput, ctx: ToolContext): TReturn;
@@ -261,10 +252,7 @@ export function defineTool<
   description: BackgroundToolDefinition<unknown, unknown>["description"];
   execution: "background";
   inputSchema: TSchema;
-  outputSchema?: PublicToolDefinition<
-    unknown,
-    BackgroundToolOutputFromExecuteReturn<TReturn>
-  >["outputSchema"];
+  outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: BackgroundToolDefinition<
@@ -352,9 +340,20 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput> {
+  return stampToolDefinition(definition, "defineTool");
+}
+
+export function stampToolDefinition<
+  T extends {
+    readonly description: string;
+    readonly execute: (...args: never[]) => unknown;
+    readonly approval?: Approval<never>;
+    readonly toModelOutput?: (...args: never[]) => unknown;
+  },
+>(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
   if ((definition as { readonly auth?: unknown }).auth !== undefined) {
     throw new Error(
-      `defineTool: The "auth" field is no longer supported. ` +
+      `${definer}: The "auth" field is no longer supported. ` +
         `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
     );
   }
@@ -362,7 +361,7 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
-      approval: definition.approval as Approval<never> | undefined,
+      approval: definition.approval,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

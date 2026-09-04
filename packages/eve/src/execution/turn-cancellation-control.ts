@@ -21,6 +21,7 @@ export interface TurnCancellationControl {
    * the signal aborted. Race it against turn-owned awaits — never
    * `await` it alone.
    */
+  readonly payload: Promise<TurnCancelPayload>;
   readonly requested: Promise<"cancel">;
   /** Disposes the hook, abandoning any outstanding read. Idempotent. */
   dispose(): Promise<void>;
@@ -61,14 +62,15 @@ export async function createTurnCancellationControl(input: {
     input.initialPayload !== undefined &&
     matchesActiveTurn(input.initialPayload, input.expectedTurnId);
   if (initiallyCancelled) abort();
-  const requested = initiallyCancelled
-    ? Promise.resolve("cancel" as const)
-    : consumeMatchingCancel(iterator, input.expectedTurnId, abort).then(() => "cancel" as const);
+  const payload = initiallyCancelled
+    ? Promise.resolve(input.initialPayload!)
+    : consumeMatchingCancel(iterator, input.expectedTurnId, abort);
 
   let disposed = false;
   return {
+    payload,
     signal: controller.signal,
-    requested,
+    requested: payload.then(() => "cancel" as const),
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
@@ -86,13 +88,13 @@ async function consumeMatchingCancel(
   iterator: AsyncIterator<TurnCancelPayload>,
   expectedTurnId: string,
   onCancel: () => void,
-): Promise<void> {
+): Promise<TurnCancelPayload> {
   while (true) {
     const next = await iterator.next();
     if (next.done) return await new Promise<never>(() => {});
     if (matchesActiveTurn(next.value, expectedTurnId)) {
       onCancel();
-      return;
+      return next.value;
     }
   }
 }

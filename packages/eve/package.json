@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.50.0",
+  "version": "0.51.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -181,12 +181,6 @@
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
     },
-    "./workflow": {
-      "eve-source": "./src/public/workflow/index.ts",
-      "types": "./dist/src/public/workflow/index.d.ts",
-      "import": "./dist/src/public/workflow/index.js",
-      "default": "./dist/src/public/workflow/index.js"
-    },
     "./workflow-modules": {
       "eve-source": "./src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
@@ -280,6 +274,24 @@
       "types": "./dist/src/public/local-dev.d.ts",
       "import": "./dist/src/public/local-dev.js",
       "default": "./dist/src/public/local-dev.js"
+    },
+    "./self-modification": {
+      "eve-source": "./src/self-modification/extension/extension.ts",
+      "types": "./dist/src/self-modification/extension/extension.d.ts",
+      "import": "./dist/src/self-modification/extension/extension.js",
+      "default": "./dist/src/self-modification/extension/extension.js"
+    },
+    "./self-modification/agent": {
+      "eve-source": "./src/self-modification/agent.ts",
+      "types": "./dist/src/self-modification/agent.d.ts",
+      "import": "./dist/src/self-modification/agent.js",
+      "default": "./dist/src/self-modification/agent.js"
+    },
+    "./self-modification/sandbox": {
+      "eve-source": "./src/self-modification/sandbox.ts",
+      "types": "./dist/src/self-modification/sandbox.d.ts",
+      "import": "./dist/src/self-modification/sandbox.js",
+      "default": "./dist/src/self-modification/sandbox.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -430,6 +442,7 @@
     "@linqapp/chat-sdk-adapter": "^0.5.1",
     "@modelcontextprotocol/server": "2.0.0",
     "@nuxt/kit": "^4.0.0",
+    "@nuxt/schema": "^4.0.0",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/otlp-transformer": "0.214.0",
@@ -445,17 +458,16 @@
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
     "@vercel/sandbox": "catalog:",
-    "@vercel/sandbox-delete": "catalog:",
     "@vercel/sandbox-drives": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/builders": "5.0.0-beta.47",
-    "@workflow/core": "5.0.0-beta.47",
-    "@workflow/errors": "5.0.0-beta.19",
+    "@workflow/builders": "5.0.0-beta.48",
+    "@workflow/core": "5.0.0-beta.48",
+    "@workflow/errors": "5.0.0-beta.20",
     "@workflow/serde": "5.0.0-beta.2",
     "@workflow/utils": "5.0.0-beta.10",
-    "@workflow/world": "5.0.0-beta.32",
-    "@workflow/world-local": "5.0.0-beta.41",
-    "@workflow/world-vercel": "5.0.0-beta.43",
+    "@workflow/world": "5.0.0-beta.33",
+    "@workflow/world-local": "5.0.0-beta.42",
+    "@workflow/world-vercel": "5.0.0-beta.44",
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.34.0",
@@ -509,5 +521,12 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "eve": {
+    "builtInExtensions": {
+      "./self-modification": {
+        "dist": "./dist/src/self-modification/extension"
+      }
+    }
   }
 }

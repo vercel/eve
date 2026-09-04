@@ -1,25 +1,30 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type { SessionAuthContext, SessionCommand } from "#channel/types.js";
+import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
+import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
+  TASK_PROGRESS_STREAM_NAMESPACE,
   TASK_VIEW_STREAM_NAMESPACE,
   taskAuthorizationRequestId,
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
   type TaskInboundAnswerInput,
+  type TaskInboundMessage,
   type TaskInboundUpdate,
   type TaskInputRequestDelivery,
+  type TaskProgress,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -30,13 +35,68 @@ const log = createLogger("execution.tasks.run");
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
+export async function appendTaskViewStep(input: {
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly view: TaskView;
+}): Promise<void> {
   "use step";
 
   const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
   const writer = writable.getWriter();
   try {
     await writer.write(input.view);
+  } finally {
+    writer.releaseLock();
+  }
+
+  const events = projectTaskActivity({
+    activityObserver: input.activityObserver,
+    settledAt: new Date().toISOString(),
+    view: input.view,
+  });
+  void submitActivity({ events, sink: input.activityObserver?.sink });
+}
+
+export function projectTaskActivity(input: {
+  readonly activityObserver: ActivityObserverConfig | undefined;
+  readonly settledAt: string;
+  readonly view: TaskView;
+}): readonly ActivityEventV1[] {
+  const work = input.activityObserver?.workIdentity;
+  if (work === undefined) return [];
+  const status = input.view.status;
+  if (status === "working") {
+    return [
+      {
+        eventId: `${work.id}:started`,
+        kind: "work.started",
+        startedAt: input.settledAt,
+        work,
+      },
+    ];
+  }
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") return [];
+  return [
+    {
+      eventId: `${work.id}:settled:${status}`,
+      kind: "work.settled",
+      outcome: status,
+      settledAt: input.settledAt,
+      workId: work.id,
+    },
+  ];
+}
+
+/** Appends task progress without starting a parent turn. */
+export async function appendTaskProgressStep(input: {
+  readonly progress: TaskProgress;
+}): Promise<void> {
+  "use step";
+
+  const writable = getWritable<TaskProgress>({ namespace: TASK_PROGRESS_STREAM_NAMESPACE });
+  const writer = writable.getWriter();
+  try {
+    await writer.write(input.progress);
   } finally {
     writer.releaseLock();
   }
@@ -93,6 +153,27 @@ export async function wakeTaskUpdateParentStep(input: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
     },
     taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
+  };
+  try {
+    await resumeSessionInbox(input.token, command);
+  } catch (error) {
+    if (isTaskWorkflowTargetGone(error)) return;
+    throw error;
+  }
+}
+
+/** Delivers one task-authored message to the parent as a new turn. */
+export async function wakeTaskMessageParentStep(input: {
+  readonly message: TaskInboundMessage;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const command: SessionCommand = {
+    kind: "send",
+    payload: { message: input.message.message },
+    taskDeliveryId: `${input.taskId}:message:${input.message.messageEpoch}:${input.message.messageIndex}:${input.message.callId}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

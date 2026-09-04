@@ -28,7 +28,6 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
-import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
@@ -191,6 +190,22 @@ const threadContextAdapter: ChannelAdapter = {
 
     const thread = adapterCtx.ctx.ensure(ThreadKey, () => "unset");
     const message = payload.message ?? "";
+
+    // `attach:` delivers structured UserContent carrying a FilePart, the
+    // shape real channels produce for an uploaded image or document.
+    if (typeof message === "string" && message.startsWith("attach:")) {
+      return {
+        message: [
+          { text: `thread=${thread}; user=${message.slice("attach:".length)}`, type: "text" },
+          {
+            data: new URL("https://files.example/diagram.png"),
+            filename: "diagram.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ],
+      };
+    }
 
     return { message: `thread=${thread}; user=${message}` };
   },
@@ -1543,6 +1558,56 @@ describe("turnStep", () => {
     ]);
   });
 
+  it("preserves a cancelled turn message that carries an attachment", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "attach:look at this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({ action: "cancelled" });
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      {
+        content: [
+          { text: "thread=unset; user=look at this", type: "text" },
+          expect.objectContaining({ filename: "diagram.png", type: "file" }),
+        ],
+        role: "user",
+      },
+    ]);
+  });
+
   it("rejects task completion while input requests remain pending", async () => {
     const session = appendPendingInputBatch({
       requests: [
@@ -2130,36 +2195,6 @@ describe("turnStep", () => {
       '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
     );
     expect(observedInput).toBeUndefined();
-  });
-
-  it("projects a requested sleep onto the durable step result", async () => {
-    const session = createStubSession();
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => {
-        requestTurnSleep(2_500);
-        return {
-          next: async () => ({ next: null, session: stepSession }),
-          session: stepSession,
-        };
-      };
-    });
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "wait before checking" }],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(result).toMatchObject({
-      action: "continue",
-      sleepDurationMs: 2_500,
-    });
-    expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
   });
 
   it("persists onDeliver context into the next durable step", async () => {

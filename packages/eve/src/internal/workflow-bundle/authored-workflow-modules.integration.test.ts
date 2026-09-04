@@ -4,11 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
-import {
-  discoverAuthoredWorkflowModules,
-  readAuthoredExecuteWorkflowId,
-} from "./authored-workflow-modules.js";
+import { discoverAuthoredWorkflowModules } from "./authored-workflow-modules.js";
 
 let appRoot: string;
 
@@ -32,9 +28,9 @@ describe("discoverAuthoredWorkflowModules", () => {
   it("separates workflow modules from step-only modules and skips the rest", async () => {
     const tool = await write(
       "agent/tools/deploy.ts",
-      `import { defineTool } from "eve/tools";
+      `import { defineWorkflowTool } from "eve/tools";
 import { plan } from "../lib/plan.ts";
-export default defineTool({
+export default defineWorkflowTool({
   description: "d",
   inputSchema: {},
   async execute(input) {
@@ -88,18 +84,19 @@ export default defineTool({
     await write(
       "src/app/layout.js",
       `export default function RootLayout({ children }) {
-  return <html><body>{children}</body></html>;
+  return <html><body><code>defineWorkflowTool is only text here</code>{children}</body></html>;
 }`,
     );
     const tool = await write(
       "agent/tools/deploy.ts",
-      `export default {
+      `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({
   description: "d",
   async execute() {
     "use workflow";
     return 1;
   },
-};`,
+});`,
     );
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
@@ -118,23 +115,20 @@ export default defineTool({
     });
   });
 
-  it("rejects a directive that is not on its own line instead of compiling half of it", async () => {
-    const source = `export default { description: "d", async execute() { "use workflow"; return 1; } };`;
-    await write("agent/tools/inline.ts", source);
-
-    // Discovery pre-scans by line, as the SDK does, and never sees this file;
-    // the module transform parses it and must refuse rather than emit a stub
-    // with no registered run behind it.
+  it("discovers directives on the same line as their function declaration", async () => {
+    const tool = await write(
+      "agent/tools/inline.ts",
+      `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ async execute() { "use workflow"; return plan(); } });`,
+    );
+    const helper = await write(
+      "agent/lib/plan.ts",
+      `export async function plan() { "use step"; return 1; }`,
+    );
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
-      directiveModules: [],
-      workflowModules: [],
+      directiveModules: [helper, tool],
+      workflowModules: [tool],
     });
-    await expect(
-      prepareAuthoredWorkflowDirectives({
-        filePath: join(appRoot, "agent/tools/inline.ts"),
-        source,
-      }),
-    ).rejects.toThrow("is not on its own line");
   });
 
   it("reports an invalid directive placement as a build error", async () => {
@@ -151,51 +145,5 @@ export default defineTool({
     );
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).rejects.toThrow(/use workflow/);
-  });
-});
-
-describe("readAuthoredExecuteWorkflowId", () => {
-  it("names the run a tool's execute compiles to, in both authoring shapes", async () => {
-    const inline = await write(
-      "agent/tools/deploy.ts",
-      [
-        'import { defineTool } from "eve/tools";',
-        "export default defineTool({",
-        '  description: "d",',
-        "  inputSchema: {},",
-        "  async execute() {",
-        '    "use workflow";',
-        "    return 1;",
-        "  },",
-        "});",
-        "",
-      ].join("\n"),
-    );
-    const referenced = await write(
-      "agent/tools/nested/release.ts",
-      [
-        'import { defineTool } from "eve/tools";',
-        'export default defineTool({ description: "d", inputSchema: {}, execute: release });',
-        "async function release() {",
-        '  "use workflow";',
-        "  return 1;",
-        "}",
-        "",
-      ].join("\n"),
-    );
-    const plain = await write(
-      "agent/tools/ping.ts",
-      'import { defineTool } from "eve/tools";\nexport default defineTool({ description: "d", inputSchema: {}, execute: () => 1 });\n',
-    );
-
-    await expect(readAuthoredExecuteWorkflowId({ appRoot, filePath: inline })).resolves.toBe(
-      "workflow//./agent/tools/deploy//execute",
-    );
-    await expect(readAuthoredExecuteWorkflowId({ appRoot, filePath: referenced })).resolves.toBe(
-      "workflow//./agent/tools/nested/release//release",
-    );
-    await expect(
-      readAuthoredExecuteWorkflowId({ appRoot, filePath: plain }),
-    ).resolves.toBeUndefined();
   });
 });

@@ -1,8 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 
-import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
+import {
+  agentTurnOutcomeSchema,
+  agentTurnOutcomeWithCostSchema,
+} from "#shared/agent-turn-outcome.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
-import { tokenUsageSchema } from "#shared/token-usage.js";
+import { tokenUsageSchema, tokenUsageWithCostSchema } from "#shared/token-usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -228,11 +231,37 @@ const runtimeToolResultActionResultSchema = z
  * the child settles. Stream consumers use the marker to keep child lifecycle
  * open while still recording the receipt as the tool result.
  */
-export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
+export interface RuntimeSubagentChildResult {
+  readonly backgroundTask?: {
+    readonly status: "working";
+    readonly taskId: string;
+  };
+  readonly callId: string;
+  readonly isError?: boolean;
+  readonly kind: "subagent-result";
+  readonly origin: "child";
+  readonly outcome: import("#shared/agent-turn-outcome.js").AgentTurnOutcome;
+  readonly output: import("#shared/json.js").JsonValue;
+  readonly subagentName: string;
+  readonly usage?: import("#shared/token-usage.js").TokenUsage;
+}
 
-/**
- * Zod schema for one child-produced subagent result.
- */
+const runtimeSubagentChildResultFields = {
+  backgroundTask: z
+    .strictObject({
+      status: z.literal("working"),
+      taskId: z.string(),
+    })
+    .optional(),
+  callId: z.string(),
+  isError: z.boolean().optional(),
+  kind: z.literal("subagent-result"),
+  origin: z.literal("child"),
+  output: jsonValueSchema,
+  subagentName: z.string(),
+};
+
+/** Token-only subagent result schema retained for historical wire formats. */
 export const runtimeSubagentChildResultSchema = z
   .object({
     backgroundTask: z
@@ -249,6 +278,15 @@ export const runtimeSubagentChildResultSchema = z
     output: jsonValueSchema,
     subagentName: z.string(),
     usage: tokenUsageSchema.optional(),
+  })
+  .strict();
+
+/** Current subagent result schema, including optional model token cost. */
+export const runtimeSubagentChildResultWithCostSchema: z.ZodType<RuntimeSubagentChildResult> = z
+  .object({
+    ...runtimeSubagentChildResultFields,
+    outcome: agentTurnOutcomeWithCostSchema,
+    usage: tokenUsageWithCostSchema.optional(),
   })
   .strict();
 

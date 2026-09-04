@@ -78,6 +78,10 @@ describe("development environment reload transactions", () => {
     const appRoot = join(workspaceRoot, "agents", "support");
     await mkdir(join(appRoot, "agent"), { recursive: true });
     await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({ dependencies: { eve: "*" } }),
+    );
+    await writeFile(
       join(workspaceRoot, ".env.local"),
       "EVE_WATCH_ENV_ROOT_ONLY=from-root\nEVE_WATCH_ENV_SHARED=from-root\n",
     );
@@ -158,6 +162,8 @@ function environmentPaths(root: string): string[] {
 async function createEnvironmentApp(): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-transaction-"));
   temporaryDirectories.push(appRoot);
+  await mkdir(join(appRoot, "agent"));
+  await writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
   await writeFile(
     join(appRoot, ".env"),
     "EVE_WATCH_ENV_FILE_ONLY=from-env\nEVE_WATCH_ENV_SHARED=from-env\nEVE_WATCH_ENV_SHELL=from-env\n",

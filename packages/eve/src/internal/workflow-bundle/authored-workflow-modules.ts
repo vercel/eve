@@ -2,18 +2,11 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  detectWorkflowPatterns,
-  isGeneratedWorkflowFile,
-} from "#compiled/@workflow/builders/index.js";
+import { isGeneratedWorkflowFile } from "#compiled/@workflow/builders/index.js";
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { isWorkflowSourceFile } from "./builder-support.js";
-import {
-  authoredWorkflowId,
-  isAuthoredApplicationModule,
-  isAuthoredApplicationRoot,
-} from "./workflow-builders.js";
+import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
 
 // The SDK's own ignore list (`BaseBuilder.getInputFiles`) plus eve's generated locations.
 const IGNORED_DIRECTORIES = new Set([
@@ -48,8 +41,7 @@ export interface AuthoredWorkflowModules {
 
 /**
  * Scans the whole application root, as the SDK's bundler integrations do, so a
- * step helper can live wherever the tool imports it from. The SDK's pre-scan
- * picks the files worth parsing.
+ * step helper can live wherever the tool imports it from.
  */
 export async function discoverAuthoredWorkflowModules(
   appRoot: string,
@@ -63,7 +55,7 @@ export async function discoverAuthoredWorkflowModules(
     if (!isAuthoredApplicationModule(filePath, appRoot) || isGeneratedWorkflowFile(filePath))
       continue;
     const source = await readFile(filePath, "utf8");
-    if (!detectWorkflowPatterns(source).hasDirective) continue;
+    if (!source.includes("use workflow") && !source.includes("use step")) continue;
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath, source });
     if (!prepared.hasDirectives) continue;
     directiveModules.push(filePath);
@@ -98,25 +90,4 @@ async function collectSourceFiles(root: string): Promise<string[]> {
 
   await visit(root);
   return files;
-}
-
-/**
- * The workflow id a tool's `execute` will run as, or `undefined` for an
- * ordinary tool. Derived from the source the way the transform derives it, so
- * the compiled manifest and the driver registry name the same run.
- */
-export async function readAuthoredExecuteWorkflowId(input: {
-  readonly appRoot: string;
-  readonly filePath: string;
-}): Promise<string | undefined> {
-  if (!isAuthoredApplicationModule(input.filePath, input.appRoot)) return undefined;
-  const source = await readFile(input.filePath, "utf8");
-  if (!detectWorkflowPatterns(source).hasDirective) return undefined;
-  const { executeWorkflow } = await prepareAuthoredWorkflowDirectives({
-    filePath: input.filePath,
-    source,
-  });
-  return executeWorkflow === undefined
-    ? undefined
-    : authoredWorkflowId(input.filePath, input.appRoot, executeWorkflow);
 }

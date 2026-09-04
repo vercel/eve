@@ -28,7 +28,7 @@ import type { ChannelInstrumentationProjection } from "#channel/instrumentation.
 
 export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxTokenCostUsdPerSession"
 >;
 
 /** Identifies the session turn to cancel. */
@@ -36,6 +36,8 @@ export interface CancelTurnInput {
   readonly sessionId: string;
   /** Framework task whose queued child deliveries should be discarded. */
   readonly taskId?: string;
+  /** Cancels every nonterminal task owned by the session. */
+  readonly tasks?: boolean;
   /** Limits the request to the turn the caller observed. */
   readonly turnId?: string;
 }
@@ -214,7 +216,12 @@ export type SessionCommand =
       readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
-  | { readonly kind: "cancel"; readonly taskId?: string; readonly turnId?: string }
+  | {
+      readonly kind: "cancel";
+      readonly taskId?: string;
+      readonly tasks?: boolean;
+      readonly turnId?: string;
+    }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };

@@ -614,7 +614,7 @@ describe("application Nitro creation", () => {
     });
     expect(createNitroMock.mock.calls[0]?.[0].traceOpts.nft.paths).toEqual({
       zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/),
-      sharp: expect.stringMatching(/sharp[/\\]lib[/\\]index\.js$/),
+      sharp: expect.stringMatching(/sharp[/\\](?:lib[/\\]index\.js|dist[/\\]index\.cjs)$/),
     });
   });
 

@@ -16,7 +16,7 @@ import {
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
@@ -43,6 +43,7 @@ function isStableInboxFastPathCompatible(
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): boolean {
   if (!isSessionCommandHookToken(token)) return false;
+  if (command.kind === "cancel" && command.tasks === true) return false;
   return !("caller" in command && command.caller?.activityObserver !== undefined);
 }
 
@@ -65,7 +66,7 @@ export async function resolveSessionInboxWireTarget(
   if (hook.token === stableToken) return { variant: "send", version: 0 };
 
   try {
-    const stableHook = await getHookByToken(stableToken);
+    const stableHook = await getRawHookByToken(stableToken);
     if (stableHook.runId !== hook.runId) {
       throw new SessionInboxWireError(
         `Stable session inbox ${JSON.stringify(stableToken)} belongs to run ${JSON.stringify(stableHook.runId)}, expected ${JSON.stringify(hook.runId)}.`,

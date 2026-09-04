@@ -36,11 +36,9 @@ describe("normalizeToolDefinition", () => {
       description: "Starts an export.",
       execution: "background",
       inputSchema: z.object({ exportId: z.string() }),
-      execute(input, _ctx, task) {
-        return task.delegated({
-          executor: { data: { exportId: input.exportId }, kind: "export" },
-          receipt: { exportId: input.exportId },
-        });
+      async *execute(input) {
+        yield { exportId: input.exportId };
+        return { exportId: input.exportId };
       },
     });
 

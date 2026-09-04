@@ -44,6 +44,8 @@ import { resolveEveServicePrefixByRoot } from "#internal/vercel/vercel-service-c
 import { parseVercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { isObject } from "#shared/guards.js";
+import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -294,21 +296,27 @@ async function buildApplicationInWorkspace(
         ),
       )
     : undefined;
+  // A service routed at the protocol path has no additional public mount.
+  // Keep servicePrefix intact for function-output routing below.
+  const normalizedServicePrefix = normalizePublicRoutePrefix(servicePrefix);
+  const inferredPublicRoutePrefix =
+    normalizedServicePrefix === EVE_ROUTE_PREFIX ? undefined : normalizedServicePrefix;
   if (
     options.publicRoutePrefix !== undefined &&
-    servicePrefix !== undefined &&
-    options.publicRoutePrefix !== servicePrefix
+    inferredPublicRoutePrefix !== undefined &&
+    options.publicRoutePrefix !== inferredPublicRoutePrefix
   ) {
     throw new Error(
       `EVE_PUBLIC_ROUTE_PREFIX ${JSON.stringify(options.publicRoutePrefix)} conflicts with the configured Vercel service prefix ${JSON.stringify(servicePrefix)}.`,
     );
   }
-  const publicRoutePrefix = options.publicRoutePrefix ?? servicePrefix;
+  const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
   const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
     createProductionApplicationNitro(preparedHost, {
       buildDir: workspace.nitro.buildDir,
       outputDir: workspace.publication.output.stagedDir,
       publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
     }),
   );
 

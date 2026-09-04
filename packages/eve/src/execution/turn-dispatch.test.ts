@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
@@ -13,6 +14,10 @@ const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("./cancel-indexed-session-tasks-step.js", () => ({
+  cancelAllIndexedSessionTasksStep: vi.fn(),
 }));
 
 vi.mock("./dispatch-turn-step.js", () => ({
@@ -262,6 +267,54 @@ describe("dispatchAndAwaitTurn", () => {
     );
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(createHookMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels indexed tasks from an inline turn and preserves turn cancellation", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockImplementation(async ({ abortSignal }) => {
+      await new Promise<void>((resolve) => abortSignal?.addEventListener("abort", () => resolve()));
+      return {
+        action: "cancelled",
+        serializedContext: { state: "cancelled" },
+        sessionState: state,
+      };
+    });
+    let delivered = false;
+    const commandInbox = createCommandInbox({
+      next: vi.fn(async () => {
+        if (!delivered) {
+          delivered = true;
+          return { done: false as const, value: { kind: "cancel", tasks: true } as never };
+        }
+        return await new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+      }),
+    });
+    installControlHook([
+      {
+        action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ initialCancellation: { tasks: true } }),
+    );
   });
 
   it("keeps ordinary tool-loop continuations inline", async () => {

@@ -25,8 +25,8 @@ export default defineMemory({
 
 That file declares a `profile` slot that remembers facts per authenticated
 caller using the built-in file provider. Swap `provider` for
-[Supermemory](#choose-a-provider) or your own implementation and the rest of the
-definition stays the same.
+[Supermemory](#supermemory), [Upstash AgentKit](#upstash-agentkit), or your own
+implementation and the rest of the definition stays the same.
 
 ## How a memory slot works
 
@@ -70,11 +70,12 @@ Every slot needs a provider. The provider decides how memory is stored, how
 relevant context is retrieved, and whether the agent captures conversation
 automatically or only through explicit tool calls.
 
-| Provider                             | Ships as           | Recall                               | Capture                                      |
-| ------------------------------------ | ------------------ | ------------------------------------ | -------------------------------------------- |
-| [Supermemory](#supermemory)          | `@supermemory/eve` | Semantic search over stored memories | Automatic after each turn, plus tools        |
-| [File memory](#file-memory)          | Built into eve     | One bounded document per scope       | Model-driven `save_memory` / `remove_memory` |
-| [Your own provider](#build-your-own) | Your code          | Whatever your store returns          | Whatever rules you implement                 |
+| Provider                              | Ships as                | Recall                                                 | Capture                                              |
+| ------------------------------------- | ----------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| [Supermemory](#supermemory)           | `@supermemory/eve`      | Semantic search over stored memories                   | Automatic after each turn, plus tools                |
+| [Upstash AgentKit](#upstash-agentkit) | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
+| [File memory](#file-memory)           | Built into eve          | One bounded document per scope                         | Model-driven `save_memory` / `remove_memory`         |
+| [Your own provider](#build-your-own)  | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
 
 ### Supermemory
 
@@ -103,10 +104,38 @@ export default defineMemory({
 });
 ```
 
-Set `SUPERMEMORY_API_KEY` in the agent's environment. The provider sends
-conversation content and extracted sources to Supermemory, so review its
-retention and data handling before enabling it for sensitive data. See the
-[Supermemory integration page](/integrations/supermemory) for provider options.
+See the [Supermemory integration page](/integrations/supermemory) for provider
+options.
+
+### Upstash AgentKit
+
+[Upstash AgentKit](https://upstash.com/docs/redis/sdks/agentkit/eve) backs a
+memory slot with your Upstash Redis database. `redisMemory()` recalls
+relevance-ranked facts before each turn, captures user messages after completed
+turns by default, and gives the model tools to save, search, read past
+sessions, and forget.
+
+```bash
+eve add memory/upstash-agentkit
+```
+
+The command installs `@upstash/agentkit-eve` and writes an `upstash-agentkit`
+slot:
+
+```ts title="agent/memory/upstash-agentkit.ts"
+import { redisMemory } from "@upstash/agentkit-eve/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: redisMemory({ topK: 5 }),
+  scope: byPrincipal,
+});
+```
+
+See the [Upstash AgentKit integration page](/integrations/upstash-agentkit) for
+options.
 
 ### File memory
 
@@ -211,7 +240,7 @@ The namespace separates an application's memory domains before scope is
 applied. Omit it to use `defaultNamespace`, which combines the slot name, the
 graph node, and a deployment-aware identity:
 
-- Production and other Vercel environments use the project and environment.
+- Production and other Vercel environments use the project and environment. Members of a top-level `agents/` workspace use separate namespaces.
 - Preview also uses the branch or deployment identity.
 - Local development uses a digest of the application root, never the raw path.
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
@@ -41,6 +41,10 @@ const deliver = vi.fn();
 const from = vi.fn(() => ({ [INTERNAL_CHANNEL_DELIVER]: deliver }) as never);
 
 describe("WorkflowAgentInvocationExecution", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     getReadable.mockReturnValue(eventStream([]));
@@ -302,6 +306,80 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(deliver).toHaveBeenCalledTimes(2);
   });
 
+  it("stops reporting input_required once the answer is resolved", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ optionId: "yes", requestId: "question" }]),
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({ status: "working" });
+  });
+
+  it("acknowledges a repeated answer that eve already accepted", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    const requestId = invocationInputRequestId("event_1", "question");
+    getReadable.mockImplementation(() =>
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ optionId: "yes", requestId: "question" }]),
+      ]),
+    );
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "yes", requestId }],
+      }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
+    expect(deliver).not.toHaveBeenCalled();
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "no", requestId }],
+      }),
+    ).resolves.toEqual({ message: "Invocation is not waiting for input.", type: "conflict" });
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ requestId, text: "yes" }],
+      }),
+    ).resolves.toMatchObject({ type: "conflict" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a repeated answer after the run completes", async () => {
+    runsGet.mockResolvedValue(run({ status: "completed" }));
+    returnValue.mockResolvedValue({ output: "done" });
+    const requestId = invocationInputRequestId("event_1", "question");
+    getReadable.mockImplementation(() =>
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ requestId: "question", text: "go" }]),
+      ]),
+    );
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ requestId, text: "go" }],
+      }),
+    ).resolves.toMatchObject({
+      invocation: { result: "done", status: "completed" },
+      type: "success",
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("projects and clears pending connection authorization", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
     const required = {
@@ -421,6 +499,134 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(getReadable).not.toHaveBeenCalled();
   });
 
+  it("projects the workflow run reference without private error data", async () => {
+    const privateError = Object.assign(new Error("private provider detail"), {
+      apiKey: "secret",
+    });
+    runsGet.mockResolvedValue(run({ error: privateError, status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: {
+            code: "MODEL_CALL_FAILED",
+            details: {
+              errorId: "err_123",
+              hint: "Try again shortly.",
+              message: "AI Gateway rate-limited the request.",
+              name: "AI Gateway rate limit exceeded",
+              semanticErrorId: "gateway-rate-limited",
+              upstreamMessage: "private provider detail",
+            },
+            message: "AI Gateway rate-limited the request.",
+            sessionId: "wrun_invocation",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    await expect(execution().read({ auth, invocationId: "wrun_invocation" })).resolves.toEqual({
+      createdAt: "2026-07-20T00:00:00.000Z",
+      error: {
+        code: -32603,
+        data: {
+          errorId: "err_123",
+          eveCode: "MODEL_CALL_FAILED",
+          hint: "Try again shortly.",
+          name: "AI Gateway rate limit exceeded",
+          runId: "wrun_invocation",
+          semanticErrorId: "gateway-rate-limited",
+        },
+        message: "AI Gateway rate-limited the request.",
+      },
+      invocationId: "wrun_invocation",
+      status: "failed",
+    });
+  });
+
+  it("projects a bounded unknown failure message and correlation id", async () => {
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: {
+            code: "MODEL_CALL_FAILED",
+            details: { errorId: "err_unknown", upstreamMessage: "private provider detail" },
+            message: "private provider detail",
+            sessionId: "wrun_invocation",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        data: {
+          errorId: "err_unknown",
+          eveCode: "MODEL_CALL_FAILED",
+          runId: "wrun_invocation",
+        },
+        message: "private provider detail",
+      },
+      status: "failed",
+    });
+  });
+
+  it("truncates an unknown failure message to Slack's display bound", async () => {
+    const message = "x".repeat(200);
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: { code: "MODEL_CALL_FAILED", message, sessionId: "wrun_invocation" },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    const invocation = await execution().read({ auth, invocationId: "wrun_invocation" });
+    expect(invocation?.status === "failed" ? invocation.error.message : undefined).toBe(
+      `${"x".repeat(159)}…`,
+    );
+  });
+
+  it("includes the Vercel deployment reference only on Vercel", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_123");
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        data: { runId: "wrun_invocation", vercelDeploymentId: "dpl_123" },
+        message: "Invocation failed.",
+      },
+      status: "failed",
+    });
+  });
+
+  it("keeps terminal failures generic when no failure event was persisted", async () => {
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        code: -32603,
+        data: { runId: "wrun_invocation" },
+        message: "Invocation failed.",
+      },
+      status: "failed",
+    });
+  });
+
   it("terminally cancels the workflow run", async () => {
     runsGet
       .mockResolvedValueOnce(run({ status: "running" }))
@@ -438,7 +644,7 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ createSession, from });
 }
 
-function run(input: { ownerKey?: string; status: string }) {
+function run(input: { error?: unknown; ownerKey?: string; status: string }) {
   const attributes: Record<string, string> = {
     "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
     "$eve.invocation_token": "invocation:token",
@@ -446,6 +652,7 @@ function run(input: { ownerKey?: string; status: string }) {
   return {
     attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),
+    error: input.error,
     input: [{ serializedContext: { "eve.initiatorAuth": auth } }],
     runId: "wrun_invocation",
     status: input.status,
@@ -472,6 +679,27 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
     },
     meta: { at: "2026-07-20T00:00:00.000Z", id },
     type: "input.requested",
+  };
+}
+
+function inputResolvedEvent(
+  id: string,
+  responses: readonly { optionId?: string; requestId: string; text?: string }[],
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      resolutions: responses.map((response) => ({
+        kind: "question" as const,
+        outcome: "answered" as const,
+        requestId: response.requestId,
+        response,
+      })),
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_1",
+    },
+    meta: { at: "2026-07-20T00:00:01.000Z", id },
+    type: "input.resolved",
   };
 }
 

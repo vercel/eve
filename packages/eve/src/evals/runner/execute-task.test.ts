@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
+import { ClientSession } from "#client/session.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
@@ -56,6 +57,75 @@ describe("executeTask", () => {
     });
 
     expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
+  it("resets each distinct known session after a configured timeout", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "ignored-by-runner",
+      status: "reset",
+    });
+    let evalSignal: AbortSignal | undefined;
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("other-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(
+      reset.mock.contexts.map((session) => (session as ClientSession).state.sessionId),
+    ).toEqual(["shared-root", "other-root"]);
+    for (const [options] of reset.mock.calls) {
+      expect(options).toMatchObject({ reason: "Eval timed out", signal: expect.any(AbortSignal) });
+      expect(options?.signal).not.toBe(evalSignal);
+      expect(options?.signal?.aborted).toBe(false);
+    }
+  });
+
+  it("does not run timeout cleanup for an ordinary eval failure", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "known-root",
+      status: "reset",
+    });
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.target.watchTurn("known-root");
+        throw new Error("eval failed");
+      }, "failure-with-timeout-configured"),
+      timeoutMs: 1_000,
+    });
+
+    expect(outcome.error).toBe("eval failed");
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("preserves the timeout verdict and appends cleanup failures", async () => {
+    vi.spyOn(ClientSession.prototype, "reset").mockRejectedValue(new Error("cleanup exploded"));
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        t.target.watchTurn("known-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup-failure"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(outcome.error).toContain("Eval timeout cleanup failed: cleanup exploded");
   });
 
   it("exposes a sleep helper with a one-second default", async () => {
