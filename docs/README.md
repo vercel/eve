@@ -14,7 +14,8 @@ Important naming note:
 
 | To do this                                               | Read this                                                                              |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                               |
+| Create your first project                                | [Getting Started](./getting-started.mdx)                                               |
+| Organize one or more peer agents in a project            | [Project Structure](./project-structure.md)                                            |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                            |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                     |
 | Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                          |
@@ -54,24 +55,25 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 For a full picture rather than a single task, read in this order:
 
 1. [Getting Started](./getting-started.mdx)
-2. [Tutorial](./tutorial/first-agent.mdx)
-3. [Agents](./agent-config.md)
-4. [TypeScript API Reference](./reference/typescript-api.md)
-5. [Context Control](./concepts/context-control.md)
-6. [Skills](./skills.mdx)
-7. [Tools](./tools/overview.mdx)
-8. [Connections](./connections/overview.mdx)
-9. [Sandboxes](./sandbox.mdx)
-10. [Channels](./channels/overview.mdx)
-11. [Session Context](./guides/session-context.md)
-12. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
-13. [Client SDK](./guides/client/overview.mdx)
-14. [Subagents](./subagents/index.mdx)
-15. [Schedules](./schedules.mdx)
-16. [Evals](./evals/overview.mdx)
-17. [Authentication](./guides/auth-and-route-protection.md)
-18. [Deployment](./guides/deployment/overview.md)
-19. [CLI](./reference/cli.md)
+2. [Project Structure](./project-structure.md)
+3. [Tutorial](./tutorial/first-agent.mdx)
+4. [Agents](./agent-config.md)
+5. [TypeScript API Reference](./reference/typescript-api.md)
+6. [Context Control](./concepts/context-control.md)
+7. [Skills](./skills.mdx)
+8. [Tools](./tools/overview.mdx)
+9. [Connections](./connections/overview.mdx)
+10. [Sandboxes](./sandbox.mdx)
+11. [Channels](./channels/overview.mdx)
+12. [Session Context](./guides/session-context.md)
+13. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
+14. [Client SDK](./guides/client/overview.mdx)
+15. [Subagents](./subagents/index.mdx)
+16. [Schedules](./schedules.mdx)
+17. [Evals](./evals/overview.mdx)
+18. [Authentication](./guides/auth-and-route-protection.md)
+19. [Deployment](./guides/deployment/overview.md)
+20. [CLI](./reference/cli.md)
 
 ## The public mental model
 
