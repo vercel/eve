@@ -7,7 +7,6 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import {
-  createWorkflowId,
   findWorkflowDirectiveFunctions,
   stripJavaScriptExtension,
   transformWorkflowDirectives,
@@ -121,15 +120,6 @@ function authoredRelativePath(absolutePath: string, appRoot: string): string {
 
 function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
   return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
-}
-
-/** The id the transform mints for an authored `"use workflow"` function. */
-export function authoredWorkflowId(
-  absolutePath: string,
-  appRoot: string,
-  functionName: string,
-): string {
-  return createWorkflowId(authoredModuleIdBase(absolutePath, appRoot), functionName);
 }
 
 // Bundlers hand back real paths while configuration carries the spelled

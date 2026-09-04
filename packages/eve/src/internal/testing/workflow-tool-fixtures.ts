@@ -8,8 +8,7 @@
 
 import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
-import { ask } from "#execution/tools/workflow/ask.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { TaskExec, TaskMessage } from "#tools/task.js";
 
 export interface DeployInput {
@@ -18,7 +17,7 @@ export interface DeployInput {
 
 export async function deployServiceWorkflow(
   input: DeployInput,
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
 ): Promise<{ readonly callId: string; readonly plan: string; readonly sessionId: string }> {
   "use workflow";
 
@@ -26,14 +25,15 @@ export async function deployServiceWorkflow(
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
 }
 
-export async function confirmDeployWorkflow(
+export async function* confirmDeployWorkflow(
   input: DeployInput,
-  ctx: ToolContext,
-): Promise<{ readonly approved: boolean; readonly service: string }> {
+  ctx: WorkflowToolContext,
+): AsyncGenerator<string, { readonly approved: boolean; readonly service: string }> {
   "use workflow";
 
   const plan = await planDeployStep(input.service);
-  const answer = await ask(ctx, {
+  yield "awaiting approval";
+  const answer = await ctx.ask({
     display: "confirmation",
     options: [
       { id: "approve", label: "Deploy", style: "primary" },
@@ -41,6 +41,7 @@ export async function confirmDeployWorkflow(
     ],
     prompt: `Apply ${plan}?`,
   });
+  yield "approval received";
   return { approved: answer.optionId === "approve", service: input.service };
 }
 
@@ -83,7 +84,7 @@ export async function* reportingDeployWorkflow(
 
 export async function* backgroundDeployWorkflow(
   input: DeployInput,
-  _ctx: ToolContext,
+  _ctx: WorkflowToolContext,
   task: TaskExec,
 ): AsyncGenerator<string | TaskMessage, { readonly plan: string }> {
   "use workflow";
@@ -113,7 +114,7 @@ export async function stepThenRaceWorkflow(
 /** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
 export async function holdUntilAbortedWorkflow(
   input: DeployInput,
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
 ): Promise<{ readonly held: boolean }> {
   "use workflow";
   try {
@@ -152,10 +153,10 @@ async function releaseStep(service: string): Promise<string> {
 
 export async function askThenRaceWorkflow(
   input: DeployInput,
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
 ): Promise<{ readonly decided: string; readonly service: string }> {
   "use workflow";
-  const pending = ask(ctx, {
+  const pending = ctx.ask({
     display: "confirmation",
     options: [
       { id: "approve", label: "Deploy", style: "primary" },

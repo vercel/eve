@@ -905,6 +905,7 @@ describe("dispatchCoordinationStep", () => {
 
     const result = await dispatchCoordinationStep({
       action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -967,7 +968,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1031,7 +1032,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1108,7 +1109,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,

@@ -2,9 +2,6 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 
 const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.runtime.workflowToolRuns";
-export function workflowToolRunAnswerToken(runId: string, seq: number): string {
-  return `eve:workflow-tool-run-answer:${runId}:${seq}`;
-}
 
 /** A workflow tool run the active turn waits on. Background runs live in the task index. */
 export interface WorkflowToolRunRecord {

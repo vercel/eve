@@ -1,3 +1,4 @@
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
@@ -1234,6 +1235,30 @@ describe("dispatchDynamicToolEvent", () => {
 
     expect(buildDynamicTools(ctx)).toHaveLength(0);
   });
+
+  it.each(["single", "map"])(
+    "does not advertise a workflow tool returned as a %s",
+    async (shape) => {
+      const ctx = createCtx();
+      const tool = defineWorkflowTool({
+        description: "Invalid dynamic workflow",
+        inputSchema: {},
+        async execute() {
+          return 1;
+        },
+      });
+      const resolver = createResolver("workflow", ["session.started"], () =>
+        shape === "single" ? tool : { workflow: tool },
+      );
+      await dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [resolver],
+        messages: [],
+        event: makeEvent("session.started"),
+      });
+      expect(buildDynamicTools(ctx)).toHaveLength(0);
+    },
+  );
 
   it("resolver throwing is logged and skipped — other resolvers still work", async () => {
     const ctx = createCtx();

@@ -33,3 +33,11 @@ export {
   type MatchedToolResult,
   type ToolResultFromFn,
 } from "#public/tools/result.js";
+
+export {
+  defineWorkflowTool,
+  type WorkflowToolContext,
+  type WorkflowToolDefinition,
+  type AgentInput,
+} from "#tools/workflow-definition.js";
+export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
