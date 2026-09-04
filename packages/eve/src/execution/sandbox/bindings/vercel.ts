@@ -533,7 +533,8 @@ function createVercelInternalSandboxSession(
     },
     async writeFile(options: SandboxWriteFileOptions) {
       const bytes = await streamToBuffer(options.content);
-      await sandbox.writeFiles([{ content: bytes, path: options.path }]);
+      const path = await resolveVercelWritePath(sandbox, options.path, options.abortSignal);
+      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.abortSignal });
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
@@ -572,6 +573,23 @@ function resolveVercelSandboxPath(path: string): string {
     return path;
   }
   return `${WORKSPACE_ROOT}/${path}`;
+}
+
+async function resolveVercelWritePath(
+  sandbox: VercelSandbox,
+  path: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await sandbox.runCommand({
+    args: ["-m", "--", path],
+    cmd: "realpath",
+    signal,
+  });
+  const resolved = (await result.stdout()).trim();
+  if (result.exitCode !== 0 || !resolved.startsWith("/") || resolved.includes("\n")) {
+    throw new Error(`Failed to resolve Vercel Sandbox write path: ${path}`);
+  }
+  return resolved;
 }
 
 function isUnprovisionedTerminalTemplateSandbox(

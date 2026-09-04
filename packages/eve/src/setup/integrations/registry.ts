@@ -4,6 +4,7 @@ import { GITHUB_SETUP } from "./github/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
 import { LINQ_SETUP } from "./linq/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
+import { SELF_MODIFICATION_SETUP } from "./self-modification/setup.js";
 import { SHOPIFY_SETUP } from "./shopify/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
 import type { SetupIntegration } from "./types.js";
@@ -20,6 +21,7 @@ export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   LINQ_SETUP,
   PHOTON_SETUP,
   SHOPIFY_SETUP,
+  SELF_MODIFICATION_SETUP,
 ];
 
 /** Resolves one built-in setup integration by its registry setup name. */

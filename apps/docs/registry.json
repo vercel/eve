@@ -32,8 +32,8 @@
       "name": "experimental/self-modification",
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
-      "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["just-bash"],
+      "description": "Add an experimental source editing subagent with local edits, official registry installation, and configured draft pull requests.",
+      "dependencies": ["just-bash", "@vercel/connect"],
       "meta": {
         "eve": {
           "install": {
@@ -47,10 +47,22 @@
                 }
               ]
             }
-          }
+          },
+          "setup": [
+            {
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification"]
+            }
+          ]
         }
       },
       "files": [
+        {
+          "path": "registry/experimental/self-modification/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/config.ts"
+        },
         {
           "path": "registry/experimental/self-modification/agent.ts",
           "type": "registry:file",

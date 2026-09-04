@@ -1,7 +1,5 @@
 import { defineTool } from "eve/tools";
 
-import { withAuthoredSourceLock } from "../source-lock.js";
-
 const replacementSchema = {
   type: "object",
   additionalProperties: false,
@@ -27,7 +25,7 @@ const inputSchema = {
     path: {
       type: "string",
       minLength: 1,
-      description: "Path to the file to edit (relative or absolute).",
+      description: "Absolute path below /source to edit.",
     },
     edits: {
       type: "array",
@@ -123,24 +121,25 @@ export default defineTool({
 
     const sandbox = await ctx.getSandbox();
 
-    // Serialized against a concurrent registry install, which rewrites
-    // package.json and the authored tree out of process.
-    return await withAuthoredSourceLock(async () => {
-      const content = await sandbox.readTextFile({ path });
+    const resolved = sandbox.resolvePath(path);
+    if (!resolved.startsWith("/source/") || resolved.split("/").some((part) => part === "..")) {
+      throw new Error("Self-modification file edits must stay below /source.");
+    }
 
-      if (content === null) {
-        throw new Error(`File not found: ${path}.`);
-      }
-      if (content.includes("\0")) {
-        throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
-      }
+    const content = await sandbox.readTextFile({ path: resolved });
 
-      await sandbox.writeTextFile({
-        content: applyExactEdits(content, edits),
-        path,
-      });
+    if (content === null) {
+      throw new Error(`File not found: ${path}.`);
+    }
+    if (content.includes("\0")) {
+      throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
+    }
 
-      return { path: sandbox.resolvePath(path), replacements: edits.length };
+    await sandbox.writeTextFile({
+      content: applyExactEdits(content, edits),
+      path: resolved,
     });
+
+    return { path: resolved, replacements: edits.length };
   },
 });

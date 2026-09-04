@@ -386,8 +386,12 @@ function matchesCategory(entry: CatalogEntry, category: Category): boolean {
  * rather than imported because that module reaches the registry client, which
  * has no place in an agent runtime.
  */
+export function officialRegistryIndexUrl(): string {
+  return `${DEFAULT_REGISTRY_BASE}${INDEX_PATH}`;
+}
+
 export function resolveRegistryIndexUrl(configured = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL) {
-  if (configured === undefined) return `${DEFAULT_REGISTRY_BASE}${INDEX_PATH}`;
+  if (configured === undefined) return officialRegistryIndexUrl();
 
   let url: URL;
   try {
