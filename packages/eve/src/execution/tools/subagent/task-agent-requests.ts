@@ -1,5 +1,5 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+import { emitTaskSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
@@ -9,6 +9,7 @@ import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
+  readonly emitCompletion?: boolean;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
@@ -45,6 +46,24 @@ export async function applyTaskAgentRequest(
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
+      if (delivery.emitCompletion === true && settled.accepted && request.result.isError !== true) {
+        const emitted = await emitTaskSubagentEventStep({
+          event: {
+            type: "subagent.completed",
+            data: {
+              callId: request.result.callId,
+              subagentName: request.result.subagentName,
+              output:
+                typeof request.result.output === "string"
+                  ? request.result.output
+                  : JSON.stringify(request.result.output),
+            },
+          },
+          parentWritable: ctx.parentWritable,
+          serializedContext: ctx.serializedContext,
+        });
+        return { serializedContext: emitted.serializedContext, sessionState: settled.sessionState };
+      }
       return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
     }
     case "agent-invoke": {
@@ -58,7 +77,7 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitTaskSubagentCalledStep({
+          const emitted = await emitTaskSubagentEventStep({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
             serializedContext: ctx.serializedContext,

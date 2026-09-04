@@ -24,7 +24,9 @@ export function codeModeBridgeRequestLimit(maxSubagents: number): number {
 }
 
 const ORCHESTRATION_INSTRUCTION =
-  "Call code_mode at most once per response. Put dependent calls, loops, retries, and parallel work in one program.";
+  "Complete the task in one execution program: keep dependent calls, loops, retries, parallel work, and final writes together. " +
+  "Discover all needed schemas before execution; discovery-only programs may precede the execution program. " +
+  "If a program fails, correct it and retry.";
 
 const DISCOVERY_INSTRUCTION =
   "Use tools.search_tools and tools.describe_tools to discover every available tool. " +
@@ -79,11 +81,12 @@ export async function applyCodeModeTool(input: {
       };
     });
 
-  Object.assign(hostTools, createDiscoveryTools(toolCatalog));
+  const discoveryTools = createDiscoveryTools(toolCatalog);
+  Object.assign(hostTools, discoveryTools);
   const generated = await createWorkflowSandboxTool({
     bridgeRequestLimit: codeModeBridgeRequestLimit(maxSubagents),
     continuationSecurity: input.continuationSecurity,
-    hostTools: hostTools as ToolSet,
+    hostTools: (input.mode === "lazy" ? discoveryTools : hostTools) as ToolSet,
   });
   const generatedDescription =
     input.mode === "lazy"
@@ -153,7 +156,9 @@ export function createDiscoveryTools(
 ): Record<string, ToolSet[string]> {
   return {
     [SEARCH_TOOLS_NAME]: {
-      description: "Search all available tools, including tools that require direct calls.",
+      description:
+        "Search all available tools by case-insensitive substring of their name or description. " +
+        "Use a short term, or omit query to list all tools. Returns an array of { name, description, requiresDirectCall }.",
       inputSchema: z.object({ query: z.string().optional() }),
       execute: async ({ query }: { readonly query?: string }) => {
         const needle = query?.toLowerCase().trim() ?? "";
@@ -168,7 +173,8 @@ export function createDiscoveryTools(
     } as ToolSet[string],
     [DESCRIBE_TOOLS_NAME]: {
       description:
-        "Return descriptions, input schemas, and direct-call requirements for available tools.",
+        "Return an array of { name, description, inputSchema, requiresDirectCall } for the requested names. " +
+        "Describe every tool needed for the task, including final writes, before executing it.",
       inputSchema: z.object({ names: z.array(z.string()) }),
       execute: async ({ names }: { readonly names: readonly string[] }) =>
         names.map((name) => {
@@ -201,10 +207,9 @@ function lazyDescription(
   catalog: readonly CodeModeToolCatalogEntry[],
 ): string {
   const generated = typeof tool.description === "string" ? tool.description : "";
-  const header = generated.split("Tools:\n", 1)[0]?.trimEnd() ?? generated;
   const names = catalog.map((entry) => entry.name);
   return [
-    header,
+    generated,
     "",
     ORCHESTRATION_INSTRUCTION,
     "",

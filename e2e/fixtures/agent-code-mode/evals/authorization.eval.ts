@@ -10,11 +10,13 @@ export default defineEval({
     if (required?.data.authorization?.url === undefined)
       throw new Error("Missing authorization URL.");
     const callbackUrl = new URL(required.data.authorization.url);
-    if (callbackUrl.origin !== new URL(t.target.url).origin)
-      throw new Error("Unexpected callback origin.");
     const waiting = await live.result();
     waiting.expectOk();
     waiting.event("authorization.required", { count: 1 });
+    if (callbackUrl.origin !== new URL(t.target.url).origin)
+      throw new Error(
+        `Unexpected callback origin ${callbackUrl.origin}; expected ${new URL(t.target.url).origin}.`,
+      );
     const response = await fetch(callbackUrl);
     if (!response.ok) throw new Error(`Authorization callback failed: ${response.status}`);
     let session = live.session;

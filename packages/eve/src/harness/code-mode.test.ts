@@ -146,6 +146,10 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain("Available tools: add, code_mode.");
     expect(description).toContain(SEARCH_TOOLS_NAME);
     expect(description).toContain(DESCRIBE_TOOLS_NAME);
+    expect(description).toContain('"names"');
+    expect(description).toContain('"query"');
+    expect(description).toContain("Returns an array");
+    expect(description).toContain("substring");
     expect(description).not.toContain('"q"');
   });
 

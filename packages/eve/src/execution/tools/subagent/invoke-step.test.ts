@@ -251,7 +251,7 @@ describe("task-owned agent settlement", () => {
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
-    const settled = await settleTaskAgentInvocationStep({
+    const input: Parameters<typeof settleTaskAgentInvocationStep>[0] = {
       result: {
         callId: "call-1",
         kind: "subagent-result",
@@ -272,13 +272,23 @@ describe("task-owned agent settlement", () => {
       ownerId: "task-1",
       sessionState: {} as never,
       taskId: "task-1",
-    });
+    };
+    const settled = await settleTaskAgentInvocationStep(input);
 
     const handles =
       getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles ?? [];
+    expect(settled.accepted).toBe(true);
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
+    vi.mocked(readDurableSession).mockResolvedValue(
+      settled.sessionState.snapshot!.session as never,
+    );
+    const repeated = await settleTaskAgentInvocationStep({
+      ...input,
+      sessionState: settled.sessionState,
+    });
+    expect(repeated).toEqual({ accepted: false, sessionState: settled.sessionState });
   });
 
   it("releases every remaining claim for a completed workflow run", async () => {
