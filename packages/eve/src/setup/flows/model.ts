@@ -289,6 +289,7 @@ export async function runModelFlow(input: {
   prompter: Prompter;
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
+  onScreen?: (screen: "model_provider" | "model_settings") => void;
   signal?: AbortSignal;
   /** Gives Codex uncontested inherited stdio while it performs login. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -414,6 +415,7 @@ export async function runModelFlow(input: {
     }
 
     if (pick === "model") {
+      input.onScreen?.("model_settings");
       const pickModelSettings = deps.pickModelSettings;
       if (pickModelSettings === undefined) {
         throw new Error("runModelFlow requires a pickModelSettings dep to open the model screen.");
@@ -460,6 +462,7 @@ export async function runModelFlow(input: {
       continue;
     }
 
+    input.onScreen?.("model_provider");
     const result = await deps.runProviderFlow({
       appRoot: environmentRoot,
       prompter,

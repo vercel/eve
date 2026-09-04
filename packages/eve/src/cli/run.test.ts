@@ -76,7 +76,7 @@ describe("CLI command registration", () => {
         resolveAgent: async () => undefined as never,
         root: process.cwd(),
       },
-      { trackDevContext: () => {}, trackInitStage: () => {}, trackOnboardingStage: () => {} },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
     );
     const paths: string[] = [];
     const visit = (command: (typeof program.commands)[number], parentPath = ""): void => {
@@ -323,6 +323,7 @@ describe("bare eve command", () => {
       },
       undefined,
       expect.any(Function),
+      expect.any(Function),
     );
   });
 
@@ -403,6 +404,7 @@ describe("eve init compatibility flags", () => {
         reasoning: "high",
       },
       undefined,
+      expect.any(Function),
       expect.any(Function),
     );
   });

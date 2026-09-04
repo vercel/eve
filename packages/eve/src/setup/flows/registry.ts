@@ -194,11 +194,18 @@ async function editPlan(input: {
   selected: Set<string>;
   notices?: readonly SelectNotice[];
   plannerContext?: RegistryPlannerContext;
+  onScreen?: (input: {
+    screen: "registry_channels" | "registry_integrations" | "registry_review" | "registry_install";
+    registrySelectedCount?: number;
+  }) => void;
 }): Promise<"install" | "cancelled"> {
   let screen: PlannerScreen = "channels";
   let notices = input.notices;
   while (true) {
     if (screen !== "review") {
+      input.onScreen?.({
+        screen: screen === "channels" ? "registry_channels" : "registry_integrations",
+      });
       try {
         const direction = await editSection({
           ...input,
@@ -219,6 +226,7 @@ async function editPlan(input: {
     }
 
     try {
+      input.onScreen?.({ screen: "registry_review", registrySelectedCount: input.selected.size });
       const hasSelections = input.selected.size > 0;
       const selectedItems = [...input.selected].map((address) => {
         const item = input.itemsByAddress.get(address);
@@ -284,6 +292,10 @@ export async function runRegistryFlow(input: {
   /** Registry item supplied by `/add <item>`, confirmed and installed directly. */
   initialAddress?: string;
   plannerContext?: RegistryPlannerContext;
+  onScreen?: (input: {
+    screen: "registry_channels" | "registry_integrations" | "registry_review" | "registry_install";
+    registrySelectedCount?: number;
+  }) => void;
   onItemStart?: (item: Item, index: number, total: number) => void;
   /** Gives each installation its own cancellation boundary without ending the batch. */
   runItem?<T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T>;
@@ -324,6 +336,7 @@ export async function runRegistryFlow(input: {
         selected,
         notices,
         plannerContext: input.plannerContext,
+        onScreen: input.onScreen,
       });
       if (plan !== "install") return { kind: "cancelled" };
       items = [...selected].map((address) => {
@@ -342,6 +355,7 @@ export async function runRegistryFlow(input: {
       (await import("#setup/project-resolution.js")).detectDeployment;
     const runDeployFlow = input.deps?.runDeployFlow ?? (await import("./deploy.js")).runDeployFlow;
     session = createRegistrySession({ detectDeployment, runDeployFlow });
+    input.onScreen?.({ screen: "registry_install" });
     const activeSession = session;
     for (const [index, item] of items.entries()) {
       input.signal?.throwIfAborted();

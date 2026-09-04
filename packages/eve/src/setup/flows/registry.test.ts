@@ -206,6 +206,7 @@ describe("runRegistryFlow", () => {
 
   it("starts bare /add on channels and keeps empty Review open", async () => {
     const prompts: unknown[] = [];
+    const screens: Array<{ screen: string; registrySelectedCount?: number }> = [];
     const fake = createFakePrompter({
       single: (options) => {
         prompts.push(options);
@@ -220,9 +221,16 @@ describe("runRegistryFlow", () => {
     await runRegistryFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
+      onScreen: (screen) => screens.push(screen),
       deps: deps(),
     });
 
+    expect(screens).toEqual([
+      { screen: "registry_channels" },
+      { screen: "registry_integrations" },
+      { screen: "registry_review", registrySelectedCount: 0 },
+      { screen: "registry_install" },
+    ]);
     expect(prompts).toMatchObject([
       { message: "Where should people reach your agent?" },
       { message: "What should your agent be able to work with?" },
