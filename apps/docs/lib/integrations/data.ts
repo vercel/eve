@@ -1374,72 +1374,6 @@ export { default } from "@onkernel/eve-extension";
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
   },
-  "upstash-agentkit": {
-    logo: "upstash",
-    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
-    keywords: [
-      "upstash",
-      "agentkit",
-      "redis",
-      "memory",
-      "long-term memory",
-      "chat history",
-      "search",
-      "rag",
-      "full-text search",
-    ],
-    install: `Install the Upstash AgentKit extension for eve:
-
-\`\`\`bash
-eve add extension/upstash-agentkit
-\`\`\`
-
-The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
-
-\`\`\`bash title=".env.local"
-UPSTASH_REDIS_REST_URL=https://...
-UPSTASH_REDIS_REST_TOKEN=...
-\`\`\``,
-    quickStart: `Mount the extension under \`agent/extensions/\`:
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({});
-\`\`\`
-
-The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
-    configure: `Two further capabilities are opt-in, and they are independent of each other: chat history covers the agent's own past conversations, while search is retrieval over documents you seed into your own Redis Search index.
-
-Enable durable transcript capture with \`chatHistory: true\`. A hook writes every user and assistant message to Redis as the session streams, and the model gains \`agentkit__search_chat_history\` to find earlier conversations by what was said and \`agentkit__read_chat_history\` to read one back — so a user can ask about something settled in a previous session. Both tools take \`userId\` from the session rather than from model input, so they only ever reach the current user's own transcripts.
-
-To add RAG over your own data, install \`@upstash/redis\` and provide a Redis Search schema:
-
-\`\`\`bash
-pnpm add @upstash/redis
-\`\`\`
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import { s } from "@upstash/redis";
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({
-  chatHistory: true,
-  search: {
-    schema: s.object({
-      title: s.string(),
-      author: s.string().noTokenize(),
-      year: s.number(),
-    }),
-    indexName: "books",
-  },
-});
-\`\`\`
-
-Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools over that index, whose documents you write yourself; it is separate from chat history, which keeps its own keyspace and index. Both tool groups resolve at session start, so an unconfigured capability contributes no tools at all.
-
-For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
-  },
   jetty: {
     logo: "jetty",
     docsHref: "https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme",
@@ -1660,6 +1594,57 @@ During \`eve dev\`, file memory stays in the local process. On Vercel, the defau
     configure: `Run \`eve integration setup file-memory\` to repair or re-run provisioning without reinstalling the registry item. Setup uses the first configured function region, preserves an existing eve-owned store if the project region later changes, and never adopts or changes an application store connected with \`BLOB_*\`.
 
 Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`, then \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
+  },
+  "upstash-agentkit": {
+    logo: "upstash",
+    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
+    keywords: [
+      "upstash",
+      "agentkit",
+      "redis",
+      "memory",
+      "memory slots",
+      "file memory",
+      "long-term memory",
+      "ranked recall",
+      "conversation history",
+    ],
+    install: `Install the Upstash AgentKit memory provider for eve:
+
+\`\`\`bash
+eve add memory/upstash-agentkit
+\`\`\`
+
+This installs \`@upstash/agentkit-eve\` and \`@upstash/redis\`, then writes a memory slot. The \`@upstash/agentkit-eve/memory\` entry point requires eve 0.45.2 or later.`,
+    quickStart: `Add an Upstash Redis database's REST credentials to the agent's environment:
+
+\`\`\`bash title=".env.local"
+UPSTASH_REDIS_REST_URL=https://...
+UPSTASH_REDIS_REST_TOKEN=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/upstash-agentkit.ts"
+import { redisMemory } from "@upstash/agentkit-eve/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: redisMemory({ topK: 5 }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`upstash-agentkit\` slot. It recalls matching curated facts before each turn, captures user messages after completed turns by default, and gives the model \`upstash-agentkit__save_memory\`, \`upstash-agentkit__search_memory\`, \`upstash-agentkit__read_session\`, and \`upstash-agentkit__forget_memory\` tools.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Use \`redisDocuments()\` with \`fileMemory({ backend: redisDocuments() })\` when you want eve's bounded, model-curated document and its \`save_memory\` and \`remove_memory\` tools, but want Redis rather than the default local or Vercel Blob backend. Use \`redisMemory()\` for relevance-ranked recall and automatic capture. Both partition Redis with eve's locked scope key.
+
+The provider stores memory content in your Upstash Redis database. Review its retention before enabling it for sensitive data. See the [Upstash AgentKit eve guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for options including retention, recall limits, and automatic capture.
+
+AgentKit also ships \`@upstash/agentkit-eve-extension\`, an eve extension that adds Redis Search tools over your own documents and searchable chat history. Mount it separately under \`agent/extensions/\` when you need those capabilities; the memory slot does not depend on it.`,
   },
   arcana: {
     logo: "arcana",

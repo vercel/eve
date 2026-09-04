@@ -62,6 +62,7 @@ minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
   - "@kybernesis/arcana"
+  - "@upstash/*"
   - "@vercel/*"
   - "@workflow/*"
   - nitro
