@@ -6,7 +6,6 @@ import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invo
 import type { ToolContext } from "#tools/definition.js";
 
 const mocks = vi.hoisted(() => ({
-  claimHookOwnership: vi.fn(),
   createHook: vi.fn(),
   disposeHook: vi.fn(),
   resumeHook: vi.fn(),
@@ -17,7 +16,6 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   createHook: mocks.createHook,
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
-  claimHookOwnership: mocks.claimHookOwnership,
   disposeHook: mocks.disposeHook,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
@@ -110,12 +108,6 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("available");
 
-    expect(mocks.claimHookOwnership).toHaveBeenCalledWith(
-      expect.objectContaining({ token: "agent-reply" }),
-    );
-    expect(mocks.claimHookOwnership.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.resumeHook.mock.invocationCallOrder[0]!,
-    );
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",
       from,
@@ -173,6 +165,7 @@ describe("background agent invocation routing", () => {
 
     const result = agent(ctx, { key: "research", message: "Find it", target: "research" });
     await Promise.resolve();
+    expect(mocks.createHook).not.toHaveBeenCalled();
     expect(mocks.resumeHook).not.toHaveBeenCalled();
 
     admission.resolve({ status: "accepted" });

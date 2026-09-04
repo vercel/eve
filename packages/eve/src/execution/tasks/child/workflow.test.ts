@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
   createHook: vi.fn(() => ({ token: "task-token" })),
   deliverTaskInputResponsesStep: vi.fn(),
-  disposeHook: vi.fn(),
   openWorkflowToolRunOwnerInbox: vi.fn(() => ({
     owner: { inbox: "generated-owner-token" },
     reader: { channel: "workflow" },
@@ -43,7 +42,6 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
   claimHookOwnership: mocks.claimHookOwnership,
-  disposeHook: mocks.disposeHook,
   isHookConflictError: () => false,
 }));
 vi.mock("#execution/tasks/child/steps.js", () => ({
