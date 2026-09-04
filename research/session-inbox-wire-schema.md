@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-04"
 ---
 
 # Versioned wire schema for the session inbox
@@ -147,11 +147,22 @@ consumer ──decode──────────▶ known version → typed p
   consumers. A markerless continuation without the stable inbox identifies eve
   ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
   capability rather than guessing from deployment or package metadata.
-- **Cost boundary.** Every producer performs one target `getHookByToken`
-  before `resumeHook`. Markerless continuation hooks require one additional
-  lookup for the stable-inbox capability. `resumeHook` receives the inspected
-  hook object, preventing the encoding decision from being applied to a
-  different hook that later reused the same token.
+- **Saved receiver addresses.** The pinned driver advertises its canonical
+  session ID and wire version in serialized context. Local subagent input
+  requests save that address with their reply route. A later producer can
+  encode for the original receiver without reading hook metadata, even if a
+  newer deployment handles the reply or the continuation alias changes.
+  Workflow-tool relays carry the stable inbox token in their existing reply
+  field because input answers fit the unversioned `send` contract.
+- **Cost boundary.** Saved receiver addresses and compatible commands to
+  stable inbox tokens skip metadata negotiation and use token-based
+  `resumeHook`, retaining Workflow's backend resume deduplication. Other
+  producers read the target with `getHookByToken`. Markerless continuation
+  hooks require one additional raw ownership lookup for the stable-inbox
+  capability. For these negotiated sends, `resumeHook` receives the inspected
+  hook object so the encoding decision cannot apply to a different hook that
+  later reused the same token. Ownership-only reads use the raw world API;
+  they do not need metadata hydration or an encryption-key lookup.
 
 ## Compatibility and payoff timeline
 

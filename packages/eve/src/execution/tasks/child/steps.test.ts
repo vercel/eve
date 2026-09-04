@@ -166,6 +166,21 @@ describe("deliverTaskInputResponsesStep", () => {
     });
   });
 
+  it("uses the persisted child address after its continuation alias changes", async () => {
+    const childSessionInbox = { sessionId: "original-child", version: 1 };
+    await deliverTaskInputResponsesStep({
+      answer: { ...answer, childSessionInbox },
+      requestIds: ["req-1"],
+    });
+
+    expect(resumeSessionInbox).toHaveBeenCalledWith(
+      childSessionInbox,
+      expect.objectContaining({
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+      }),
+    );
+  });
+
   it("posts a remote child answer to its narrowed task-input route", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);

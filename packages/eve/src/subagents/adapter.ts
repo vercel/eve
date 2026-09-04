@@ -6,7 +6,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
+import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 
@@ -44,6 +44,7 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
       callId: state.callId,
       childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
       childSessionId: ctx.ctx.require(SessionIdKey),
+      childSessionInbox: ctx.ctx.get(SessionInboxKey),
       event: {
         requests: data.requests,
         sequence: data.sequence,

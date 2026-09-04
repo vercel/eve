@@ -15,6 +15,7 @@ import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
@@ -136,7 +137,10 @@ export async function invokeAgent(
         await resumeHookStep(owner.inbox, {
           kind: "request",
           from: run,
-          replyTo: reply.childContinuationToken,
+          replyTo:
+            reply.childSessionInbox?.sessionId === reply.childSessionId
+              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              : reply.childContinuationToken,
           request: {
             kind: "input-batch",
             requests: reply.event.requests,
