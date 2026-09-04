@@ -32,7 +32,8 @@ export default defineSubagent({
 ```
 
 The filename supplies `reviewer`; no separate name or registration is authored.
-Only named subagents receive generated bindings. The proposed `agent(prompt)` calls
+Only named subagents receive generated bindings, including named remote subagents.
+The proposed `agent(prompt)` calls
 a copy of itself, matching the built-in
 [`agent` tool][agent-tool]'s target and root-only
 availability. It does not select another named agent.
@@ -129,6 +130,181 @@ eve must retain a resumable child handle after a successful invocation, includin
 when the enclosing workflow tool runs in the background. The handle belongs to the
 owning session. Completing an invocation does not, by itself, end the child session.
 
+## Example: a software factory
+
+A factory can put implementation, parallel review, and bounded repair in a workflow
+tool using the proposed bindings. The model handling the issue calls this tool once;
+workflow code decides which specialists run next and passes their structured results
+between stages.
+
+Declare `implementer`, `reviewer`, and `securityReviewer` under `agent/subagents/`.
+Give the implementer repository-write tools and an isolated worktree for each issue.
+Give the reviewers read access to commits and diffs. Those capabilities belong in
+the subagent definitions; importing a binding does not provide them. The implementer
+must publish its commit to a repository or artifact store the reviewers can read.
+
+```ts
+// agent/tools/build-issue.ts
+import { defineTool } from "eve/tools";
+import { implementer, reviewer, securityReviewer } from "eve/workflow";
+import { z } from "zod";
+
+const CommitSha = z.string().regex(/^[0-9a-f]{40}$/);
+const Change = z.object({ commitSha: CommitSha, summary: z.string() });
+const Review = z.object({
+  commitSha: CommitSha,
+  approved: z.boolean(),
+  findings: z.array(z.string()),
+});
+
+export default defineTool({
+  description: "Implement an issue and review the resulting commit.",
+  execution: "background",
+  inputSchema: z.object({ repository: z.string(), issue: z.string() }),
+  async execute(input) {
+    "use workflow";
+
+    let [change, implementation] = await implementer(
+      JSON.stringify({ task: "Implement this issue and publish a commit.", ...input }),
+      { outputSchema: Change },
+    );
+    let repairsRemaining = 2;
+
+    while (true) {
+      const request = JSON.stringify({
+        task: "Review this exact commit without modifying it.",
+        repository: input.repository,
+        issue: input.issue,
+        commitSha: change.commitSha,
+      });
+      const [[review], [security]] = await Promise.all([
+        reviewer(request, { outputSchema: Review }),
+        securityReviewer(request, { outputSchema: Review }),
+      ]);
+
+      if ([review, security].some((result) => result.commitSha !== change.commitSha)) {
+        throw new Error("A review returned a different commit than the one requested.");
+      }
+      if (review.approved && security.approved) {
+        return { status: "reviewed", ...change, review, security };
+      }
+      if (repairsRemaining === 0) {
+        return { status: "needs_changes", ...change, review, security };
+      }
+
+      [change] = await implementer(
+        JSON.stringify({
+          task: "Address these findings and publish the revised commit.",
+          commitSha: change.commitSha,
+          findings: [...review.findings, ...security.findings],
+        }),
+        { agentId: implementation.agentId, outputSchema: Change },
+      );
+      repairsRemaining--;
+    }
+  },
+});
+```
+
+The implementer retains its session across repairs. Each review call starts a fresh
+child. The workflow sends both reviewers the same immutable commit reference and
+rejects a different returned reference. The loop permits at most two repair
+invocations and three review rounds. On exhaustion it returns the last commit and
+findings. Execution errors reject the workflow instead of being treated as negative
+reviews.
+
+`execution: "background"` lets the owning agent continue while the factory tool
+runs, following the [existing workflow-tool contract][workflow-tool-background].
+Inside the tool, each binding still waits for its result. A schema validates the
+shape of a review, not whether its conclusions are correct: `reviewed` here means
+both reviewers approved that commit. A merge step must separately check actual CI
+results and that the pull request still points to the reviewed commit. Admission
+across multiple issues also needs an application concurrency limit; `Promise.all`
+only expresses the two reviews within one issue.
+
+## Example: remote specialists
+
+A named remote subagent receives the same proposed binding as a local one. To run
+the factory's security review in another deployment, define its existing name with
+the current [`defineRemoteAgent` API][remote-definition]:
+
+```ts
+// agent/subagents/securityReviewer.ts in the factory application
+import { defineRemoteAgent } from "eve";
+import { vercelOidc } from "eve/agents/auth";
+
+export default defineRemoteAgent({
+  description: "Review an exact repository commit for security issues.",
+  url: "https://security-reviewer.example.com",
+  auth: vercelOidc(),
+});
+```
+
+The factory's `securityReviewer(request, { outputSchema: Review })` call stays the
+same. The URL and outbound authentication belong to the declaration. The receiver
+must authorize the calling deployment using the [existing remote auth setup][remote-auth].
+If it needs to act as the parent's end user, configure `forwardPrincipal: true` and
+the receiver's trusted forwarders as described in [identity forwarding][remote-principal].
+The import does not transfer repository credentials or make local files available
+remotely; the receiver needs its own access to the referenced commit.
+
+The result and continuation contract also stays the same:
+
+```ts
+// Inside the factory's workflow body; Review is the schema above.
+const [review, securityMetadata] = await securityReviewer(request, {
+  outputSchema: Review,
+});
+const [clarification] = await securityReviewer("Explain the first finding in more detail.", {
+  agentId: securityMetadata.agentId,
+});
+```
+
+The returned `agentId` belongs to the factory's child-handle store. eve uses that
+handle's [remote session address][remote-session-address] to continue the same
+session on the receiver. The workflow does not construct HTTP requests or pass a
+remote `sessionId`. Existing [remote dispatch][remote-dispatch] already sends a
+message and output schema with a callback, and supports
+[continuation requests][remote-continuation]. The proposal makes those operations
+available through named calls that resolve to `[output, metadata]`, preserving
+remote failure, human-input, cancellation, and cleanup behavior.
+
+### Inside the remote specialist
+
+The receiving agent can itself use named bindings in its workflow tools. For
+example, the security-reviewer application could declare `dependencyReviewer` and
+`codeReviewer` under its own `agent/subagents/` and combine their results:
+
+```ts
+// agent/tools/review-commit.ts in the security-reviewer application
+import { defineTool } from "eve/tools";
+import { codeReviewer, dependencyReviewer } from "eve/workflow";
+import { z } from "zod";
+
+const Finding = z.object({ findings: z.array(z.string()) });
+
+export default defineTool({
+  description: "Inspect a commit's code and dependencies in parallel.",
+  inputSchema: z.object({ repository: z.string(), commitSha: z.string() }),
+  async execute(input) {
+    "use workflow";
+
+    const request = JSON.stringify(input);
+    const [[code], [dependencies]] = await Promise.all([
+      codeReviewer(request, { outputSchema: Finding }),
+      dependencyReviewer(request, { outputSchema: Finding }),
+    ]);
+    return { commitSha: input.commitSha, findings: [...code.findings, ...dependencies.findings] };
+  },
+});
+```
+
+These imports resolve against the receiving application's agent scope. Its session
+owns these children; their handles are not continuation handles for the factory.
+Being invoked remotely does not add the caller's bindings to that scope or change
+the root-only rule for `agent`. The remote agent uses its tool result to produce
+the final response required by the factory's `Review` schema.
+
 ## Current behavior and the gap
 
 [`eve/workflow`][eve-workflow] exports `agent` and
@@ -178,6 +354,11 @@ These are requirements for the proposal, not claims about an implementation.
   cannot be imported as identifiers, with a diagnostic naming the declaration.
 - **Self-delegation.** `agent` preserves the built-in tool's self-delegation target
   and root-only availability. Generated bindings address named subagents separately.
+- **Remote parity.** A named `defineRemoteAgent` declaration produces the same
+  callable binding and continuation metadata as a local declaration. Dispatch uses
+  its configured endpoint and auth, and `agentId` resolves through the owning
+  session's handle store. A receiving agent may use its own named bindings under
+  the same scope and lifecycle rules.
 - **Invocation identity.** Two calls to `reviewer`, including calls from the same
   loop or helper or with the same `agentId`, represent distinct invocations.
   Replaying either call resumes its original invocation. eve must supply identities
@@ -214,6 +395,11 @@ These are requirements for the proposal, not claims about an implementation.
    or retains the [current fallback to a fresh child][current-fallback-to-a-fresh-child].
    Rejection would make an
    explicit request to resume fail visibly instead of silently losing history.
+5. **How do remote schema defaults affect the return type?** Remote definitions
+   already allow a default `outputSchema` for new sessions. Decide whether a call
+   without an explicit schema infers that default or the binding API requires
+   per-call schemas. The remote examples above omit a declaration-level default;
+   their calls follow the string-or-explicit-schema contract.
 
 ## Acceptance criteria
 
@@ -235,6 +421,13 @@ These are requirements for the proposal, not claims about an implementation.
   promise must not be treated as evidence that sibling work was cancelled.
 - Reject missing, ambiguous, and out-of-scope bindings. Cover reserved names,
   disabled targets, and confirm arbitrary tools receive no generated bindings.
+- Run the factory with a local security reviewer and with a remote one. Verify
+  identical tuple shapes, schema validation, continuation history, and repair
+  limits. Reject reviews of a different commit and return the final findings when
+  repairs are exhausted.
+- Exercise a remote specialist calling its own named subagents. Verify the factory
+  cannot use the specialist's child handles, and cover remote authorization
+  rejection, human-input routing, cancellation, and owner cleanup.
 
 Use compiler/scenario coverage for generated imports and fixture-owned CI evals for
 the runtime paths. This draft adds no runtime implementation or published API docs.
@@ -250,3 +443,10 @@ the runtime paths. This draft adds no runtime implementation or published API do
 [discovered]: ../packages/eve/src/discover/discover-subagent.ts#L119
 [requires-a-description]: ../packages/eve/src/compiler/normalize-manifest-helpers.ts#L107
 [current-fallback-to-a-fresh-child]: ../docs/subagents/index.mdx#agent-messaging
+[workflow-tool-background]: ../research/tools-as-workflows.md#wait-or-run-in-the-background
+[remote-auth]: ../docs/guides/remote-agents.md#outbound-auth
+[remote-principal]: ../docs/guides/remote-agents.md#forwarding-the-caller-identity
+[remote-session-address]: ../packages/eve/src/subagents/handles/store.ts#L87
+[remote-dispatch]: ../packages/eve/src/subagents/remote-dispatch.ts#L56
+[remote-continuation]: ../packages/eve/src/subagents/remote-dispatch.ts#L201
+[remote-definition]: ../packages/eve/src/public/definitions/remote-agent.ts#L83
