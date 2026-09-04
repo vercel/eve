@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invoke-agent.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -24,6 +24,26 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: (...args: unknown[]) => mocks.resumeHook(...args),
 }));
 beforeEach(() => vi.resetAllMocks());
+
+describe("workflow helper context errors", () => {
+  it.each([
+    ["ordinary tool", { callId: "call-1", session: {} }],
+    ["channel handler", { from() {}, to() {}, waitUntil() {} }],
+    ["schedule handler", { to() {}, waitUntil() {}, appAuth: {} }],
+    ["missing context", undefined],
+    ["null context", null],
+  ])("rejects %s before creating hooks or dispatching work", async (_name, context) => {
+    const ctx = context as ToolContext;
+    await expect(
+      agent(ctx, { key: "review", target: "reviewer", message: "Review" }),
+    ).rejects.toThrow('agent() from "eve/workflow" requires the context of an eve workflow tool.');
+    expect(() => ask(ctx, { prompt: "Continue?" })).toThrow(
+      'ask() from "eve/workflow" requires the context of an eve workflow tool.',
+    );
+    expect(mocks.createHook).not.toHaveBeenCalled();
+    expect(mocks.resumeHook).not.toHaveBeenCalled();
+  });
+});
 
 describe("background agent invocation routing", () => {
   it("stops waiting when the workflow body is cancelled", async () => {

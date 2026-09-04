@@ -84,6 +84,17 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
+`agent` and `ask` from `eve/workflow` require the `ctx` supplied to an eve workflow tool body.
+Channel handlers, schedule handlers, ordinary tools, and `"use step"` functions cannot call them.
+Adding `"use workflow"` to a channel or schedule handler does not make it a workflow tool.
+
+eve reports statically identifiable misuse at build time with the source location and the helper
+name. Shared helpers may call `agent` or `ask` when invoked from a workflow tool body with that
+body's `ctx`; indirect calls that the build cannot check still fail at runtime if the context is
+missing. To start a session from a channel or schedule, use the
+[channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
+[schedule handler](/docs/schedules#handler-form-run) APIs.
+
 ## Wait or run in the background
 
 |                          | default                             | `execution: "background"`                   |

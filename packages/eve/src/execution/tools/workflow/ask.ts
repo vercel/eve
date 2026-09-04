@@ -7,6 +7,7 @@ import type {
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { workflowToolRunAnswerToken } from "#harness/workflow-tool-runs.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: `ask()` ships via the `eve/workflow`
 // entry while `attachWorkflowToolRunContext` runs from `body.ts`, and those may
@@ -37,33 +38,34 @@ export function attachWorkflowToolRunContext(
   });
 }
 
-function readWorkflowToolRunContext(ctx: ToolContext): WorkflowToolRunContext {
-  const context = (ctx as WorkflowToolRunContextCarrier)[WORKFLOW_TOOL_RUN_CONTEXT];
+function readWorkflowToolRunContext(
+  ctx: ToolContext,
+  helper: "agent" | "ask",
+): WorkflowToolRunContext {
+  const context = (ctx as WorkflowToolRunContextCarrier | undefined)?.[WORKFLOW_TOOL_RUN_CONTEXT];
   if (context === undefined) {
-    throw new Error(
-      'This function must be called with the context of a workflow tool body ("use workflow").',
-    );
+    throw new Error(workflowToolContextErrorMessage(helper));
   }
   return context;
 }
 
 export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
-  return readWorkflowToolRunContext(ctx).from;
+  return readWorkflowToolRunContext(ctx, "agent").from;
 }
 
 export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
-  return readWorkflowToolRunContext(ctx).owner;
+  return readWorkflowToolRunContext(ctx, "agent").owner;
 }
 
 export function readWorkflowToolRunAdmission(
   ctx: ToolContext,
 ): WorkflowToolRunContext["admission"] {
-  return readWorkflowToolRunContext(ctx).admission;
+  return readWorkflowToolRunContext(ctx, "agent").admission;
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
-  const context = readWorkflowToolRunContext(ctx);
+  const context = readWorkflowToolRunContext(ctx, "ask");
   const answer = createHook<ToolInputResponse>({
     token: workflowToolRunAnswerToken(context.from.runId, context.answerSeq++),
   });

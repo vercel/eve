@@ -2,6 +2,7 @@ import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
+import { validateWorkflowHelperContexts } from "#internal/workflow-bundle/workflow-helper-context.js";
 
 const HOISTED_EXECUTE_NAME = "execute";
 
@@ -58,6 +59,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
   const program = (await parseWithNitroRolldownAst(input.filePath, input.source)) as AstProgram;
+  validateWorkflowHelperContexts(input, program);
   const body = program.body ?? [];
 
   for (const statement of body) {

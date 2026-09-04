@@ -85,7 +85,7 @@ export default defineTool({
     await write(
       "src/app/layout.js",
       `export default function RootLayout({ children }) {
-  return <html><body>{children}</body></html>;
+  return <html><body><code>import { agent } from "eve/workflow"</code>{children}</body></html>;
 }`,
     );
     const tool = await write(

@@ -67,6 +67,7 @@ const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-
 /** Invokes an agent from a task-owned background workflow tool. */
 export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonValue> {
   validateAgentInput(input, true);
+  readWorkflowToolRunRef(ctx);
   return await invokeAgent(
     ctx,
     {
