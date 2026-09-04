@@ -1,4 +1,5 @@
 export const WORKFLOW_QUEUE_NAMESPACE_ENV = "WORKFLOW_QUEUE_NAMESPACE";
+export const WORKFLOW_SEQUENTIAL_REPLAYS_ENV = "WORKFLOW_SEQUENTIAL_REPLAYS";
 
 /** Derives a stable Workflow queue namespace from an eve agent's unique name. */
 export function deriveEveWorkflowQueueNamespace(agentName: string): string {
@@ -27,6 +28,7 @@ export function createEveWorkflowQueueTrigger(agentName: string) {
     consumer: "default",
     retryAfterSeconds: 5,
     initialDelaySeconds: 0,
+    maxConcurrency: 1,
   };
 }
 
@@ -34,5 +36,6 @@ export function createEveWorkflowQueueTrigger(agentName: string) {
 export function installEveWorkflowQueueNamespace(agentName: string): string {
   const namespace = deriveEveWorkflowQueueNamespace(agentName);
   process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = namespace;
+  process.env[WORKFLOW_SEQUENTIAL_REPLAYS_ENV] = "1";
   return namespace;
 }

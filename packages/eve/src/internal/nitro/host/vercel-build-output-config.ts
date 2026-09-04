@@ -1,7 +1,10 @@
 import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
+import {
+  createEveWorkflowQueueTrigger,
+  WORKFLOW_SEQUENTIAL_REPLAYS_ENV,
+} from "#internal/workflow/queue-namespace.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -33,6 +36,7 @@ export function createEveVercelOptions(input: {
     // Reject replay decisions made from an event log that missed a
     // concurrent wake.
     WORKFLOW_PRECONDITION_GUARD: "1",
+    [WORKFLOW_SEQUENTIAL_REPLAYS_ENV]: "1",
   };
 
   // Bake the agent's public mount into the flow function so callback-URL

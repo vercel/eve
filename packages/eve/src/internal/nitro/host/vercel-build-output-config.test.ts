@@ -36,10 +36,12 @@ describe("createEveVercelOptions", () => {
             consumer: "default",
             retryAfterSeconds: 5,
             initialDelaySeconds: 0,
+            maxConcurrency: 1,
           },
         ],
         environment: {
           WORKFLOW_PRECONDITION_GUARD: "1",
+          WORKFLOW_SEQUENTIAL_REPLAYS: "1",
         },
       },
     });
@@ -67,6 +69,7 @@ describe("createEveVercelOptions", () => {
 
     expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toEqual({
       WORKFLOW_PRECONDITION_GUARD: "1",
+      WORKFLOW_SEQUENTIAL_REPLAYS: "1",
       EVE_PUBLIC_ROUTE_PREFIX: "/eve/agents/support",
     });
   });

@@ -6,6 +6,7 @@ import {
   deriveEveWorkflowQueueTopic,
   installEveWorkflowQueueNamespace,
   WORKFLOW_QUEUE_NAMESPACE_ENV,
+  WORKFLOW_SEQUENTIAL_REPLAYS_ENV,
 } from "#internal/workflow/queue-namespace.js";
 
 describe("workflow queue namespace", () => {
@@ -34,6 +35,7 @@ describe("workflow queue namespace", () => {
         "eve776561746865722d6167656e74",
       );
       expect(process.env[WORKFLOW_QUEUE_NAMESPACE_ENV]).toBe("eve776561746865722d6167656e74");
+      expect(process.env[WORKFLOW_SEQUENTIAL_REPLAYS_ENV]).toBe("1");
     } finally {
       vi.unstubAllEnvs();
     }
