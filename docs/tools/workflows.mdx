@@ -68,8 +68,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 ### Rules
 
 - Export `defineWorkflowTool({ ... })` as the default export. Its `execute` must be an async
-  function or async generator, written inline or referenced as a local top-level `async function`.
-  Start the executor with `"use workflow"` as its first statement, on its own line. A missing
+  function or async generator, written inline or referenced as a top-level `async function` in
+  the same module or an imported application module. Start the executor with `"use workflow"`
+  as its first statement. A missing
   directive is a build error, even if another function in the module has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
   step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
@@ -386,6 +387,7 @@ session's task index, can be cancelled with `task_cancel`, and are cancelled whe
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the run.
 
-Identity follows the tool. The workflow id derives from the tool's path, so renaming or moving the
-file creates a new workflow. Runs in flight finish on the deployment that started them; a run that
+The workflow id derives from the executor's module path and function name. Inline executors use
+the tool module and the name `execute`; imported executors use their declaring module and name.
+Renaming or moving that function creates a new workflow. Runs in flight finish on the deployment that started them; a run that
 resumes on a deployment without its tool fails with an error naming the missing workflow.

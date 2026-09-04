@@ -2,10 +2,7 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  detectWorkflowPatterns,
-  isGeneratedWorkflowFile,
-} from "#compiled/@workflow/builders/index.js";
+import { isGeneratedWorkflowFile } from "#compiled/@workflow/builders/index.js";
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { isWorkflowSourceFile } from "./builder-support.js";
@@ -44,8 +41,7 @@ export interface AuthoredWorkflowModules {
 
 /**
  * Scans the whole application root, as the SDK's bundler integrations do, so a
- * step helper can live wherever the tool imports it from. The SDK's pre-scan
- * picks the files worth parsing.
+ * step helper can live wherever the tool imports it from.
  */
 export async function discoverAuthoredWorkflowModules(
   appRoot: string,
@@ -59,8 +55,7 @@ export async function discoverAuthoredWorkflowModules(
     if (!isAuthoredApplicationModule(filePath, appRoot) || isGeneratedWorkflowFile(filePath))
       continue;
     const source = await readFile(filePath, "utf8");
-    if (!detectWorkflowPatterns(source).hasDirective && !source.includes("defineWorkflowTool"))
-      continue;
+    if (!source.includes("use workflow") && !source.includes("use step")) continue;
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath, source });
     if (!prepared.hasDirectives) continue;
     directiveModules.push(filePath);

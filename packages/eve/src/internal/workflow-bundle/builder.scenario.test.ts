@@ -803,6 +803,14 @@ describe("WorkflowBundleBuilder", () => {
           ].join("\n"),
         ),
         writeFile(
+          join(appRoot, "agent", "tools", "imported.ts"),
+          'import { defineWorkflowTool } from "eve/tools";\nimport { run } from "../lib/run";\nexport default defineWorkflowTool({ description: "Imported", inputSchema: {}, execute: run });',
+        ),
+        writeFile(
+          join(appRoot, "agent", "lib", "run.ts"),
+          'import { hashPlan } from "./steps";\nexport async function run() { "use workflow"; return hashPlan("imported"); }',
+        ),
+        writeFile(
           toolPath,
           [
             'import { defineWorkflowTool } from "eve/tools";',
@@ -841,6 +849,7 @@ describe("WorkflowBundleBuilder", () => {
       const stepsSource = await readFile(join(outDir, "steps.mjs"), "utf8");
       expect(stepsSource).toContain("agent/tools/deploy.ts");
       expect(stepsSource).toContain("agent/lib/steps.ts");
+      expect(stepsSource).toContain("agent/lib/run.ts");
       expect(stepsSource).not.toContain("vendored");
 
       const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
@@ -850,6 +859,7 @@ describe("WorkflowBundleBuilder", () => {
       const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
       const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
       expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
+      expect(workflowCode).toContain('"workflow//./agent/lib/run//run"');
       expect(workflowCode).toContain('"step//./agent/lib/steps//hashPlan"');
       expect(workflowCode).toContain("deploy ${service}");
       expect(workflowCode).not.toContain("defineWorkflowTool");

@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { discoverAuthoredWorkflowModules } from "./authored-workflow-modules.js";
 
 let appRoot: string;
@@ -106,17 +105,6 @@ export default defineWorkflowTool({
     });
   });
 
-  it("rejects a workflow tool with no directive during discovery", async () => {
-    await write(
-      "agent/tools/missing.ts",
-      `import { defineWorkflowTool } from "eve/tools";
-export default defineWorkflowTool({ description: "Missing", inputSchema: {}, async execute() { return 1; } });`,
-    );
-    await expect(discoverAuthoredWorkflowModules(appRoot)).rejects.toThrow(
-      'defineWorkflowTool() execute must start with "use workflow"',
-    );
-  });
-
   it("finds nothing without an application package.json", async () => {
     await rm(join(appRoot, "package.json"));
     await write("agent/tools/deploy.ts", `export async function run() { "use workflow"; }`);
@@ -127,23 +115,20 @@ export default defineWorkflowTool({ description: "Missing", inputSchema: {}, asy
     });
   });
 
-  it("rejects a directive that is not on its own line instead of compiling half of it", async () => {
-    const source = `export async function standalone() { "use workflow"; return 1; }`;
-    await write("agent/tools/inline.ts", source);
-
-    // Discovery pre-scans by line, as the SDK does, and never sees this file;
-    // the module transform parses it and must refuse rather than emit a stub
-    // with no registered run behind it.
+  it("discovers directives on the same line as their function declaration", async () => {
+    const tool = await write(
+      "agent/tools/inline.ts",
+      `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ async execute() { "use workflow"; return plan(); } });`,
+    );
+    const helper = await write(
+      "agent/lib/plan.ts",
+      `export async function plan() { "use step"; return 1; }`,
+    );
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
-      directiveModules: [],
-      workflowModules: [],
+      directiveModules: [helper, tool],
+      workflowModules: [tool],
     });
-    await expect(
-      prepareAuthoredWorkflowDirectives({
-        filePath: join(appRoot, "agent/tools/inline.ts"),
-        source,
-      }),
-    ).rejects.toThrow("is not on its own line");
   });
 
   it("reports an invalid directive placement as a build error", async () => {

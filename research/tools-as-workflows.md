@@ -47,17 +47,20 @@ The turn-owned `getSandbox`, `getSkill`, `getToken`, and `requireAuth` methods a
 public type. Side effects and credential reads belong in top-level `"use step"` helpers.
 
 Export `defineWorkflowTool({ ... })` directly as the default export of a static tool module.
-`execute` is an inline async function or async generator, or a reference to a local top-level
-async function. With `execution: "background"`, the third executor argument is `task`; its `postMessage` method
+`execute` is an inline async function or async generator, or a reference to a top-level async
+function in the same module or an imported application module. With `execution: "background"`, the third executor argument is `task`; its `postMessage` method
 creates a yielded message descriptor. Schemas, approvals, and model-output projections have
 the same meaning as for the existing workflow tool runtime.
 
 ## Compilation boundary
 
-The compiler requires the workflow directive on the executor and hoists inline executors into the
-shape consumed by the existing Workflow transform. Discovery also checks modules using
-`defineWorkflowTool` without a directive, so missing directives fail during the build. Workflow IDs continue to derive from the application-relative path and
-executor name, so migrating the wrapper does not rename an existing inline executor.
+The source pass validates directive placement and hoists inline executors into the shape consumed
+by the Workflow transform. Definition validation checks the compiled executor's `.workflowId`,
+so missing directives fail during compilation without recognizing the definer's import spelling.
+Discovery filters candidate files by directive text, then uses the same AST validation as the
+transform; directives can be the first statement on the function's opening line. Workflow IDs
+derive from the declaring module's application-relative path and function name, so migrating the
+wrapper does not rename an existing inline executor.
 
 The definition carries a workflow-tool brand. Compilation requires both that brand and a compiled
 executor workflow ID. An ordinary `defineTool` or bare object with a workflow executor fails the

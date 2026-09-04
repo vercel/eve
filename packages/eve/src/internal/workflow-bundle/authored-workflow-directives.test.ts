@@ -48,7 +48,6 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
 
     expect(prepared.hasDirectives).toBe(true);
-    expect(prepared.executeWorkflow).toBe("execute");
     expect(prepared.source).toContain("  execute,\n  toModelOutput: (output) => output,");
     expect(prepared.source).toContain(
       "async function execute({ service }: { service: string }, ctx: ToolContext): Promise<{ ok: boolean }> {\n" +
@@ -92,37 +91,6 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     );
   });
 
-  it("rejects a workflow executor on a bare tool object", async () => {
-    const source = 'export default { async execute() {\n"use workflow";\nreturn 1; } };';
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      "Workflow executors require defineWorkflowTool()",
-    );
-  });
-
-  it.each([
-    "async execute(input) { return input; },",
-    "async *execute(input) { yield input; },",
-    "execute: async (input) => { return input; },",
-    "execute: async (input) => input,",
-    "execute: async () => ({ ok: true }),",
-    'async execute(input) { void input; "use workflow"; return input; },',
-    'async execute() {\nasync function inner() {\n"use workflow";\n}\nreturn inner(); },',
-  ])("requires the directive on the executor: %s", async (execute) => {
-    const source = toolModule(execute);
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      'defineWorkflowTool() execute must start with "use workflow"',
-    );
-  });
-
-  it("does not accept a workflow directive on an unrelated function", async () => {
-    const source =
-      toolModule("async execute(input) { return input; },") +
-      '\nasync function other() {\n"use workflow";\nreturn 1;\n}';
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      'defineWorkflowTool() execute must start with "use workflow"',
-    );
-  });
-
   it.each(["use workflow", "use step"])(
     "rejects nested %s inside a marked executor",
     async (directive) => {
@@ -146,35 +114,7 @@ return inner();
     const source = `${binding}\nexport default ${definer}({ async execute(input) {\n"use workflow";\nreturn input; } });`;
     await expect(
       prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
-    ).resolves.toMatchObject({ executeWorkflow: "execute", hasWorkflowDirective: true });
-  });
-
-  it("rejects a referenced local executor without a directive", async () => {
-    const source =
-      'import { defineWorkflowTool } from "eve/tools";\nexport default defineWorkflowTool({ execute: deploy });\nasync function deploy(input) { return input; }';
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      'defineWorkflowTool() execute must start with "use workflow"',
-    );
-  });
-
-  it.each(["execute() { return 1; }", "execute: imported"])(
-    "rejects an executor it cannot compile: %s",
-    async (execute) => {
-      const source = `import { defineWorkflowTool } from "eve/tools";\nexport default defineWorkflowTool({ ${execute} });`;
-      await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-        "requires an async execute body or a local top-level async function reference",
-      );
-    },
-  );
-
-  it("rejects use workflow on defineTool", async () => {
-    const source = toolModule('async execute() {\n"use workflow";\nreturn 1; },').replaceAll(
-      "defineWorkflowTool",
-      "defineTool",
-    );
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      "Workflow executors require defineWorkflowTool()",
-    );
+    ).resolves.toMatchObject({ hasWorkflowDirective: true });
   });
 
   it("keeps a referenced top-level workflow function as is", async () => {
@@ -189,7 +129,6 @@ return inner();
     ].join("\n");
 
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
-      executeWorkflow: "deploy",
       hasDirectives: true,
       hasWorkflowDirective: true,
       source,
@@ -246,15 +185,16 @@ return inner();
           ["  async execute() {", '    "use step";', "    return 1;", "  },"].join("\n"),
         ),
       }),
-    ).rejects.toThrow('defineWorkflowTool() execute must start with "use workflow"');
+    ).rejects.toThrow('"use step"');
   });
 
-  it("rejects a directive the SDK's line-based pre-scan cannot see", async () => {
+  it("accepts a directive as the first statement on the function's opening line", async () => {
     const source = `export async function standalone() { "use workflow"; return 1; }\n`;
-
-    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      /"use workflow" in .* is not on its own line/u,
-    );
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
+      hasDirectives: true,
+      hasWorkflowDirective: true,
+      source,
+    });
   });
 
   it("rejects hoisting over an existing top-level execute binding", async () => {

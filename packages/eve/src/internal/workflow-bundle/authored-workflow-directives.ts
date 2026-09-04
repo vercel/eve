@@ -1,5 +1,3 @@
-import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
-
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
 
@@ -30,11 +28,7 @@ type AstNode = {
   typeParameters?: AstNode | null;
   value?: unknown;
   arguments?: AstNode[];
-  callee?: AstNode;
   source?: AstNode;
-  imported?: AstNode;
-  object?: AstNode;
-  property?: AstNode;
 };
 
 type AstProgram = { body?: AstNode[] };
@@ -45,8 +39,6 @@ interface DirectiveFunctionNode {
 }
 
 export interface AuthoredWorkflowDirectiveSource {
-  /** Name of the top-level `"use workflow"` function the default export's `execute` is or references. */
-  readonly executeWorkflow?: string;
   readonly hasDirectives: boolean;
   readonly hasWorkflowDirective: boolean;
   readonly source: string;
@@ -70,35 +62,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(input) or ctx.ask(request) in its executor.`,
     );
   }
-  const workflowTool = isDefaultWorkflowTool(body);
-  if (workflowTool) {
-    const property = findDefaultExportExecuteProperty(body);
-    const value = property?.value;
-    const fn =
-      isAstNode(value) && value.type === "Identifier"
-        ? body
-            .map((node) => node.declaration ?? node)
-            .find((node) => node.type === "FunctionDeclaration" && node.id?.name === value.name)
-        : isAstNode(value) && isFunctionLike(value)
-          ? value
-          : undefined;
-    if (
-      fn === undefined ||
-      fn.async !== true ||
-      !isAstNode(fn.body) ||
-      (fn.body.type !== "BlockStatement" && fn.type !== "ArrowFunctionExpression")
-    ) {
-      throw new Error(
-        `${input.filePath}: defineWorkflowTool() requires an async execute body or a local top-level async function reference.`,
-      );
-    }
-    if (readLeadingDirective(fn) !== "use workflow") {
-      throw new Error(
-        `${input.filePath}: defineWorkflowTool() execute must start with "use workflow" as the first statement, on its own line.`,
-      );
-    }
-  }
-
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
     const directive = readWorkflowDirective(statement);
@@ -131,11 +94,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       ? executeProperty.value
       : undefined;
   if (executeFunction !== undefined) {
-    if (!workflowTool && readLeadingDirective(executeFunction) === "use workflow") {
-      throw new Error(
-        `${input.filePath}: Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
-      );
-    }
     allowed.add(executeFunction);
   }
 
@@ -144,17 +102,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
-  // Discovery gates on the SDK's line-based pre-scan; a directive it cannot see
-  // would compile here into a stub with no run behind it.
-  const visibleToPrescan = detectWorkflowPatterns(input.source).hasDirective;
-
   for (const entry of found) {
-    if (!visibleToPrescan) {
-      throw new Error(
-        `${JSON.stringify(entry.directive)} in "${input.filePath}" is not on its own line. ` +
-          `Write it as the first statement of the function body, on a line by itself.`,
-      );
-    }
     if (!allowed.has(entry.fn)) {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
@@ -178,13 +126,11 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   const hoist = found.find((entry) => entry.fn === executeFunction);
   if (hoist === undefined || executeProperty === undefined) {
-    const prepared: AuthoredWorkflowDirectiveSource = {
+    return {
       hasDirectives: true,
       hasWorkflowDirective,
       source: input.source,
     };
-    const referenced = readExecuteReference(executeProperty, found);
-    return referenced === undefined ? prepared : { ...prepared, executeWorkflow: referenced };
   }
 
   if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
@@ -195,27 +141,10 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   }
 
   return {
-    executeWorkflow: HOISTED_EXECUTE_NAME,
     hasDirectives: true,
     hasWorkflowDirective,
     source: hoistExecuteMethod(input.source, executeProperty, hoist.fn),
   };
-}
-
-/** `execute: deploy`, where `deploy` is a top-level `"use workflow"` declaration. */
-function readExecuteReference(
-  executeProperty: AstNode | undefined,
-  found: readonly DirectiveFunctionNode[],
-): string | undefined {
-  const value = executeProperty?.value;
-  if (!isAstNode(value) || value.type !== "Identifier" || typeof value.name !== "string") {
-    return undefined;
-  }
-  const name = value.name;
-  const target = found.find(
-    (entry) => entry.directive === "use workflow" && entry.fn.id?.name === name,
-  );
-  return target === undefined ? undefined : name;
 }
 
 function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | undefined {
@@ -351,30 +280,4 @@ function visit(node: AstNode, visitor: (node: AstNode) => void): void {
 
 function isAstNode(value: unknown): value is AstNode {
   return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
-}
-
-function isDefaultWorkflowTool(body: readonly AstNode[]): boolean {
-  const call = body.find((node) => node.type === "ExportDefaultDeclaration")?.declaration;
-  if (call?.type !== "CallExpression") return false;
-  return body.some(
-    (node) =>
-      node.type === "ImportDeclaration" &&
-      node.source?.value === "eve/tools" &&
-      node.specifiers?.some((specifier) => {
-        if (specifier.type === "ImportSpecifier") {
-          return (
-            readPropertyName(specifier.imported) === "defineWorkflowTool" &&
-            call.callee?.type === "Identifier" &&
-            call.callee.name === specifier.local?.name
-          );
-        }
-        return (
-          specifier.type === "ImportNamespaceSpecifier" &&
-          call.callee?.type === "MemberExpression" &&
-          call.callee.object?.name === specifier.local?.name &&
-          (call.callee.computed !== true || call.callee.property?.type === "Literal") &&
-          readPropertyName(call.callee.property) === "defineWorkflowTool"
-        );
-      }),
-  );
 }
