@@ -99,11 +99,13 @@ async function runAndAwaitTurn(
     } satisfies TurnWorkflowDispatchInput;
     let action: TurnDriverAction;
     if (input.inline) {
-      // The parent owns the same hooks and orchestration as a dispatched turn.
-      // Service commands concurrently so workflow questions and cancellation can resume it.
+      // Hook claims can suspend. Do not let a queued command allocate steps
+      // midway through initialization: warm execution and cold replay can order
+      // those allocations differently.
+      const ready = Promise.withResolvers<void>();
       [action] = await Promise.all([
-        control.waitForAction(),
-        runTurnOwnedWorkflow(createTurnWorkflowInput(turnInput)),
+        ready.promise.then(() => control.waitForAction()),
+        runTurnOwnedWorkflow(createTurnWorkflowInput(turnInput), ready.resolve),
       ]);
     } else {
       await dispatchTurnStep(turnInput);

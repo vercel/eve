@@ -71,7 +71,10 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   return runTurnOwnedWorkflow(input);
 }
 
-export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
+export async function runTurnOwnedWorkflow(
+  input: TurnWorkflowInput,
+  onReady?: () => void,
+): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
@@ -116,6 +119,8 @@ export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<vo
         initialPayload: input.initialCancellation,
       });
     }
+
+    onReady?.();
 
     while (true) {
       const beforeStep = initialStep?.beforeStep ?? {
