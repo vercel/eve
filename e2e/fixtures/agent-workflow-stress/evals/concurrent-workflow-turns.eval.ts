@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     const sessions = Array.from({ length: SESSION_COUNT }, () => t.newSession());
     const firstBatchStartedAt = performance.now();
-    const firstTurns = await Promise.all(
+    const firstTurns = await Promise.allSettled(
       sessions.map(async (session, index) => {
         const startedAt = performance.now();
         const result = await session.send(markerFor(index, 1));
@@ -26,11 +26,21 @@ export default defineEval({
       }),
     );
     const firstBatchDurationMs = performance.now() - firstBatchStartedAt;
-    firstTurns.forEach((turn, index) => {
+    const failedFirstTurns = firstTurns.flatMap((turn, index) =>
+      turn.status === "rejected" ? [`session ${index + 1}: ${formatErrorChain(turn.reason)}`] : [],
+    );
+    if (failedFirstTurns.length > 0) {
+      throw new Error(`First concurrent turn batch failed: ${failedFirstTurns.join("; ")}`);
+    }
+    const completedFirstTurns = firstTurns.map((turn) => {
+      if (turn.status === "rejected") throw new Error("Unreachable failed first turn.");
+      return turn.value;
+    });
+    completedFirstTurns.forEach((turn, index) => {
       t.log(`workflow run id (${index + 1}/${SESSION_COUNT}): ${turn.result.sessionId}`);
     });
     const secondBatchStartedAt = performance.now();
-    const secondTurns = await Promise.all(
+    const secondTurns = await Promise.allSettled(
       sessions.map(async (session, index) => {
         const startedAt = performance.now();
         const result = await session.send(markerFor(index, 2));
@@ -43,10 +53,20 @@ export default defineEval({
       }),
     );
     const secondBatchDurationMs = performance.now() - secondBatchStartedAt;
+    const failedSecondTurns = secondTurns.flatMap((turn, index) =>
+      turn.status === "rejected" ? [`session ${index + 1}: ${formatErrorChain(turn.reason)}`] : [],
+    );
+    if (failedSecondTurns.length > 0) {
+      throw new Error(`Second concurrent turn batch failed: ${failedSecondTurns.join("; ")}`);
+    }
+    const completedSecondTurns = secondTurns.map((turn) => {
+      if (turn.status === "rejected") throw new Error("Unreachable failed second turn.");
+      return turn.value;
+    });
 
     for (let index = 0; index < SESSION_COUNT; index += 1) {
-      const first = firstTurns[index]!.result.expectOk();
-      const second = secondTurns[index]!.result.expectOk();
+      const first = completedFirstTurns[index]!.result.expectOk();
+      const second = completedSecondTurns[index]!.result.expectOk();
 
       await t.require(first.message, equals(`stress-ack:1:${markerFor(index, 1)}`));
       await t.require(second.message, equals(`stress-ack:2:${markerFor(index, 2)}`));
@@ -54,7 +74,7 @@ export default defineEval({
     }
 
     await t.require(
-      new Set(firstTurns.map((turn) => turn.result.sessionId)).size,
+      new Set(completedFirstTurns.map((turn) => turn.result.sessionId)).size,
       equals(SESSION_COUNT),
     );
 
@@ -63,7 +83,7 @@ export default defineEval({
         batches: [
           {
             batchDurationMs: firstBatchDurationMs,
-            samples: firstTurns.map(({ durationMs, sessionNumber }) => ({
+            samples: completedFirstTurns.map(({ durationMs, sessionNumber }) => ({
               durationMs,
               sessionNumber,
             })),
@@ -71,7 +91,7 @@ export default defineEval({
           },
           {
             batchDurationMs: secondBatchDurationMs,
-            samples: secondTurns.map(({ durationMs, sessionNumber }) => ({
+            samples: completedSecondTurns.map(({ durationMs, sessionNumber }) => ({
               durationMs,
               sessionNumber,
             })),
@@ -92,6 +112,23 @@ export default defineEval({
     t.notEvent("turn.failed");
   },
 });
+
+function formatErrorChain(error: unknown): string {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const name = "name" in current && typeof current.name === "string" ? current.name : "Error";
+    const message =
+      "message" in current && typeof current.message === "string"
+        ? current.message
+        : JSON.stringify(current);
+    messages.push(`${name}: ${message}`);
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return messages.length > 0 ? messages.join(" <- ") : String(error);
+}
 
 function markerFor(sessionIndex: number, turnNumber: number): string {
   return `stress-session-${String(sessionIndex + 1).padStart(2, "0")}-turn-${turnNumber}`;
