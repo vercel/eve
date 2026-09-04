@@ -14,7 +14,7 @@ import { contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
-import type { AgentTraceStateStore, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import {
   contentAttribute,
   genAiInputMessagesAttribute,
@@ -32,7 +32,11 @@ import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channe
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
-import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import {
+  setAgentInvocationUsage,
+  setAgentUsage,
+  setGenAiUsage,
+} from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
@@ -284,6 +288,7 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
+    await actions.flushForSessionTransition(event);
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -364,6 +369,7 @@ export function createAgentOtelInstrumentation(
           "gen_ai.request.model": event.model.modelId,
           ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
         },
+        kind: SpanKind.CLIENT,
       },
       attempt.context,
     );
@@ -394,7 +400,10 @@ export function createAgentOtelInstrumentation(
       recordError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
-      setAgentUsage(state.span, event.usage);
+      setGenAiUsage(state.span, event.usage);
+      if (event.responseId !== undefined) {
+        state.span.setAttribute("gen_ai.response.id", event.responseId);
+      }
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);
@@ -675,16 +684,6 @@ function modelSpanName(modelId: string): string {
 
 function agentSpanName(agentName: string | undefined): string {
   return agentName === undefined ? "invoke_agent" : `invoke_agent ${agentName}`;
-}
-
-function setAgentInvocationUsage(span: Span, modelUsage: AgentTurnTraceState["modelUsage"]): void {
-  if (modelUsage === undefined) return;
-  if (modelUsage.inputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.input_tokens", modelUsage.inputTokens);
-  }
-  if (modelUsage.outputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.output_tokens", modelUsage.outputTokens);
-  }
 }
 
 function errorText(error: unknown): unknown {

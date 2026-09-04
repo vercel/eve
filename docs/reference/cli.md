@@ -304,6 +304,8 @@ Span rows carry inline metrics when the span recorded them — `↑input`/`↓ou
 
 A delegated local or remote agent session records into its own trace. The parent `invoke_agent` caller span records `agent.child.trace.id` only after the child acknowledges the exact trace coordinates, and the child `agent.session` root links back to that caller span. Follow-up turns reuse the child session's trace.
 
+Each `agent()` call inside an authored workflow has its own caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `agent.action` and `execute_tool` spans.
+
 A durable session keeps one persisted trace context across turns and worker resumptions. Independently replayed attempts can still produce another trace; passing the session id shows every trace it produced, oldest first.
 
 Every span carries a real duration except `agent.session`: an idle session never closes, so it is recorded as a zero-duration marker and the span tree shows its descendant extent instead. A turn's `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.

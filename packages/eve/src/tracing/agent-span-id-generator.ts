@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+
 /**
  * Id generator shared by `registerOTel` and the agent OTel provider. A span
  * whose lifetime crosses durable worker boundaries (`invoke_agent`) is emitted
@@ -17,8 +19,7 @@ export class AgentSpanIdGenerator {
 
   /** Derives one span id for a replay-stable instrumentation event. */
   deriveSpanId(key: string): string {
-    const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
-    return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
+    return deriveAgentSpanId(key);
   }
 
   /** Derives one trace id for a replay-stable child session dispatch. */
@@ -63,6 +64,15 @@ export class AgentSpanIdGenerator {
       this.#primedTraceId = undefined;
     }
   }
+}
+
+export function deriveAgentSpanId(key: string): string {
+  const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
+  return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
+}
+
+export function deriveAgentActionSpanId(sessionId: string, turnId: string, callId: string): string {
+  return deriveAgentSpanId(`action:${actionIdempotencyKey(sessionId, turnId, callId)}`);
 }
 
 const HEX_DIGITS = "0123456789abcdef";

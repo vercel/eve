@@ -203,6 +203,7 @@ async function publishActionStarts(
         callId: action.callId,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
+        ...(action.kind === "workflow-tool-call" ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         name: actionName(action),
         scope,

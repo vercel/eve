@@ -1115,7 +1115,12 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(applyTaskAgentRequest).mock.calls.map(([delivery]) => delivery)).toEqual([
       expect.objectContaining({
         ownerId: "run-1",
-        request: { kind: "agent-invoke", invocationId: "call-1", input: expect.any(Object) },
+        request: {
+          kind: "agent-invoke",
+          invocationId: "call-1",
+          input: expect.any(Object),
+          parentActionCallId: "call-1",
+        },
       }),
       expect.objectContaining({
         ownerId: "run-1",

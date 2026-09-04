@@ -636,6 +636,7 @@ const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
   "#execution/wire/session-inbox-wire.v3.migration.js",
   "#execution/wire/session-inbox-wire.v4.migration.js",
   "#execution/wire/session-inbox-wire.v5.migration.js",
+  "#execution/wire/session-inbox-wire.v7.migration.js",
   "#shared/guards.js",
 ]);
 

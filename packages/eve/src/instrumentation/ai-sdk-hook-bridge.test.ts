@@ -514,6 +514,7 @@ describe("createAiSdkHookBridge", () => {
         ],
         finishReason: "tool-calls",
         idempotencyKey: modelCallIdempotencyKey(scope, 0),
+        responseId: "response-1",
         scope,
         type: "model.call.completed",
         usage: {
