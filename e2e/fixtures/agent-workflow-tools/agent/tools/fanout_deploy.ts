@@ -1,4 +1,4 @@
-import { defineTool } from "eve/tools";
+import { defineWorkflowTool } from "eve/tools";
 import { createHook } from "workflow";
 import { z } from "zod";
 
@@ -9,7 +9,7 @@ import { type ReplicaResult, startReplica } from "../lib/fanout.ts";
  * their results on reply hooks. Exercises `start` and `resumeHook` from
  * steps across the run boundary.
  */
-export default defineTool({
+export default defineWorkflowTool({
   description: "Plan several deploy replicas in parallel and combine their digests.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }) {

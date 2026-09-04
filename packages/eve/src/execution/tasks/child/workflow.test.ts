@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { WorkflowToolRunRequestMessage } from "#execution/tools/workflow/messages.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -12,8 +12,10 @@ const mocks = vi.hoisted(() => ({
   createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
   createHook: vi.fn(() => ({ token: "task-token" })),
   deliverTaskInputResponsesStep: vi.fn(),
-  disposeHook: vi.fn(),
-  openWorkflowToolRunOwnerChannels: vi.fn(() => ({ dispose: vi.fn(), readers: [] })),
+  openWorkflowToolRunOwnerInbox: vi.fn(() => ({
+    owner: { inbox: "generated-owner-token" },
+    reader: { channel: "workflow" },
+  })),
   raceChannelReads: vi.fn(),
   resumeHookStep: vi.fn(),
   wakeTaskAgentRequestParentStep: vi.fn(),
@@ -40,7 +42,6 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
   claimHookOwnership: mocks.claimHookOwnership,
-  disposeHook: mocks.disposeHook,
   isHookConflictError: () => false,
 }));
 vi.mock("#execution/tasks/child/steps.js", () => ({
@@ -62,7 +63,7 @@ vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
   raceChannelReads: mocks.raceChannelReads,
 }));
 vi.mock("#execution/tools/workflow/owner.js", () => ({
-  openWorkflowToolRunOwnerChannels: mocks.openWorkflowToolRunOwnerChannels,
+  openWorkflowToolRunOwnerInbox: mocks.openWorkflowToolRunOwnerInbox,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.resumeHookStep,
@@ -79,6 +80,7 @@ const initialView = {
 } satisfies TaskView;
 
 const bufferedAgentRequest = {
+  kind: "request",
   from: {
     callId: "tool-call-1",
     execution: "background",
@@ -95,7 +97,7 @@ const bufferedAgentRequest = {
     invocationId: "tool-call-1:approver",
     kind: "agent-invoke",
   },
-} satisfies WorkflowToolRunRequestMessage;
+} satisfies WorkflowToolRunMessage;
 
 const workflowAgentRequest = {
   ...bufferedAgentRequest,
@@ -104,13 +106,16 @@ const workflowAgentRequest = {
     invocationId: "tool-call-1:approver:2",
     kind: "agent-invoke",
   },
-} satisfies WorkflowToolRunRequestMessage;
+} satisfies WorkflowToolRunMessage;
 
 describe("taskRunWorkflow", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
-    mocks.openWorkflowToolRunOwnerChannels.mockReturnValue({ dispose: vi.fn(), readers: [] });
+    mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+      owner: { inbox: "generated-owner-token" },
+      reader: { channel: "workflow" },
+    });
     mocks.executeWorkflowBody.mockResolvedValue({
       outcome: { output: "done", status: "completed" },
       reportCount: 0,
@@ -153,7 +158,7 @@ describe("taskRunWorkflow", () => {
   it("buffers agent requests until task dispatch is acknowledged", async () => {
     mocks.raceChannelReads
       .mockResolvedValueOnce({
-        channel: "request",
+        channel: "workflow",
         next: { done: false, value: bufferedAgentRequest },
       })
       .mockResolvedValueOnce({
@@ -185,7 +190,7 @@ describe("taskRunWorkflow", () => {
         next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
       })
       .mockResolvedValueOnce({
-        channel: "request",
+        channel: "workflow",
         next: { done: false, value: workflowAgentRequest },
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
@@ -257,6 +262,10 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: { inbox: "generated-owner-token" } }),
+      expect.any(AbortSignal),
+    );
   });
 
   it.each(["tool", "subagent"])(
@@ -384,10 +393,11 @@ describe("taskRunWorkflow", () => {
         },
       })
       .mockResolvedValueOnce({
-        channel: "report",
+        channel: "workflow",
         next: {
           done: false,
           value: {
+            kind: "report",
             from: bufferedAgentRequest.from,
             update: { kind: "eve:task-message", message: "Review the export" },
           },

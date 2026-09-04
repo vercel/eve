@@ -34,8 +34,8 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 ### Stream preliminary tool results
 
-An async generator lets a long-running tool stream complete output snapshots
-before it finishes. Each `yield` replaces the previous snapshot; the final
+For a `defineTool` executor with the default execution mode, an async generator streams complete
+output snapshots before it finishes. Each `yield` replaces the previous snapshot; the final
 yield is the normal tool result the model receives:
 
 ```ts title="agent/tools/build_report.ts"
@@ -54,29 +54,41 @@ eve publishes every earlier yield as an `action.partial` stream event. The
 snapshot is visible to channels, hooks, and clients but never enters model
 history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
-can retry a step and replay overlapping snapshots.
+can retry a step and replay overlapping snapshots. A generator `return` value is not used as
+the result in this mode; yield the final output. Workflow and background generators have
+different result rules, described under [yield and return](#yield-and-return).
 
 ### Background execution
 
-`defineTool({ execution: "background" })` receives a third `task` argument and returns
-`{ status: "working", taskId }` to the model. Add `"use workflow"` to let the body outlive the
-initiating step; without it, the step waits for the body to finish. Return completes the durable task; throw fails it. An
-async generator may additionally yield:
+Background execution controls how a tool delivers its result to the parent agent. Durable
+suspension controls whether the executor can pause at a workflow wait and release compute.
+These are independent choices: `execution: "background"` selects the task lifecycle;
+`defineWorkflowTool` with a leading `"use workflow"` directive enables durable suspension.
 
-```ts
-yield { progress: 0.5 }; // stream-only progress; does not wake the agent
-yield task.postMessage("The export needs review."); // one new parent turn
-```
+| Definition                                       | Durable waits inside `execute`                                  | Result delivered to the model                                          |
+| ------------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `defineTool`                                     | No; the executor runs inside the initiating step.               | Executor output after it finishes.                                     |
+| `defineTool` + `execution: "background"`         | No; the initiating step still waits for the executor to finish. | Task receipt, followed by task notifications.                          |
+| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend.        | Workflow output after it finishes.                                     |
+| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.         | Task receipt before the body finishes, followed by task notifications. |
+
+A background tool receives a third `task` argument. Its tool result is the receipt
+`{ status: "working", taskId }`; its eventual output belongs to the task. Use a background
+workflow tool when the conversation should continue while the body waits for a person,
+webhook, or timer. Setting `execution: "background"` on an ordinary tool does not move its
+executor into a separate workflow or make an ordinary Promise a durable wait.
 
 For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
 return value is available through the completed task's output.
 
-`task.delegated()` has been removed. Move external work into a `"use workflow"` body and
+`task.delegated()` has been removed. Move external work into a `defineWorkflowTool` executor and
 return its result when it finishes. Rebuild extensions using the removed API after migrating.
 
-`postMessage` is the only yield that wakes the parent agent. Keep values needed by the body
-in local variables; workflow replay reconstructs them across durable waits.
-Use [`ask`](/docs/tools/workflows#ask-a-human-ask) when the body needs an answer from the human.
+`yield task.postMessage(message)` is the only yield that requests a parent-agent turn. Calling
+`task.postMessage` only constructs the message descriptor; you must yield it to send it.
+In a workflow body, keep values needed after a wait in local variables; workflow replay
+reconstructs them across durable waits.
+Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an answer from the human.
 Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
 and remote subagents use this task lifecycle automatically.
 
@@ -88,11 +100,31 @@ Later task-triggered parent turns receive fresh state for the same cohort. The m
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.
 
+### Yield and return
+
+`yield` hands a value to eve's generator consumer, which processes it and advances the generator.
+It does not by itself create a durable wait for a person, timer, or external event. The value's
+meaning depends on the tool's execution mode:
+
+| Executor                                         | Ordinary `yield value`                                                                  | Final output                                                                                                      |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `defineTool`, default execution                  | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                        |
+| `defineWorkflowTool`, default execution          | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`.       |
+| Either definition with `execution: "background"` | Stream-only task progress; does not request a parent-agent turn.                        | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
+
+For either kind of background tool, `yield task.postMessage(message)` sends a message to the
+parent agent while the task remains open. Return completes the task; throw fails it. These
+notifications are separate from the original tool call's receipt.
+
+Progress snapshots do not enter model history as intermediate tool results. For a default
+executor, the final output selected by the rules above becomes the tool result. For a background
+executor, task messages and completion notifications provide input to later parent-agent turns.
+
 ### Workflows as tools
 
-Put `"use workflow"` at the start of a tool's `execute` function to run each call as a durable
-Workflow run. The tool can wait for a person, webhook, or timer without holding compute, then return
-its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
+Use `defineWorkflowTool` from `eve/tools` to run each call as a durable Workflow run. Its
+executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The tool can
+wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
 examples.
 
 ### The `ctx` parameter
