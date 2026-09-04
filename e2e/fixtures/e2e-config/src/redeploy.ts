@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process";
-import { readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { EveEvalContext } from "eve/evals";
@@ -27,9 +37,30 @@ export async function createRedeployFixture(t: EveEvalContext) {
   );
   const currentPackage = await realpath(links[0]!.path);
   const execOptions = { ...EXEC_OPTIONS, signal: t.signal };
+  const stagedPackages: string[] = [];
 
   return {
     currentPackage,
+    async stagePublishedEve(packagePath: string): Promise<string> {
+      const cache = resolve("node_modules", ".cache");
+      await mkdir(cache, { recursive: true });
+      const staged = await mkdtemp(resolve(cache, "eve-published-"));
+      stagedPackages.push(staged);
+      await cp(packagePath, staged, {
+        recursive: true,
+        filter: (source) => source !== resolve(packagePath, "node_modules"),
+      });
+      await symlink(dirname(packagePath), resolve(staged, "node_modules"));
+      const manifestPath = resolve(staged, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      // Historical source-only export conditions point to files absent from npm.
+      // Change package resolution in this copy; preserve every published code byte.
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(withoutSourceConditions(manifest), null, 2)}\n`,
+      );
+      return staged;
+    },
     async deploy(packagePath: string, marker: string): Promise<string> {
       for (const link of links) await replaceLink(link.path, packagePath);
       await writeFile(instructionsPath, `${instructions}\nDeployment marker: ${marker}.\n`);
@@ -90,8 +121,19 @@ export async function createRedeployFixture(t: EveEvalContext) {
     async restore(): Promise<void> {
       for (const link of links) await replaceLink(link.path, link.target);
       await writeFile(instructionsPath, instructions);
+      for (const staged of stagedPackages) await rm(staged, { force: true, recursive: true });
     },
   };
+}
+
+function withoutSourceConditions(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutSourceConditions);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "eve-source")
+      .map(([key, entry]) => [key, withoutSourceConditions(entry)]),
+  );
 }
 
 async function replaceLink(path: string, target: string): Promise<void> {

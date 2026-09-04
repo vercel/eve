@@ -142,6 +142,13 @@ the current runtime. Session expiry is disabled throughout the probe. This is
 the compatibility baseline for the unified inbox refactor; it does not exercise
 the proposed new owner topology or self-hosted executable retention.
 
+The historical workflow fixture stages a copy of the published package with
+its unusable `eve-source` conditions removed from `package.json`; those point
+to source files absent from npm and otherwise leave `eve/workflow` unresolved
+in the Workflow sandbox. Published runtime code is unchanged. This build
+accommodation is specific to the probe; production upgrades must retain their
+old deployment artifacts.
+
 These evals redeploy from inside their test bodies: they mutate agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.

@@ -52,10 +52,13 @@ export default defineEval({
     ];
 
     try {
+      const historicalRuntime = await fixture.stagePublishedEve(historicalPackage);
       await writeMarker(OLD_MARKER, true);
-      await fixture.deploy(historicalPackage, "inbox-upgrade-published");
+      await fixture.deploy(historicalRuntime, "inbox-upgrade-published");
 
-      const first = await idle.send("UPGRADE-read-first");
+      const first = await idle.send("UPGRADE-read-first", {
+        signal: AbortSignal.any([t.signal, AbortSignal.timeout(90_000)]),
+      });
       const oldExecution = readExecution(first);
       await requireExecution(t, oldExecution, OLD_MARKER);
       const sessionId = first.sessionId;
