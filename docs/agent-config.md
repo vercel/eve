@@ -261,7 +261,9 @@ ordinary `execution: "background"` tools, and framework task controls stay
 direct. Subagent tools enter the program and
 return their result when called, the same way an authored workflow tool's
 `agent()` does. `"eager"` inlines every callable signature in the tool
-description; `"lazy"` lists the available tool names.
+description; `"lazy"` lists the available tool names and the discovery helpers'
+signatures. The model can discover schemas first, then keep the task's reads,
+computation, and final writes in one execution program.
 
 Each program can invoke at most 100 subagents by default. Set `maxSubagents` to
 change that limit; sequential calls, parallel calls, retries, and calls that
@@ -288,6 +290,11 @@ direct calls. Results include `requiresDirectCall: true` when the program
 cannot execute a tool. Discovery does not run the tool or bypass its approval
 policy. `code_mode` remains available for discovery even when all other tools
 require direct calls.
+
+`tools.search_tools({ query })` returns an array of matching tools; `query` is a
+case-insensitive substring of the name or description. Omit it to list every
+tool. `tools.describe_tools({ names })` returns an array of descriptions and
+input schemas for the requested tool names.
 
 Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model

@@ -1,10 +1,4 @@
-import { z } from "#compiled/zod/index.js";
-
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
-
-export const codeModeInputSchema = z.strictObject({
-  js: z.string().describe("Complete JavaScript program to execute over the available tools."),
-});
 
 export const DEFAULT_CODE_MODE_MAX_SUBAGENTS = 100;
 
