@@ -2,11 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
-import {
-  resolveSessionInboxWireTarget,
-  resumeSessionInbox,
-} from "#execution/wire/session-inbox-resume.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-wire.js";
 
 const getHookByTokenMock = vi.fn();
 const resumeHookMock = vi.fn();
@@ -21,216 +19,111 @@ afterEach(() => {
   resumeHookMock.mockReset();
 });
 
-describe("session inbox target resolution", () => {
-  it.each(SESSION_INBOX_WIRE_VERSIONS)(
-    "uses wire version %i advertised by a stamped hook",
-    async (version) => {
-      const hook = sessionHook("session-1", "channel-1", {
-        sessionInboxWireVersion: version,
-      });
+describe("resumeSessionInbox", () => {
+  it.each([sessionCommandHookToken("session-1"), "continuation-1", "authorization-1"])(
+    "resumes %s by token without a capability lookup",
+    async (token) => {
+      const hook = { runId: "session-1", token };
+      resumeHookMock.mockResolvedValue(hook);
 
-      await expect(resolveSessionInboxWireTarget(hook)).resolves.toEqual({ version });
+      await expect(
+        resumeSessionInbox(token, {
+          kind: "send",
+          payload: { message: "follow-up" },
+        }),
+      ).resolves.toBe(hook);
+
       expect(getHookByTokenMock).not.toHaveBeenCalled();
+      expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(
+        token,
+        expect.objectContaining({
+          kind: "deliver",
+          payload: { message: "follow-up" },
+          payloads: [{ message: "follow-up" }],
+          version: SESSION_INBOX_WIRE_VERSION,
+        }),
+      );
     },
   );
 
-  it("selects raw send for a markerless stable hook", async () => {
+  it("preserves session-owned task cancellation without negotiation", async () => {
     const token = sessionCommandHookToken("session-1");
-
-    await expect(resolveSessionInboxWireTarget(sessionHook("session-1", token))).resolves.toEqual({
-      variant: "send",
-      version: 0,
-    });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-  });
-
-  it("selects raw send for a markerless continuation owned by the stable-inbox cohort", async () => {
-    getHookByTokenMock.mockResolvedValue(
-      sessionHook("session-1", sessionCommandHookToken("session-1")),
-    );
-
-    await expect(
-      resolveSessionInboxWireTarget(sessionHook("session-1", "continuation-1")),
-    ).resolves.toEqual({ variant: "send", version: 0 });
-  });
-
-  it("selects deliver for a markerless continuation without a stable inbox", async () => {
-    getHookByTokenMock.mockRejectedValue(
-      new HookNotFoundError(sessionCommandHookToken("session-1")),
-    );
-
-    await expect(
-      resolveSessionInboxWireTarget(sessionHook("session-1", "continuation-1")),
-    ).resolves.toEqual({ variant: "deliver", version: 0 });
-  });
-
-  it("rejects an advertised unknown version before persistence", async () => {
-    await expect(
-      resolveSessionInboxWireTarget(
-        sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 99 }),
-      ),
-    ).rejects.toThrow(/unsupported wire version 99/);
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("resumeSessionInbox", () => {
-  it("resumes a compatible stable inbox by token without inspecting metadata", async () => {
-    const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox(token, {
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
-
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-    expect(resumeHookMock).toHaveBeenCalledWith(token, {
-      auth: undefined,
-      caller: undefined,
-      delivery: undefined,
-      kind: "send",
-      payload: { message: "follow-up" },
-      requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-    });
-  });
-
-  it("strips an undefined activity observer from the stable fast path", async () => {
-    const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox(token, {
-      caller: {
-        activityObserver: undefined,
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "reply-1" },
-        subagentName: "researcher",
-      },
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
-
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-    expect(resumeHookMock).toHaveBeenCalledWith(token, {
-      auth: undefined,
-      caller: {
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "reply-1" },
-        subagentName: "researcher",
-      },
-      delivery: undefined,
-      kind: "send",
-      payload: { message: "follow-up" },
-      requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-    });
-  });
-
-  it("negotiates v6 for stable session-owned task cancellation", async () => {
-    const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 6 });
-    getHookByTokenMock.mockResolvedValue(hook);
-    resumeHookMock.mockResolvedValue(hook);
-
     await resumeSessionInbox(token, { kind: "cancel", tasks: true, turnId: "turn-1" });
 
-    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
-    expect(resumeHookMock).toHaveBeenCalledWith(hook, {
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    const [resumedToken, wire] = resumeHookMock.mock.calls[0]!;
+    expect(resumedToken).toBe(token);
+    expect(wire).toMatchObject({ version: SESSION_INBOX_WIRE_VERSION });
+    expect(sessionInboxWire.decode(wire)).toMatchObject({
       kind: "cancel",
       tasks: true,
       turnId: "turn-1",
-      version: 6,
     });
   });
 
-  it.each([
-    ["markerless", undefined],
-    ["v5", { sessionInboxWireVersion: 5 }],
-  ])(
-    "rejects stable session-owned task cancellation for a %s consumer before persistence",
-    async (_name, metadata) => {
-      const token = sessionCommandHookToken("session-1");
-      getHookByTokenMock.mockResolvedValue(sessionHook("session-1", token, metadata));
+  it("preserves activity observers and delivery routing without negotiation", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const caller = {
+      activityObserver: { sink: { url: "https://example.com/activity", version: 1 as const } },
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "reply-1" },
+      subagentName: "researcher",
+    };
+    const delivery = {
+      acceptedDeploymentId: "dpl_current",
+      channelKind: "channel:http" as const,
+      channelName: "http",
+      deliveryId: "delivery-1",
+    };
 
-      await expect(resumeSessionInbox(token, { kind: "cancel", tasks: true })).rejects.toThrow(
-        /Cannot encode session-owned task cancellation for wire version/,
+    await resumeSessionInbox(token, {
+      caller,
+      delivery,
+      kind: "send",
+      payload: { message: "follow-up" },
+      turnPolicy: "queue",
+    });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    const [resumedToken, wire] = resumeHookMock.mock.calls[0]!;
+    expect(resumedToken).toBe(token);
+    expect(sessionInboxWire.decode(wire)).toMatchObject({
+      caller,
+      deliveryMetadata: [{ ...delivery, payloadIndex: 0 }],
+      kind: "deliver",
+      payloads: [{ message: "follow-up" }],
+      turnPolicy: "queue",
+    });
+  });
+
+  it.each(["clear", "compact", "reset", "session-timeout"] as const)(
+    "sends %s in the current wire format",
+    async (kind) => {
+      await resumeSessionInbox("continuation-1", { kind });
+      expect(getHookByTokenMock).not.toHaveBeenCalled();
+      expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(
+        "continuation-1",
+        expect.objectContaining({ kind, version: SESSION_INBOX_WIRE_VERSION }),
       );
-
-      expect(getHookByTokenMock).toHaveBeenCalledWith(token);
-      expect(resumeHookMock).not.toHaveBeenCalled();
     },
   );
 
-  it("encodes continuation delivery for the resolved consumer and resumes that hook", async () => {
-    const hook = sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 1 });
-    getHookByTokenMock.mockResolvedValue(hook);
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox("continuation-1", {
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
-
-    expect(getHookByTokenMock).toHaveBeenCalledWith("continuation-1");
-    expect(resumeHookMock).toHaveBeenCalledWith(hook, {
-      auth: undefined,
-      caller: undefined,
-      kind: "deliver",
-      payload: { message: "follow-up" },
-      payloads: [{ message: "follow-up" }],
-      requestId: undefined,
-      version: 1,
-    });
-  });
-
-  it("inspects reserved session aliases outside the stable inbox", async () => {
-    const token = "eve:session:session-1:session-timeout";
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 1 });
-    getHookByTokenMock.mockResolvedValue(hook);
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox(token, { kind: "session-timeout" });
-
-    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
-    expect(resumeHookMock).toHaveBeenCalledWith(hook, {
-      kind: "session-timeout",
-      version: 1,
-    });
-  });
-
-  it("retains metadata negotiation when a stable delivery needs the current caller wire", async () => {
-    const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    getHookByTokenMock.mockResolvedValue(hook);
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox(token, {
-      caller: {
-        activityObserver: { sink: { url: "https://example.com/activity", version: 1 } },
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "reply-1" },
-        subagentName: "researcher",
-      },
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
-
-    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      hook,
-      expect.objectContaining({
-        caller: expect.objectContaining({ activityObserver: expect.any(Object) }),
-        version: 2,
+  it("rejects invalid payloads before touching Workflow", async () => {
+    await expect(
+      resumeSessionInbox("continuation-1", {
+        kind: "send",
+        payload: { message: 42 as never },
       }),
-    );
+    ).rejects.toThrow(/does not match wire version/);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates a missing hook without a compatibility retry", async () => {
+    const error = new HookNotFoundError("continuation-1");
+    resumeHookMock.mockRejectedValue(error);
+    await expect(resumeSessionInbox("continuation-1", { kind: "clear" })).rejects.toBe(error);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledOnce();
   });
 });
-
-function sessionHook(runId: string, token: string, metadata?: unknown) {
-  return { metadata, runId, token } as never;
-}

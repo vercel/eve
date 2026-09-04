@@ -9,11 +9,6 @@ const getHookByTokenMock = vi.fn();
 const DIGEST = "0123456789abcdef0123456789abcdef";
 const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
 const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
-const TARGET_HOOK = {
-  metadata: { sessionInboxWireVersion: 1 },
-  runId: "child-session",
-  token: TARGET_TOKEN,
-};
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
@@ -23,7 +18,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 describe("task input response capability", () => {
   beforeEach(() => {
     getHookByTokenMock.mockReset();
-    getHookByTokenMock.mockResolvedValue(TARGET_HOOK);
     resumeHookMock.mockReset();
   });
 
@@ -35,15 +29,15 @@ describe("task input response capability", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(getHookByTokenMock).toHaveBeenCalledWith(TARGET_TOKEN);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
     expect(resumeHookMock).toHaveBeenCalledWith(
-      TARGET_HOOK,
+      TARGET_TOKEN,
       sessionInboxWire.encode(
         {
           kind: "send",
           payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
         },
-        { version: 1 },
+        { version: 6 },
       ),
     );
   });

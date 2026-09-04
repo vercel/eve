@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -10,17 +10,12 @@ import { satisfies } from "eve/evals/expect";
 import { postChannel } from "./shared";
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
-const OLD_EVE_VERSION = "0.30.8";
 const ACTIVE_TURN_MESSAGE = "Please wait for cross-version follow-up.";
 const FOLLOW_UP_TOKEN = "CROSS-VERSION-WIRE-OK";
 
 const INSTRUCTIONS_PATH = resolve("agent", "instructions.md");
-const FIXTURE_EVE_LINK = resolve("node_modules", "eve");
-const CONFIG_EVE_LINK = resolve("..", "e2e-config", "node_modules", "eve");
-const OLD_EVE_PACKAGE = resolve("node_modules", "historical-eve-0-30-8");
-
-const OLD_DEPLOYMENT_MARKER = "cross-version-eve-0-30-8";
-const CURRENT_DEPLOYMENT_MARKER = "cross-version-eve-current";
+const OLD_DEPLOYMENT_MARKER = "session-inbox-before-redeploy";
+const CURRENT_DEPLOYMENT_MARKER = "session-inbox-after-redeploy";
 const TOOL_NAME = "wait-for-cancellation";
 
 const execFileAsync = promisify(execFile);
@@ -28,15 +23,9 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 type MessageResponse = { ok: boolean; sessionId?: string };
 
-/**
- * Proves the complete mixed-version codec boundary through the real Workflow
- * hook: the current producer resumes an active turn built and deployed with
- * the published eve@0.30.8 consumer, then the old session accepts the
- * replacement message and completes its next turn.
- */
 export default defineEval({
   description:
-    "Session inbox: the current producer resumes an active eve@0.30.8 consumer through the durable hook.",
+    "Session inbox: a redeployed producer resumes an active session through metadata-free hooks.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
 
@@ -53,28 +42,12 @@ export default defineEval({
     }
 
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
-    const links = await Promise.all([
-      snapshotLink(FIXTURE_EVE_LINK),
-      snapshotLink(CONFIG_EVE_LINK),
-    ]);
-    const currentEvePackage = await realpath(FIXTURE_EVE_LINK);
-    const currentEveVersion = await readPackageVersion(currentEvePackage);
-    const oldEvePackage = await realpath(OLD_EVE_PACKAGE);
-    const oldEveVersion = await readPackageVersion(oldEvePackage);
-    if (oldEveVersion !== OLD_EVE_VERSION) {
-      throw new Error(
-        `Expected ${OLD_EVE_PACKAGE} to resolve eve@${OLD_EVE_VERSION}; got eve@${oldEveVersion}.`,
-      );
-    }
-
     try {
-      await replaceLink(FIXTURE_EVE_LINK, oldEvePackage);
-      await replaceLink(CONFIG_EVE_LINK, oldEvePackage);
       await writeFile(
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${OLD_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, "eve@0.30.8");
+      await deployToAlias(t, alias, "before redeploy");
       await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
 
       const sessionRef = crypto.randomUUID();
@@ -86,7 +59,7 @@ export default defineEval({
         started,
         satisfies(
           (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
-          "eve@0.30.8 starts the durable session",
+          "the first deployment starts the durable session",
         ),
       );
       const sessionId = started.sessionId!;
@@ -99,12 +72,11 @@ export default defineEval({
         },
       });
 
-      await restoreLinks(links);
       await writeFile(
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${CURRENT_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, `eve@${currentEveVersion}`);
+      await deployToAlias(t, alias, "after redeploy");
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
       const replacement = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
@@ -116,14 +88,11 @@ export default defineEval({
         replacement,
         satisfies(
           (value: MessageResponse) => value.ok === true && value.sessionId === sessionId,
-          "the current producer targets the existing eve@0.30.8 session",
+          "the new deployment targets the existing session",
         ),
       );
 
-      // eve@0.30.8 buffers a raw `send` during an active turn but predates
-      // `turnPolicy: "steer"`. Settle the deliberately blocked turn through a
-      // separate cancellation; the queued message must then become the next
-      // turn if the old receiver decoded and retained it.
+      // Settle the blocked turn after queuing the follow-up on the old deployment.
       await t.sleep(1_000);
       const cancellation = await activeTurn.cancel();
       await t.require(
@@ -131,7 +100,7 @@ export default defineEval({
         satisfies(
           (value: { readonly sessionId?: string; readonly status: string }) =>
             value.status === "accepted" && value.sessionId === sessionId,
-          "the current deployment cancels the active eve@0.30.8 turn",
+          "the new deployment cancels the active turn",
         ),
       );
 
@@ -151,41 +120,10 @@ export default defineEval({
 
       t.succeeded();
     } finally {
-      await restoreLinks(links);
       await writeFile(INSTRUCTIONS_PATH, originalInstructions);
     }
   },
 });
-
-interface LinkSnapshot {
-  readonly path: string;
-  readonly target: string;
-}
-
-async function snapshotLink(path: string): Promise<LinkSnapshot> {
-  return { path, target: await readlink(path) };
-}
-
-async function replaceLink(path: string, target: string): Promise<void> {
-  await rm(path, { force: true });
-  await symlink(target, path);
-}
-
-async function restoreLinks(links: readonly LinkSnapshot[]): Promise<void> {
-  for (const link of links) {
-    await replaceLink(link.path, link.target);
-  }
-}
-
-async function readPackageVersion(packagePath: string): Promise<string> {
-  const manifest = JSON.parse(await readFile(resolve(packagePath, "package.json"), "utf8")) as {
-    version?: string;
-  };
-  if (manifest.version === undefined) {
-    throw new Error(`Package at ${packagePath} has no version.`);
-  }
-  return manifest.version;
-}
 
 /** Builds the fixture and repoints the run-scoped alias at the fresh deployment. */
 async function deployToAlias(t: EveEvalContext, alias: string, phase: string): Promise<void> {

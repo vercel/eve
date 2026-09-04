@@ -136,7 +136,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  it("preserves the legacy delivery payload through a continuation alias", async () => {
+  it("preserves the delivery payload through a continuation alias", async () => {
     resumeHookMock.mockResolvedValue({ runId: "driver-run" });
     const caller = {
       callId: "call-1",
@@ -157,16 +157,19 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "driver-run", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("test:token"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
       caller,
+      deliveryMetadata: undefined,
       kind: "deliver",
       payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: "req_deliver",
-      version: 1,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+      version: 6,
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("dispatches commands through the stable session inbox", async () => {
@@ -181,6 +184,7 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       kind: "clear",
+      version: 6,
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -198,12 +202,14 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       auth: undefined,
       caller: undefined,
-      delivery: undefined,
-      kind: "send",
+      deliveryMetadata: undefined,
+      kind: "deliver",
       payload: { message: "hello" },
+      payloads: [{ message: "hello" }],
       requestId: undefined,
       taskDeliveryId: undefined,
       turnPolicy: undefined,
+      version: 6,
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -215,7 +221,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     { command: { kind: "reset" as const }, status: "no_active_session" },
   ])("maps a missing $command.kind target to $status", async ({ command, status }) => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
+    resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -250,7 +256,9 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       kind: "cancel",
+      tasks: undefined,
       turnId: "turn-2",
+      version: 6,
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -291,9 +299,9 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
-    getHookByTokenMock
-      .mockResolvedValueOnce(currentSessionHook("eve:token"))
-      .mockRejectedValue(new HookNotFoundError(sessionCommandHookToken("session-1")));
+    getHookByTokenMock.mockRejectedValue(
+      new HookNotFoundError(sessionCommandHookToken("session-1")),
+    );
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -301,10 +309,10 @@ describe("createWorkflowRuntime command dispatch", () => {
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("eve:token"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", {
       kind: "reset",
       reason: "User requested /new",
-      version: 1,
+      version: 6,
     });
     expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
@@ -312,7 +320,6 @@ describe("createWorkflowRuntime command dispatch", () => {
 
 function currentSessionHook(token: string) {
   return {
-    metadata: { sessionInboxWireVersion: 1 },
     runId: "target-session",
     token,
   };

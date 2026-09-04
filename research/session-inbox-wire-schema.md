@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-04"
 ---
 
 # Versioned wire schema for the session inbox
@@ -62,8 +62,8 @@ encodeSessionCommandV1(input) // build → parse complete value once → persist
 // execution/wire/session-inbox-wire.v0.ts (dependency-free, temporary)
 export const sessionInboxWireV0Migration: VersionMigration = { from: 0, to: 1, migrate };
 
-// Server/step-safe encoder facade selects the target consumer's version.
-sessionInboxWire.encode(input, target)
+// Server/step-safe producers always select the current version.
+sessionInboxWire.encode(input, { version: SESSION_INBOX_WIRE_VERSION })
 
 // Workflow-safe decoder: execution/wire/session-inbox-wire.ts
 import type { SessionInboxWireV1 } from "./session-inbox-wire.v1.js";
@@ -83,7 +83,7 @@ Normative rules:
   owns the immutable schema and version-bound encoder. A
   `*.vN.migration.ts` module is a pure data transform with no normalization or
   version-selection dependencies. The encoder and decoder facades own mutable
-  policy: selecting a target, assembling the chain, and normalizing values
+  policy: emitting the current version, assembling the chain, and normalizing values
   received from another Workflow VM realm.
 - **The complete transported value is validated once, at encode.** The
   schema owns the envelope and every eve-owned `DeliverPayload` field,
@@ -116,58 +116,32 @@ Normative rules:
 
 ## Version signals and their semantics
 
-Two complementary signals, each covering the other's blind side:
+Producers validate and send the current inbox wire format directly by hook token.
+The payload's `version` is the only version signal. Consumers retain the migration
+chain for replaying older persisted payloads and reject unknown newer versions.
 
-```text
-producer ──getHookByToken──▶ hook.metadata.sessionInboxWireVersion
-                                              (what can they decode?)
-producer ──resumeHook──────▶ { version: N, ... }        (what did I send?)
-consumer ──decode──────────▶ known version → typed payload
-                             unknown version → loud failure, session stays alive
-```
+Inbox hooks carry no metadata. The removed `sessionInboxWireVersion` stamp had
+one purpose: choosing an encoder for sessions pinned to older deployments. It
+was written on the stable inbox, every channel alias (including replacements),
+and the authorization callback. Workflow hydrates hook metadata during token
+lookup, which requires resolving the run's encryption key even for an ordinary
+resume. Omitting metadata removes that read-side key lookup from newly created
+hooks.
 
-- **Envelope `version` (consumer-facing).** Every versioned payload carries
-  `version`. Decode of an unrecognized `version` **must not** fall through to
-  any legacy interpretation: it raises `SessionInboxWireError`, which the driver
-  surfaces through a recorded reporting step (a durable trace in the run's
-  event log plus a structured error log — the driver body cannot log
-  directly, since logging pulls Node builtins the workflow bundle rejects),
-  then keeps the session parked. A lost delivery with an operator-visible
-  signal is the designed failure; a reinterpreted delivery is the bug this
-  plan removes. A channel-visible error event **may** be added when the
-  pattern generalizes beyond the session inbox.
-- **Hook metadata stamp (producer-facing).** Consumers stamp
-  `metadata: { sessionInboxWireVersion }` at `createHook`. The producer reads
-  the capability marker and passes the resulting target to
-  `sessionInboxWire.encode`.
-- **Markerless historical classification.** Version 0 had two incompatible
-  shapes. A markerless stable session inbox, or a markerless continuation hook
-  whose run owns that stable inbox, receives raw `send`. That shape is required
-  by eve 0.30.5–0.31.0 and remains accepted by later pre-stamp stable-inbox
-  consumers. A markerless continuation without the stable inbox identifies eve
-  ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
-  capability rather than guessing from deployment or package metadata.
-- **Cost boundary.** Every producer performs one target `getHookByToken`
-  before `resumeHook`. Markerless continuation hooks require one additional
-  lookup for the stable-inbox capability. `resumeHook` receives the inspected
-  hook object, preventing the encoding decision from being applied to a
-  different hook that later reused the same token.
+`resumeSessionInbox` performs no capability lookup, historical consumer
+classification, or fallback. It validates the current payload and calls
+`resumeHook(token, payload)`, so Workflow owns token resolution and resume
+idempotency. No replacement capability store or additional hook is needed.
 
-## Compatibility and payoff timeline
+## Compatibility
 
-The producer now emits the consumer's actual contract: markerless legacy
-continuations receive unversioned `deliver`, markerless stable-inbox consumers
-receive unversioned `send` (required by eve 0.30.5–0.31.0), and stamped
-consumers receive their declared version.
+Sessions pinned to an older inbox wire format must be restarted when upgrading.
+Deployment changes using the same inbox format continue to work. Already
+persisted payloads still decode through the versioned migration chain; historical
+schemas, encoders, and frozen fixtures remain as protocol history.
 
-| Phase                                               | Emit                                                        | Removable                                                                      |
-| --------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Now                                                 | v0 `deliver`, v0 `send`, or v1 according to the target hook | —                                                                              |
-| Pre-stamp cohorts aged out (30-day session timeout) | current version to stamped hooks                            | markerless classifier and both v0 encoders                                     |
-| Pre-version payloads aged out                       | current version only                                        | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
-
-Each removable row already has its condition written next to the code it
-deletes; #1765 tracks the cleanups.
+Removing the stamp does not erase metadata already persisted by older deployments.
+Those hooks continue to incur Workflow's metadata hydration cost until they end.
 
 ## Enforcement
 
@@ -197,7 +171,7 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   unregistered or untested protocol history.
 - Enforcement is layered by what each CI job can check. Rule 40 runs in the
   lint job and compares declared versions with shipped modules and tests.
-  TypeScript requires an encoder for every registered stamped version. The
+  TypeScript requires an encoder for every registered wire version. The
   required unit tier then encodes and decodes every registry entry, while each
   version's frozen contract pins its exact shape and backwards migration.
 - Rule 40 also freezes pure `*.vN.migration.ts` modules with their tests and
@@ -206,10 +180,10 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   soon as the approved rewrite reaches `main`.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
-  deterministic registry checks cover future stamped-version changes. The
-  agent-channels cross-version redeploy eval remains the end-to-end backstop
-  for the pre-versioning gap: it runs the current producer against an actual
-  eve@0.30.8 consumer.
+  deterministic registry checks cover future wire-version changes. The
+  agent-channels session-inbox redeploy eval verifies that a new deployment can
+  deliver and cancel through an existing metadata-free inbox using the same
+  wire format.
 
 ## Alternatives considered
 

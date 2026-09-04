@@ -7,10 +7,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import {
-  SESSION_INBOX_WIRE_VERSION,
-  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
-} from "#execution/wire/session-inbox-contract.js";
+
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
@@ -131,16 +128,8 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   const createState = (token: string): SessionCommandHookState => {
-    // Stamp the consumer's wire capability so producers can select an encoder
-    // pre-resume. Hooks created before this stamp carry no wire marker:
-    // markerless means the consumer predates the capability and accepts a
-    // legacy shape.
-    const hook = createHook<SessionInboxPayload>({
-      metadata: {
-        [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
-      },
-      token,
-    });
+    // Metadata forces Workflow to resolve the run's encryption key on token lookup.
+    const hook = createHook<SessionInboxPayload>({ token });
     return {
       closed: false,
       enabled: false,

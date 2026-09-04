@@ -21,7 +21,7 @@ describe("session inbox consumer compatibility", () => {
     expect(receiver.bufferedDeliveries).toEqual([expectedDelivery]);
   });
 
-  it("keeps current sends readable by the published eve 0.30.8 turn receiver", async () => {
+  it("keeps the frozen v0 send shape readable by the published eve 0.30.8 turn receiver", async () => {
     const receiver = await createEve0308TurnControlReceiver();
     const wire = sessionInboxWire.encode(
       { kind: "send", payload: { message: "follow-up" } },

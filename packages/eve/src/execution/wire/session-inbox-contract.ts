@@ -1,4 +1,4 @@
-/** Every explicit session-inbox wire version still supported by producers. */
+/** Every explicit session-inbox wire version retained as protocol history. */
 export const SESSION_INBOX_WIRE_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
 
 export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[number];
@@ -7,11 +7,8 @@ export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[numbe
 export const SESSION_INBOX_WIRE_VERSION =
   SESSION_INBOX_WIRE_VERSIONS[SESSION_INBOX_WIRE_VERSIONS.length - 1]!;
 
-/** Hook metadata field advertising the consumer's inbox wire capability. */
-export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";
-
 /**
- * The consumer wire selected before a producer persists a payload.
+ * A wire format retained by the encoder for current sends and historical fixtures.
  *
  * Version 0 had two incompatible unversioned shapes, so its historical
  * variants remain explicit rather than pretending they were one protocol.

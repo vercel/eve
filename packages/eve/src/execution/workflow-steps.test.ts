@@ -286,16 +286,19 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("child-token"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,
       caller: undefined,
+      deliveryMetadata: undefined,
       kind: "deliver",
       payload: {
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
       },
       payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
       requestId: undefined,
-      version: 1,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+      version: 6,
     });
   });
 
@@ -356,7 +359,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook("child-token-a"),
+      "child-token-a",
       expect.objectContaining({
         ...delivery,
         deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
@@ -364,7 +367,7 @@ describe("routeProxiedDeliverStep", () => {
       }),
     );
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook("child-token-b"),
+      "child-token-b",
       expect.objectContaining({
         auth,
         caller,
@@ -547,7 +550,6 @@ describe("routeProxiedDeliverStep", () => {
 
 function currentSessionHook(token: string) {
   return {
-    metadata: { sessionInboxWireVersion: 1 },
     runId: "child-run",
     token,
   };
