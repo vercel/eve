@@ -107,6 +107,9 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  */
 export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
 
+/** Static landing page shown after an interactive authorization callback completes. */
+export const EVE_AUTHORIZATION_COMPLETE_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/connections/authorization-complete`;
+
 /** Callback shape minted by deployments before authorization attempt IDs. */
 export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
 

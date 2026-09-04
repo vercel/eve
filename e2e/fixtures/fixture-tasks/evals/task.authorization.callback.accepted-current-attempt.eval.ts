@@ -47,10 +47,17 @@ export default defineTaskEval({
     if (webhookUrl === undefined) throw new Error("C7 authorization.required had no webhook URL.");
     const callback = new URL(webhookUrl);
     callback.searchParams.set("code", AUTHORIZATION_CODE);
-    const callbackResponse = await fetch(callback, {
-      method: "GET",
+    // Callback URLs no longer carry a deployment-protection bypass, so the
+    // request goes through the authenticated target client instead of a bare
+    // fetch that a protected deployment would redirect to SSO.
+    const callbackResponse = await t.target.fetch(`${callback.pathname}${callback.search}`, {
+      redirect: "manual",
     });
-    await t.require(callbackResponse.status, equals(200));
+    await t.require(callbackResponse.status, equals(303));
+    await t.require(
+      callbackResponse.headers.get("location"),
+      equals("/eve/v1/connections/authorization-complete"),
+    );
 
     const completed = await waitForAuthorizationEvent(
       t,
