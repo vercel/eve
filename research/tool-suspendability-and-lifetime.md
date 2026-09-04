@@ -8,6 +8,10 @@ last_updated: "2026-09-03"
 
 ## 1. Summary
 
+The proposal uses workflow-local bindings for execution data, ordinary yields
+for silent progress, and `yield task.postMessage(...)` for parent messages.
+There is no `task.setState()` or authored `TaskView.state`.
+
 An authored tool has two independent properties that eve encodes as two
 unrelated flags and re-derives with `if` chains at every consumer:
 
@@ -25,6 +29,13 @@ already exist for waiting workflow tools: `ask` for the human, and
 `ctx.getToken`/`ctx.requireAuth` inside a step for the provider. The latter is
 a blocker today for any Connect-backed workflow tool and is in scope.
 
+[Implementation PR #2997](https://github.com/vercel/eve/pull/2997) implements
+the compiled shape, fixed receipt, progress and message yields, and removal of
+`task.delegated()`. Step-scoped provider authorization (§3.2), cancellation of
+parked bodies (§7), consolidation of inbound messages (§4.1), and removal of
+the remaining deprecated `TaskExec` fields (§6) are still proposed work. The
+Devbox example below depends on the authorization and cancellation work.
+
 Motivating case: [vercel/internal-agents#2173](https://github.com/vercel/internal-agents/pull/2173)
 runs Devbox as a background tool and had to build a relay workflow, a webhook
 route, and a `session.completed` adapter because a background `execute()`
@@ -40,8 +51,8 @@ cannot park on an external webhook or resolve the requester's token.
 Every cell exists today. What changes: the pair is data the compiler writes
 once (§5), the same `task` capability means the same thing in both task cells,
 and a background workflow body receives `task` at all — today it is silently
-absent. `execution: "background"` selects the task row; the directive selects
-the workflow column; there is no combined enum.
+absent. `execution: "background"` selects the task column; the directive selects
+the workflow row; there is no combined enum.
 
 ## 3. Authoring API
 
@@ -250,11 +261,18 @@ task instead of the framework's `Background task … update:` prose, deduplicate
 by the same delivery id. The receiving turn runs under the existing
 task-delivery policy.
 
+Use one `TaskInboundMessage` contract for parent-bound traffic, subsuming
+`TaskInboundUpdate` rather than keeping separate message and update queues.
+Subagent updates retain their formatting and delivery policy. `TaskProgress`
+remains the stream-only contract. The shared delivery path must preserve
+deduplication ids, buffer messages until dispatch acknowledgement, and drain
+persisted reports before task completion.
+
 ### 4.2 Wiring
 
 - `runBody` already sends each yield as a `RunReport`. The owner maps
   `TaskMessage` → parent `send`, untagged → progress on the stream. Subagent
-  reports retain the `wakeTaskUpdateParentStep` path.
+  reports retain their parent wakes through the shared message path.
 - `createWorkflowToolBackgroundExecute` returns `{ status: "working", taskId }` after task admission. It never waits for a body yield.
 - The `"Background tools cannot return AsyncIterable"` guard goes; the
   ordinary background executor iterates the body, routes progress and messages,
@@ -290,11 +308,16 @@ From the public `TaskExec`: `delegated()` and `TaskExecutorBinding` (a tool
 parks on the external system from a workflow body instead of handing off by
 sentinel; the seam stays internal), `send()` (not restart-safe by its own
 contract; dominated by `yield`), `binding` (the framework callback wire stops
-being reachable from authored code), and `session` (use `ctx.session`).
+being reachable from authored code), `session` (use `ctx.session`), and `task`
+(the durable task internals remain framework-owned).
 
 Pre-1.0: no shim. The only known external consumer is the Devbox bridge; §3.3
 is its replacement. The `agent-background-tools/export.ts` fixture is rewritten
 as a workflow body.
+
+Extension manifests requiring removed delegation contracts are rejected before
+their code runs. Keep the historical contract fixtures immutable, but compile
+only the versions still declared supported.
 
 ## 7. Cancellation
 
