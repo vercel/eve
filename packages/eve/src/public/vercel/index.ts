@@ -53,30 +53,45 @@ export interface WithEveOptions {
 }
 
 function toInternalConfig(config: EveVercelConfig): VercelServicesConfig {
-  return config as unknown as VercelServicesConfig;
+  return config as VercelServicesConfig;
+}
+
+function assertUniqueNamedServices(services: EveVercelConfig["services"]): void {
+  if (!Array.isArray(services)) return;
+
+  const seen = new Set<string>();
+  for (const service of services) {
+    if (seen.has(service.name)) {
+      throw new Error(
+        `withEve received duplicate Vercel service name ${JSON.stringify(service.name)}. Give every entry in the services array a unique name.`,
+      );
+    }
+    seen.add(service.name);
+  }
 }
 
 function assertComposableConfig(config: EveVercelConfig, agentNames: readonly string[]): void {
   if (config.experimentalServices !== undefined || config.experimentalServicesV2 !== undefined) {
     throw new Error(
-      "withEve does not support experimentalServices. Use services or remove the obsolete configuration.",
+      "withEve cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
     );
   }
 
+  assertUniqueNamedServices(config.services);
   const internalConfig = toInternalConfig(config);
   const services = createServiceConfigRecord(internalConfig.services);
   for (const name of agentNames) {
     const serviceName = createEveServiceName(name);
-    if (services[serviceName] !== undefined) {
+    if (Object.hasOwn(services, serviceName)) {
       throw new Error(
-        `Vercel service ${JSON.stringify(serviceName)} is reserved for eve workspace agent ${JSON.stringify(name)}.`,
+        `Vercel service key ${JSON.stringify(serviceName)} conflicts with the service generated for eve workspace agent ${JSON.stringify(name)}. Remove or rename the authored service; withEve owns this key.`,
       );
     }
 
     const routeSrc = createEveServiceRouteSrc(`/${name}`);
     if (config.routes?.some((route) => route.src === routeSrc)) {
       throw new Error(
-        `Vercel route ${JSON.stringify(routeSrc)} is reserved for eve workspace agent ${JSON.stringify(name)}.`,
+        `Vercel route ${JSON.stringify(routeSrc)} conflicts with the transport route generated for eve workspace agent ${JSON.stringify(name)}. Remove the authored route; withEve adds it automatically.`,
       );
     }
   }
@@ -104,6 +119,12 @@ export async function withEve<TConfig extends EveVercelConfig>(
   }
 
   const { workspace } = context;
+  if (workspace.members.length === 0) {
+    throw new Error(
+      `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,
+    );
+  }
+
   const agentNames = workspace.members.map((member) => member.name);
   const generatedServiceNames = new Set(agentNames.map(createEveServiceName));
   assertComposableConfig(config, agentNames);

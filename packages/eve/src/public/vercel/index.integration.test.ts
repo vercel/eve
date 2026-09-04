@@ -80,15 +80,60 @@ describe("withEve", () => {
     await expect(access(marker)).resolves.toBeUndefined();
   });
 
-  it("reserves generated service names and transport routes", async () => {
+  it("rejects authored service keys owned by generated agents", async () => {
     const root = await createWorkspace();
 
     await expect(
       withEve({ services: { "eve-support": { framework: "nextjs" } } }, { root }),
-    ).rejects.toThrow(/eve-support.*reserved/);
+    ).rejects.toThrow(
+      'Vercel service key "eve-support" conflicts with the service generated for eve workspace agent "support". Remove or rename the authored service; withEve owns this key.',
+    );
+  });
+
+  it("rejects authored routes owned by generated agents", async () => {
+    const root = await createWorkspace();
+
     await expect(
       withEve({ routes: [{ src: "^/support/eve/v1/(.*)$" }] }, { root }),
-    ).rejects.toThrow(/route.*support.*reserved/);
+    ).rejects.toThrow(
+      'Vercel route "^/support/eve/v1/(.*)$" conflicts with the transport route generated for eve workspace agent "support". Remove the authored route; withEve adds it automatically.',
+    );
+  });
+
+  it("rejects duplicate names in a service array", async () => {
+    const root = await createWorkspace();
+
+    await expect(
+      withEve(
+        {
+          services: [
+            { framework: "nextjs", name: "web", root: "apps/first" },
+            { framework: "nuxtjs", name: "web", root: "apps/second" },
+          ],
+        },
+        { root },
+      ),
+    ).rejects.toThrow(
+      'withEve received duplicate Vercel service name "web". Give every entry in the services array a unique name.',
+    );
+  });
+
+  it("rejects obsolete service fields", async () => {
+    const root = await createWorkspace();
+
+    await expect(withEve({ experimentalServicesV2: {} }, { root })).rejects.toThrow(
+      "withEve cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
+    );
+  });
+
+  it("requires at least one workspace agent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-vercel-config-empty-workspace-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+    await mkdir(join(root, "agents"));
+
+    await expect(withEve({}, { root })).rejects.toThrow(
+      `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,
+    );
   });
 
   it("requires an eve workspace root", async () => {
