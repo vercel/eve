@@ -86,14 +86,16 @@ short-lived request span as its parent.
 
 ## Callback delivery errors
 
-Failed outbound callback attempts emit an error-level
+Failed outbound session and task callback attempts emit an error-level
 `[eve:execution.session-callback] callback delivery failed` runtime log without
 requiring an instrumentation provider. Filter by `statusCode` for HTTP failures
 or `failure` (`http`, `transport`, or `timeout`). The log includes the callback
 origin, token-redacted route, payload kind, and available call, task, and child
 session identifiers. Payload content, credentials, and callback tokens are
 excluded. Each retry can emit a separate error; logging does not change Workflow
-retry behavior or make best-effort activity delivery fatal.
+retry behavior. Best-effort activity delivery keeps its single
+`[eve:execution.activity-submit] activity sink request failed` warning and does
+not mark the active span as failed.
 
 ## Runtime context
 

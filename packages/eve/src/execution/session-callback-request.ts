@@ -14,6 +14,8 @@ const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 /** Posts one framework callback payload with the shared callback transport policy. */
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
+  /** Set false when the caller owns failure logging, such as best-effort activity. */
+  readonly logFailures?: boolean;
   readonly timeoutMs?: number;
   readonly url: string;
 }): Promise<Response> {
@@ -34,15 +36,17 @@ export async function postSessionCallbackRequest(input: {
   } catch (error) {
     // Fetch errors can contain the capability URL or credentials in their
     // cause chain. Log a safe summary, but preserve the original rejection.
-    log.error("callback delivery failed", {
-      ...callbackLogFields(input),
-      failure: signal.aborted ? "timeout" : "transport",
-      timeoutMs,
-      error: new Error("Callback request failed before receiving a response."),
-    });
+    if (input.logFailures !== false) {
+      log.error("callback delivery failed", {
+        ...callbackLogFields(input),
+        failure: signal.aborted ? "timeout" : "transport",
+        timeoutMs,
+        error: new Error("Callback request failed before receiving a response."),
+      });
+    }
     throw error;
   }
-  if (!response.ok) {
+  if (!response.ok && input.logFailures !== false) {
     log.error("callback delivery failed", {
       ...callbackLogFields(input),
       failure: "http",
