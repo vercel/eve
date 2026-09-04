@@ -18,7 +18,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
     config.experimentalServicesV2 !== undefined
   ) {
     throw new Error(
-      "This project defines its Vercel service graph in vercel.json. Run `vercel build` to build the complete project, or run `eve build` from an individual agent directory.",
+      "This project defines its Vercel service graph in vercel.json. Compose generated workspace agents from a programmatic vercel.ts with `withEve` from `eve/vercel`, manually define every service and run `vercel build`, or run `eve build` from an individual agent directory.",
     );
   }
 

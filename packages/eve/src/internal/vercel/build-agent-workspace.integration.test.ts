@@ -93,6 +93,6 @@ describe("buildAgentWorkspace", () => {
     const root = await createWorkspace();
     await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
     const workspace = await resolveWorkspace(root);
-    await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/Run `vercel build`/);
+    await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/vercel\.ts.*eve\/vercel/);
   });
 });
