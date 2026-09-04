@@ -104,6 +104,11 @@ export function isToolSchema(value: unknown): value is ToolSchema {
   );
 }
 
+/** Returns whether a value provides live Standard Schema validation. */
+export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
+  return typeof getStandardSchemaProperties(value)?.validate === "function";
+}
+
 /**
  * Permissive schema lowered onto model-visible tools whose definitions
  * declare no input schema. Accepts any input — an absent schema declares no
