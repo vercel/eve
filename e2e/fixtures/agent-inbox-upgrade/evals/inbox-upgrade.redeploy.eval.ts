@@ -144,14 +144,22 @@ export default defineEval({
         receipt.taskId,
         backgroundExecution,
       );
-      const afterTask = await followCodeDeployment(
-        t,
-        completedBackground,
-        "aftertask",
-        NEW_MARKER,
-        [oldExecution],
-      );
-      await requireExecution(t, afterTask.execution, NEW_MARKER, newExecution.deploymentId);
+      let backgroundFollowupError: Error | undefined;
+      try {
+        const afterTask = await followCodeDeployment(
+          t,
+          completedBackground,
+          "aftertask",
+          NEW_MARKER,
+          [oldExecution],
+        );
+        await requireExecution(t, afterTask.execution, NEW_MARKER, newExecution.deploymentId);
+      } catch (error) {
+        if (t.signal.aborted) throw error;
+        // Preserve this failure while collecting evidence from the independent rollback cohorts.
+        backgroundFollowupError = error instanceof Error ? error : new Error(String(error));
+        t.log(`Background follow-up failed: ${backgroundFollowupError.message}`);
+      }
 
       const fresh = await createSessionOnDeployment(t, sessions, newExecution, oldExecution);
 
@@ -167,6 +175,7 @@ export default defineEval({
         rollbackDeploymentId ??= rollback.execution.deploymentId;
         await requireExecution(t, rollback.execution, OLD_MARKER, rollbackDeploymentId);
       }
+      if (backgroundFollowupError !== undefined) throw backgroundFollowupError;
     } finally {
       // These isolated fixture sessions have finished the probe; retire their durable resources.
       for (const session of sessions) {
