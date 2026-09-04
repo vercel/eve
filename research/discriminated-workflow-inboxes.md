@@ -737,7 +737,11 @@ The published-consumer probe now requires the formerly failing task-owning
 session to accept its next message on retained code, then admit, answer, and
 finish another background task. It also starts new blocking work after upgrade,
 verifies current code for fresh sessions, and checks both cohorts through
-agent-code rollback. Hosted results for this implementation are pending.
+agent-code rollback. The [hosted run at `e8d44a692`](https://github.com/vercel/eve/actions/runs/33900278614/job/101112516239)
+passed all 56 checks on 2026-09-04. The old task-owning session accepted its next
+message, completed new background work, and remained usable through rollback;
+the fresh session ran current and rolled-back code. The retained `0.30.8`
+consumer test and the Local/Postgres fixture baselines also passed.
 Self-hosted retained-generation routing and full runtime downgrade remain
 unimplemented release gates.
 
