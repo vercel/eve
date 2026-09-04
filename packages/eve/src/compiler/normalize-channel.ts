@@ -1,6 +1,7 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
+import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
 import type { CompiledChannelDefinition } from "#compiler/manifest.js";
 import {
@@ -59,6 +60,11 @@ export async function compileChannelDefinition(
       exportName: source.exportName,
       adapterKind: extractAdapterKind(definition.adapter),
       cors: definition.cors,
+      vercelConnect: extractVercelConnectMetadata(
+        rawValue === null || typeof rawValue !== "object"
+          ? undefined
+          : (rawValue as { readonly vercelConnect?: unknown }).vercelConnect,
+      ),
     })),
     kind: "channel",
   };

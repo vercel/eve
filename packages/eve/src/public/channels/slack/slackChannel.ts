@@ -992,7 +992,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
     renderers: activityRenderers,
   });
-  return channel;
+  const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
+  return Object.assign(channel, {
+    vercelConnect: credentials?.vercelConnect,
+  });
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
