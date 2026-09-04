@@ -8,17 +8,16 @@ A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/too
 `"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
 delegate work to subagents, or coordinate retryable steps over a long period.
 
-By default, the model's tool call waits for the run's return value. While the run is suspended, the
-turn is parked and holds no compute. Set `execution: "background"` when the conversation should
-continue; the model receives a task receipt, and eve wakes the agent with the result when the run
-ends.
+Durable suspension and background execution are independent. `defineWorkflowTool` lets the body
+suspend at durable waits without holding compute. `execution: "background"` determines whether
+the parent agent receives a task receipt and continues before the body finishes. A workflow can
+suspend in either execution mode; running in the background does not require a suspension.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel and `ctx.agent` for durable subagent delegation. A waiting workflow's `yield`
-is turn progress. A background workflow also receives `task`: yield an ordinary value for
-stream-only progress or `task.postMessage(...)` to wake the parent agent with one message.
-Values needed after a durable wait stay in local variables in the workflow body.
+the session's channel and `ctx.agent` for durable subagent delegation. Use `yield` to report
+progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
+stay in local variables in the workflow body.
 
 A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
 as `deploy`.
@@ -102,18 +101,51 @@ The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`, `
 
 ## Wait or run in the background
 
-|                          | default                             | `execution: "background"`                   |
-| ------------------------ | ----------------------------------- | ------------------------------------------- |
-| tool result              | the run's return value              | `{ status: "working", taskId }`             |
-| turn while the run lives | parked                              | continues                                   |
-| when the run ends        | result lands in the tool call       | agent is woken with the result or the error |
-| progress (`yield`)       | `action.partial` on the turn        | stream-only; does not wake the agent        |
-| parent message           | not applicable                      | `yield task.postMessage(...)`               |
-| cancel                   | cancelling the turn cancels the run | `task_cancel`, or the session ending        |
+Both modes support the same durable waits. Choose the execution mode based on when the parent
+agent should receive a tool result:
 
-Wait when the model needs the answer to continue. Go background when the wait may outlive the
-conversation or the user should keep talking in the meantime. Background tools need no root-agent
-flag.
+|                              | Default execution                                   | `execution: "background"`                                            |
+| ---------------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
+| Tool result                  | The workflow's output after it finishes.            | `{ status: "working", taskId }` before the body finishes.            |
+| Parent turn                  | Waits for this tool call to finish.                 | Continues after receiving the receipt.                               |
+| Durable wait inside the body | Suspends the workflow; the tool call stays pending. | Suspends the workflow; the parent can continue independently.        |
+| When the run ends            | Settles the pending tool call.                      | Sends a task completion or failure notification to the parent agent. |
+| Cancel                       | Cancelling the turn cancels the run.                | `task_cancel`, or the session ending.                                |
+
+Use default execution when the model needs the answer to continue. Use background execution when
+the conversation should continue while the task is pending. Background tools need no root-agent
+flag. Ordinary `defineTool` also accepts `execution: "background"`, but its executor still runs
+inside the initiating step and cannot suspend at workflow waits. See the
+[tool execution comparison](/docs/tools#background-execution).
+
+### How suspension works
+
+Suspension happens when a workflow must wait for an unresolved durable operation, such as
+`ctx.ask`, an awaited hook or webhook, or `sleep`. The runtime persists the wait and releases the
+workflow's compute. When the answer, event, or timer arrives, the runtime replays the workflow,
+reuses recorded step results, and continues past the wait. Put side effects in `"use step"`
+functions so replay does not repeat completed effects.
+
+Consider a body that reports progress and then asks for approval:
+
+```ts
+async *execute(input, ctx) {
+  "use workflow";
+  yield { status: "awaiting approval" };
+  const answer = await ctx.ask({ prompt: "Continue?", display: "confirmation" });
+  return { answer };
+}
+```
+
+The yield reports a snapshot, and eve advances the generator to `ctx.ask`. Awaiting the unanswered
+request is the durable wait. In default execution, the original tool call remains pending until
+the answer arrives and the body returns. With `execution: "background"`, the original call has
+already returned a task receipt, and the workflow can suspend while the conversation continues.
+Answering resumes the body in either mode.
+
+`yield` itself does not wait for approval or switch a tool into background execution. An ordinary
+Promise or Node.js timer inside a step also does not create a durable workflow suspension; use
+the workflow operations for waits that must survive a restart.
 
 ## Ask a human: `ctx.ask`
 
@@ -166,24 +198,49 @@ keys. `target` is the model-visible subagent name; pass `agentId` to continue an
 
 ## Report progress: `yield`
 
-A workflow body may be an async generator. Each ordinary `yield` reports progress; the return
-value is the result. If the body returns nothing, a waiting tool uses its last yield and a
-background tool completes with `null`.
+A workflow body may be an async generator. Ordinary yields report progress in both execution
+modes. After processing a yield, eve advances the generator; use an awaited workflow operation
+when the body needs to suspend.
 
-```ts
-async *execute({ service }, ctx) {
-  "use workflow";
-  yield { status: "planning" };
-  const plan = await planDeploy(service);
-  yield { status: "deploying" };
-  return { deployed: true, url: await applyDeploy(plan) };
-}
+| Operation                         | Default execution                                                 | `execution: "background"`                                              |
+| --------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `yield value`                     | Emits an `action.partial` snapshot for the pending tool call.     | Emits stream-only task progress; does not request a parent-agent turn. |
+| `yield task.postMessage(message)` | Unavailable; there is no `task` argument.                         | Sends a message requesting a parent-agent turn; the task stays open.   |
+| `return value`                    | Settles the tool call with its output.                            | Completes the task and delivers its output in a later notification.    |
+| No return value                   | Uses the last yield as output, or `null` if there were no yields. | Completes with `null`; yielded progress is not the task output.        |
+
+For default execution, an explicit `return null` also falls back to the last yield. Prefer an
+explicit object return when progress snapshots and the final result have different shapes.
+Progress snapshots are last-write-wins by tool call id and do not enter model history as
+intermediate tool results. A snapshot used as the final output does enter history as the tool result.
+
+This background workflow reports progress, sends the parent one message, and then suspends:
+
+```ts title="agent/tools/remind_with_progress.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "workflow";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Schedule a reminder and report progress before waiting.",
+  inputSchema: z.object({ note: z.string(), delay: z.string() }),
+  execution: "background",
+  async *execute({ note, delay }, ctx, task) {
+    "use workflow";
+    yield { status: "preparing reminder" }; // Stream-only progress.
+    yield task.postMessage(`Reminder scheduled for ${delay}.`); // Parent-agent message.
+    await sleep(delay); // Durable suspension while the timer is pending.
+    return { reminder: note }; // Task completion notification.
+  },
+});
 ```
 
-For a waiting tool each `yield` streams as an `action.partial` event, last-write-wins by tool call
-id, and never enters model history — the same contract as an in-process generator tool. For a
-background tool ordinary yields are stream-only; `yield task.postMessage(message)` wakes the
-owning agent. Returning ends the run with the result; throwing ends it with the failure.
+Calling `task.postMessage` constructs a descriptor; yielding it sends the message. It does not
+wait for a reply. Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer.
+Removing `execution: "background"` requires removing the `task` argument and message yield; the
+ordinary progress yield and `await sleep(delay)` still work, but the model waits for the final
+reminder as the tool result. See [yield and return](/docs/tools#yield-and-return) for the different
+final-output rules of ordinary `defineTool` generators.
 
 ## Cancel and clean up: `ctx.abortSignal`
 
