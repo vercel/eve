@@ -419,7 +419,10 @@ describe("dispatchAndAwaitTurn", () => {
       serializedContext: {},
       sessionState: state,
     });
-    vi.mocked(forwardTurnCancellationStep).mockImplementationOnce(async () => forwarded.resolve());
+    vi.mocked(forwardTurnCancellationStep).mockImplementationOnce(async () => {
+      forwarded.resolve();
+      return true;
+    });
     createHookMock.mockReturnValue(
       createMockHook(async () => {
         await forwarded.promise;

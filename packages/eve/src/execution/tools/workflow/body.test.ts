@@ -21,7 +21,7 @@ it("binds workflow-only methods to the run context", async () => {
     stepIndex: 0,
     toolName: "deploy",
     workflowId: "workflow//test//execute",
-    owner: { report: "report" },
+    owner: { inbox: "inbox" },
     execution: "blocking",
     runId: "run",
   } as WorkflowBodyInput & { execution: "blocking"; runId: string };
