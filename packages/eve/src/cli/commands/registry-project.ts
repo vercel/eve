@@ -8,6 +8,7 @@ import {
   parse as parseJsonc,
 } from "#compiled/jsonc-parser/index.js";
 import type { RegistryConfig, RegistrySource } from "#compiled/shadcn-registry/index.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { WEB_APP_TEMPLATE_FILES } from "#setup/scaffold/create/web-template.js";
 
 interface RegistryPackage {
@@ -81,6 +82,13 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
     );
   }
   return { namespace, url };
+}
+
+export async function assertCanInstallWebChat(appRoot: string): Promise<void> {
+  if ((await resolveEveProjectContext(appRoot)).kind === "standalone") return;
+  throw new Error(
+    "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+  );
 }
 
 /** Reads registry namespace mappings from package.json. */
