@@ -84,6 +84,17 @@ The built-in OpenTelemetry provider maps each pair to an
 span links to it with `eve.link.type=channel.request` rather than using the
 short-lived request span as its parent.
 
+## Callback delivery errors
+
+Failed outbound callback attempts emit an error-level
+`[eve:execution.session-callback] callback delivery failed` runtime log without
+requiring an instrumentation provider. Filter by `statusCode` for HTTP failures
+or `failure` (`http`, `transport`, or `timeout`). The log includes the callback
+origin, token-redacted route, payload kind, and available call, task, and child
+session identifiers. Payload content, credentials, and callback tokens are
+excluded. Each retry can emit a separate error; logging does not change Workflow
+retry behavior or make best-effort activity delivery fatal.
+
 ## Runtime context
 
 _Runtime context_ is an [AI SDK concept](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text): a user-defined object that flows through a generation lifecycle. eve exposes it through `events["step.started"]`, a callback that runs once eve has assembled the model input for an attempt and returns `{ runtimeContext }`. Because eve registers the AI SDK's OpenTelemetry integration with runtime context enabled, those returned values ride onto the model-call span and its children. The field is named `runtimeContext`, not `metadata`, because AI SDK v7 carries per-call attributes on runtime context rather than a dedicated metadata field.
