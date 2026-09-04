@@ -5,6 +5,7 @@ import {
   requireTaskView,
   waitForCompletedTask,
   waitForTaskInput,
+  waitForTaskNotification,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
@@ -12,10 +13,10 @@ const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:user:remote-http-child";
 
 /**
  * Also covers the /eve/v1 callback-prefix regression (#3047): vercel.json
- * mounts this fixture at /eve/v1. The Vercel build check asserts the emitted
- * callback path is /eve/v1/callback/<token>, never /eve/v1/eve/v1/callback/<token>.
- * This existing eval then proves the child can deliver HITL and its final result
- * to the parent over that callback, and resume over its persisted HTTP route.
+ * mounts this fixture at /eve/v1. Both the input request and completion must
+ * reach the parent through its generated callback URL. A doubled /eve/v1 prefix
+ * prevents these deliveries. The build scenario checks the prefix itself;
+ * this eval checks the remote round trip through the public event stream.
  */
 export default defineTaskEval({
   description:
@@ -38,6 +39,11 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
+    t.event("input.requested", {
+      count: 1,
+      data: { requests: [{ action: { toolName: "remote_gate" } }] },
+    }).label("remote input callback reaches the parent");
+    t.log("Waiting for the remote input callback to reach the parent.");
     const gate = await waitForTaskInput(t, t, "remote_gate");
     const answered = await gate.session.respond([
       {
@@ -58,7 +64,26 @@ export default defineTaskEval({
     );
     answered.noFailedActions();
 
-    const terminal = await waitForCompletedTask(t, gate.session, "TASK-C8-REMOTE-VERIFY", taskId);
+    t.eventsSatisfy("remote completion callback reaches the parent", (events) =>
+      events.some(
+        (event) =>
+          event.type === "message.received" &&
+          messageText(event.data.message).includes(`Background task ${taskId}`) &&
+          messageText(event.data.message).includes(REMOTE_PRINCIPAL_MARKER),
+      ),
+    );
+    t.log("Waiting for the remote completion callback to reach the parent.");
+    const completed = await waitForTaskNotification(t, gate.session, taskId, "completed", [
+      answered,
+    ]);
+    completed.turn.expectOk();
+
+    const terminal = await waitForCompletedTask(
+      t,
+      completed.session,
+      "TASK-C8-REMOTE-VERIFY",
+      taskId,
+    );
     terminal.expectOk();
     const view = requireTaskView(terminal.requireToolCall("task_cancel").output, taskId);
     await t.require(
@@ -72,10 +97,6 @@ export default defineTaskEval({
       ),
     );
 
-    t.event("input.requested", {
-      count: 1,
-      data: { requests: [{ action: { toolName: "remote_gate" } }] },
-    });
     t.notEvent("authorization.required");
     t.noFailedActions();
   },

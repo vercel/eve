@@ -166,9 +166,6 @@ jobs:
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
-          if [ "${{ matrix.name }}" = "fixture-tasks" ]; then
-            node scripts/assert-callback-route.mjs
-          fi
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
             --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \

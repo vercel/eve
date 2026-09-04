@@ -7,12 +7,15 @@ HITL and completion round trip to cover the callback-prefix bug from
 [eve #3047](https://github.com/vercel/eve/pull/3047). The fixture's `vercel.json`
 sets the service route to `/eve/v1`.
 
-Before deploying this fixture, Vercel CI runs `scripts/assert-callback-route.mjs`
-against the built workflow function configuration. It asserts the callback path
-is `/eve/v1/callback/<token>`; the broken build produced
-`/eve/v1/eve/v1/callback/<token>`. A mismatch fails immediately with both paths,
-before running the existing remote eval. Local and Postgres runs exercise the
-remote round trip, but only the Vercel build exercises service-prefix inference.
+The eval uses event assertions labeled "remote input callback reaches the parent"
+and "remote completion callback reaches the parent". It also logs which delivery
+it is waiting for. These assertions check the live round trip through the public
+eval APIs; they do not inspect the generated callback URL.
+
+The [build scenario](../../../../packages/eve/src/internal/nitro/host/build-application.scenario.test.ts)
+separately checks that this service route adds no extra public prefix. Local and
+Postgres runs exercise the remote round trip, but only the Vercel build exercises
+service-prefix inference.
 
 ## Transition declarations
 
