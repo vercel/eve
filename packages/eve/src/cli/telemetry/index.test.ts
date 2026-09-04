@@ -154,17 +154,19 @@ describe("createEveCliTelemetry", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const telemetry = createEveCliTelemetry("1.0.0");
     telemetry.trackCommand("init");
-    telemetry.trackInitStage("target");
-    telemetry.trackInitStage("install");
+    telemetry.trackSetupStep({ flow: "init", step: "resolve_target" });
+    telemetry.trackSetupStep({ flow: "init", step: "install_dependencies" });
 
     await telemetry.flush();
 
     const events = JSON.parse(
       String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
     ) as Array<{ key: string; value: string }>;
-    expect(events).toContainEqual(expect.objectContaining({ key: "init_stage", value: "install" }));
-    expect(events).not.toContainEqual(
-      expect.objectContaining({ key: "init_stage", value: "target" }),
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "install_dependencies" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "resolve_target" }),
     );
   });
 
@@ -174,8 +176,8 @@ describe("createEveCliTelemetry", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const telemetry = createEveCliTelemetry("1.0.0");
     telemetry.trackCommand("dev");
-    telemetry.trackOnboardingStage("model");
-    telemetry.trackOnboardingStage("add_error");
+    telemetry.trackSetupStep({ flow: "onboarding", step: "model_provider" });
+    telemetry.trackSetupTerminal({ flow: "onboarding", step: "registry_install", result: "error" });
 
     await telemetry.flush();
 
@@ -183,10 +185,10 @@ describe("createEveCliTelemetry", () => {
       String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
     ) as Array<{ key: string; value: string }>;
     expect(events).toContainEqual(
-      expect.objectContaining({ key: "onboarding_stage", value: "add_error" }),
+      expect.objectContaining({ key: "setup_terminal_step", value: "registry_install" }),
     );
-    expect(events).not.toContainEqual(
-      expect.objectContaining({ key: "onboarding_stage", value: "model" }),
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "model_provider" }),
     );
   });
 

@@ -3585,14 +3585,15 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
-      onOnboardingStage: (stage) => stages.push(stage),
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: { handle },
     });
 
     await runner.run();
 
     expect(order).toEqual(["model", "prompt"]);
-    expect(stages).toEqual(["model", "model_error"]);
+    expect(stages).toEqual(["model_provider", "model_provider_error"]);
     expect(results).toContain("/model failed: provider unavailable");
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "model", argument: "" },
@@ -3644,14 +3645,15 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
-      onOnboardingStage: (stage) => stages.push(stage),
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: { handle },
     });
 
     await runner.run();
 
     expect(order).toEqual(["model", "add", "end", "prompt"]);
-    expect(stages).toEqual(["model", "add", "add_error"]);
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_error"]);
     expect(end).toHaveBeenCalledWith({ preserveDiagnostics: true });
     expect(handle).toHaveBeenNthCalledWith(
       2,
@@ -3688,7 +3690,8 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
-      onOnboardingStage: (stage) => stages.push(stage),
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       promptCommandHandler: {
         handle: async (command) =>
           command.name === "model"
@@ -3699,7 +3702,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(stages).toEqual(["model", "add", "completed"]);
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_completed"]);
     expect(renderCommandInvocation).toHaveBeenCalledWith("/add", undefined);
     expect(renderCommandResult).toHaveBeenCalledWith("Added Web Chat", "success");
   });
@@ -3719,7 +3722,8 @@ describe("EveTUIRunner boot setup detection", () => {
       appRoot: "/tmp/weather-agent",
       onboard: true,
       bootDetections: [],
-      onOnboardingStage: (stage) => stages.push(stage),
+      onOnboardingStep: ({ step }) => stages.push(step),
+      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
       getVercelAuthStatus: vi.fn(async () => "authenticated" as const),
       promptCommandHandler: {
         handle: async (command) =>
@@ -3731,7 +3735,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(stages).toEqual(["model", "add", "add_cancelled"]);
+    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_cancelled"]);
     expect(renderCommandResult).not.toHaveBeenCalledWith("/add dismissed.", expect.anything());
   });
 

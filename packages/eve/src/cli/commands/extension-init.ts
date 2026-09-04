@@ -39,7 +39,12 @@ export interface ExtensionInitCliLogger {
   log(message: string): void;
 }
 
-export type ExtensionInitStage = "target" | "scaffold" | "install" | "git" | "post_init";
+export type ExtensionInitSetupStep =
+  | "resolve_target"
+  | "scaffold"
+  | "install_dependencies"
+  | "initialize_git"
+  | "handoff";
 
 export interface ExtensionInitCommandDependencies {
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
@@ -223,9 +228,9 @@ export async function runExtensionInitCommand(
   parentDirectory: string,
   target: string | undefined,
   dependencies: ExtensionInitCommandDependencies = defaultDependencies,
-  trackStage?: (stage: ExtensionInitStage) => void,
+  trackStep?: (step: ExtensionInitSetupStep) => void,
 ): Promise<void> {
-  trackStage?.("target");
+  trackStep?.("resolve_target");
   // Coding agent with no target: print a setup guide, same gate as agent init.
   if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
     logger.log(initExtensionInstructions());
@@ -260,7 +265,7 @@ export async function runExtensionInitCommand(
       );
     }
 
-    trackStage?.("scaffold");
+    trackStep?.("scaffold");
     progress.update("Creating extension");
     initLog.debug("creating extension");
     const agentStartedAt = dependencies.now();
@@ -284,7 +289,7 @@ export async function runExtensionInitCommand(
     agentElapsedMs = dependencies.now() - agentStartedAt;
     initLog.debug("creating extension done", { ms: agentElapsedMs });
 
-    trackStage?.("install");
+    trackStep?.("install_dependencies");
     progress.update("Installing dependencies", `${packageManager} install`);
     initLog.debug(`installing dependencies with ${packageManager}`);
     const installStartedAt = dependencies.now();
@@ -322,7 +327,7 @@ export async function runExtensionInitCommand(
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
-    trackStage?.("git");
+    trackStep?.("initialize_git");
     progress.update("Initializing Git repository");
     initLog.debug("initializing git repository");
     gitResult = await dependencies.tryInitializeGit(projectPath);
@@ -330,7 +335,7 @@ export async function runExtensionInitCommand(
     progress.stop();
   }
 
-  trackStage?.("post_init");
+  trackStep?.("handoff");
   logger.log(
     `${pc.green("✓")} Created an ${EVE_WORDMARK} extension in ${pc.bold(projectPath!)} ${pc.dim(`in ${formatElapsed(agentElapsedMs!)}`)}`,
   );

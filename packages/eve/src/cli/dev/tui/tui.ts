@@ -1,4 +1,4 @@
-import type { EveCliOnboardingStage } from "#cli/telemetry/index.js";
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -39,8 +39,9 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly onboard?: boolean;
-  /** Reports the furthest stage reached by fresh-agent onboarding. */
-  readonly onOnboardingStage?: (stage: EveCliOnboardingStage) => void;
+  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
+  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
+  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
@@ -144,7 +145,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     headers,
     initialInput,
     onboard,
-    onOnboardingStage,
+    onOnboardingStep,
+    onOnboardingTerminal,
     onBootProgress,
     lifecycle,
     startup,
@@ -193,7 +195,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.startup = startup;
   }
   if (onboard !== undefined) options.onboard = onboard;
-  if (onOnboardingStage !== undefined) options.onOnboardingStage = onOnboardingStage;
+  if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
+  if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;
