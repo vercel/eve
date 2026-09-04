@@ -78,6 +78,7 @@ import {
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
+const FORCED_RESET_CANCEL_REASON = "Session reset timed out waiting for command inbox release";
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -356,7 +357,24 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+    const released = await waitForCommandHookRelease(
+      sessionCommandHookToken(hook.runId),
+      hook.runId,
+    );
+    if (!released) {
+      log.warn("session reset did not release its command inbox; cancelling the workflow run", {
+        sessionId: hook.runId,
+      });
+      try {
+        // A run that cannot replay cannot consume reset or finalize cooperatively.
+        // Direct cancellation is the only out-of-band way to release its inbox.
+        await cancelRun(await getWorld(), hook.runId, {
+          cancelReason: FORCED_RESET_CANCEL_REASON,
+        });
+      } catch (error) {
+        if (!isInactiveCommandTarget(error)) throw error;
+      }
+    }
   }
 
   return activeCommandResult(command, hook.runId);
@@ -431,20 +449,18 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   }
 }
 
-async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
+async function waitForCommandHookRelease(token: string, sessionId: string): Promise<boolean> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
       const owner = normalizeWorkflowHook(await getHookByToken(token));
-      if (owner.runId !== sessionId) return;
+      if (owner.runId !== sessionId) return true;
     } catch (error) {
-      if (HookNotFoundError.is(error)) return;
+      if (HookNotFoundError.is(error)) return true;
       throw error;
     }
 
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
-    }
+    if (Date.now() >= deadline) return false;
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
 }
