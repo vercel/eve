@@ -682,7 +682,7 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
   });
 
-  it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {
+  it("includes the code_mode sandbox runtime plugin only when code mode is enabled", async () => {
     const directNitroStub = createNitroStub();
     const workflowNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
@@ -693,11 +693,7 @@ describe("application Nitro creation", () => {
 
     const directHost = await createPreparedHost();
     const workflowHost = await createPreparedHost();
-    workflowHost.compileResult.manifest.workflowTool = {
-      logicalPath: "tools/workflow.ts",
-      sourceId: "test:workflow",
-      sourceKind: "module",
-    };
+    workflowHost.compileResult.manifest.config.experimental = { codeMode: { mode: "eager" } };
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));

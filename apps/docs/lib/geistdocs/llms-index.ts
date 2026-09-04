@@ -19,7 +19,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
 - [Sessions, Runs, and Streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand session IDs, NDJSON events, controls, and reconnecting.
 - [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand model context and compaction in the built-in loop.
-- [Built-in Tools](${EVE_ORIGIN}/docs/concepts/built-in-tools.md): Review default tools and add opt-in tools such as Workflow, glob, grep, and sleep.
+- [Built-in Tools](${EVE_ORIGIN}/docs/concepts/built-in-tools.md): Review default tools and add opt-in tools such as code_mode, glob, grep, and sleep.
 - [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
 - [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
 

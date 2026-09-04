@@ -294,7 +294,7 @@ describe("app runtime dependency tracing", () => {
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
-  it("bundles Workflow sandbox worker assets only when an agent enables Workflow", async () => {
+  it("bundles code_mode sandbox worker assets only when code mode is enabled", async () => {
     async function createWorkflowAssetsApp(label: string, workflow: boolean): Promise<string> {
       const appRoot = await createScratchDirectory(`eve-app-workflow-assets-${label}-build-`);
 
@@ -316,9 +316,9 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        'export default { model: "openai/gpt-5.4-mini" };\n',
+        `export default { model: "openai/gpt-5.4-mini", experimental: { codeMode: ${workflow ? '{ mode: "eager" }' : "false"} } };\n`,
       );
-      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace Workflow assets.\n");
+      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace code_mode assets.\n");
       await writeFile(
         join(appRoot, "agent", "subagents", "researcher", "agent.ts"),
         'export default { description: "Research.", model: "openai/gpt-5.4-mini" };\n',
@@ -327,13 +327,6 @@ describe("app runtime dependency tracing", () => {
         join(appRoot, "agent", "subagents", "researcher", "instructions.md"),
         "Research the request.\n",
       );
-      if (workflow) {
-        await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
-        await writeFile(
-          join(appRoot, "agent", "tools", "workflow.ts"),
-          'export default { kind: "eve:enable-workflow-tool", maxSubagents: 6 };\n',
-        );
-      }
 
       return appRoot;
     }

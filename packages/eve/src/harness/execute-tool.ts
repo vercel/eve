@@ -41,15 +41,14 @@ export interface HarnessToolDefinition {
    * ordinary `tool-result` (authored workflow tools). Absent means `"tool"`.
    *
    * On the definition itself this duplicates the dispatch target kind; it
-   * exists because the value must survive past the tool map. `buildToolSet`,
-   * `createCoordinationRequestFromToolCall`, and the workflow sandbox host
-   * tool copy it into the `RuntimeWorkflowTaskRequest`, which `startWorkflowTask`
+   * exists because the value must survive past the tool map.
+   * `createCoordinationRequestFromToolCall` copies it into the
+   * `RuntimeWorkflowTaskRequest`, which `startWorkflowTask`
    * persists on the `WorkflowToolRunRecord` in session state and the run echoes
    * back on every `WorkflowToolRunRef` inbox message. The owner turn then routes
-   * outcomes, counts the workflow subagent budget, and decides whether child
-   * usage accrues without access to a `HarnessToolMap`. Harness-side readers
-   * (`advertised-tools`, `emission`, the background tool executor) use it to
-   * expose only delegation tools inside workflow sandboxes, emit task receipts,
+   * outcomes and decides whether child usage accrues without access to a `HarnessToolMap`. Harness-side readers
+   * (`code-mode`, `emission`, the background tool executor) use it to
+   * await subagents inside code_mode, emit task receipts,
    * and reserve/claim agent handles for subagent starts.
    *
    * The persisted copy is dropped by `removeWorkflowToolRun` when the run

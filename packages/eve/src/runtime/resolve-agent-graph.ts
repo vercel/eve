@@ -20,7 +20,6 @@ import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type {
   ResolvedDynamicSubagentDefinition,
@@ -139,7 +138,6 @@ async function resolveRuntimeAgentNode(
     { tools: agent.tools },
     {
       nodeId,
-      reservedToolNames: [WORKFLOW_TOOL_NAME],
     },
   );
 

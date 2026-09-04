@@ -39,6 +39,7 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  */
 export interface TestAppDescriptor {
   readonly agent?: {
+    readonly experimental?: import("#shared/agent-definition.js").AgentExperimentalDefinition;
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
@@ -168,7 +169,12 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
-    limits: descriptor.agent?.limits,
+    agent: {
+      model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
+      limits: descriptor.agent?.limits,
+      outputSchema: descriptor.agent?.outputSchema,
+      experimental: descriptor.agent?.experimental,
+    },
     modules: [
       {
         loadNamespace: async () => ({

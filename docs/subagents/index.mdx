@@ -17,7 +17,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with updates or the final result. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `code_mode`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` runs in the background when called directly and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with updates or the final result. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -46,7 +46,7 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with updates, completion, failure, or cancellation. Human input requests surface separately on the parent session.
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. When called directly, every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with updates, completion, failure, or cancellation. Human input requests surface separately on the parent session.
 
 A child running as a background task receives the framework `task_update` tool. It uses `task_update` to report progress to its parent. `task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
 
@@ -153,7 +153,7 @@ eve lowers every subagent visible to the current agent (the root built-in copy, 
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
-Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. Background subagents run through the model tool loop and are not available inside a model-authored `Workflow` program.
+Child sessions can still call their own declared or remote subagents, but they receive neither `code_mode` nor the built-in `agent`. When the root enables [`experimental.codeMode`](/docs/agent-config#other-defineagent-fields), its JavaScript program can await subagent results, sequence dependent calls, or use `Promise.all` for concurrent calls. The program's `maxSubagents` budget counts every invocation, including retries and continuations.
 
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 

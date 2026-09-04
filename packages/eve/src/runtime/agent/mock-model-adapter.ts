@@ -208,7 +208,7 @@ function createSkillLoadResult(
 
 const SUBAGENT_TOOL_NAME = "agent";
 const SUBAGENT_DELEGATION_DIRECTIVE =
-  /\bdelegate\s+(?:(through\s+workflow)\s+)?to\s+a\s+subagent\s*:\s*(.+)$/iu;
+  /\bdelegate\s+(?:(through\s+code_mode)\s+)?to\s+a\s+subagent\s*:\s*(.+)$/iu;
 const PARALLEL_AUTHORED_TOOLS_DIRECTIVE = /^call tools in parallel:\s*(.+)$/imu;
 
 function createParallelAuthoredToolCallsResult(
@@ -278,7 +278,7 @@ function createSubagentDelegationResult(
     return null;
   }
 
-  const toolName = directive[1] === undefined ? SUBAGENT_TOOL_NAME : "Workflow";
+  const toolName = directive[1] === undefined ? SUBAGENT_TOOL_NAME : "code_mode";
   const tool = getAvailableTools(options).find((entry) => entry.name === toolName);
 
   if (tool === undefined) {
@@ -287,7 +287,7 @@ function createSubagentDelegationResult(
 
   const message = directive[2].trim();
   const toolInput =
-    toolName === "Workflow"
+    toolName === "code_mode"
       ? { js: `return await tools.agent({ message: ${JSON.stringify(message)} });` }
       : { message };
 

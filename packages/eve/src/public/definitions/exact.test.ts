@@ -31,7 +31,6 @@ import {
   type TaskReceipt,
   type ToolDefinition,
 } from "#public/tools/index.js";
-import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -56,7 +55,12 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
-    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
+    expect(
+      defineAgent({
+        model: "test/model",
+        experimental: { codeMode: { mode: "eager", maxSubagents: 6 } },
+      }).experimental.codeMode.maxSubagents,
+    ).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
@@ -220,15 +224,21 @@ function typeOnlyFixtures(): void {
 
   defineAgent({
     limits: {
-      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      // @ts-expect-error Program fan-out is configured by experimental.codeMode.maxSubagents.
       maxSubagents: 6,
     },
     model: "anthropic/claude-sonnet-5",
   });
 
-  experimental_workflow({
-    // @ts-expect-error Workflow maxSubagents must be a number.
-    maxSubagents: "6",
+  defineAgent({
+    model: "test/model",
+    experimental: {
+      codeMode: {
+        mode: "lazy",
+        // @ts-expect-error code_mode maxSubagents must be a number.
+        maxSubagents: "6",
+      },
+    },
   });
 
   const agentWithName = {

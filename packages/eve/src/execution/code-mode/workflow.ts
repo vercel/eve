@@ -36,6 +36,7 @@ export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Pro
   };
   let outcome: CodeModeProgramOutcome = await runCodeModeProgramStep(base);
   let nested = 0;
+  let subagentCalls = 0;
   while (outcome.status === "interrupted") {
     if (ctx.abortSignal.aborted) {
       throw ctx.abortSignal.reason ?? new Error("code_mode was cancelled.");
@@ -44,6 +45,15 @@ export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Pro
     // together. Ids are assigned before the await so replay hands each call
     // the same id regardless of completion order.
     const settling = outcome.pending.map((pending) => {
+      if (pending.call.target === "agent" && subagentCalls++ >= program.maxSubagents) {
+        return Promise.resolve({
+          interrupt: pending.interrupt,
+          resolution: {
+            status: "failed" as const,
+            error: `CODE_MODE_SUBAGENT_LIMIT_REACHED: code_mode may invoke at most ${program.maxSubagents} subagents per program; "${pending.call.toolName}" was not called.`,
+          },
+        });
+      }
       const invocationId = `${ctx.callId}:${String(nested++)}`;
       return settleNestedCall(ctx, run, pending, invocationId);
     });

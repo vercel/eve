@@ -169,7 +169,7 @@ describe("settleCancelledTurnStep handle store", () => {
         hookToken: "workflow-hook",
         resultKind: "tool",
         runId: "workflow-run",
-        toolName: "Workflow",
+        toolName: "code_mode",
       });
       const result = await settleCancelledTurnStep({
         parentWritable: new WritableStream<Uint8Array>({ write() {} }),

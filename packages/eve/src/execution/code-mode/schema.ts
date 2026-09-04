@@ -6,6 +6,8 @@ export const codeModeInputSchema = z.strictObject({
   js: z.string().describe("Complete JavaScript program to execute over the available tools."),
 });
 
+export const DEFAULT_CODE_MODE_MAX_SUBAGENTS = 100;
+
 export type CodeModeMode = "eager" | "lazy";
 
 export type CodeModeCallResolution =
@@ -27,6 +29,7 @@ export interface CodeModeToolCatalogEntry {
 export interface CodeModeWorkflowInput {
   readonly js: string;
   readonly mode: CodeModeMode;
+  readonly maxSubagents: number;
   readonly toolNames: readonly string[];
   readonly toolCatalog: readonly CodeModeToolCatalogEntry[];
 }
@@ -35,6 +38,7 @@ export function serializeCodeModeWorkflowInput(input: CodeModeWorkflowInput): Js
   return {
     js: input.js,
     mode: input.mode,
+    maxSubagents: input.maxSubagents,
     toolNames: [...input.toolNames],
     toolCatalog: input.toolCatalog.map((entry) => ({ ...entry })),
   };
@@ -57,6 +61,13 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
   ) {
     throw new TypeError('code_mode workflow input requires "toolNames" as a string array.');
   }
+  if (
+    typeof record.maxSubagents !== "number" ||
+    !Number.isSafeInteger(record.maxSubagents) ||
+    record.maxSubagents <= 0
+  ) {
+    throw new TypeError('code_mode workflow input requires "maxSubagents" as a positive integer.');
+  }
   if (!Array.isArray(record.toolCatalog)) {
     throw new TypeError('code_mode workflow input requires a "toolCatalog" array.');
   }
@@ -76,5 +87,11 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
       requiresDirectCall: entry.requiresDirectCall,
     };
   });
-  return { js: record.js, mode: record.mode, toolNames: record.toolNames as string[], toolCatalog };
+  return {
+    js: record.js,
+    mode: record.mode,
+    maxSubagents: record.maxSubagents,
+    toolNames: record.toolNames as string[],
+    toolCatalog,
+  };
 }

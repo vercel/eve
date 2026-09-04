@@ -4,7 +4,6 @@ import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
-import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import { applyCodeModeTool, type CodeModeMode } from "#harness/code-mode.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
@@ -21,13 +20,10 @@ type AdvertisedToolDefinitionsInput = {
 };
 
 type AdvertisedModelToolsInput = {
-  readonly codeMode?: { readonly mode: CodeModeMode };
+  readonly codeMode?: { readonly mode: CodeModeMode; readonly maxSubagents?: number };
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
-  readonly workflow?: {
-    readonly maxSubagents?: number;
-  };
 };
 
 type AdvertisedModelTools = {
@@ -69,26 +65,13 @@ async function getAdvertisedModelTools(
   let modelTools = input.modelTools;
   let session = input.session;
 
-  if (input.workflow !== undefined) {
-    const workflowHostTools = filterWorkflowHostToolsForRootSession(tools, session);
-    if (workflowHostTools.size > 0) {
-      session = ensureWorkflowContinuationSecurity(session);
-      const applied = await applyWorkflowTool({
-        continuationSecurity: getWorkflowContinuationSecurity(session),
-        harnessTools: workflowHostTools,
-        maxSubagents: input.workflow.maxSubagents,
-        tools: modelTools,
-      });
-      modelTools = applied.modelTools;
-    }
-  }
-
   if (input.codeMode !== undefined) {
     session = ensureWorkflowContinuationSecurity(session);
     const applied = await applyCodeModeTool({
       continuationSecurity: getWorkflowContinuationSecurity(session),
       harnessTools,
       mode: input.codeMode.mode,
+      maxSubagents: input.codeMode.maxSubagents,
       tools: modelTools,
     });
     harnessTools = applied.harnessTools;
@@ -124,24 +107,6 @@ function filterUnavailableToolMap(
       continue;
     }
     filteredTools.set(name, tool);
-  }
-  return filteredTools;
-}
-
-function filterWorkflowHostToolsForRootSession(
-  tools: HarnessToolMap,
-  session: AdvertisedToolSession,
-): HarnessToolMap {
-  const filteredTools = new Map<string, HarnessToolDefinition>();
-
-  if (session.rootSessionId !== undefined) {
-    return filteredTools;
-  }
-
-  for (const [name, tool] of tools) {
-    if (tool.resultKind === "subagent") {
-      filteredTools.set(name, tool);
-    }
   }
   return filteredTools;
 }

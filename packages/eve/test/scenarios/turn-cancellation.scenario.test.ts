@@ -73,11 +73,11 @@ import { mockModel } from "eve/evals";
 
 const model = mockModel((request) => {
   const message = request.lastUserMessage ?? "";
-  if (message.includes("Use Workflow exactly once")) {
+  if (message.includes("Use code_mode exactly once")) {
     return {
       toolCalls: [
         {
-          name: "Workflow",
+          name: "code_mode",
           input: {
             js: 'return await Promise.all([tools["local-sleeper"]({ message: "Use wait-for-cancel." }), tools["remote-sleeper"]({ message: "Use wait-for-cancel." })]);',
           },
@@ -88,13 +88,9 @@ const model = mockModel((request) => {
   return "still-alive";
 });
 
-export default defineAgent({ model, modelContextWindowTokens: 32_000 });
+export default defineAgent({ model, experimental: { codeMode: { mode: "eager" } }, modelContextWindowTokens: 32_000 });
 `,
       "agent/instructions.md": "Delegate cancellation waits as requested.\n",
-      "agent/tools/workflow.ts": `import { experimental_workflow } from "eve/tools/workflow";
-
-export default experimental_workflow();
-`,
       "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -157,7 +153,7 @@ describe("turn cancellation descendant cascade", () => {
           const parentClient = new Client({ host: parentServer.url });
           const { session: parentSession, response } = await parentClient.sessions.create({
             message: [
-              "Use Workflow exactly once to call local-sleeper and remote-sleeper in parallel.",
+              "Use code_mode exactly once to call local-sleeper and remote-sleeper in parallel.",
               'Pass both the message "Use wait-for-cancel." and return Promise.all of their results.',
             ].join("\n"),
           });

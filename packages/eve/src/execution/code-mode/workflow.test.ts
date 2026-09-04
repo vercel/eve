@@ -58,6 +58,7 @@ const program = {
   js: "return 1;",
   mode: "eager",
   toolNames: ["add", "researcher"],
+  maxSubagents: 100,
   toolCatalog: [],
 };
 
@@ -68,6 +69,56 @@ beforeEach(() => {
 });
 
 describe("codeModeWorkflow", () => {
+  it("counts failed calls and continuations against one budget across resumes", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "first" })))
+      .mockResolvedValueOnce(
+        parked(
+          call("tool", "add", { a: 1, b: 2 }),
+          call("agent", "researcher", { agentId: "existing-child", message: "continue" }),
+        ),
+      )
+      .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "excess" })))
+      .mockResolvedValueOnce(completed("caught"));
+    invokeAgent.mockRejectedValueOnce(new Error("child failed")).mockResolvedValueOnce("continued");
+    executeTool.mockResolvedValue({ status: "completed", output: 3 });
+
+    await expect(codeModeWorkflow({ ...program, maxSubagents: 2 }, context())).resolves.toBe(
+      "caught",
+    );
+
+    expect(invokeAgent).toHaveBeenCalledTimes(2);
+    expect(invokeAgent.mock.calls[1]?.[1]).toMatchObject({
+      agentId: "existing-child",
+      message: "continue",
+    });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(runProgram.mock.calls[3]?.[0].resume[0].resolution).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("CODE_MODE_SUBAGENT_LIMIT_REACHED"),
+    });
+  });
+
+  it("admits concurrent calls in program order and rejects excess calls before dispatch", async () => {
+    runProgram
+      .mockResolvedValueOnce(
+        parked(
+          call("agent", "researcher", { message: "first" }),
+          call("agent", "researcher", { message: "second" }),
+          call("agent", "researcher", { message: "excess" }),
+        ),
+      )
+      .mockResolvedValueOnce(completed("settled"));
+    invokeAgent.mockResolvedValue("child result");
+
+    await codeModeWorkflow({ ...program, maxSubagents: 2 }, context());
+
+    expect(invokeAgent.mock.calls.map((args) => args[1].message)).toEqual(["first", "second"]);
+    expect(
+      runProgram.mock.calls[1]?.[0].resume.map((entry: any) => entry.resolution.status),
+    ).toEqual(["completed", "completed", "failed"]);
+  });
+
   it("returns the program output when it completes without nested calls", async () => {
     runProgram.mockResolvedValueOnce(completed(42));
     await expect(codeModeWorkflow(program, context())).resolves.toBe(42);

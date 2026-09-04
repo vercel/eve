@@ -80,7 +80,6 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return nodes.some((node) => {
-    if (node.workflowTool !== undefined) return true;
     if (!("config" in node) || typeof node.config !== "object" || node.config === null)
       return false;
     const codeMode = (node.config as CompiledAgentManifest["config"]).experimental?.codeMode;

@@ -36,7 +36,7 @@ import {
 } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import {
-  CODE_MODE_BRIDGE_REQUEST_LIMIT,
+  codeModeBridgeRequestLimit,
   claimsForCodeMode,
   createDiscoveryTools,
   describeClaimedTool,
@@ -124,7 +124,7 @@ export async function runCodeModeProgramStep(
   let raw: unknown;
   if (input.resume === undefined) {
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
       continuationSecurity: security,
       hostTools,
     });
@@ -145,7 +145,7 @@ export async function runCodeModeProgramStep(
     // not the original park. The program only runs on the final resolution.
     let current = first.interrupt;
     raw = await continueWorkflowSandboxInterrupt({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
       continuationSecurity: security,
       interrupt: current,
       resolution: first.resolution,
@@ -158,7 +158,7 @@ export async function runCodeModeProgramStep(
       }
       current = getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
       raw = await continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
         continuationSecurity: security,
         interrupt: current,
         resolution,

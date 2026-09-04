@@ -8,7 +8,7 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
-  const result = [...request.toolResults].reverse().find((entry) => entry.name === "code_mode");
+  let result: MockModelRequest["toolResults"][number] | undefined;
   const echo = (): string =>
     `${directive}-RESULT ${
       typeof result?.output === "string" ? result.output : JSON.stringify(result?.output ?? null)
@@ -16,7 +16,27 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   let directive = "";
   let js: string | undefined;
-  if (message.includes("CODEMODE-ECHO-START")) {
+  if (message.includes("CODEMODE-VISIBILITY-CHILD")) {
+    return request.tools.some((tool) => tool.name === "code_mode" || tool.name === "Workflow")
+      ? "CHILD_WRAPPER_VISIBLE"
+      : "CHILD_WRAPPER_ABSENT";
+  } else if (message.includes("CODEMODE-VISIBILITY-START")) {
+    directive = "CODEMODE-VISIBILITY";
+    js = 'return await tools.agent({ message: "CODEMODE-VISIBILITY-CHILD" });';
+  } else if (message.includes("CODEMODE-LIMIT-START")) {
+    directive = "CODEMODE-LIMIT";
+    js =
+      'const results = []; for (const message of ["limit-alpha", "limit-beta", "limit-gamma"]) { try { results.push(await tools.marker({ message })); } catch (error) { results.push(String(error)); } } return results;';
+  } else if (message.includes("CODEMODE-CONTINUE-START")) {
+    directive = "CODEMODE-CONTINUE";
+    js = 'return await tools.marker({ message: "first" });';
+  } else if (message.includes("CODEMODE-RESUME-START")) {
+    directive = "CODEMODE-RESUME";
+    const listing = request.messages.map((entry) => entry.text).join("\n");
+    const agentId = /<agent id="([^"]+)" name="marker"(?: [^>]*)?>/u.exec(listing)?.[1];
+    if (agentId === undefined) throw new Error("No marker agent id in the parent announcement.");
+    js = `const agentId = ${JSON.stringify(agentId)}; const results = []; for (const message of ["second", "third", "excess"]) { try { results.push(await tools.marker({ agentId, message })); } catch (error) { results.push(String(error)); } } return results;`;
+  } else if (message.includes("CODEMODE-ECHO-START")) {
     directive = "CODEMODE-ECHO";
     js = 'return await tools.echo({ value: "hello" });';
   } else if (message.includes("CODEMODE-CHAIN-START")) {
@@ -77,7 +97,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   if (js !== undefined) {
-    return result === undefined ? { toolCalls: [{ input: { js }, name: "code_mode" }] } : echo();
+    result = request.toolResults.find((entry) => entry.id === directive);
+    return result === undefined
+      ? { toolCalls: [{ id: directive, input: { js }, name: "code_mode" }] }
+      : echo();
   }
   return "CODEMODE-IDLE";
 }
@@ -86,7 +109,7 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  experimental: { ...base.experimental, codeMode: "eager" },
+  experimental: { ...base.experimental, codeMode: { mode: "eager", maxSubagents: 2 } },
   // Always author the deterministic script so this fixture never depends on a
   // live model; world suites already set EVE_E2E_MODEL=mock.
   model: mockModel(respond),

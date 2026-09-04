@@ -50,8 +50,6 @@ import { observeSessionActivity } from "#execution/session-activity-projection.j
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
@@ -534,7 +532,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             nodeId: bundle.nodeId,
           },
           node: effectiveNode,
-          workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(modelSession, stepInput);
       };
@@ -621,17 +618,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   if (stepResult.next === null) {
     writer.releaseLock();
-
-    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
-    if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
-      return {
-        action: "dispatch-workflow-tasks",
-        ...backgroundTransition,
-        pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
-      };
-    }
 
     const pending = derivePendingState(stepResult.session);
 
