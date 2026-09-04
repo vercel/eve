@@ -9564,6 +9564,26 @@ describe("createToolLoopHarness", () => {
     expect(stepViews).toEqual([compactedHistory]);
   });
 
+  it("restores history without running a model turn", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { restoreHistoryTo: 1 }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "keep", role: "user" },
+        { content: "remove", role: "assistant" },
+      ],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual([{ content: "keep", role: "user" }]);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
   it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
     const { emit, events } = createEventCollector();
     const resolveModel = vi.fn();

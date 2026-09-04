@@ -45,6 +45,9 @@ function makeSession(): Session {
     async clear() {
       return { status: "no_active_session" };
     },
+    async restoreHistory() {
+      return { status: "no_active_session" };
+    },
     async reset() {
       return { status: "no_active_session" };
     },

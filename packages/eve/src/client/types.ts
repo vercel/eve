@@ -6,6 +6,7 @@ import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
+import type { RestoreHistoryStatus } from "#protocol/restore-history.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -237,6 +238,16 @@ export type ClearResult =
   | {
       /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<ClearStatus, "no_active_session">;
+    };
+
+/** Result of requesting model-history restoration for a client session. */
+export type RestoreHistoryResult =
+  | {
+      readonly sessionId: string;
+      readonly status: Extract<RestoreHistoryStatus, "accepted">;
+    }
+  | {
+      readonly status: Extract<RestoreHistoryStatus, "no_active_session">;
     };
 
 /** Result of requesting context compaction for a client session. */

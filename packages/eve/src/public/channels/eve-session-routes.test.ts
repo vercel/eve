@@ -23,6 +23,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     cancel: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
+    restoreHistory: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({ previousSessionId: "wrun_A", status: "reset" }),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
@@ -218,6 +219,31 @@ describe("eve ID-addressed session routes", () => {
     expect(response.ok).toBe(true);
     if (operation === "cancel") expect(response.status).toBe(202);
     expect(session[operation]).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates and dispatches history restoration", async () => {
+    const session = createFixedSession();
+    const handler = route("POST", "/eve/v1/session/:sessionId/restore-history");
+    const response = await handler(
+      new Request("https://eve.test/eve/v1/session/wrun_A/restore-history", {
+        body: JSON.stringify({ to: 2 }),
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(response.status).toBe(202);
+    expect(session.restoreHistory).toHaveBeenCalledWith({ to: 2 });
+
+    const invalid = await handler(
+      new Request("https://eve.test/eve/v1/session/wrun_A/restore-history", {
+        body: JSON.stringify({ to: -1 }),
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+    expect(invalid.status).toBe(400);
+    expect(session.restoreHistory).toHaveBeenCalledTimes(1);
   });
 
   it("forwards owned-task cancellation without changing the response", async () => {
