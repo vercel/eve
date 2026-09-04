@@ -1,4 +1,4 @@
-/** Every explicit session-inbox wire version retained as protocol history. */
+/** Every explicit session-inbox wire version still supported by producers. */
 export const SESSION_INBOX_WIRE_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
 
 export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[number];
@@ -8,7 +8,16 @@ export const SESSION_INBOX_WIRE_VERSION =
   SESSION_INBOX_WIRE_VERSIONS[SESSION_INBOX_WIRE_VERSIONS.length - 1]!;
 
 /**
- * A wire format retained by the encoder for current sends and historical fixtures.
+ * Last version advertised to already-deployed producers. Keep this fixed:
+ * delivery contents can evolve without changing the pinned parent's envelope.
+ */
+export const SESSION_INBOX_LEGACY_WIRE_VERSION = 6;
+
+/** Hook metadata retained for deployed producers and capability-dependent parent controls. */
+export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";
+
+/**
+ * The consumer wire selected before a producer persists a payload.
  *
  * Version 0 had two incompatible unversioned shapes, so its historical
  * variants remain explicit rather than pretending they were one protocol.

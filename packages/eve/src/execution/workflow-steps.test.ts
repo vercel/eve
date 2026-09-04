@@ -164,8 +164,8 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  getHookByToken: vi.fn(async (token: string) => currentSessionHook(token)),
+vi.mock("#internal/workflow/runtime.js", () => ({
+  getHookRecordByToken: vi.fn(async (token: string) => currentSessionHook(token)),
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
@@ -286,19 +286,15 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
+    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("child-token"), {
       auth,
       caller: undefined,
-      deliveryMetadata: undefined,
       kind: "deliver",
       payload: {
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
       },
       payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
       requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-      version: 6,
     });
   });
 
@@ -359,7 +355,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "child-token-a",
+      currentSessionHook("child-token-a"),
       expect.objectContaining({
         ...delivery,
         deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
@@ -367,7 +363,7 @@ describe("routeProxiedDeliverStep", () => {
       }),
     );
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "child-token-b",
+      currentSessionHook("child-token-b"),
       expect.objectContaining({
         auth,
         caller,
@@ -550,6 +546,7 @@ describe("routeProxiedDeliverStep", () => {
 
 function currentSessionHook(token: string) {
   return {
+    metadata: { sessionInboxWireVersion: 1 },
     runId: "child-run",
     token,
   };

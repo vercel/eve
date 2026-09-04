@@ -19,11 +19,7 @@ The Workflow SDK is not inherently tied to Vercel. In local development and in a
 
 When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
 
-When upgrading eve, restart sessions pinned to an older inbox wire format before
-sending them new commands. eve sends the current format without negotiating with
-the session's deployment. Redeploys that keep the same inbox format can continue
-existing sessions; current consumers still decode older persisted payloads during
-replay.
+The long-lived session driver remains on its original deployment. New message handlers use a compatible delivery envelope so that driver can keep forwarding messages and input responses to subsequent turns without restarting the conversation. New session controls can still require newer driver behavior: for example, `cancel({ tasks: true })` is rejected before delivery when the existing driver predates session-owned task cancellation. Ordinary messages and turn cancellation continue to work for that session.
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
 

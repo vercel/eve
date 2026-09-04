@@ -62,8 +62,8 @@ encodeSessionCommandV1(input) // build → parse complete value once → persist
 // execution/wire/session-inbox-wire.v0.ts (dependency-free, temporary)
 export const sessionInboxWireV0Migration: VersionMigration = { from: 0, to: 1, migrate };
 
-// Server/step-safe producers always select the current version.
-sessionInboxWire.encode(input, { version: SESSION_INBOX_WIRE_VERSION })
+// Server/step-safe encoder facade selects the target consumer's version.
+sessionInboxWire.encode(input, target)
 
 // Workflow-safe decoder: execution/wire/session-inbox-wire.ts
 import type { SessionInboxWireV1 } from "./session-inbox-wire.v1.js";
@@ -74,16 +74,17 @@ sessionInboxWire.decode(value) // runMigrationChain (initialVersion: 0) → vers
 
 Normative rules:
 
-- **The current version has exactly one declared shape.** Changing it
+- **A versioned schema has exactly one declared shape.** Changing it
   **must** be a new version: bump the constant, add a one-step
-  `VersionMigration`, freeze the new shape. Historic versions live on as
+  `VersionMigration`, freeze the new shape. The compatible delivery envelope
+  does not advertise that sender-schema version. Historic versions live on as
   executable migrations plus frozen payload fixtures (the turn-workflow
   precedent), not as retained schemas.
 - **Protocol data and migration policy stay separate.** A `*.vN.ts` module
   owns the immutable schema and version-bound encoder. A
   `*.vN.migration.ts` module is a pure data transform with no normalization or
   version-selection dependencies. The encoder and decoder facades own mutable
-  policy: emitting the current version, assembling the chain, and normalizing values
+  policy: selecting a target, assembling the chain, and normalizing values
   received from another Workflow VM realm.
 - **The complete transported value is validated once, at encode.** The
   schema owns the envelope and every eve-owned `DeliverPayload` field,
@@ -106,42 +107,85 @@ Normative rules:
   Legacy v0 is the temporary exception: those writers predate the encoder,
   so its 0→1 migration defensively checks the historic `send`/`deliver`
   fields until that cohort ages out under the 30-day timeout.
-- **Encode goes through the wire module too.** Every persisted inbox
-  payload — sends and controls alike — is built and validated against the
-  current schema before it persists, so producer drift dies at the producer
-  instead of at a pinned consumer weeks later.
-- Per family, `sessionInboxWire.encode` **must** be the only producer of
+- **Encode goes through the wire module too.** Ordinary inbox payloads are
+  validated against the current schema before their compatible envelope is
+  built. Capability-dependent controls use the supported versioned encoder.
+- Per family, the `sessionInboxWire` encoder facade **must** be the only producer of
   persisted payloads and `sessionInboxWire.decode` the only consumer-side
   interpretation.
 
-## Version signals and their semantics
+## Stable delivery envelope and parent capabilities
 
-Producers validate and send the current inbox wire format directly by hook token.
-The payload's `version` is the only version signal. Consumers retain the migration
-chain for replaying older persisted payloads and reject unknown newer versions.
+Session drivers remain pinned while new turns and HTTP handlers use newer
+code. Most inbox contents are forwarded to those turns. Adding an optional
+field to a forwarded payload must not require restarting its parent session.
 
-Inbox hooks carry no metadata. The removed `sessionInboxWireVersion` stamp had
-one purpose: choosing an encoder for sessions pinned to older deployments. It
-was written on the stable inbox, every channel alias (including replacements),
-and the authorization callback. Workflow hydrates hook metadata during token
-lookup, which requires resolving the run's encryption key even for an ordinary
-resume. Omitting metadata removes that read-side key lookup from newly created
-hooks.
+Ordinary sends and controls use `sessionInboxWire.encodeCompatible`. It
+validates the complete value with the current sender schema, then emits the
+unversioned envelope that shipped parents already decode. A delivery retains
+its payloads, caller, delivery IDs, accepted deployment IDs, and routing
+metadata. The historical stable-inbox cohort instead receives the compatible
+raw `send` envelope with a coalesced payload.
 
-`resumeSessionInbox` performs no capability lookup, historical consumer
-classification, or fallback. It validates the current payload and calls
-`resumeHook(token, payload)`, so Workflow owns token resolution and resume
-idempotency. No replacement capability store or additional hook is needed.
+```text
+ordinary delivery → validate current contents → compatible envelope → pinned parent → turn
+parent-owned control → inspect parent capability → supported encoder → pinned parent
+```
 
-## Compatibility
+The sender chooses the historical envelope without decrypting metadata:
 
-Sessions pinned to an older inbox wire format must be restarted when upgrading.
-Deployment changes using the same inbox format continue to work. Already
-persisted payloads still decode through the versioned migration chain; historical
-schemas, encoders, and frozen fixtures remain as protocol history.
+- Stable session tokens receive raw `send` directly.
+- An alias with a stored stamp belongs to the versioned-decoder cohort and
+  receives unversioned `deliver`. Only the stamp's presence is inspected.
+- An alias without metadata requires a raw lookup of its owner's stable
+  hook. A stamped stable hook identifies a current parent (`deliver`); a
+  markerless stable hook identifies the pre-stamp cohort (`send`). No stable
+  hook identifies the oldest delivery-only cohort (`deliver`).
+- A probed alias is resumed as the exact inspected hook, so a later reuse of
+  its token cannot redirect the encoded delivery to another owner. Lookup or
+  wake errors do not trigger a second delivery.
 
-Removing the stamp does not erase metadata already persisted by older deployments.
-Those hooks continue to incur Workflow's metadata hydration cost until they end.
+Only `cancel({ tasks: true })` requires metadata hydration and version
+selection. That command changes behavior owned by the parent: an older parked
+parent cannot enumerate and cancel its background tasks just because the next
+turn runs newer code. Unsupported parents reject the operation before the
+hook event is written, while ordinary delivery remains available.
+
+The stable inbox and channel aliases retain `sessionInboxWireVersion: 6` for
+already-deployed senders. Without it, those producers select the legacy v0
+encoder, which drops caller observers and cannot encode task cancellation.
+This compatibility stamp is fixed independently of future sender schemas.
+Authorization callbacks store no metadata. There are no additional hooks or
+replacement capability store. Ownership-only reads use raw hook records.
+
+For example, the v6 schema adds optional `tasks` to cancellation; an ordinary
+v6 message otherwise has the same shape as v5. A pinned v5 decoder rejects
+that message solely because its envelope says `version: 6`. The compatible
+envelope reaches that same decoder successfully, without weakening its
+handling of previously persisted versioned values.
+
+Future changes must distinguish forwarded contents from parent-owned
+semantics. Adding forwarded fields requires compatibility tests against the
+frozen historical receivers, including their migrations; removing a version
+stamp alone does not prove preservation. A change to parent-owned routing or
+control behavior needs an explicit capability strategy. Historical versioned
+schemas, decoders, and migrations remain available for persisted payloads and
+legacy producers.
+
+## Cost boundary
+
+Ordinary stable-ID deliveries need no explicit eve hook lookup. A stamped
+alias needs one raw lookup; a markerless alias needs a second raw lookup of
+the stable hook to distinguish historical receivers. None of these paths
+hydrates metadata or resolves a read key. Task cancellation retains the
+capability read. Workflow's underlying delivery lookup and payload encryption
+remain unchanged; this does not claim that every transport round trip is
+removed.
+
+Authorization-hook creation no longer serializes metadata. Stable and channel
+hooks, including rekeyed aliases, retain their compatibility stamp. Ordinary
+producers read only the stamp's presence, including on existing persisted
+hooks. Existing sessions do not need to be restarted.
 
 ## Enforcement
 
@@ -171,7 +215,7 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   unregistered or untested protocol history.
 - Enforcement is layered by what each CI job can check. Rule 40 runs in the
   lint job and compares declared versions with shipped modules and tests.
-  TypeScript requires an encoder for every registered wire version. The
+  TypeScript requires an encoder for every registered stamped version. The
   required unit tier then encodes and decodes every registry entry, while each
   version's frozen contract pins its exact shape and backwards migration.
 - Rule 40 also freezes pure `*.vN.migration.ts` modules with their tests and
@@ -180,10 +224,10 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   soon as the approved rewrite reaches `main`.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
-  deterministic registry checks cover future wire-version changes. The
-  agent-channels session-inbox redeploy eval verifies that a new deployment can
-  deliver and cancel through an existing metadata-free inbox using the same
-  wire format.
+  deterministic registry checks cover future stamped-version changes. The
+  agent-channels cross-version redeploy eval remains the end-to-end backstop
+  for the pre-versioning gap: it runs the current producer against an actual
+  eve@0.30.8 consumer.
 
 ## Alternatives considered
 

@@ -5,7 +5,7 @@ import { settleContinuationConflictStep } from "#execution/continuation-conflict
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 const cancelRunMock = vi.fn();
-const getHookByTokenMock = vi.fn();
+const getHookRecordByTokenMock = vi.fn();
 const getWorldMock = vi.fn();
 const resumeSessionInboxMock = vi.fn();
 
@@ -15,7 +15,7 @@ vi.mock("#execution/wire/session-inbox-resume.js", () => ({
 
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
-  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
+  getHookRecordByToken: (...args: unknown[]) => getHookRecordByTokenMock(...args),
   getWorld: (...args: unknown[]) => getWorldMock(...args),
 }));
 
@@ -71,15 +71,15 @@ describe("settleContinuationConflictStep", () => {
     resumeSessionInboxMock
       .mockRejectedValueOnce(new HookNotFoundError("slack:C1:T1"))
       .mockResolvedValueOnce({ runId: "wrun_owner" });
-    getHookByTokenMock.mockResolvedValue({ runId: "wrun_owner" });
+    getHookRecordByTokenMock.mockResolvedValue({ runId: "wrun_owner" });
 
     await settleContinuationConflictStep({
       command,
       continuationToken: "slack:C1:T1",
     });
 
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
-    expect(getHookByTokenMock).toHaveBeenCalledWith("slack:C1:T1");
+    expect(getHookRecordByTokenMock).toHaveBeenCalledOnce();
+    expect(getHookRecordByTokenMock).toHaveBeenCalledWith("slack:C1:T1");
     expect(resumeSessionInboxMock).toHaveBeenNthCalledWith(
       2,
       sessionCommandHookToken("wrun_owner"),
@@ -89,7 +89,7 @@ describe("settleContinuationConflictStep", () => {
 
   it("identifies a legacy delivery whose owner can no longer be resolved", async () => {
     resumeSessionInboxMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
+    getHookRecordByTokenMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
 
     await expect(
       settleContinuationConflictStep({

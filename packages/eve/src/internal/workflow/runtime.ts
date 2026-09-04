@@ -11,3 +11,9 @@ export type {
 export function setWorld(world: unknown): void {
   workflowRuntime.setWorld(world as Parameters<typeof workflowRuntime.setWorld>[0]);
 }
+
+/** Reads hook identity without decrypting metadata that the caller does not use. */
+export async function getHookRecordByToken(token: string) {
+  const world = await workflowRuntime.getWorld();
+  return await world.hooks.getByToken(token);
+}

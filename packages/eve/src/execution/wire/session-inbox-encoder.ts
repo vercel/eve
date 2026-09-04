@@ -16,6 +16,7 @@ import {
   type SessionInboxWireV3,
 } from "#execution/wire/session-inbox-wire.v3.js";
 import {
+  SESSION_INBOX_WIRE_VERSION,
   isSessionInboxWireVersion,
   SessionInboxWireError,
   type SessionInboxWireTarget,
@@ -183,5 +184,38 @@ function readAcceptedDeploymentId(command: SessionInboxCommand): string | undefi
   return command.deliveryMetadata?.find((metadata) => metadata.payloadIndex === 0)
     ?.acceptedDeploymentId;
 }
+/**
+ * Validates current contents without tying a delivery to the sender's release.
+ * Every shipped inbox decoder accepts an unversioned envelope. Only the
+ * pre-stamp active-turn receiver requires the historical `send` discriminator.
+ */
+function encodeCompatible(
+  command: SessionInboxCommand,
+  variant: "deliver" | "send",
+): Record<string, unknown> {
+  if (command.kind === "cancel" && command.tasks === true) {
+    throw new SessionInboxWireError("Session-owned task cancellation requires a capable parent.");
+  }
+  const wire = encode(command, { version: SESSION_INBOX_WIRE_VERSION }) as SessionInboxWire;
+  const { version: _version, ...envelope } = wire;
+  if (wire.kind !== "deliver" || variant === "deliver") return envelope;
+  const deliveryMetadata = wire.deliveryMetadata?.find((metadata) => metadata.payloadIndex === 0);
+  let delivery: Record<string, unknown> | undefined;
+  if (deliveryMetadata !== undefined) {
+    const { payloadIndex: _payloadIndex, ...value } = deliveryMetadata;
+    delivery = value;
+  }
+  return {
+    auth: wire.auth,
+    caller: wire.caller,
+    delivery,
+    kind: "send",
+    payload: wire.payload,
+    requestId: wire.requestId,
+    taskDeliveryId: wire.taskDeliveryId,
+    turnPolicy: wire.turnPolicy,
+  };
+}
+
 /** Server/step-safe producer facade. */
-export const sessionInboxWire = { encode } as const;
+export const sessionInboxWire = { encode, encodeCompatible } as const;

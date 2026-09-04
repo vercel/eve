@@ -32,6 +32,16 @@ describe("session inbox consumer compatibility", () => {
     expect(receiver.bufferedDeliveries).toEqual([expectedDelivery]);
   });
 
+  it("accepts the current stable envelope with the published eve 0.30.8 receiver", async () => {
+    const receiver = await createEve0308TurnControlReceiver();
+    const wire = sessionInboxWire.encodeCompatible(
+      { kind: "send", payload: { message: "follow-up" } },
+      "send",
+    );
+    await expect(receiver.handleSessionCommand(wire)).resolves.toBeUndefined();
+    expect(receiver.bufferedDeliveries).toEqual([expectedDelivery]);
+  });
+
   it("reproduces the failure when a v1 delivery is sent to the published eve 0.30.8 turn receiver", async () => {
     const receiver = await createEve0308TurnControlReceiver();
     const wire = sessionInboxWire.encode(

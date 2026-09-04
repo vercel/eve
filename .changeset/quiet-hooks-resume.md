@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
-Remove Workflow hook metadata and session inbox version negotiation to avoid metadata hydration during hook resumes. Restart sessions pinned to older inbox wire formats when upgrading; replay of older persisted payloads remains supported.
+Avoid hook metadata decryption for ordinary session messages and ownership lookups while preserving existing conversations across upgrades. Remove unused authorization-hook metadata; session inbox stamps remain for older producers and capability-dependent task cancellation.

@@ -1,16 +1,84 @@
 import { describe, expect, it } from "vitest";
 
+import { v5SessionInboxWorkflow } from "#internal/testing/v5-session-inbox-workflow.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
+import { legacySessionDeliveryWorkflow } from "#internal/testing/legacy-session-delivery-workflow.js";
+import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-session-delivery-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { SESSION_INBOX_LEGACY_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 describe("session command inbox integration", () => {
-  it("dispatches through metadata-free stable and channel hooks", async () => {
-    const channelToken = "http:session-command-inbox:no-metadata";
-    const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
+  it("resumes a legacy delivery-only workflow from a current send command", async () => {
+    const token = "http:session-command-inbox:legacy-delivery";
+    const run = await start(legacySessionDeliveryWorkflow, [{ token }]);
+
+    try {
+      await waitForHook({ runId: run.runId }, { token });
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      });
+
+      await expect(
+        runtime.dispatchContinuation({
+          command: {
+            delivery: {
+              channelKind: "channel:http",
+              channelName: "http",
+              deliveryId: "legacy-delivery",
+            },
+            kind: "send",
+            payload: { message: "legacy-compatible" },
+          },
+          continuationToken: token,
+        }),
+      ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+      await expect(run.returnValue).resolves.toBe("legacy-compatible");
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("resumes a 0.30.5–0.30.8 parked consumer from a current send command", async () => {
+    const token = "http:session-command-inbox:mid-cohort-delivery";
+    const run = await start(midCohortSessionDeliveryWorkflow, [{ token }]);
+
+    try {
+      await waitForHook({ runId: run.runId }, { token });
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      });
+
+      await expect(
+        runtime.dispatchContinuation({
+          command: {
+            delivery: {
+              channelKind: "channel:http",
+              channelName: "http",
+              deliveryId: "mid-cohort-delivery",
+            },
+            kind: "send",
+            payload: { message: "mid-cohort-compatible" },
+          },
+          continuationToken: token,
+        }),
+      ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+      await expect(run.returnValue).resolves.toBe("mid-cohort-compatible");
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("retains legacy compatibility on session addresses and omits authorization metadata", async () => {
+    const channelToken = "http:session-command-inbox:version-stamp";
+    const run = await start(sessionCommandInboxWorkflow, [
+      { authorizationToken: `${channelToken}:auth`, token: channelToken },
+    ]);
     const stableToken = sessionCommandHookToken(run.runId);
 
     try {
@@ -18,19 +86,61 @@ describe("session command inbox integration", () => {
         waitForHook({ runId: run.runId }, { token: stableToken }),
         waitForHook({ runId: run.runId }, { token: channelToken }),
       ]);
+
+      expect((await getHookByToken(stableToken)).metadata).toEqual({
+        sessionInboxWireVersion: SESSION_INBOX_LEGACY_WIRE_VERSION,
+      });
+      expect((await getHookByToken(channelToken)).metadata).toEqual({
+        sessionInboxWireVersion: SESSION_INBOX_LEGACY_WIRE_VERSION,
+      });
+      await waitForHook({ runId: run.runId }, { token: `${channelToken}:auth` });
+      expect((await getHookByToken(`${channelToken}:auth`)).metadata).toBeUndefined();
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("delivers current messages to a parent pinned to the actual v5 decoder", async () => {
+    const token = "http:session-command-inbox:pinned-v5";
+    const run = await start(v5SessionInboxWorkflow, [{ token }]);
+    try {
+      await waitForHook({ runId: run.runId }, { token });
       const runtime = createWorkflowRuntime({
         compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
       });
-      for (const token of [stableToken, channelToken]) {
-        expect((await getHookByToken(token)).metadata).toBeUndefined();
+      for (const message of ["before upgrade", "after upgrade"]) {
         await expect(
           runtime.dispatchContinuation({
-            command: { kind: "send", payload: { message: token } },
             continuationToken: token,
+            command: { kind: "send", payload: { message } },
           }),
         ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
       }
-      await expect(run.returnValue).resolves.toEqual([stableToken, channelToken]);
+      await expect(run.returnValue).resolves.toEqual(["before upgrade", "after upgrade"]);
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("resumes a current channel alias with the stable delivery envelope", async () => {
+    const token = "http:session-command-inbox:stable-envelope";
+    const run = await start(sessionCommandInboxWorkflow, [{ token }]);
+    try {
+      await waitForHook({ runId: run.runId }, { token });
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      });
+      for (const message of ["first", "second"]) {
+        await expect(
+          runtime.dispatchContinuation({
+            continuationToken: token,
+            command: { kind: "send", payload: { message } },
+          }),
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+      }
+      await expect(run.returnValue).resolves.toEqual(["first", "second"]);
     } finally {
       const status = await run.status;
       if (status === "pending" || status === "running") await run.cancel();

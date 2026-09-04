@@ -7,7 +7,10 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-
+import {
+  SESSION_INBOX_LEGACY_WIRE_VERSION,
+  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+} from "#execution/wire/session-inbox-contract.js";
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
@@ -127,9 +130,22 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     if (state.resolved !== undefined) enqueue(state.resolved);
   };
 
-  const createState = (token: string): SessionCommandHookState => {
-    // Metadata forces Workflow to resolve the run's encryption key on token lookup.
-    const hook = createHook<SessionInboxPayload>({ token });
+  const createState = (
+    token: string,
+    advertiseLegacyCapability = true,
+  ): SessionCommandHookState => {
+    // Already-deployed producers use this stamp to encode caller observers and
+    // parent-owned controls. New deliveries never decrypt it; auth never uses it.
+    const hook = createHook<SessionInboxPayload>({
+      ...(advertiseLegacyCapability
+        ? {
+            metadata: {
+              [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_LEGACY_WIRE_VERSION,
+            },
+          }
+        : {}),
+      token,
+    });
     return {
       closed: false,
       enabled: false,
@@ -186,7 +202,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("A session command inbox cannot change its authorization token.");
       }
 
-      const candidate = createState(token);
+      const candidate = createState(token, false);
       await claimHookOwnership(candidate.hook);
       // Stays disabled until the driver opens the authorization window;
       // resolved reads stash on the state and enqueue when it opens.

@@ -7,6 +7,7 @@ import {
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 export async function sessionCommandInboxWorkflow(input: {
+  readonly authorizationToken?: string;
   readonly messageCount?: number;
   readonly nextToken?: string;
   readonly token: string;
@@ -19,6 +20,8 @@ export async function sessionCommandInboxWorkflow(input: {
   try {
     await inbox.claimStable(sessionCommandHookToken(workflowRunId));
     await inbox.rekeyContinuation(input.token);
+    if (input.authorizationToken !== undefined)
+      await inbox.claimAuthorization(input.authorizationToken);
     const pending = inbox.next();
     if (input.nextToken !== undefined) {
       await inbox.rekeyContinuation(input.nextToken);

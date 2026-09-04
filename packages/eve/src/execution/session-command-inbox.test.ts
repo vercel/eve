@@ -123,22 +123,27 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
+      metadata: { sessionInboxWireVersion: 6 },
       token: "stable",
     });
     await inbox.dispose();
   });
 
-  it("creates every inbox alias without metadata", async () => {
-    const tokens = ["stable", "channel", "authorization", "replacement"];
-    installHooks(...tokens.map((token) => createMockHook({ token })));
+  it("retains compatibility on session aliases and omits unused authorization metadata", async () => {
+    installHooks(
+      createMockHook({ token: "stable" }),
+      createMockHook({ token: "channel" }),
+      createMockHook({ token: "auth" }),
+    );
     const inbox = createSessionCommandInbox();
-
     await inbox.claimStable("stable");
     await inbox.rekeyContinuation("channel");
-    await inbox.claimAuthorization("authorization");
-    await inbox.rekeyContinuation("replacement");
-
-    expect(createHookMock.mock.calls).toEqual(tokens.map((token) => [{ token }]));
+    await inbox.claimAuthorization("auth");
+    expect(createHookMock).toHaveBeenCalledWith({
+      metadata: { sessionInboxWireVersion: 6 },
+      token: "channel",
+    });
+    expect(createHookMock).toHaveBeenCalledWith({ token: "auth" });
     await inbox.dispose();
   });
 
