@@ -7,6 +7,7 @@ import {
   deriveHitlResponse,
   formatInputRequestFallbackText,
   freeformRequestIdFromActionId,
+  hitlRouteFromActionId,
   HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
@@ -15,6 +16,7 @@ import {
   isFreeformAction,
   isHitlAction,
   renderInputRequestBlocks,
+  routeHitlBlocks,
 } from "#public/channels/slack/hitl.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
@@ -30,6 +32,37 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
     kind: overrides.kind ?? "question",
   };
 }
+
+describe("private HITL routes", () => {
+  it("embeds a return route without changing response decoding", () => {
+    const blocks = routeHitlBlocks(
+      [
+        {
+          type: "actions",
+          elements: [
+            {
+              action_id: "eve_input:tool-approval:approval_abc123:button:0",
+              type: "button",
+              value: "approve",
+            },
+          ],
+        },
+      ],
+      { channelId: "C123", threadTs: "111.222" },
+    );
+    const actionId = (blocks[0] as { elements: Array<{ action_id: string }> }).elements[0]!
+      .action_id;
+
+    expect(hitlRouteFromActionId(actionId)).toEqual({
+      channelId: "C123",
+      threadTs: "111.222",
+    });
+    expect(deriveHitlResponse({ actionId, value: "approve" })?.response).toMatchObject({
+      optionId: "approve",
+      requestId: "approval_abc123",
+    });
+  });
+});
 
 describe("deriveHitlResponse", () => {
   it("keeps Slack classification outside the durable input response type", () => {
