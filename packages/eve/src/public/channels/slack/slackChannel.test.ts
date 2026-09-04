@@ -217,6 +217,7 @@ let mentionCounter = 0;
 
 function buildMentionBody(overrides?: {
   channel?: string;
+  isExtSharedChannel?: boolean;
   threadTs?: string;
   ts?: string;
   text?: string;
@@ -237,6 +238,7 @@ function buildMentionBody(overrides?: {
   if (overrides?.threadTs) event.thread_ts = overrides.threadTs;
   const body = JSON.stringify({
     type: "event_callback",
+    is_ext_shared_channel: overrides?.isExtSharedChannel,
     team_id: overrides?.teamId ?? "T01",
     event_id: `Ev${mentionCounter}`,
     event,
@@ -1623,6 +1625,72 @@ describe("slackChannel() inbound mention pipeline", () => {
         triggeringUserId: "U01",
       },
     });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("marks imperative direct-message sends as private before the handler returns", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onDirectMessage(ctx) {
+        await ctx.send("Imperative DM follow-up");
+        return null;
+      },
+    });
+    const { body } = buildDirectMessageBody();
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      message: "Imperative DM follow-up",
+      state: { audience: "private" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("applies an explicit app mention visibility lookup to an imperative send", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, channel: { is_private: true } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        expect(await ctx.isDMOrPrivateChannel()).toBe(true);
+        await ctx.send("Imperative private follow-up");
+        return null;
+      },
+    });
+    const { body } = buildMentionBody({ channel: "C_PRIVATE" });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      message: "Imperative private follow-up",
+      state: { audience: "private" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("conversations.info");
+  });
+
+  it("marks imperative Slack Connect sends private without an API lookup", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.send("Imperative shared-channel follow-up");
+        return null;
+      },
+    });
+    const { body } = buildMentionBody({ channel: "C_SHARED", isExtSharedChannel: true });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      state: { audience: "private" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("lets onAppMention cancel the active turn before dispatching its replacement", async () => {
@@ -2016,6 +2084,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("awaits an async onAppMention before deciding whether to dispatch", async () => {

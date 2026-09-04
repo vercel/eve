@@ -239,6 +239,72 @@ describe("discordChannel() inbound route", () => {
     });
   });
 
+  it.each([
+    {
+      audience: "public",
+      channel: { type: 0 },
+      ephemeral: false,
+      expected: "public",
+      guildId: "G01",
+    },
+    {
+      audience: "public",
+      channel: { type: 0 },
+      ephemeral: true,
+      expected: "private",
+      guildId: "G01",
+    },
+    {
+      audience: "public",
+      channel: { type: 1 },
+      ephemeral: false,
+      expected: "private",
+      guildId: "G01",
+    },
+    {
+      audience: "public",
+      channel: { type: 0 },
+      ephemeral: false,
+      expected: "private",
+      guildId: undefined,
+    },
+    {
+      audience: "everyone",
+      channel: { type: 0 },
+      ephemeral: false,
+      expected: "unknown",
+      guildId: "G01",
+    },
+  ] as const)(
+    "projects command audience evidence as $expected",
+    async ({ audience, channel: interactionChannel, ephemeral, expected, guildId }) => {
+      const { privateKey, publicKeyHex } = testKeys();
+      const channel = discordChannel({
+        credentials: { publicKey: publicKeyHex },
+        onCommand: () => ({
+          audience: audience as "public",
+          auth: null,
+          ephemeral,
+        }),
+      });
+
+      const { send } = await firePost(
+        channel,
+        signedRequest({
+          body: commandBody({
+            channel: interactionChannel,
+            guild_id: guildId,
+          }),
+          privateKey,
+        }),
+      );
+
+      expect(send.mock.calls[0]?.[1]).toMatchObject({
+        state: { audience: expected },
+      });
+    },
+  );
+
   it("acknowledges commands without dispatch when onCommand returns null", async () => {
     const { privateKey, publicKeyHex } = testKeys();
     const channel = discordChannel({
@@ -561,6 +627,28 @@ describe("discordChannel() default event handlers", () => {
         initialResponseSent: true,
         interactionToken: null,
       },
+    });
+  });
+
+  it.each([
+    ["public", "public"],
+    ["private", "private"],
+    ["everyone", "unknown"],
+  ] as const)("projects proactive audience %s as %s", async (audience, expected) => {
+    const channel = discordChannel({ credentials: { botToken: "bot-token" } });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await channel.receive!(
+      {
+        target: { audience: audience as "public", channelId: "C01" },
+        auth: null,
+        message: "start",
+      },
+      mockChannelContext(send),
+    );
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      state: { audience: expected },
     });
   });
 });

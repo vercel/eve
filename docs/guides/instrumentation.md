@@ -60,7 +60,7 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
-Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Proactive Slack `receive` / `ctx.send` handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
+Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels, Chat SDK workspace-visible threads, public GitHub repositories, and username-addressable Telegram channels and supergroups are public. Direct, private, externally shared, ephemeral, and participant-restricted phone conversations are private; platform surfaces without enough visibility evidence remain unknown. Generic Chat SDK, Discord, Slack, and Teams handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination is public. Discord and Teams inbound hooks can return the same evidence; platform-derived private evidence takes precedence. The Photon and Linq wrappers classify all iMessage and SMS conversations as private.
 
 ## Channel delivery traces
 

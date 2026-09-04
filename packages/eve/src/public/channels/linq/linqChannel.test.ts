@@ -1,25 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createLinqAdapter, directMessage, markRead, newMessage, send } = vi.hoisted(() => ({
-  createLinqAdapter: vi.fn((_config: { credentials?: () => unknown | Promise<unknown> }) => ({
-    name: "linq",
-  })),
-  directMessage: vi.fn(),
-  markRead: vi.fn(),
-  newMessage: vi.fn(),
-  send: vi.fn(),
-}));
+const { chatSdkChannel, createLinqAdapter, directMessage, markRead, newMessage, send } = vi.hoisted(
+  () => ({
+    chatSdkChannel: vi.fn(() => ({
+      bot: {
+        getAdapter: () => ({ markRead }),
+        onDirectMessage: directMessage,
+        onNewMessage: newMessage,
+      },
+      channel: { routes: [] },
+      send,
+    })),
+    createLinqAdapter: vi.fn((_config: { credentials?: () => unknown | Promise<unknown> }) => ({
+      name: "linq",
+    })),
+    directMessage: vi.fn(),
+    markRead: vi.fn(),
+    newMessage: vi.fn(),
+    send: vi.fn(),
+  }),
+);
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
-  chatSdkChannel: () => ({
-    bot: {
-      getAdapter: () => ({ markRead }),
-      onDirectMessage: directMessage,
-      onNewMessage: newMessage,
-    },
-    channel: { routes: [] },
-    send,
-  }),
+  chatSdkChannel,
   messageToUserContent: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
@@ -71,6 +74,7 @@ describe("linqChannel", () => {
         title: undefined,
       },
     );
+    expect(chatSdkChannel).toHaveBeenCalledWith(expect.objectContaining({ audience: "private" }));
   });
 
   it("uses lazy credentials and the managed credential verifier", async () => {

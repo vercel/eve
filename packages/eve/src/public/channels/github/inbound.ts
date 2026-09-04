@@ -1,5 +1,6 @@
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { githubRepositoryAudience } from "#public/channels/github/privacy.js";
 import type {
   GitHubAppRef,
   GitHubCheckRunWebhookEvent,
@@ -446,7 +447,9 @@ function normalizeRepository(value: unknown): GitHubRepositoryRef | null {
   const name = typeof value.name === "string" ? value.name : fallbackName;
   const id = typeof value.id === "number" ? value.id : 0;
   if (!owner || !name) return null;
+  const audience = githubRepositoryAudience(value);
   return {
+    audience,
     fullName: fullName || `${owner}/${name}`,
     id,
     name,
