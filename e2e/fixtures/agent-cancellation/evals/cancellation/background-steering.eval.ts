@@ -1,10 +1,4 @@
-import {
-  defineEval,
-  type EveEvalContext,
-  type EveEvalLiveTurn,
-  type EveEvalSession,
-  type EveEvalTurn,
-} from "eve/evals";
+import { defineEval, type EveEvalTurn } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 const cases = [
@@ -29,14 +23,11 @@ export default cases.map(({ parentActive, steering, description }) =>
     tags: ["real-model", "background-steering"],
     timeoutMs: 240_000,
     async test(t) {
-      const threadId = crypto.randomUUID();
       const memo = crypto.randomUUID();
       const original = `WORKER-RESULT:ORIGINAL:${memo}`;
       const steered = `WORKER-RESULT:STEERED:${memo}`;
       const expected = steering ? steered : original;
-      const sessionId = await postMessage(
-        t,
-        threadId,
+      let parent = await t.start(
         [
           "Call steering-worker exactly once in the background with this exact message:",
           `ASSIGNMENT ${memo}`,
@@ -45,21 +36,19 @@ export default cases.map(({ parentActive, steering, description }) =>
         ].join("\n"),
       );
 
+      const sessionId = parent.sessionId;
       try {
-        const parent = t.target.watchTurn(sessionId);
         const acknowledged = await parent.result();
         acknowledged.expectOk();
         const parentTurns: EveEvalTurn[] = [acknowledged];
-        let parentSession = parent.session;
-        let pendingParent: EveEvalLiveTurn | undefined;
         // Admission can acknowledge before the child starts. Keep observing
         // from the cursor instead of assuming subagent.called precedes it.
         if (!parent.events.some((event) => event.type === "subagent.called")) {
-          pendingParent = t.target.watchTurn(sessionId, {
-            startIndex: streamIndex(parentSession),
+          parent = t.target.watchTurn(sessionId, {
+            startIndex: parent.session.state!.streamIndex,
           });
         }
-        const called = await (pendingParent ?? parent).waitForEvent("subagent.called", {
+        const called = await parent.waitForEvent("subagent.called", {
           data: { name: "steering-worker" },
         });
         await t.require(
@@ -77,18 +66,11 @@ export default cases.map(({ parentActive, steering, description }) =>
           },
         });
 
-        let activeParent: EveEvalLiveTurn | undefined;
         if (parentActive) {
           // Establish a running child before holding another parent turn;
           // holding the launch turn can delay dispatch until its wait ends.
-          await postMessage(t, threadId, "Please wait for cancellation.", "queue");
-          activeParent =
-            pendingParent ??
-            t.target.watchTurn(sessionId, {
-              startIndex: streamIndex(parentSession),
-            });
-          pendingParent = undefined;
-          await activeParent.waitForEvent("actions.requested", {
+          parent = await parent.session.start("Please wait for cancellation.");
+          await parent.waitForEvent("actions.requested", {
             data: {
               actions: (actions) =>
                 actions.some(
@@ -112,32 +94,30 @@ export default cases.map(({ parentActive, steering, description }) =>
           ),
         );
 
-        const followUpSessionId = await postMessage(
-          t,
-          threadId,
+        parent = await parent.session.start(
           steering
-            ? "Steer the assignment you just delegated: use STEERED instead of ORIGINAL. Redirect that same worker now, preserving its original memo. This replaces the first request; do not start an independent assignment or report the original result. Stop your own wait, if any."
-            : "Unrelated follow-up: stop your own wait and reply with SIDE-QUESTION-OK. Leave the existing background assignment running, and relay its result when it completes.",
+            ? "Actually, use STEERED instead of ORIGINAL."
+            : "What is 2 + 2? Reply with just the number.",
+          { turnPolicy: "steer" },
         );
-        await t.require(followUpSessionId, equals(sessionId));
+        await t.require(parent.sessionId, equals(sessionId));
 
-        if (activeParent !== undefined) {
-          const cancelled = await activeParent.result();
+        if (parentActive) {
+          // start() observes from the current cursor, including the turn
+          // cancelled by this steering message before its replacement begins.
+          const cancelled = await parent.result();
           cancelled.notEvent("turn.failed");
           cancelled.event("turn.cancelled", { count: 1 });
           parentTurns.push(cancelled);
-          parentSession = activeParent.session;
+          parent = t.target.watchTurn(sessionId, {
+            startIndex: parent.session.state!.streamIndex,
+          });
         }
         // Observe through the result-bearing task wake, not just the parent's
         // acknowledgment of the steering message or an AGENT_BUSY failure wake.
         for (let attempt = 0; attempt < 6; attempt++) {
-          const next =
-            pendingParent ??
-            t.target.watchTurn(sessionId, { startIndex: streamIndex(parentSession) });
-          pendingParent = undefined;
-          const turn = await next.result();
+          const turn = await parent.result();
           parentTurns.push(turn);
-          parentSession = next.session;
           if (
             turn.events.some(
               (event) =>
@@ -148,6 +128,9 @@ export default cases.map(({ parentActive, steering, description }) =>
           ) {
             break;
           }
+          parent = t.target.watchTurn(sessionId, {
+            startIndex: parent.session.state!.streamIndex,
+          });
         }
 
         const calls = parentTurns.flatMap((turn) =>
@@ -176,7 +159,7 @@ export default cases.map(({ parentActive, steering, description }) =>
           // Also permits cancel-and-resume of the same child; no specific
           // control API or task-id lifetime is required by these assertions.
           const resumed = await t.target
-            .watchTurn(called.data.childSessionId, { startIndex: streamIndex(child.session) })
+            .watchTurn(called.data.childSessionId, { startIndex: child.session.state!.streamIndex })
             .result();
           resumed.expectOk();
           resumed.messageIncludes(expected);
@@ -198,23 +181,22 @@ export default cases.map(({ parentActive, steering, description }) =>
 
         // A queued follow-up extends observation beyond the first result wake
         // without cancelling a duplicate wake that is already pending.
-        await postMessage(
-          t,
-          threadId,
+        parent = await parent.session.start(
           "Reply with exactly STEERING-CHECKPOINT. Do not repeat any earlier result or call tools.",
-          "queue",
+          { turnPolicy: "queue" },
         );
         let checkpointReached = false;
         for (let attempt = 0; attempt < 4; attempt++) {
-          const next = t.target.watchTurn(sessionId, { startIndex: streamIndex(parentSession) });
-          const turn = await next.result();
+          const turn = await parent.result();
           parentTurns.push(turn);
-          parentSession = next.session;
           turn.notEvent("subagent.called");
           if (turn.message?.includes("STEERING-CHECKPOINT")) {
             checkpointReached = true;
             break;
           }
+          parent = t.target.watchTurn(sessionId, {
+            startIndex: parent.session.state!.streamIndex,
+          });
         }
         t.check(checkpointReached, equals(true)).label("parent processes the queued checkpoint");
 
@@ -237,7 +219,7 @@ export default cases.map(({ parentActive, steering, description }) =>
           );
         else
           t.check(
-            replies.some((message) => message.includes("SIDE-QUESTION-OK")),
+            replies.some((message) => message.trim() === "4"),
             equals(true),
           );
         for (const turn of parentTurns) {
@@ -248,7 +230,7 @@ export default cases.map(({ parentActive, steering, description }) =>
         // Reset owns admitted background tasks; cancelling only the parent
         // turn would leave workers alive when a gate fails.
         try {
-          const cleanup = await t.target.fetch(`/threads/${threadId}/new`, {
+          const cleanup = await t.target.fetch(`/eve/v1/session/${sessionId}/reset`, {
             method: "POST",
             signal: AbortSignal.timeout(10_000),
           });
@@ -261,27 +243,3 @@ export default cases.map(({ parentActive, steering, description }) =>
     },
   }),
 );
-
-async function postMessage(
-  t: EveEvalContext,
-  threadId: string,
-  message: string,
-  turnPolicy: "queue" | "steer" = "steer",
-): Promise<string> {
-  const response = await t.target.fetch(`/threads/${threadId}/messages`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, turnPolicy }),
-    signal: t.signal,
-  });
-  if (!response.ok) throw new Error(`Posting steering message failed (${response.status}).`);
-  const result = (await response.json()) as { sessionId?: string };
-  if (typeof result.sessionId !== "string") throw new Error("Channel returned no session id.");
-  return result.sessionId;
-}
-
-function streamIndex(session: EveEvalSession): number {
-  const index = session.state?.streamIndex;
-  if (index === undefined) throw new Error("Observed session has no stream cursor.");
-  return index;
-}

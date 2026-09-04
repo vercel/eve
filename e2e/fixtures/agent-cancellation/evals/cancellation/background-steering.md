@@ -17,7 +17,11 @@ duplicate delegation and superseded results.
 | `0002` | Waiting in its own tool call          | Answer an unrelated question; the original child finishes normally.              |
 
 The eval observes the child's pending tool call before sending the follow-up
-through the authored channel with `turnPolicy: "steer"`. The
+with the eval session driver's `start(message, { turnPolicy: "steer" })`.
+The steering message is “Actually, use STEERED instead of ORIGINAL.” It does
+not name the worker, repeat the memo, or tell the parent how to route it. The
+unrelated follow-up asks “What is 2 + 2?” without instructions about background
+work. The
 [worker][worker] uses the same real matrix model as the parent and the existing
 bounded [cancellation wait][wait] (90 seconds). Its [instructions][instructions]
 ask it to return `WORKER-RESULT:ORIGINAL:<memo>` unless steering replaces
