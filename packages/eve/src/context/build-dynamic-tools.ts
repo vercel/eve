@@ -23,6 +23,7 @@ import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
+  type DurableDynamicCallbackReference,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 
@@ -91,13 +92,16 @@ export function replayDynamicTools(
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
-    const toModelOutputReference = entry.callbacks.toModelOutput;
-    const toModelOutput =
-      toModelOutputReference === undefined
-        ? undefined
-        : lookupDurableDynamicCallback(entry.name, "toModelOutput");
+    const labelStart = bindDynamicCallback(entry, "labelStart", entry.callbacks.label?.start);
+    const toModelOutput = bindDynamicCallback(
+      entry,
+      "toModelOutput",
+      entry.callbacks.toModelOutput,
+    );
 
-    return {
+    const replayed: {
+      -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
+    } = {
       description: entry.description,
       execute:
         entry.execution === "background"
@@ -136,22 +140,26 @@ export function replayDynamicTools(
       execution: entry.execution,
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
-      ...(toModelOutputReference === undefined
-        ? {}
-        : {
-            toModelOutput: (output: unknown) => {
-              if (toModelOutput === undefined) {
-                throw missingCallbackError(entry, "toModelOutput");
-              }
-              return callDurableDynamicCallback(
-                toModelOutput!,
-                toModelOutputReference.closure,
-                output,
-              );
-            },
-          }),
     };
+    if (labelStart !== undefined) {
+      replayed.label = { start: (input: unknown) => labelStart(input) as string };
+    }
+    if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
+    return replayed;
   });
+}
+
+function bindDynamicCallback(
+  entry: CurrentDynamicToolMetadata,
+  phase: DurableDynamicCallbackPhase,
+  reference: DurableDynamicCallbackReference | undefined,
+): ((...args: unknown[]) => unknown) | undefined {
+  if (reference === undefined) return undefined;
+  const callback = lookupDurableDynamicCallback(entry.name, phase);
+  return (...args) => {
+    if (callback === undefined) throw missingCallbackError(entry, phase);
+    return callDurableDynamicCallback(callback, reference.closure, ...args);
+  };
 }
 
 function requireCurrentDynamicToolMetadata(

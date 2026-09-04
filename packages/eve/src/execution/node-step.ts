@@ -31,6 +31,10 @@ import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
 } from "#execution/tools/workflow/background.js";
+import {
+  resolveWebSearchActivityLabel,
+  WEB_SEARCH_TOOL_NAME,
+} from "#harness/provider-tool-schemas.js";
 
 const log = createLogger("execution.node-step");
 
@@ -274,6 +278,11 @@ function createRegisteredHarnessToolDefinition(input: {
     def.owner.kind === "framework" && def.name === ASK_QUESTION_TOOL_NAME;
 
   const definition: HarnessToolDefinition = {
+    label:
+      def.label ??
+      (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME
+        ? { start: resolveWebSearchActivityLabel }
+        : undefined),
     approvalKey: def.approvalKey,
     behavior: input.behavior,
     description: def.description,

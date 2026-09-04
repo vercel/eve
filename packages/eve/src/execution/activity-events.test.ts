@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
-import { MAX_ACTIVITY_TEXT_LENGTH } from "#execution/activity-text.js";
+import { MAX_ACTIVITY_TEXT_LENGTH } from "#shared/presentation-text.js";
 
 const lineage = {
   id: "work:root:turn",
@@ -27,6 +27,7 @@ describe("projectActivityEvents", () => {
               },
               { callId: "skill-1", input: { skill: "private" }, kind: "load-skill" },
             ],
+            presentation: { "tool-1": { label: "Search issues" } },
             sequence: 0,
             stepIndex: 0,
             turnId: "turn",
@@ -44,6 +45,11 @@ describe("projectActivityEvents", () => {
           stepIndex: 0,
         }),
         kind: "action.started",
+      }),
+      expect.objectContaining({
+        actionId: "action:work:root:turn:tool-1",
+        kind: "action.label.updated",
+        label: "Search issues",
       }),
       expect.objectContaining({
         action: expect.objectContaining({

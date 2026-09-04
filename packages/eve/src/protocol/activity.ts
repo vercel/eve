@@ -42,6 +42,7 @@ export interface ActivityActionIdentityV1 {
 }
 
 export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
+  readonly label?: string;
   readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
@@ -88,6 +89,12 @@ export type ActivityEventV1 =
       readonly kind: "action.settled";
       readonly outcome: Exclude<ActivityActionPhase, "running">;
       readonly settledAt: string;
+    }
+  | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "action.label.updated";
+      readonly label: string;
     }
   | {
       readonly blocker: ActivityBlockerIdentityV1;
@@ -232,6 +239,21 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         kind: "action.settled",
         outcome: value.outcome,
         settledAt: value.settledAt,
+      };
+    }
+    case "action.label.updated": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "label"])) return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isBoundedString(value.label)
+      )
+        return undefined;
+      return {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "action.label.updated",
+        label: value.label,
       };
     }
     case "blocker.started": {

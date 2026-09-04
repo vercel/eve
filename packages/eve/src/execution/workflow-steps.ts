@@ -52,7 +52,7 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
@@ -376,11 +376,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await writer.write(encodeMessageStreamEvent(stamped));
     return stamped;
   };
-
-  const handleEvent = async (
-    event: UnstampedMessageStreamEvent,
-    messages?: readonly import("ai").ModelMessage[],
-  ): Promise<void> => {
+  const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
     // A remote task's parent owns its HITL. Forward blocking events over
     // the task callback and keep them out of the child's local channel;
     // otherwise two TUIs can present and answer the same request.

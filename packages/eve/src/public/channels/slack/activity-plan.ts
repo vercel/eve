@@ -152,7 +152,13 @@ function project(snapshot: ActivitySnapshotV1, rootTurnId: string): View {
     }
   for (const action of Object.values(snapshot.actions).filter((a) => a.rootTurnId === rootTurnId)) {
     const p = owner(action.parentWorkId);
-    if (p) entities.push({ id: action.id, name: action.name, phase: action.phase, parent: p.id });
+    if (p)
+      entities.push({
+        id: action.id,
+        name: action.label ?? action.name,
+        phase: action.phase,
+        parent: p.id,
+      });
   }
   for (const blocker of Object.values(snapshot.blockers).filter(
     (b) => b.rootTurnId === rootTurnId,

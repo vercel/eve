@@ -222,9 +222,16 @@ export type MessageReceivedPart =
  * action lifecycles by call ID rather than assume one event contains every call
  * from an assistant step.
  */
+export interface ActionPresentation {
+  readonly label?: string;
+}
+
+export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentation>>;
+
 export interface ActionsRequestedStreamEvent {
   data: {
     actions: readonly RuntimeActionRequest[];
+    presentation?: ActionPresentationByCallId;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -308,6 +315,7 @@ export interface InputResolvedStreamEvent {
 export interface ActionResultStreamEvent {
   data: {
     error?: ActionResultError;
+    presentation?: ActionPresentationByCallId;
     result: RuntimeActionResult;
     sequence: number;
     stepIndex: number;
@@ -323,6 +331,7 @@ export interface ActionResultStreamEvent {
  */
 export interface ActionPartialStreamEvent {
   data: {
+    presentation?: ActionPresentationByCallId;
     result: RuntimeToolResultActionResult;
     sequence: number;
     stepIndex: number;
@@ -1083,6 +1092,7 @@ function basenameOf(path: string): string {
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly presentation?: ActionPresentationByCallId;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1090,12 +1100,19 @@ export function createActionsRequestedEvent(input: {
   return {
     data: {
       actions: input.actions,
+      ...optionalPresentation(input.presentation),
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "actions.requested",
   };
+}
+
+function optionalPresentation(presentation: ActionPresentationByCallId | undefined): {
+  readonly presentation?: ActionPresentationByCallId;
+} {
+  return presentation === undefined ? {} : { presentation };
 }
 
 /** Creates an `action.input.appended` event for streamed tool input text. */
@@ -1265,6 +1282,7 @@ export function createInputResolvedEvent(input: {
  * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
@@ -1279,6 +1297,7 @@ export function createActionResultEvent(input: {
   return {
     data: {
       error: outcome.error,
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       status: outcome.status,
@@ -1291,6 +1310,7 @@ export function createActionResultEvent(input: {
 
 /** Creates an `action.partial` event for one preliminary tool-result snapshot. */
 export function createActionPartialEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly result: RuntimeToolResultActionResult;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1298,6 +1318,7 @@ export function createActionPartialEvent(input: {
 }): ActionPartialStreamEvent {
   return {
     data: {
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
