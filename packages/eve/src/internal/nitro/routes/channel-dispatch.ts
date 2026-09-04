@@ -1,4 +1,5 @@
 import type { H3Event } from "nitro";
+import { getRouterParams } from "nitro/h3";
 import type { Span } from "#compiled/@opentelemetry/api/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
@@ -217,11 +218,7 @@ function buildRouteArgs(
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
   const backgroundTasks: Promise<unknown>[] = [];
-  const rawParams = (event.context.params as Record<string, string>) ?? {};
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(rawParams)) {
-    params[key] = decodeURIComponent(value);
-  }
+  const params = getRouterParams(event, { decode: true });
 
   const waitUntil = (task: Promise<unknown>) => {
     backgroundTasks.push(task);

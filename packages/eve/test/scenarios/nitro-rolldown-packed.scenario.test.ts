@@ -64,27 +64,31 @@ console.log(
 `;
 
 describe("packed Nitro Rolldown wrapper", () => {
-  it("builds and parses from Nitro's dependency tree without consumer-owned Rolldown", async () => {
-    const app = await scenarioApp({
-      files: {
-        "probe.mjs": PACKED_CONSUMER_PROBE,
-      },
-      installDependencies: true,
-      name: "packed-nitro-rolldown",
-      packageManager: "npm",
-    });
+  it.each(["npm", "pnpm"] as const)(
+    "builds and parses from Nitro's dependency tree in a %s consumer",
+    async (packageManager) => {
+      const app = await scenarioApp({
+        files: {
+          "probe.mjs": PACKED_CONSUMER_PROBE,
+        },
+        installDependencies: true,
+        name: "packed-nitro-rolldown",
+        packageManager,
+      });
 
-    const { stdout } = await runFile(process.execPath, ["probe.mjs"], {
-      cwd: app.appRoot,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+      const { stdout } = await runFile(process.execPath, ["probe.mjs"], {
+        cwd: app.appRoot,
+        maxBuffer: 10 * 1024 * 1024,
+      });
 
-    expect(JSON.parse(stdout.trim())).toEqual({
-      bundled: true,
-      consumerDeclaresRolldown: false,
-      eveDeclaresRolldown: false,
-      nitroDeclaresRolldown: true,
-      parsed: true,
-    });
-  }, 120_000);
+      expect(JSON.parse(stdout.trim())).toEqual({
+        bundled: true,
+        consumerDeclaresRolldown: false,
+        eveDeclaresRolldown: false,
+        nitroDeclaresRolldown: true,
+        parsed: true,
+      });
+    },
+    120_000,
+  );
 });

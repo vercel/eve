@@ -54,6 +54,39 @@ describe("shouldInstallSandboxShutdown", () => {
 });
 
 describe("installSandboxShutdownHandlers", () => {
+  it("shares pending cleanup across signals and repeated Nitro close hooks", async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const handle = { shutdown: vi.fn(() => cleanup.promise) };
+    trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
+    const fakeProcess = createFakeProcess();
+    let closeHandler!: () => Promise<void>;
+
+    installSandboxShutdownHandlers({
+      log: () => {},
+      nitroApp: {
+        hooks: {
+          hook(_name, handler) {
+            closeHandler = handler;
+          },
+        },
+      },
+      process: fakeProcess,
+    });
+    fakeProcess.emit("SIGTERM");
+    const closed = closeHandler();
+    expect(closeHandler()).toBe(closed);
+    fakeProcess.emit("SIGINT");
+    expect(fakeProcess.exit).not.toHaveBeenCalled();
+    expect(handle.shutdown).toHaveBeenCalledTimes(1);
+
+    cleanup.resolve();
+    await closed;
+    expect(handle.shutdown).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exit).toHaveBeenCalledWith(143);
+    expect(fakeProcess.exit).toHaveBeenCalledWith(130);
+    expect(closeHandler()).toBe(closed);
+  });
+
   it("registers no handlers when shutdown ownership is elsewhere", () => {
     const fakeProcess = createFakeProcess({ VERCEL: "1" });
 

@@ -166,6 +166,26 @@ Control operations never create a session. Unknown or inactive targets return a
 benign no-active status. Authenticate and deduplicate command webhooks before
 calling `reset`, because a delayed duplicate can retire a newer address owner.
 
+## Paths and HTTP methods
+
+`params` decodes ordinary URL-encoded text once. For `/threads/:threadId`,
+`/threads/caf%C3%A9` supplies `"café"`. Encoded slashes and backslashes stay
+encoded: `/threads/a%2Fb` supplies `"a%2Fb"`, not `"a/b"`, and `%5C` stays
+`%5C`. Nested encodings of these separators also stay encoded. Malformed
+encoding returns `400` before the handler runs.
+
+When upgrading from an earlier eve release, check handlers that use slashes or
+backslashes inside parameter values. Prefer a separator-free identifier. If
+your protocol requires decoding separators, decode and validate that identifier
+explicitly inside the handler before using it to address a resource.
+
+Routing uses canonical URL paths, so unnecessary escapes such as `%61` match
+the same route as `a`. eve rejects conflicting authored routes at compile time.
+A `GET()` route also handles `HEAD` when there is no matching explicit `HEAD()`
+route. The GET handler receives the original HEAD request, and the response has
+no body. Define `HEAD()` explicitly when generating the GET response would do
+unnecessary work.
+
 ## CORS
 
 Custom HTTP channels leave CORS untouched unless you opt in. Pass `cors: true`
@@ -205,8 +225,77 @@ export default defineChannel({
 
 `WS()` handlers receive the same `from`, `to`, and `attachSession` operations,
 `params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The
-returned hooks are eve-owned structural types compatible with Nitro/H3 websocket
-routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+returned hooks include `upgrade`, `open`, `message`, `close`, `error`, `drain`,
+`ping`, and `pong`.
+
+### Upgrade authentication and subprotocols
+
+Authenticate in `upgrade()` before accepting the connection. Return a `Response`
+to reject the handshake, or an object with `context`, `headers`, and an optional
+`protocol`. Select a protocol the client offered; returning a protocol does not
+validate it for you:
+
+```ts
+WS("/events/ws", () => ({
+  async upgrade(request) {
+    const principal = await authenticate(request);
+    if (!principal) return new Response("Unauthorized", { status: 401 });
+
+    const offered = request.headers
+      .get("sec-websocket-protocol")
+      ?.split(",")
+      .map((p) => p.trim());
+    if (!offered?.includes("events.v1")) {
+      return new Response("Unsupported protocol", { status: 400 });
+    }
+
+    return {
+      protocol: "events.v1",
+      context: { principalId: principal.id },
+      headers: { "x-events-version": "1" },
+    };
+  },
+  open(peer) {
+    peer.send(JSON.stringify({ connected: true }));
+  },
+}));
+```
+
+Here `authenticate` is your application’s verifier. Authorization for each
+message must still check the resource that message addresses.
+
+### Backpressure and control frames
+
+`peer.bufferedAmount` reports queued outgoing bytes. Before producing more data,
+await `peer.waitForDrain({ threshold, pollInterval, signal })`. The default
+threshold is zero bytes and the default polling interval is 100 milliseconds.
+The wait resolves when the buffer reaches the threshold or the connection
+closes. Aborting `signal` rejects an outstanding wait with the abort reason.
+Use a timeout or a connection-owned abort signal to bound long waits:
+
+```ts
+async function sendChunk(peer: WebSocketPeer, chunk: Uint8Array) {
+  await peer.waitForDrain({ threshold: 64 * 1024, signal: AbortSignal.timeout(5_000) });
+  peer.send(chunk);
+}
+```
+
+Import `WebSocketPeer` from `eve/channels`. The optional `drain(peer)` hook is a
+host notification to check the buffer again; it does not guarantee zero queued
+bytes. Hosts without a buffer signal report zero, so this is transport flow
+control, not a delivery acknowledgement.
+
+`peer.ping(data?)` sends a control ping on Node, Bun, and uWebSockets hosts.
+Keep the encoded payload at or below 125 bytes; invalid payloads reach the
+`error` hook. The optional `ping(peer, data)` and `pong(peer, data)` hooks observe
+incoming control frames where the host exposes them. Deno and Cloudflare do not
+expose these control-frame operations, and browser clients cannot send control
+pings directly. eve uses the host’s default liveness behavior; it does not expose
+a per-route idle timeout.
+
+Use a host that supports persistent WebSocket connections, such as the Node
+server. Vercel Functions do not host these connections. Close application-owned
+resources in `close()` when a client disconnects.
 
 ### Node upgrade server escape hatch
 

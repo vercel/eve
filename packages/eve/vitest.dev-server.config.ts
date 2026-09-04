@@ -20,6 +20,8 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "test/vercel/**"],
     globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
     include: [
+      "test/scenarios/nitro-compatibility.scenario.test.ts",
+      "test/scenarios/nitro-rolldown-packed.scenario.test.ts",
       "test/scenarios/dev-server-apps.scenario.test.ts",
       "test/scenarios/dev-server-connections.scenario.test.ts",
       "test/scenarios/dev-server-rebuild.scenario.test.ts",

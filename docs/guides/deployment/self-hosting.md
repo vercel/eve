@@ -65,6 +65,18 @@ A proxy restricted to `/eve/` lets a session start, but the run stalls when its 
 
 The standard `eve build && eve start` path starts Nitro’s schedule runner. If you adapt the output to a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
 
+## Shut down the service
+
+On `SIGINT` or `SIGTERM`, eve stops tracked sandboxes before exiting. Nitro’s
+close hook uses the same cleanup operation, so overlapping signals and host
+shutdown do not stop a sandbox twice. Sandbox cleanup has a 15-second limit;
+`eve start` gives its server child up to 20 seconds before forcing termination.
+Configure your process manager’s grace period to allow that window.
+
+These limits bound process shutdown; they do not guarantee completion of every
+in-flight request or background task. Development workers and Vercel Functions
+use their own lifecycle handling.
+
 ## Verify the service
 
 Check the health route after your proxy and authentication configuration are active:

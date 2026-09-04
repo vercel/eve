@@ -284,7 +284,10 @@ async function installScenarioDependencies(input: {
       "--no-audit",
       "--no-fund",
       "--ignore-scripts",
-      "--prefer-offline",
+      "--prefer-online",
+      // pnpm can forward the host's npm release-age setting through the
+      // environment, which takes precedence over the fixture's .npmrc.
+      "--min-release-age=0",
     ]);
     return;
   }

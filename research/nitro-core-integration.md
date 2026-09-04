@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2055
 status: in-progress
-last_updated: "2026-08-13"
+last_updated: "2026-09-03"
 ---
 
 # Nitro-first build and runtime integration
@@ -48,6 +48,106 @@ This boundary allows eve to improve the inputs and extension points around Nitro
 eve a second host framework.
 
 ## Current-pass improvements with umbrella Nitro
+
+### September 2026 release
+
+Upgrade to `nitro@3.0.260903-beta`, using the
+[published release](https://github.com/nitrojs/nitro/releases/tag/v3.0.260903-beta)
+and [tagged manifest](https://github.com/nitrojs/nitro/blob/v3.0.260903-beta/package.json)
+as the compatibility boundary. The package contains newer primitives than parts
+of the release summary: h3 `2.0.1-rc.31`, srvx `1.0.3`, env-runner `0.2.1`, and
+Rolldown `1.2.7`.
+
+`nitro` and the existing `undici` remain eve's only runtime dependencies.
+The lockfile refresh also supplies CrossWS `0.4.12`, rou3 `0.9.2`, nf3 `0.3.24`,
+ocache `0.3.0`, db0 `0.4.1`, and unstorage `2.0.0-alpha.10`. Nitro bundles its own
+unctx and unwasm. Older versions needed by historical fixtures and Nuxt's
+separate `nitropack` 2.x graph remain independent. No global overrides force
+these consumers onto Nitro 3's versions.
+
+eve vendors env-runner `0.2.1` as a development dependency, updates Vite to
+`^8.2.2`, and keeps Vitest on the `4.1.11` patch line. Exact version exceptions
+allow the required fresh releases and Rolldown native bindings through pnpm's
+two-day release-age policy. The resolved Rolldown version and env-runner manifest
+invalidate the existing vendor fingerprint; generated artifacts and license
+notices are rebuilt together.
+
+Both host constructors explicitly select `builder: "rolldown"`. A surrounding
+application's Vite configuration must not select a different build pipeline or
+trigger Nitro's automatic dependency installer. eve retains the public
+`prepare`, `build`, asset-copying, and prerender APIs, workflow transforms,
+conditional exports, native tracing, and Windows import normalization. Removed
+Nitro auto-imports, typed fetch, and declaration generation are not eve inputs.
+
+Channel parameters now use `getRouterParams(event, { decode: true })` from
+`nitro/h3`. Ordinary text decodes once, encoded separators stay encoded, and
+malformed encoding is rejected before dispatch. This is a public breaking
+change. Static routes retain precedence, explicit HEAD handlers win over GET
+fallback, and fallback keeps the captured GET channel identity while forwarding
+the original HEAD request. eve retains compiler-owned CORS validation and
+generated preflights, with h3 handling response headers.
+
+The packed-host test found that Nitro's generated `H3Core` matcher omits h3's
+HEAD fallback. An eve build plugin adds the missing second lookup to Nitro's
+matcher only when the HEAD lookup returns no route. Explicit HEAD routes retain
+precedence even across different static/dynamic patterns, and an explicit HEAD
+handler returning 404 does not fall back. The plugin fails the build if Nitro's
+generated matcher shape changes, requiring review at the next upgrade.
+
+The existing eve-owned WebSocket types expose `bufferedAmount`, `waitForDrain`,
+`ping`, `drain`/`ping`/`pong` hooks, and upgrade `protocol` selection. Operations
+delegate to CrossWS peers; there is no new transport implementation. Control
+frames and drain notifications depend on the host. CrossWS owns default liveness
+checks; an adapter-level idle timeout is not a public eve route option.
+Compatibility tests cover request-attached hook resolution once per connection,
+handshake headers, rejected upgrades, protocol selection, and bounded drain waits.
+
+The env-runner shutdown patch remains necessary: `0.2.1` still runs the IPC
+close hook before closing its server and leaves the parent port open. eve keeps
+its corrected ordering, immutable generations, readiness gates, crash recovery,
+stream draining, and bounded worker termination. Production sandbox cleanup now
+shares one promise across signals and Nitro close hooks. Signal supervision
+remains necessary because srvx disables automatic signal handling in CI/test,
+and schedule timers can otherwise retain the process. Development and Vercel
+remain excluded from production sandbox cleanup.
+
+Native Nitro tracing and its logger remain disabled by default: enabling them
+would introduce a separate exporter outside eve's instrumentation policies.
+The release's cache behavior is recorded for future use: SWR is disabled by
+default; query parameters are stripped unless allowed; request cookies require
+an allowlist and response `set-cookie` is removed; keys include URL authority;
+and shared resolutions time out after 30 seconds by default
+([Nitro cache documentation](https://nitro.build/docs/cache)). eve does not use
+Nitro caching or db0 for workflow persistence, so this upgrade requires no state
+migration. Immutable assets add no value while `publicAssets` is empty. Nitro's
+text/bytes import plugins do not extend eve's earlier authored compilation.
+Cloudflare development and distributed WebSocket pub/sub remain separate work.
+
+Validation uses packed npm and pnpm consumers, including a conflicting Vite
+configuration and checks that builds do not mutate manifests, lockfiles, or
+installed package directories. Real production and development hosts exercise
+HTTP and WebSocket behavior. Existing scenario coverage retains workflow,
+conditional exports, native externals, extensions, Windows paths, and Vercel
+output contracts. Deterministic HTTP fixture evals run only in CI. The historical
+measurements below remain the record of the earlier core-package investigation.
+
+The upgrade's local report compares commit `90917771` with the updated package
+on macOS arm64 and Node 24.20.0, using the same isolated npm consumer reporting
+tool. Fresh consumers resolve the manifest's dependency ranges; these counts
+are not the monorepo lockfile's full graph.
+
+| Metric                                       |   Before |    After |
+| -------------------------------------------- | -------: | -------: |
+| Packed install                               | 75.71 MB | 75.65 MB |
+| Installed package instances                  |       35 |       33 |
+| Optional peer edges                          |       47 |        7 |
+| `eve init` packages                          |      122 |      120 |
+| Packed tarball delta                         |        — |  -6.7 kB |
+| Two Vercel function payloads, combined delta |        — |  -2.9 kB |
+
+Existing size budgets pass unchanged. One recorded build took 1.15 seconds
+before and 2.23 seconds after; the latter ran alongside regression tests, so
+this is an informational profile, not evidence of a build-speed change.
 
 ### Contain the transitive Rolldown boundary
 
@@ -159,7 +259,7 @@ claims, and both designs used Rolldown, H3, CrossWS, and srvx. A single shared-r
 improved from 2.10 seconds to 1.54 seconds, but it was explicitly informational and too noisy to
 support a build-performance claim.
 
-The current Nitro manifest has 14 hard dependencies and eight optional peers. Its closure includes
+The August Nitro manifest had 14 hard dependencies and eight optional peers. Its closure included
 23 optional storage-provider peers from unstorage and six database-provider peers from db0. eve
 cannot remove those manifest edges with imports, aliases, overrides, dynamic loading, or feature
 flags. Moving dependencies to optional peers would reduce default installed bytes but would still
@@ -196,9 +296,8 @@ Stable APIs are also needed at the seams eve currently reaches through hooks and
   writing the traced dependency tree.
 - Preset extension points for routes, functions, crons, headers, and service layouts without
   rewriting Nitro's emitted Vercel output.
-- A Node adapter on `srvx` 0.12 or newer, or a supported way for the host to supply that adapter.
-  The current umbrella Nitro release resolves `srvx` 0.11.22, while the 0.12 line contains the
-  `waitUntil` retention and Node-adapter fixes needed by eve's lifecycle contract.
+- A Node adapter with `waitUntil` retention and the Node-adapter fixes introduced in srvx 0.12.
+  The September umbrella release now supplies srvx 1.0.3, satisfying this part of the requirement.
 - A disposable Node preset contract with bounded asynchronous shutdown across requests,
   WebSockets, schedules, lifecycle hooks, signals, and transitive `waitUntil` work.
 - A published compatibility matrix for Nitro's supported Rolldown, H3, CrossWS, srvx, and nf3

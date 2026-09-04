@@ -380,6 +380,7 @@ describe("application Nitro creation", () => {
 
     expect(createNitroMock).toHaveBeenCalledTimes(1);
     expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
+      builder: "rolldown",
       rootDir: preparedHost.appRoot,
       scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
     });
@@ -446,11 +447,13 @@ describe("application Nitro creation", () => {
 
     const nitroOptions = createNitroMock.mock.calls[0]?.[0];
     expect(nitroOptions).toMatchObject({
+      builder: "rolldown",
       features: {
         websocket: true,
       },
       preset: "vercel",
     });
+    expect(nitroOptions?.tracingChannel).toBeUndefined();
     expect(nitroOptions?.vercel).toEqual(
       createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
     );

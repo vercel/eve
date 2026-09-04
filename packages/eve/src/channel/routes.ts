@@ -66,6 +66,8 @@ export type RouteHandler<TState = undefined> = (
  * `close` closes gracefully; `terminate` aborts the socket immediately.
  */
 export interface WebSocketPeer {
+  /** Queued outgoing bytes. Hosts without a buffer signal report zero. */
+  readonly bufferedAmount: number;
   readonly id: string;
   readonly context: Record<string, unknown>;
   readonly namespace: string;
@@ -73,11 +75,22 @@ export interface WebSocketPeer {
   readonly remoteAddress?: string;
   readonly topics: Set<string>;
   close(code?: number, reason?: string): void;
+  /** Send a control ping of at most 125 bytes. Support depends on the host. */
+  ping(data?: unknown): number | void | undefined;
   publish(topic: string, data: unknown, options?: { compress?: boolean }): void;
   send(data: unknown, options?: { compress?: boolean }): number | void | undefined;
   subscribe(topic: string): void;
   terminate(): void;
   unsubscribe(topic: string): void;
+  /**
+   * Wait for queued bytes to reach the threshold (default zero), or for the
+   * connection to close. Polls every 100ms by default; a signal aborts the wait.
+   */
+  waitForDrain(options?: {
+    readonly threshold?: number;
+    readonly pollInterval?: number;
+    readonly signal?: AbortSignal;
+  }): Promise<void>;
 }
 
 /**
@@ -115,6 +128,8 @@ export type WebSocketUpgradeResult =
       readonly handled?: boolean;
       readonly headers?: WebSocketHeaders;
       readonly namespace?: string;
+      /** Select a subprotocol offered in the client's upgrade request. */
+      readonly protocol?: string;
     }
   | Response
   | void;
@@ -126,9 +141,15 @@ export type WebSocketUpgradeResult =
  */
 export interface WebSocketRouteHooks {
   close?(peer: WebSocketPeer, details: { code?: number; reason?: string }): void | Promise<void>;
+  /** A host-provided hint to check bufferedAmount and resume sending. */
+  drain?(peer: WebSocketPeer): void | Promise<void>;
   error?(peer: WebSocketPeer, error: Error): void | Promise<void>;
   message?(peer: WebSocketPeer, message: WebSocketMessage): void | Promise<void>;
   open?(peer: WebSocketPeer): void | Promise<void>;
+  /** Observe an incoming ping control frame on supported hosts. */
+  ping?(peer: WebSocketPeer, data: Uint8Array): void | Promise<void>;
+  /** Observe an incoming pong control frame on supported hosts. */
+  pong?(peer: WebSocketPeer, data: Uint8Array): void | Promise<void>;
   upgrade?(
     request: WebSocketUpgradeRequest,
   ): Promise<WebSocketUpgradeResult> | WebSocketUpgradeResult;

@@ -74,9 +74,9 @@ function exitCodeForSignal(signal: ShutdownSignal): number {
 
 /**
  * Wires sandbox shutdown into the server lifecycle: the nitro `close`
- * hook plus SIGINT/SIGTERM, since the node-server preset installs no
- * signal handling of its own. Exposed for tests; the plugin default
- * export applies it to the real `process`.
+ * hook plus SIGINT/SIGTERM. srvx disables its signal handling in CI/test
+ * environments, and scheduled tasks can keep the process alive after the
+ * server closes, so eve still owns bounded process exit.
  */
 export function installSandboxShutdownHandlers(input: {
   readonly log: (message: string) => void;
@@ -87,13 +87,13 @@ export function installSandboxShutdownHandlers(input: {
     return;
   }
 
-  input.nitroApp?.hooks?.hook("close", async () => {
-    await runSandboxShutdown(input.log);
-  });
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => (shutdownPromise ??= runSandboxShutdown(input.log));
+  input.nitroApp?.hooks?.hook("close", shutdown);
 
   for (const signal of SHUTDOWN_SIGNALS) {
     input.process.once(signal, () => {
-      void runSandboxShutdown(input.log).finally(() => {
+      void shutdown().finally(() => {
         input.process.exit(exitCodeForSignal(signal));
       });
     });

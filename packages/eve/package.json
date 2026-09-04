@@ -427,7 +427,7 @@
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },
   "dependencies": {
-    "nitro": "3.0.260610-beta",
+    "nitro": "3.0.260903-beta",
     "undici": "8.9.0"
   },
   "devDependencies": {
@@ -480,7 +480,7 @@
     "chokidar": "5.0.0",
     "commander": "14.0.3",
     "emulate": "0.6.0",
-    "env-runner": "0.1.16",
+    "env-runner": "0.2.1",
     "eventsource-parser": "3.1.0",
     "gray-matter": "4.0.3",
     "historical-eve-0-30-8": "npm:eve@0.30.8",
@@ -498,7 +498,7 @@
     "shadcn": "4.18.0",
     "svelte": "^5.0.0",
     "turndown": "7.2.4",
-    "vite": "^8.1.5",
+    "vite": "^8.2.2",
     "vitest": "catalog:",
     "vue": "^3.5.0",
     "zod": "catalog:",

@@ -56,7 +56,7 @@ catalog:
   react-dom: "19.2.6"
   streamdown: "2.5.0"
   typescript: "7.0.2"
-  vitest: "4.1.10"
+  vitest: "4.1.11"
   zod: "4.5.4"
 
 catalogs:
@@ -66,6 +66,27 @@ catalogs:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@rolldown/binding-android-arm-eabi@1.2.7"
+  - "@rolldown/binding-android-arm64@1.2.7"
+  - "@rolldown/binding-darwin-arm64@1.2.7"
+  - "@rolldown/binding-darwin-x64@1.2.7"
+  - "@rolldown/binding-freebsd-x64@1.2.7"
+  - "@rolldown/binding-linux-arm-gnueabihf@1.2.7"
+  - "@rolldown/binding-linux-arm64-gnu@1.2.7"
+  - "@rolldown/binding-linux-arm64-musl@1.2.7"
+  - "@rolldown/binding-linux-ppc64-gnu@1.2.7"
+  - "@rolldown/binding-linux-s390x-gnu@1.2.7"
+  - "@rolldown/binding-linux-x64-gnu@1.2.7"
+  - "@rolldown/binding-linux-x64-musl@1.2.7"
+  - "@rolldown/binding-openharmony-arm64@1.2.7"
+  - "@rolldown/binding-win32-arm64-msvc@1.2.7"
+  - "@rolldown/binding-win32-x64-msvc@1.2.7"
+  - "db0@0.4.1"
+  - "env-runner@0.2.1"
+  - "h3@2.0.1-rc.31"
+  - "rolldown@1.2.7"
+  - "srvx@1.0.3"
+  - "unstorage@2.0.0-alpha.10"
   - "@kybernesis/arcana"
   - "@linqapp/chat-sdk-adapter"
   - "@linqapp/sdk"
