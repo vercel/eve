@@ -33,7 +33,6 @@ import {
   sendTaskCommand,
   sendTaskInboundPayload,
   startTaskRun,
-  waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
@@ -443,7 +442,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         };
       }
     }
-    await startTaskRun({
+    const owner = await startTaskRun({
       activityObserver: taskInput.activityObserver,
       initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
@@ -460,7 +459,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         workflowId: workflow.workflowId,
       },
     });
-    const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
     const backgroundTask = {
       ...task,
       executor: IN_PROCESS_WORKFLOW_EXECUTOR,

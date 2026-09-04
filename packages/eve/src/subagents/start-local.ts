@@ -2,7 +2,7 @@ import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
@@ -38,6 +38,7 @@ export async function startLocalSubagent(input: {
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
   const childRuntime = createWorkflowRuntime({
+    acknowledgeOwnership: true,
     compiledArtifactsSource: input.bundle.compiledArtifactsSource,
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
@@ -64,10 +65,11 @@ export async function startLocalSubagent(input: {
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   let childSessionId: string;
   try {
-    await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
-      childRuntime.createSession(runInput),
+    const child = await contextStorage.run(
+      new ContextContainer({ localDevRequest: input.localDevRequest }),
+      () => childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    childSessionId = child.sessionId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,

@@ -226,6 +226,8 @@ Clear removes model-message history in place, including static and dynamic user-
 
 Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
 
+Reset waits up to 30 seconds for the session driver to acknowledge that it released its command hooks. Sessions pinned to deployments that predate lifecycle acknowledgements can reset successfully but still return a timeout. Retry reset after that timeout; `"no_active_session"` confirms the old session has retired.
+
 ## Reconnect and rewind
 
 The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.

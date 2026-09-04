@@ -13,8 +13,8 @@ import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.j
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
-  waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
+import { readWorkflowOwnership } from "#execution/workflow-lifecycle.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
 const log = createLogger("execution.workflow-tool-run");
@@ -41,8 +41,10 @@ export async function startWorkflowToolRun(
       parentTurnId: input.session.turn.id,
     });
   const workflowToolRunInput = { ...input, hookToken } as WorkflowToolRunInput;
-  await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [workflowToolRunInput]);
-  const owner = await waitForCommandHookOwner(hookToken);
+  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
+    workflowToolRunInput,
+  ]);
+  const owner = await readWorkflowOwnership(run.runId);
   return { hookToken, runId: owner.runId };
 }
 

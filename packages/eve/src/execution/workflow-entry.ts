@@ -44,7 +44,9 @@ import { createSessionTimeoutControl } from "#execution/session-timeout-control.
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { claimSessionInbox } from "#execution/claim-session-inbox.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import { publishWorkflowCleanupStep } from "#execution/workflow-lifecycle-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   SESSION_INBOX_WIRE_VERSION,
@@ -63,6 +65,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly acknowledgeOwnership?: boolean;
   readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
@@ -180,40 +183,37 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   };
 
   try {
-    // Derived once and reused for createSession + tag emission so the
-    // chain-root id can never drift between persisted session and tags.
-    const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
     const dynamicSubagentAgentConfig = input.serializedContext["eve.dynamicSubagentAgentConfig"] as
       | DynamicSubagentAgentConfig
       | undefined;
 
     const commandInbox = createSessionCommandInbox();
-    const stableCommandToken = sessionCommandHookToken(sessionId);
-    const authorizationHookToken = `${sessionId}:auth`;
     let sessionState: DurableSessionState;
     let outcome: DriverLoopOutcome;
     try {
-      const [sessionCreation, stableClaim, authorizationClaim, continuationClaim] =
-        await Promise.allSettled([
-          createSessionStep({
-            compiledArtifactsSource: serializedBundle.source,
-            continuationToken,
-            dynamicSubagentAgentConfig,
-            inheritedLimits: input.limits,
-            nodeId: serializedBundle.nodeId,
-            outputSchema: input.input.outputSchema,
-            rootSessionId: rootSessionIdFromParent,
-            sessionId,
-            taskId: input.taskId,
-          }),
-          commandInbox.claimStable(stableCommandToken),
-          commandInbox.claimAuthorization(authorizationHookToken),
-          commandInbox.rekeyContinuation(continuationToken),
-        ]);
+      const [sessionCreation, registration] = await Promise.allSettled([
+        createSessionStep({
+          compiledArtifactsSource: serializedBundle.source,
+          continuationToken,
+          dynamicSubagentAgentConfig,
+          inheritedLimits: input.limits,
+          nodeId: serializedBundle.nodeId,
+          outputSchema: input.input.outputSchema,
+          rootSessionId: readRootSessionId(input.serializedContext),
+          sessionId,
+          taskId: input.taskId,
+        }),
+        claimSessionInbox({
+          acknowledgeOwnership: input.acknowledgeOwnership,
+          commandInbox,
+          continuationToken,
+          sessionId,
+        }),
+      ]);
 
       if (sessionCreation.status === "rejected") throw sessionCreation.reason;
-      if (stableClaim.status === "rejected") throw stableClaim.reason;
-      if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
+      if (registration.status === "rejected") throw registration.reason;
+      const continuationClaim = registration.value;
       if (continuationClaim.status === "rejected") {
         // Two runs can race for the same continuation alias (e.g. two messages
         // hit one thread before either session owns it). Only the winner runs
@@ -286,10 +286,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
                 workflowStartedAt.getTime() +
                   (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
               ),
-        stableCommandToken,
+        stableCommandToken: sessionCommandHookToken(sessionId),
       });
     } finally {
       await commandInbox.dispose();
+      await publishWorkflowCleanupStep();
     }
     if (outcome.kind === "result") {
       return outcome.result;

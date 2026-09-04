@@ -9,21 +9,24 @@ import {
 } from "#execution/tasks/parent/control-shared.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { readWorkflowStreamUntil } from "#execution/workflow-lifecycle.js";
 import {
   cancelTaskOwnedWork,
   type TaskExecutorCancel,
 } from "#execution/tasks/parent/task-cancel.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus, type TaskInboundUpdate, type TaskView } from "#tasks/types.js";
+import {
+  TASK_VIEW_STREAM_NAMESPACE,
+  isTerminalTaskStatus,
+  type TaskInboundUpdate,
+  type TaskView,
+} from "#tasks/types.js";
 import {
   TASK_CANCEL_TOOL_NAME,
   TASK_TOOL_NAMES,
   TASK_UPDATE_TOOL_NAME,
 } from "#tools/framework/task-contract.js";
-
-const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
-const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
 export type DeliverTaskUpdate = (input: {
   readonly adapter?: ChannelAdapter;
@@ -127,16 +130,18 @@ export async function cancelOwnedTask(input: {
     command: { kind: "cancel" },
     taskInboxToken: input.entry.taskInboxToken,
   });
-  let view = await readTaskView(input.entry);
-  for (
-    let attempt = 0;
-    attempt < CANCEL_COMMIT_POLL_ATTEMPTS && !isTerminalTaskStatus(view.status);
-    attempt += 1
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, CANCEL_COMMIT_POLL_DELAY_MS));
-    view = await readTaskView(input.entry);
-  }
-  if (!isTerminalTaskStatus(view.status)) {
+  const view =
+    delivery === "delivered"
+      ? await readWorkflowStreamUntil<TaskView>({
+          accept: (value) => isTerminalTaskStatus(value.status),
+          namespace: TASK_VIEW_STREAM_NAMESPACE,
+          operation: `task "${input.entry.taskId}" cancellation`,
+          runId: input.entry.taskRunId,
+          startIndex: -1,
+          timeoutMs: 2_500,
+        })
+      : await readTaskView(input.entry);
+  if (view === undefined || !isTerminalTaskStatus(view.status)) {
     throw new Error(`Task "${input.entry.taskId}" did not commit cancellation before timeout.`);
   }
   if (view.status !== "cancelled" || delivery !== "delivered") return view;

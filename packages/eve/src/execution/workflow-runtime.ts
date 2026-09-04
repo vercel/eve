@@ -66,6 +66,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { readWorkflowOwnership, waitForWorkflowCleanup } from "#execution/workflow-lifecycle.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -77,7 +78,6 @@ import {
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
-const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -136,6 +136,7 @@ export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
+  readonly acknowledgeOwnership?: boolean;
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
@@ -207,6 +208,7 @@ export function createWorkflowRuntime(config: {
         serializedContext,
       };
       const taskId = input.taskId ?? input.callback?.taskId;
+      if (config.acknowledgeOwnership === true) workflowInput.acknowledgeOwnership = true;
       if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
@@ -252,10 +254,14 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
+      const sessionId =
+        config.acknowledgeOwnership === true
+          ? (await readWorkflowOwnership(run.runId)).runId
+          : run.runId;
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
         events ??= parseNdjsonStream<MessageStreamEvent>(
-          () => getRun(run.runId).getReadable(),
+          () => getRun(sessionId).getReadable(),
           normalizePersistedEvent,
         );
         return events;
@@ -265,7 +271,7 @@ export function createWorkflowRuntime(config: {
         get events() {
           return getEvents();
         },
-        sessionId: run.runId,
+        sessionId,
       };
     },
 
@@ -356,7 +362,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+    await waitForWorkflowCleanup(hook.runId);
   }
 
   return activeCommandResult(command, hook.runId);
@@ -412,41 +418,6 @@ function isInactiveCommandTarget(error: unknown): boolean {
     }
   }
   return false;
-}
-
-/**
- * Resolves hook ownership for replay-idempotent work already running inside a
- * durable step. Request handlers must return from start/resume acceptance and
- * leave ownership arbitration to the workflow.
- */
-export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
-  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
-  while (true) {
-    try {
-      return normalizeWorkflowHook(await getRawHookByToken(token));
-    } catch (error) {
-      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
-
-async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
-  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
-  while (true) {
-    try {
-      const owner = normalizeWorkflowHook(await getRawHookByToken(token));
-      if (owner.runId !== sessionId) return;
-    } catch (error) {
-      if (HookNotFoundError.is(error)) return;
-      throw error;
-    }
-
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-  }
 }
 
 /** Starts a workflow on the deployment executing this call. */

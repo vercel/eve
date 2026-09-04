@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   appendTaskViewStep: vi.fn(),
   cancelWorkflowToolRunStep: vi.fn(),
   claimHookOwnership: vi.fn(),
+  isHookConflictError: vi.fn(),
+  publishWorkflowOwnershipStep: vi.fn(),
+  publishWorkflowCleanupStep: vi.fn(),
   createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
   createHook: vi.fn(() => ({ token: "task-token" })),
   deliverTaskInputResponsesStep: vi.fn(),
@@ -37,11 +40,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: mocks.createHook,
+  getWorkflowMetadata: () => ({ workflowRunId: "task-run" }),
+}));
+vi.mock("#execution/workflow-lifecycle-step.js", () => ({
+  publishWorkflowOwnershipStep: mocks.publishWorkflowOwnershipStep,
+  publishWorkflowCleanupStep: mocks.publishWorkflowCleanupStep,
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
   claimHookOwnership: mocks.claimHookOwnership,
   disposeHook: mocks.disposeHook,
-  isHookConflictError: () => false,
+  isHookConflictError: mocks.isHookConflictError,
 }));
 vi.mock("#execution/tasks/child/steps.js", () => ({
   appendTaskProgressStep: mocks.appendTaskProgressStep,
@@ -117,6 +125,37 @@ describe("taskRunWorkflow", () => {
     });
   });
 
+  it("acknowledges a duplicate's actual owner without executing its body", async () => {
+    const conflict = { name: "HookConflictError", conflictingRunId: "winning-run" };
+    mocks.claimHookOwnership.mockRejectedValue(conflict);
+    mocks.isHookConflictError.mockReturnValue(true);
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+
+    expect(mocks.publishWorkflowOwnershipStep).toHaveBeenCalledWith({ runId: "winning-run" });
+    expect(mocks.appendTaskViewStep).not.toHaveBeenCalled();
+    expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
+    expect(mocks.publishWorkflowCleanupStep).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge a failed hook claim as successful startup", async () => {
+    const failure = new Error("claim failed");
+    mocks.claimHookOwnership.mockRejectedValue(failure);
+
+    await expect(
+      taskRunWorkflow({
+        initialView,
+        parentContinuationToken: "parent-token",
+        taskInboxToken: "task-token",
+      }),
+    ).rejects.toBe(failure);
+    expect(mocks.publishWorkflowOwnershipStep).not.toHaveBeenCalled();
+  });
+
   it("delivers an authored message queued before completion and dispatch acknowledgement", async () => {
     const message = {
       callId: "call-1",
@@ -147,6 +186,10 @@ describe("taskRunWorkflow", () => {
     });
     expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.publishWorkflowCleanupStep).toHaveBeenCalledOnce();
+    expect(mocks.disposeHook.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.publishWorkflowCleanupStep.mock.invocationCallOrder[0]!,
     );
   });
 

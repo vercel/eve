@@ -1,4 +1,5 @@
-import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
+import { publishWorkflowOwnershipStep } from "#execution/workflow-lifecycle-step.js";
 
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type {
@@ -24,10 +25,14 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       await claimHookOwnership(control.hook);
       ownsInbox = true;
     } catch (error) {
-      if (isHookConflictError(error)) return;
+      if (isHookConflictError(error) && typeof error.conflictingRunId === "string") {
+        await publishWorkflowOwnershipStep({ runId: error.conflictingRunId });
+        return;
+      }
       throw error;
     }
 
+    await publishWorkflowOwnershipStep({ runId: getWorkflowMetadata().workflowRunId });
     const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
     const from = createWorkflowBodyRef(bodyInput);
     const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
