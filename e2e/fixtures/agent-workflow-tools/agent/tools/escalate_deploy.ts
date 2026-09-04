@@ -13,6 +13,8 @@ export default defineWorkflowTool({
   description: "Ask for deploy approval, but give up if no one answers in time.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
+
     const pending = ctx.ask({
       display: "confirmation",
       options: [

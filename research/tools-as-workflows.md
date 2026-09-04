@@ -7,8 +7,8 @@ last_updated: "2026-09-04"
 # Tools as workflows
 
 `defineWorkflowTool` is the authoring boundary for durable tools, and its executor context owns
-`agent` and `ask`. Defining a workflow tool implies workflow execution; the author does not add
-`"use workflow"` to its executor.
+`agent` and `ask`. The executor must explicitly start with `"use workflow"`; the definition
+selects the eve tool contract and the directive marks the function's replay semantics.
 
 ## Authoring API
 
@@ -20,6 +20,7 @@ export default defineWorkflowTool({
   description: "Review and deploy a service after approval.",
   inputSchema: z.object({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
     const review = await ctx.agent({
       key: "review",
       target: "reviewer",
@@ -53,9 +54,9 @@ the same meaning as for the existing workflow tool runtime.
 
 ## Compilation boundary
 
-The compiler adds the workflow directive and hoists the executor into the shape consumed by the
-existing Workflow transform. Discovery includes modules using `defineWorkflowTool`, even without
-an authored directive. Workflow IDs continue to derive from the application-relative path and
+The compiler requires the workflow directive on the executor and hoists inline executors into the
+shape consumed by the existing Workflow transform. Discovery also checks modules using
+`defineWorkflowTool` without a directive, so missing directives fail during the build. Workflow IDs continue to derive from the application-relative path and
 executor name, so migrating the wrapper does not rename an existing inline executor.
 
 The definition carries a workflow-tool brand. Compilation requires both that brand and a compiled
@@ -87,7 +88,7 @@ their existing behavior.
 
 ## Migration
 
-- Replace `defineTool` with `defineWorkflowTool` for workflow tools and remove the executor's
+- Replace `defineTool` with `defineWorkflowTool` for workflow tools and keep the executor's
   `"use workflow"` directive.
 - Replace `agent(ctx, input)` with `ctx.agent(input)` and `ask(ctx, request)` with `ctx.ask(request)`.
 - Remove imports from `eve/workflow`; that entry point is removed. Import `WorkflowToolContext`,

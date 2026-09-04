@@ -10,6 +10,8 @@ export default defineWorkflowTool({
   description: "Hold a deploy open until cancelled.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }) {
+    "use workflow";
+
     await sleep("10m");
     return { held: service };
   },

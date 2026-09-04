@@ -35,6 +35,7 @@ export default defineWorkflowTool({
   description: "d",
   inputSchema: {},
   async execute(input) {
+    "use workflow";
     return plan(input);
   },
 });`,
@@ -93,6 +94,7 @@ export default defineWorkflowTool({
 export default defineWorkflowTool({
   description: "d",
   async execute() {
+    "use workflow";
     return 1;
   },
 });`,
@@ -102,6 +104,17 @@ export default defineWorkflowTool({
       directiveModules: [tool],
       workflowModules: [tool],
     });
+  });
+
+  it("rejects a workflow tool with no directive during discovery", async () => {
+    await write(
+      "agent/tools/missing.ts",
+      `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Missing", inputSchema: {}, async execute() { return 1; } });`,
+    );
+    await expect(discoverAuthoredWorkflowModules(appRoot)).rejects.toThrow(
+      'defineWorkflowTool() execute must start with "use workflow"',
+    );
   });
 
   it("finds nothing without an application package.json", async () => {

@@ -59,7 +59,8 @@ can retry a step and replay overlapping snapshots.
 ### Background execution
 
 `defineWorkflowTool({ execution: "background" })` receives a third `task` argument and returns
-`{ status: "working", taskId }` to the model. Its durable body can outlive the initiating step.
+`{ status: "working", taskId }` to the model. Mark its executor with `"use workflow"` so its
+durable body can outlive the initiating step.
 With ordinary `defineTool({ execution: "background" })`, the initiating step waits for the executor to finish.
 Return completes the durable task; throw fails it. An async generator may additionally yield:
 
@@ -91,7 +92,7 @@ task is terminal, the state includes their outputs so the model can combine the 
 ### Workflows as tools
 
 Use `defineWorkflowTool` from `eve/tools` to run each call as a durable Workflow run. Its
-executor receives `ctx.agent` and `ctx.ask`; no `"use workflow"` directive is needed. The tool can
+executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The tool can
 wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
 examples.
 

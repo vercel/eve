@@ -278,6 +278,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     '  description: "Deploy",',
     "  inputSchema: z.object({ service: z.string() }),",
     "  async execute({ service }: { service: string }, ctx: WorkflowToolContext) {",
+    '    "use workflow";',
     "    const plan = await planDeploy(service);",
     "    const answer = await ctx.ask({ prompt: plan, options: APPROVE });",
     '    await sleep("1s");',

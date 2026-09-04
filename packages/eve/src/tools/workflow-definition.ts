@@ -36,7 +36,7 @@ export type WorkflowToolContext = Pick<
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
-/** A static tool whose executor runs as a durable workflow. No directive is required. */
+/** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
 export interface BlockingWorkflowToolDefinition<
   TInput = unknown,
   TOutput = unknown,

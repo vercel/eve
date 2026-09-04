@@ -12,6 +12,8 @@ export default defineWorkflowTool({
   execution: "background",
   inputSchema: z.strictObject({ service: z.string() }),
   async *execute({ service }, _ctx, task) {
+    "use workflow";
+
     const plan = describePlan(service);
     yield { plan };
     yield task.postMessage(`Deploy ${task.taskId}: WORKFLOW-REPORT-PROGRESS ${plan}`);

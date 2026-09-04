@@ -107,7 +107,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (isWorkflowToolDefinition(value)) {
     if (workflowId === undefined) {
       throw new Error(
-        `${message} defineWorkflowTool() requires a compiled workflow executor. Export defineWorkflowTool({ execute: async (...) => { ... } }) as the default export of a static tool module.`,
+        `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
       );
     }
   } else if (workflowId !== undefined) {

@@ -4,8 +4,8 @@ description: "Define durable workflow tools that wait for people, webhooks, or t
 url: /tools/workflows
 ---
 
-A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`. Each call
-starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
+A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`, with
+`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
 delegate work to subagents, or coordinate retryable steps over a long period.
 
 By default, the model's tool call waits for the run's return value. While the run is suspended, the
@@ -13,7 +13,7 @@ turn is parked and holds no compute. Set `execution: "background"` when the conv
 continue; the model receives a task receipt, and eve wakes the agent with the result when the run
 ends.
 
-Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use step"`, `createHook`,
+Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
 the session's channel and `ctx.agent` for durable subagent delegation. A waiting workflow's `yield`
 is turn progress. A background workflow also receives `task`: yield an ordinary value for
@@ -34,6 +34,7 @@ export default defineWorkflowTool({
   description: "Deploy a service to production. Pauses for a human to approve the plan.",
   inputSchema: z.object({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
     const plan = await planDeploy(service);
     const answer = await ctx.ask({
       prompt: `Deploy ${service}?\n\n${plan.summary}`,
@@ -69,7 +70,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 
 - Export `defineWorkflowTool({ ... })` as the default export. Its `execute` must be an async
   function or async generator, written inline or referenced as a local top-level `async function`.
-  eve compiles it as a workflow automatically; no `"use workflow"` directive is needed.
+  Start the executor with `"use workflow"` as its first statement, on its own line. A missing
+  directive is a build error, even if another function in the module has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
   step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
   is replayed and must stay deterministic.
@@ -93,7 +95,7 @@ or [schedule handler](/docs/schedules#handler-form-run) APIs.
 
 ### Migrate an existing workflow tool
 
-Replace `defineTool` with `defineWorkflowTool`, remove the executor's `"use workflow"` directive,
+Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
 and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(input)` and `ctx.ask(request)`.
 The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`, `AgentInput`,
 `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
@@ -170,6 +172,7 @@ background tool completes with `null`.
 
 ```ts
 async *execute({ service }, ctx) {
+  "use workflow";
   yield { status: "planning" };
   const plan = await planDeploy(service);
   yield { status: "deploying" };
@@ -191,6 +194,7 @@ receives it observes the abort. Pass it into the steps that should stop, and cle
 
 ```ts
 async execute({ projectId }, ctx) {
+  "use workflow";
   const jobId = await submitRender(projectId);
   try {
     return await waitForRender(jobId, ctx.abortSignal);
@@ -211,6 +215,7 @@ first.
 
 ```ts
 async execute({ service }, ctx) {
+  "use workflow";
   const plan = await planDeploy(service);
   const pending = ctx.ask({ prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
 
@@ -241,6 +246,7 @@ export default defineWorkflowTool({
   description: "Render a video. Returns the URL once the render farm finishes.",
   inputSchema: z.object({ projectId: z.string() }),
   async execute({ projectId }) {
+    "use workflow";
     const done = createWebhook();
     const jobId = await submitRender(projectId, done.url);
     const callback = await done;
@@ -267,6 +273,7 @@ export default defineWorkflowTool({
   inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
   execution: "background",
   async execute({ orderId, amount }, ctx) {
+    "use workflow";
     const decision = await ctx.ask({
       prompt: `Refund $${amount} on order ${orderId}?`,
       display: "confirmation",
@@ -297,6 +304,7 @@ export default defineWorkflowTool({
   inputSchema: z.object({ note: z.string(), delay: z.string() }),
   execution: "background",
   async execute({ note, delay }) {
+    "use workflow";
     await sleep(delay);
     return { reminder: note };
   },

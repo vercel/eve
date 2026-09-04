@@ -12,6 +12,8 @@ export default defineWorkflowTool({
   description: "Deploy a service after planning it durably.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
+
     const plan = describePlan(service);
     const digest = await hashPlan(plan);
     await sleep("50ms");

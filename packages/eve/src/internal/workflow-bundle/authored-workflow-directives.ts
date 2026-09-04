@@ -54,7 +54,7 @@ export interface AuthoredWorkflowDirectiveSource {
 
 /**
  * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A `defineWorkflowTool` executor is marked and hoisted
+ * whose first statement is the directive. A marked `defineWorkflowTool` executor is hoisted
  * into that shape here; every other placement is a build error, because an
  * ignored directive would run side effects inline in a replayed body.
  */
@@ -92,23 +92,10 @@ export async function prepareAuthoredWorkflowDirectives(input: {
         `${input.filePath}: defineWorkflowTool() requires an async execute body or a local top-level async function reference.`,
       );
     }
-    if (fn.body.type !== "BlockStatement" && property !== undefined) {
-      if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
-        throw new Error(
-          `${input.filePath}: defineWorkflowTool() needs to hoist execute; rename the existing top-level "execute" binding.`,
-        );
-      }
-      return prepareAuthoredWorkflowDirectives({
-        ...input,
-        source: hoistExecuteMethod(input.source, property, fn),
-      });
-    }
-    if (readLeadingDirective(fn) === undefined) {
-      const offset = (fn.body.start ?? 0) + 1;
-      return prepareAuthoredWorkflowDirectives({
-        ...input,
-        source: `${input.source.slice(0, offset)}\n"use workflow";\n${input.source.slice(offset)}`,
-      });
+    if (readLeadingDirective(fn) !== "use workflow") {
+      throw new Error(
+        `${input.filePath}: defineWorkflowTool() execute must start with "use workflow" as the first statement, on its own line.`,
+      );
     }
   }
 
@@ -267,11 +254,7 @@ function hoistExecuteMethod(source: string, property: AstNode, fn: AstNode): str
       : source.slice(first.start, last.end);
   const typeParametersText = sliceNode(source, fn.typeParameters);
   const returnTypeText = sliceNode(source, fn.returnType);
-  const originalBody = source.slice(fn.body.start, fn.body.end);
-  const bodyText =
-    fn.body.type === "BlockStatement"
-      ? originalBody
-      : `{\n"use workflow";\nreturn (${originalBody});\n}`;
+  const bodyText = source.slice(fn.body.start, fn.body.end);
   const star = fn.generator === true ? "*" : "";
   const declaration = `async function${star} ${HOISTED_EXECUTE_NAME}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
 

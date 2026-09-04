@@ -813,6 +813,7 @@ describe("WorkflowBundleBuilder", () => {
             '  description: "Deploy a service.",',
             '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
             "  async execute({ service }: { service: string }) {",
+            '    "use workflow";',
             "    const digest = await hashPlan(describePlan(service));",
             '    await sleep("1s");',
             "    return { digest };",

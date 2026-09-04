@@ -6,6 +6,8 @@ export default defineWorkflowTool({
   execution: "background",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
+
     return await ctx.agent({
       key: "background-child",
       message: `${service}:background`,

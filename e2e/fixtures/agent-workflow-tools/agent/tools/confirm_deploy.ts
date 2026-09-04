@@ -11,6 +11,8 @@ export default defineWorkflowTool({
   description: "Deploy a service after a human approves the plan.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {
+    "use workflow";
+
     const answer = await ctx.ask({
       display: "confirmation",
       options: [

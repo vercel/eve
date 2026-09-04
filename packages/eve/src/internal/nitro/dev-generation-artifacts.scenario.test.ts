@@ -563,6 +563,7 @@ describe("development generation artifacts", () => {
           '  description: "Deploy a service.",',
           '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
           "  async execute({ service }) {",
+          '    "use workflow";',
           "    return { plan: await planDeploy(service) };",
           "  },",
           "});",

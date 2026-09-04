@@ -75,6 +75,7 @@ describe("defineWorkflowTool", () => {
       description: "Workflow",
       inputSchema: {},
       async execute() {
+        "use workflow";
         return 1;
       },
     });
