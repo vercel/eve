@@ -1,21 +1,26 @@
+import { satisfies } from "eve/evals/expect";
+
 import { defineTaskEval } from "./task-transition.js";
 import {
   requireBackgroundTaskId,
+  requireTaskView,
   parseToolErrorOutput,
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
+  waitForTaskNotification,
 } from "./shared.js";
 
-/** A persistent child with a nonterminal task rejects every competing continuation. */
+/** Same-batch calls compete for one claim; a later message steers the admitted task. */
 export default defineTaskEval({
   description:
-    "One agentId continuation is admitted; competing continuations are rejected as AGENT_BUSY.",
+    "One same-batch continuation is admitted; later steering cancels its task and reuses the child.",
   transition: {
-    primary: "task.agent.continue.rejected-agent-busy",
+    primary: "task.agent.steer.accepted-busy",
     setup: [
       "task.dispatch.start.accepted-acknowledged",
       "task.lifecycle.complete.accepted-nonterminal",
       "task.agent.continue.accepted-terminal-available",
+      "task.agent.continue.rejected-agent-busy",
     ],
     dimensions: { transport: "local", parentPhase: "active" },
   },
@@ -61,15 +66,44 @@ export default defineTaskEval({
       t,
       `CHILD-TASK-EXCLUSIVITY-LATER ${agentId}`,
       race.session,
-      { allowFailedActions: true },
     );
-    later.turn.calledTool("busy-worker", {
-      count: 1,
-      output: (output) => isBusyRejection(output, admittedTaskId),
-      status: "failed",
-    });
+    later.turn.expectOk();
+    later.turn.calledSubagent("busy-worker", { count: 1, status: "completed" });
+    const steeredTaskId = requireBackgroundTaskId(later.turn);
+    await t.require(
+      steeredTaskId,
+      satisfies((taskId) => taskId !== admittedTaskId, "steering creates a new task identity"),
+    );
 
-    await waitForCompletedTask(t, later.session, "CHILD-TASK-EXCLUSIVITY-VERIFY", admittedTaskId);
+    const cancelled = await waitForTaskNotification(
+      t,
+      later.session,
+      admittedTaskId,
+      "cancelled",
+      later.observedTurns,
+    );
+    const completed = await waitForCompletedTask(
+      t,
+      cancelled.session,
+      "CHILD-TASK-EXCLUSIVITY-VERIFY",
+      steeredTaskId,
+    );
+    const output = completed.requireToolCall("task_cancel").output;
+    await t.require(
+      agentIdFromTaskView(output, steeredTaskId),
+      satisfies((id) => id === agentId, "steering retains the same agent identity"),
+    );
+    const view = requireTaskView(output, steeredTaskId);
+    await t.require(
+      view.lastOutput,
+      satisfies(
+        (value) =>
+          value !== null &&
+          typeof value === "object" &&
+          Reflect.get(value, "data") === "BUSY-WORKER:Return BUSY-WORKER-LATER.",
+        "the replacement task completes with the steering message's result",
+      ),
+    );
   },
 });
 
