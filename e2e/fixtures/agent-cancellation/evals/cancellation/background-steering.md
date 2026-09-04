@@ -18,10 +18,12 @@ duplicate delegation and superseded results.
 
 The eval observes the child's pending tool call before sending the follow-up
 through the authored channel with `turnPolicy: "steer"`. The
-[worker][worker] uses a deterministic model and the existing bounded
-[cancellation wait][wait] (90 seconds). If no correction reaches it, it emits
-`WORKER-RESULT:ORIGINAL:<memo>`. A correction produces
-`WORKER-RESULT:CORRECTED:<memo>`, retaining the memo from its first message.
+[worker][worker] uses the same real matrix model as the parent and the existing
+bounded [cancellation wait][wait] (90 seconds). Its [instructions][instructions]
+ask it to return `WORKER-RESULT:ORIGINAL:<memo>` unless a correction replaces
+the label. The model must interpret the correction, retain the original memo,
+and return `WORKER-RESULT:CORRECTED:<memo>`; no scripted responder selects the
+answer.
 
 Assertions inspect the child stream and the parent's result-bearing task wake.
 A parent acknowledgment alone cannot pass. All observed delegations must retain
@@ -39,8 +41,8 @@ it does not fix the task-id lifetime or require a particular steering tool.
 It permits an acknowledgment of the correction; acknowledgment wording and
 count are outside this contract.
 
-The parent uses the matrix model because identifying and routing the correction
-is part of the behavior under evaluation. These cases carry `real-model`, so
+Both parent and child use the matrix model: the parent must identify and route
+the correction, and the child must apply it while retaining context. These cases carry `real-model`, so
 mock world suites exclude them. They are acceptance tests, not assertions that
 the existing limitation should remain. No expected-failure inversion or skip
 hides a failure. Run them in CI from this fixture with
@@ -64,6 +66,7 @@ runtime operation is warranted.
 
 [eval]: ./background-steering.eval.ts
 [worker]: ../../agent/subagents/steering-worker/agent.ts
+[instructions]: ../../agent/subagents/steering-worker/instructions.md
 [wait]: ../../agent/subagents/sleeper/tools/wait-for-cancellation.ts
 [claim]: ../../../../../packages/eve/src/subagents/handles/transitions.ts
 [busy]: ../../../../../packages/eve/src/execution/tools/subagent/invoke-step.ts
