@@ -276,6 +276,8 @@ describe("telegramChannel() inbound route", () => {
     expect(replied.send.mock.calls[0]![0]).toBe("-1001::");
     expect(replied.send.mock.calls[0]![1]).toMatchObject({
       inputResponses: [{ requestId: "telegram_reply:12", text: "follow-up" }],
+      message: "follow-up",
+      state: { chatId: "-1001", conversationId: null },
     });
 
     const inTopic = await firePost(channel, {

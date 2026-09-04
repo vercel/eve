@@ -1,6 +1,11 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
-import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type ChannelFrom,
+  type ChannelResolveSession,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -112,7 +117,7 @@ export interface TelegramChannelCredentials extends TelegramCredentials {
   readonly webhookVerifier?: TelegramWebhookVerifier;
 }
 
-/** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` resumes an existing thread; `initialMessage` posts a seed message and starts a new thread from it. The two are mutually exclusive: supplying both throws. */
+/** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` pins the session to a caller-selected id instead of the chat-wide session; inbound messages never route to it. `initialMessage` posts a seed message before the session starts; in groups the session stays chat-wide. The two are mutually exclusive: supplying both throws. */
 export interface TelegramReceiveTarget {
   readonly chatId: number | string;
   readonly conversationId?: number | string;
@@ -583,10 +588,14 @@ async function dispatchMessage(input: {
         title: result.title,
       });
     } else {
-      await source.respond(replyInputResponses, {
-        auth: result.auth,
-        context: [contextBlock, ...channelContext],
-      });
+      await (source as InternalChannelSource<TelegramChannelState>)[INTERNAL_CHANNEL_DELIVER](
+        {
+          context: [contextBlock, ...channelContext],
+          inputResponses: replyInputResponses,
+          message: turnMessage,
+        },
+        { auth: result.auth, state, title: result.title },
+      );
     }
   } catch (error) {
     log.error("message delivery failed", { error });
