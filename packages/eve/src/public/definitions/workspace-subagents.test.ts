@@ -30,13 +30,21 @@ describe("vercelWorkspaceTarget", () => {
     await expect(target.auth?.()).resolves.toEqual({ headers: {} });
   });
 
+  it("targets the public Vercel dev router when available", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("VERCEL_URL", "localhost:3000");
+    const target = await vercelWorkspaceTarget()(member);
+
+    expect(await (target.url as () => Promise<string>)()).toBe("http://localhost:3000/triage");
+  });
+
   it("targets the current preview deployment member route", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
     const target = await vercelWorkspaceTarget()(member);
 
     expect(await (target.url as () => Promise<string>)()).toBe(
-      "https://preview.example.com/eve/agents/triage",
+      "https://preview.example.com/triage",
     );
     expect(await target.auth?.()).toEqual({
       headers: {
@@ -52,7 +60,7 @@ describe("vercelWorkspaceTarget", () => {
     const target = await vercelWorkspaceTarget()(member);
 
     expect(await (target.url as () => Promise<string>)()).toBe(
-      "https://production.example.com/eve/agents/triage",
+      "https://production.example.com/triage",
     );
   });
 });

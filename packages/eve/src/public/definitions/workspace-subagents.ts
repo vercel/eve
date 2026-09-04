@@ -55,7 +55,10 @@ export function vercelWorkspaceTarget(): WorkspaceSubagentTargetResolver {
       };
     },
     url: () => {
-      if (isEveDevEnvironment()) return "http://127.0.0.1:1";
+      if (isEveDevEnvironment()) {
+        const host = process.env.VERCEL_URL;
+        return host === undefined ? "http://127.0.0.1:1" : `http://${host}/${member.name}`;
+      }
       const host =
         process.env.VERCEL_ENV === "production"
           ? process.env.VERCEL_PROJECT_PRODUCTION_URL
@@ -65,7 +68,7 @@ export function vercelWorkspaceTarget(): WorkspaceSubagentTargetResolver {
           "vercelWorkspaceTarget() requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
         );
       }
-      return `https://${host}/eve/agents/${member.name}`;
+      return `https://${host}/${member.name}`;
     },
   });
 }
