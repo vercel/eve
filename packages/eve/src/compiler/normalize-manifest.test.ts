@@ -140,6 +140,7 @@ describe("compileAgentManifest source graph", () => {
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
+      shape: { lifetime: "step", suspend: "workflow" },
     });
   });
 

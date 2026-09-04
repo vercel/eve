@@ -110,7 +110,7 @@ describe("extension compatibility manifest", () => {
   ])(
     "rejects $capability extensions requiring task.delegated",
     ({ capability, firstDelegatedEpoch }) => {
-      for (let requiredVersion = firstDelegatedEpoch; requiredVersion <= 26; requiredVersion++) {
+      for (let requiredVersion = firstDelegatedEpoch; requiredVersion <= 27; requiredVersion++) {
         expect(
           findUnsupportedExtensionCapabilities({
             kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,

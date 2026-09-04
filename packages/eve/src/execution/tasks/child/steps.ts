@@ -1,9 +1,5 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type {
-  ActivityObserverConfig,
-  SessionAuthContext,
-  SessionCommand,
-} from "#channel/types.js";
+import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
