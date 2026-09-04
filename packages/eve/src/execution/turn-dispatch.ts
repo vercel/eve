@@ -2,9 +2,10 @@ import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#chan
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type {
-  InitialTurnStep,
-  TurnWorkflowDispatchInput,
+import {
+  createTurnWorkflowInput,
+  type InitialTurnStep,
+  type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { runInlineTurn } from "#execution/inline-turn.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -13,6 +14,7 @@ import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { runTurnOwnedWorkflow } from "#execution/turn-workflow.js";
 
 /** One settled turn: its terminal driver action plus deferred hook cleanup. */
 export interface DispatchedTurn {
@@ -56,16 +58,18 @@ export async function dispatchAndAwaitTurn(input: TurnDispatchInput): Promise<Di
   if (inline.kind === "result") {
     return { action: inline.action, async dispose() {} };
   }
-  return await dispatchAndAwaitChildTurn({
+  return await runAndAwaitTurn({
     ...input,
+    inline: inline.kind === "continue",
     initialCancellation: inline.initialCancellation,
     stateCursor,
     initialStep: inline.initialStep,
   });
 }
 
-async function dispatchAndAwaitChildTurn(
+async function runAndAwaitTurn(
   input: TurnDispatchInput & {
+    readonly inline: boolean;
     readonly initialCancellation?: TurnCancelPayload;
     readonly initialStep?: InitialTurnStep;
   },
@@ -82,7 +86,7 @@ async function dispatchAndAwaitChildTurn(
   });
 
   try {
-    await dispatchTurnStep({
+    const turnInput = {
       capabilities: input.capabilities,
       completionToken: control.token,
       delivery: input.delivery,
@@ -92,8 +96,21 @@ async function dispatchAndAwaitChildTurn(
       parentWritable: input.parentWritable,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
-    } satisfies TurnWorkflowDispatchInput);
-    const action = await control.waitForAction();
+    } satisfies TurnWorkflowDispatchInput;
+    let action: TurnDriverAction;
+    if (input.inline) {
+      // Hook claims can suspend. Do not let a queued command allocate steps
+      // midway through initialization: warm execution and cold replay can order
+      // those allocations differently.
+      const ready = Promise.withResolvers<void>();
+      [action] = await Promise.all([
+        ready.promise.then(() => control.waitForAction()),
+        runTurnOwnedWorkflow(createTurnWorkflowInput(turnInput), ready.resolve),
+      ]);
+    } else {
+      await dispatchTurnStep(turnInput);
+      action = await control.waitForAction();
+    }
     return { action, dispose: () => control.dispose() };
   } catch (error) {
     await control.dispose();

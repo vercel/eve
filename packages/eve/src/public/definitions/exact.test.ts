@@ -27,8 +27,8 @@ import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  type TaskReceipt,
   type TaskExec,
+  type TaskReceipt,
   type ToolDefinition,
 } from "#public/tools/index.js";
 import { experimental_workflow } from "#public/tools/workflow.js";
@@ -97,20 +97,19 @@ describe("definition helper exact inputs", () => {
       description: "Start a durable export.",
       execution: "background",
       inputSchema: z.object({ jobId: z.string() }),
-      execute(input, _ctx, task) {
+      async *execute(input, _ctx, task) {
         expectTypeOf(task).toEqualTypeOf<TaskExec>();
-        expectTypeOf(task.binding.taskId).toEqualTypeOf<string>();
-        return task.delegated({
-          executor: { data: { jobId: input.jobId }, kind: "export" },
-          receipt: { jobId: input.jobId },
-        });
+        expectTypeOf(task.taskId).toEqualTypeOf<string>();
+        expectTypeOf(task).not.toHaveProperty("delegated");
+        yield { jobId: input.jobId };
+        return { jobId: input.jobId };
       },
     });
 
     expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
-    expectTypeOf<Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]>().toEqualTypeOf<
-      TaskReceipt<{ jobId: string }>
-    >();
+    expectTypeOf<
+      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
+    >().toEqualTypeOf<TaskReceipt>();
     expect(backgroundTool.execution).toBe("background");
   });
 
@@ -133,16 +132,6 @@ describe("definition helper exact inputs", () => {
 });
 
 function typeOnlyFixtures(): void {
-  defineTool({
-    description: "Invalid streaming background tool.",
-    // @ts-expect-error Background executors settle once; streamed output is unsupported.
-    execution: "background",
-    inputSchema: { type: "object" },
-    async *execute() {
-      yield { status: "working" };
-    },
-  });
-
   defineDynamic({
     // @ts-expect-error defineDynamic is resolver-only.
     fallback: "anthropic/claude-sonnet-5",

@@ -1,9 +1,5 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type {
-  ActivityObserverConfig,
-  SessionAuthContext,
-  SessionCommand,
-} from "#channel/types.js";
+import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
@@ -19,13 +15,16 @@ import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
+  TASK_PROGRESS_STREAM_NAMESPACE,
   TASK_VIEW_STREAM_NAMESPACE,
   taskAuthorizationRequestId,
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
   type TaskInboundAnswerInput,
+  type TaskInboundMessage,
   type TaskInboundUpdate,
   type TaskInputRequestDelivery,
+  type TaskProgress,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -88,6 +87,21 @@ export function projectTaskActivity(input: {
   ];
 }
 
+/** Appends task progress without starting a parent turn. */
+export async function appendTaskProgressStep(input: {
+  readonly progress: TaskProgress;
+}): Promise<void> {
+  "use step";
+
+  const writable = getWritable<TaskProgress>({ namespace: TASK_PROGRESS_STREAM_NAMESPACE });
+  const writer = writable.getWriter();
+  try {
+    await writer.write(input.progress);
+  } finally {
+    writer.releaseLock();
+  }
+}
+
 /**
  * Wakes the parent session with a framework task notification.
  *
@@ -139,6 +153,27 @@ export async function wakeTaskUpdateParentStep(input: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
     },
     taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
+  };
+  try {
+    await resumeSessionInbox(input.token, command);
+  } catch (error) {
+    if (isTaskWorkflowTargetGone(error)) return;
+    throw error;
+  }
+}
+
+/** Delivers one task-authored message to the parent as a new turn. */
+export async function wakeTaskMessageParentStep(input: {
+  readonly message: TaskInboundMessage;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const command: SessionCommand = {
+    kind: "send",
+    payload: { message: input.message.message },
+    taskDeliveryId: `${input.taskId}:message:${input.message.messageEpoch}:${input.message.messageIndex}:${input.message.callId}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

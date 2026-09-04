@@ -22,19 +22,35 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 27,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-    ],
-    dropped: { 15: "TaskExec replaces stageEffect with send" },
+    current: 29,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29],
+    dropped: {
+      14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      15: "TaskExec replaces stageEffect with send",
+      16: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      17: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      18: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      19: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      20: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      21: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      22: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+    },
   },
   dynamicTool: {
-    current: 27,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27,
-    ],
+    current: 28,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
     },
   },
   channel: {

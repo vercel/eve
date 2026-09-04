@@ -854,6 +854,13 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
       ])
       .optional(),
     presentation: z.literal("load-skill").optional(),
+    shape: z
+      .object({
+        lifetime: z.enum(["step", "task"]),
+        suspend: z.enum(["none", "workflow"]),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

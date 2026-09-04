@@ -104,6 +104,31 @@ describe("extension compatibility manifest", () => {
     ]);
   });
 
+  it.each([
+    { capability: "tool", firstDelegatedEpoch: 14 },
+    { capability: "dynamicTool", firstDelegatedEpoch: 23 },
+  ])(
+    "rejects $capability extensions requiring task.delegated",
+    ({ capability, firstDelegatedEpoch }) => {
+      for (let requiredVersion = firstDelegatedEpoch; requiredVersion <= 27; requiredVersion++) {
+        expect(
+          findUnsupportedExtensionCapabilities({
+            kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+            formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+            builtWithEve: "0.40.0",
+            requires: { [capability]: requiredVersion },
+          }),
+        ).toEqual([
+          {
+            capability,
+            requiredVersion,
+            supportedVersions: EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability],
+          },
+        ]);
+      }
+    },
+  );
+
   it("publishes valid support history for every capability version it stamps", () => {
     for (const [capability, version] of Object.entries(EXTENSION_CAPABILITY_VERSIONS)) {
       const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability];

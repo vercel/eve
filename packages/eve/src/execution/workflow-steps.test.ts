@@ -191,6 +191,22 @@ const threadContextAdapter: ChannelAdapter = {
     const thread = adapterCtx.ctx.ensure(ThreadKey, () => "unset");
     const message = payload.message ?? "";
 
+    // `attach:` delivers structured UserContent carrying a FilePart, the
+    // shape real channels produce for an uploaded image or document.
+    if (typeof message === "string" && message.startsWith("attach:")) {
+      return {
+        message: [
+          { text: `thread=${thread}; user=${message.slice("attach:".length)}`, type: "text" },
+          {
+            data: new URL("https://files.example/diagram.png"),
+            filename: "diagram.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ],
+      };
+    }
+
     return { message: `thread=${thread}; user=${message}` };
   },
 };
@@ -889,6 +905,7 @@ describe("dispatchCoordinationStep", () => {
 
     const result = await dispatchCoordinationStep({
       action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -951,7 +968,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1015,7 +1032,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1092,7 +1109,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1539,6 +1556,56 @@ describe("turnStep", () => {
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
     expect(result.sessionState.snapshot?.session.history).toEqual([
       { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
+  });
+
+  it("preserves a cancelled turn message that carries an attachment", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "attach:look at this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({ action: "cancelled" });
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      {
+        content: [
+          { text: "thread=unset; user=look at this", type: "text" },
+          expect.objectContaining({ filename: "diagram.png", type: "file" }),
+        ],
+        role: "user",
+      },
     ]);
   });
 

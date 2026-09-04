@@ -1,5 +1,6 @@
 export {
   defineTool,
+  defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
   toolOutput,

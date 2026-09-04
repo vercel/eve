@@ -1,3 +1,4 @@
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
@@ -1059,19 +1060,24 @@ describe("dispatchDynamicToolEvent", () => {
 
   it("persists background execution and forwards TaskExec when replaying", async () => {
     const ctx = createCtx();
-    const stepFn = vi.fn((_closure: unknown, _input: unknown, _toolCtx: unknown, task: TaskExec) =>
-      task.delegated({
-        executor: { data: {}, kind: "test" },
-        receipt: {},
-      }),
-    );
+    const stepFn = vi.fn(async function* (
+      _closure: unknown,
+      _input: unknown,
+      _toolCtx: unknown,
+      task: TaskExec,
+    ) {
+      yield task.postMessage("replayed");
+      return { done: true };
+    });
     const resolver = createResolver("background", ["session.started"], () => {
       const entry = defineTool({
         description: "delegate background work",
         execution: "background",
         inputSchema: z.strictObject({}),
-        execute: (_input, _toolCtx, task) =>
-          task.delegated({ executor: { data: {}, kind: "test" }, receipt: {} }),
+        async *execute(_input, _toolCtx, task) {
+          yield task.postMessage("replayed");
+          return { done: true };
+        },
       });
       stampDurableDynamicToolCallbacks(entry, {
         execute: { callback: stepFn as never, closure: {} },
@@ -1091,23 +1097,18 @@ describe("dispatchDynamicToolEvent", () => {
 
     const [tool] = buildDynamicTools(restored);
     expect(tool?.execution).toBe("background");
-    const binding = { taskId: "task-1", token: "token-1" };
     const task: TaskExec = {
-      batch: [],
-      binding,
-      delegated: ({ executor, receipt }) => ({
-        executor,
-        kind: "eve:task-delegated",
-        receipt: { ...receipt, status: "working", taskId: binding.taskId },
-      }),
+      binding: { taskId: "task-1", token: "token-1" },
+      postMessage: (message) => ({ kind: "eve:task-message", message }),
       send: vi.fn(),
       session: {} as TaskExec["session"],
       task: {} as TaskExec["task"],
+      taskId: "task-1",
     };
-    await expect(tool!.execute!({}, executeOptions, task)).resolves.toMatchObject({
-      kind: "eve:task-delegated",
-      receipt: { status: "working", taskId: "task-1" },
-    });
+    const output = tool!.execute!({}, executeOptions, task) as AsyncIterable<unknown>;
+    const updates = [];
+    for await (const update of output) updates.push(update);
+    expect(updates).toEqual([{ kind: "eve:task-message", message: "replayed" }]);
     expect(stepFn).toHaveBeenCalledWith({}, {}, expect.anything(), task);
   });
 
@@ -1234,6 +1235,30 @@ describe("dispatchDynamicToolEvent", () => {
 
     expect(buildDynamicTools(ctx)).toHaveLength(0);
   });
+
+  it.each(["single", "map"])(
+    "does not advertise a workflow tool returned as a %s",
+    async (shape) => {
+      const ctx = createCtx();
+      const tool = defineWorkflowTool({
+        description: "Invalid dynamic workflow",
+        inputSchema: {},
+        async execute() {
+          return 1;
+        },
+      });
+      const resolver = createResolver("workflow", ["session.started"], () =>
+        shape === "single" ? tool : { workflow: tool },
+      );
+      await dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [resolver],
+        messages: [],
+        event: makeEvent("session.started"),
+      });
+      expect(buildDynamicTools(ctx)).toHaveLength(0);
+    },
+  );
 
   it("resolver throwing is logged and skipped — other resolvers still work", async () => {
     const ctx = createCtx();

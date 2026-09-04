@@ -21,6 +21,42 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   // Framework agent-list notes are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
+  if (message.includes("TASK-REMOTE-UPDATE-CHILD")) {
+    const result = resultById(request, "remote-update-progress");
+    if (result === undefined) {
+      return {
+        toolCalls: [
+          {
+            id: "remote-update-progress",
+            name: "task_update",
+            input: { message: "TASK-UPDATE-PROGRESS" },
+          },
+        ],
+      };
+    }
+    if (
+      result.output === null ||
+      typeof result.output !== "object" ||
+      Reflect.get(result.output, "status") !== "sent"
+    ) {
+      throw new Error("Remote task_update did not confirm delivery.");
+    }
+    return "TASK-REMOTE-UPDATE-DONE";
+  }
+  if (message === "TASK-REMOTE-UPDATE-SETUP") {
+    if (resultById(request, "remote-update-worker") === undefined) {
+      return {
+        toolCalls: [
+          {
+            id: "remote-update-worker",
+            name: "remote-loopback",
+            input: { message: "TASK-REMOTE-UPDATE-CHILD" },
+          },
+        ],
+      };
+    }
+    return "TASK-UPDATE-STARTED";
+  }
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
     return "TASK-UPDATE-RECEIVED";
   }

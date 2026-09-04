@@ -29,7 +29,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return "BACKGROUND-EXPORT-STARTED";
   }
 
-  if (message.includes(`update: ${PROGRESS}`)) {
+  if (message.includes(PROGRESS)) {
     return "BACKGROUND-EXPORT-UPDATE-RECEIVED";
   }
 
@@ -50,7 +50,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 function respondScheduled(request: MockModelRequest): MockModelResponse | string {
   const taskNotification = [...request.userMessages]
     .reverse()
-    .find((entry) => /^Background task task_[a-z0-9]+/iu.test(entry));
+    .find((entry) => /^(?:Background task|Export) task_[a-z0-9]+/iu.test(entry));
   if (taskNotification?.includes("is completed") && taskNotification.includes(RESULT)) {
     return "SCHEDULED-EXPORT-DONE";
   }

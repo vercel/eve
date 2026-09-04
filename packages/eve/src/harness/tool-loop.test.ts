@@ -12172,6 +12172,81 @@ describe("createToolLoopHarness", () => {
       }
     });
 
+    it("keeps client context at a stable prompt position through every step of its turn", async () => {
+      const toolCallMessage = {
+        content: [
+          {
+            input: { a: 20, b: 22 },
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      } as const;
+      const toolResultMessage = {
+        content: [
+          {
+            output: "42",
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      } as const;
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: { messages: [toolCallMessage, toolResultMessage] },
+        text: "",
+        toolCalls: toolCallMessage.content,
+        toolResults: [
+          {
+            input: { a: 20, b: 22 },
+            output: "42",
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+      });
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const clientContext = "Client context:\nroute=/billing";
+
+      const firstStep = await runStep(
+        createTestSession(),
+        attachClientContext({ message: "Add 20 and 22." }, [clientContext]),
+      );
+      expect(firstStep.next).toBe(runStep);
+      const firstPrompt = structuredClone(getLastAgentSettings().messages);
+
+      setupMockAgent(defaultModelResult());
+      const serializedSession = JSON.parse(JSON.stringify(firstStep.session)) as HarnessSession;
+      const secondStep = await runStep(serializedSession);
+      expect(secondStep.next).toBeNull();
+      const secondPrompt = getLastAgentSettings().messages;
+
+      expect(secondPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
+      expect(secondPrompt).toEqual([
+        { content: clientContext, role: "user" },
+        { content: "Add 20 and 22.", role: "user" },
+        toolCallMessage,
+        toolResultMessage,
+      ]);
+      expect(secondStep.session.history).not.toContainEqual({
+        content: clientContext,
+        role: "user",
+      });
+      expect(JSON.stringify(secondStep.session.state)).not.toContain(clientContext);
+
+      setupMockAgent(defaultModelResult());
+      await runStep(secondStep.session, { message: "Start another turn." });
+      expect(getLastAgentSettings().messages).not.toContainEqual({
+        content: clientContext,
+        role: "user",
+      });
+    });
+
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
       vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);

@@ -111,17 +111,17 @@ describe("integration discovery", () => {
     expect(integrationSearchText(jetty!)).toContain("grading");
   });
 
-  it("renders the Upstash AgentKit extension setup", () => {
-    const agentkit = getIntegration("upstash-agentkit");
-    expect(agentkit).toBeDefined();
+  it("renders the Upstash AgentKit memory provider setup", () => {
+    const agentkitMemory = getIntegration("upstash-agentkit");
+    expect(agentkitMemory).toBeDefined();
 
-    const markdown = integrationMarkdown(agentkit!);
-    expect(markdown).toContain("eve add extension/upstash-agentkit");
-    expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
+    const markdown = integrationMarkdown(agentkitMemory!);
+    expect(markdown).toContain("eve add memory/upstash-agentkit");
+    expect(markdown).toContain('import { redisMemory } from "@upstash/agentkit-eve/memory"');
     expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
-    expect(markdown).toContain("agentkit__recall_memory");
-    expect(markdown).toContain("chatHistory: true");
-    expect(integrationSearchText(agentkit!)).toContain("long-term memory");
+    expect(markdown).toContain("redisDocuments()");
+    expect(markdown).toContain("upstash-agentkit__search_memory");
+    expect(integrationSearchText(agentkitMemory!)).toContain("Memory provider");
   });
 
   it("renders the Kybernesis Arcana memory provider setup", () => {

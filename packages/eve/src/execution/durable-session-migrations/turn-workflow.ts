@@ -64,7 +64,7 @@ interface TurnWorkflowInputBase {
   readonly stepInput: TurnStepInput;
 }
 
-/** A step completed inline before the turn needed its child workflow. */
+/** A step completed inline before the turn needed the shared turn runner. */
 export interface InitialTurnStep {
   readonly beforeStep: {
     readonly serializedContext: Record<string, unknown>;

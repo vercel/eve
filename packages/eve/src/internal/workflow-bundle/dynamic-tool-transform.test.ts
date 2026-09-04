@@ -1972,11 +1972,13 @@ export default defineDynamic({
     expect(await transformDynamicToolExecute("tools/null.ts", source)).toBeNull();
   });
 
-  it("leaves executes that are workflow functions unstamped", async () => {
-    // The shape the directive transform hands over: bodies hoisted to
-    // top-level declarations (here already stubbed) and referenced by name.
-    const source = `
-import { defineTool } from "eve/tools";
+  it.each(["named", "namespace"])(
+    "leaves workflow executors unstamped with a %s import",
+    async (style) => {
+      // The shape the directive transform hands over: bodies hoisted to
+      // top-level declarations (here already stubbed) and referenced by name.
+      let source = `
+import { defineWorkflowTool } from "eve/tools";
 
 async function execute(input) {
   throw new Error("stub");
@@ -1988,28 +1990,34 @@ async function deploy(input) {
 }
 deploy.workflowId = "workflow//./agent/tools/deploy//deploy";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Inline body",
   inputSchema: {},
   execute,
   async toModelOutput(output) { return String(output); },
 });
 
-export const referenced = defineTool({
+export const referenced = defineWorkflowTool({
   description: "Referenced body",
   inputSchema: {},
   execute: deploy,
 });
 `;
-    const result = await transformDynamicToolExecute(
-      "agent/tools/deploy.ts",
-      source,
-      new Set(["execute", "deploy"]),
-    );
-    expect(result).not.toBeNull();
-    expect(result?.code).not.toContain("__eve_dynamic_exec_");
-    expect(result?.code).toContain("toModelOutput: __eveStampDynamicCallback(");
-  });
+      if (style === "namespace") {
+        source = source
+          .replace("import { defineWorkflowTool }", "import * as tools")
+          .replaceAll("defineWorkflowTool({", "tools.defineWorkflowTool({");
+      }
+      const result = await transformDynamicToolExecute(
+        "agent/tools/deploy.ts",
+        source,
+        new Set(["execute", "deploy"]),
+      );
+      expect(result).not.toBeNull();
+      expect(result?.code).not.toContain("__eve_dynamic_exec_");
+      expect(result?.code).toContain("toModelOutput: __eveStampDynamicCallback(");
+    },
+  );
 });
 
 // ===========================================================================

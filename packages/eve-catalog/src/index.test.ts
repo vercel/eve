@@ -122,8 +122,8 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
   });
 
-  it("exposes Upstash AgentKit as an extension", () => {
-    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("extension");
+  it("exposes Upstash AgentKit as a memory provider", () => {
+    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("memory");
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 

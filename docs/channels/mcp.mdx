@@ -67,6 +67,8 @@ The authorization server identified by `issuer` must issue tokens accepted by th
 
 `oauthResource()` does not issue tokens or run an authorization server. It decorates an ordinary inbound `AuthFn` with OAuth protected-resource metadata so `mcpChannel()` can publish discovery and add `resource_metadata` to Bearer challenges. Client registration, consent, token issuance, and authorization-server metadata remain the identity provider's responsibility.
 
+Most hosted MCP clients (Claude, ChatGPT, Grok, and similar) register themselves with the authorization server through Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) the first time a user connects. Choose an issuer that supports it, or pre-register each client with the issuer before the demo. If registration fails, the client stops before it ever reaches eve.
+
 ### Verify the bearer token yourself
 
 Use a custom `AuthFn` when token verification needs application-specific logic:
@@ -144,7 +146,7 @@ export default mcpChannel({
 });
 ```
 
-This allows anyone to invoke the agent. Every caller shares the anonymous principal, so invocation IDs become bearer capabilities until workflow retention expires. Use public access only when anonymous invocation is intentional.
+This allows anyone to invoke the agent. Every caller shares the anonymous principal, so invocation IDs become bearer capabilities until workflow retention expires: anyone holding an ID can read, answer, or cancel that invocation. Use public access only when anonymous invocation is intentional. For a public demo, prefer [Interactive OAuth](#interactive-oauth) so each caller owns their own invocations.
 
 ## HTTP security
 
@@ -171,6 +173,10 @@ MCP clients receive four tools:
 | `agent_update` | `{ invocationId, responses }` | Answer the complete pending human-input batch.              |
 | `agent_cancel` | `{ invocationId }`            | Request cooperative cancellation of non-terminal work.      |
 
+The server also returns `instructions` from `initialize` and `server/discover` that summarize this
+protocol for the connecting model, so a hosted client does not have to infer it from the tool
+schemas alone.
+
 `agent_start` creates one task-mode eve session and returns after durable acceptance without
 waiting for the session continuation hook to become readable. Keep its `invocationId`, then call
 `agent_get` until the invocation reaches a terminal state. While the status is `working`, wait at
@@ -179,15 +185,31 @@ least `pollAfterMs` before polling again.
 The invocation response is discriminated by `status`:
 
 - `working`: work is active; continue polling according to `pollAfterMs`.
-- `input_required`: present `inputRequests`, then send the complete answer batch through `agent_update`. A successful update returns fresh `working` state.
+- `input_required`: present `inputRequests`, then send the complete answer batch through `agent_update`. A successful update returns the current invocation state.
 - `authorization_required`: present the returned sign-in URL, user code, or instructions. The connection callback resumes the invocation automatically; continue polling.
 - `completed`: consume the optional `result`.
 - `failed`: inspect the structured `error`.
 - `cancelled`: cancellation reached a terminal state.
 
+A tool result with `isError: true` means the call itself was rejected. A `failed` status means the call succeeded and the task itself failed. Handle them differently: correct the call in the first case, report the task failure in the second. Rejected calls carry `structuredContent.error` with a stable `code`, a short `message`, and `retryable`:
+
+| `code`          | Meaning                                                                        | `retryable` |
+| --------------- | ------------------------------------------------------------------------------ | ----------- |
+| `invalid_input` | An argument was rejected, for example an oversized or external `outputSchema`. | `false`     |
+| `not_found`     | The invocation does not exist, has expired, or belongs to another caller.      | `false`     |
+| `conflict`      | The invocation is not in the expected state; read it with `agent_get` first.   | `true`      |
+| `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.     | `false`     |
+
 Cancellation is cooperative, so call `agent_get` after `agent_cancel` until the state becomes terminal.
 
-Optional output schemas are limited to 64 KiB, 32 levels, and 2,048 nodes. External `$ref` values are rejected.
+Requests are bounded: the whole MCP request body is limited to 1 MiB, `message` to 64 KiB, each input-response `text` to 16 KiB (both measured as UTF-8 bytes, not characters), and one `agent_update` to 64 responses. Optional output schemas are limited to 64 KiB, 32 levels, and 2,048 nodes, and external `$ref` values are rejected. Oversized bodies receive a JSON-RPC `413`; oversized fields fail input validation before any work starts.
+
+### Durability guarantees
+
+- Once `agent_start` returns, the work is durable. A dropped HTTP connection, a client restart, or a closed MCP session does not cancel it. Only `agent_cancel` stops work.
+- `agent_start` is not idempotent. If its response is lost, the client has no `invocationId` to check, and a second call starts a second task. Ask the user before starting again rather than retrying blindly.
+- `agent_update` answers one pending batch. Re-sending the same answers after eve has accepted them returns the current invocation state; sending different answers for an already-answered batch is a conflict.
+- `agent_cancel` is cooperative and can race with completion. Poll `agent_get` until the status is terminal (`cancelled`, `completed`, or `failed`), not specifically `cancelled`.
 
 ## Invocation ownership
 

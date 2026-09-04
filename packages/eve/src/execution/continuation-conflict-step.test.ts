@@ -5,8 +5,9 @@ import { settleContinuationConflictStep } from "#execution/continuation-conflict
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 const cancelRunMock = vi.fn();
-const getHookByTokenMock = vi.fn();
+const getRawHookByTokenMock = vi.fn();
 const getWorldMock = vi.fn();
+const world = { hooks: { getByToken: getRawHookByTokenMock } };
 const resumeSessionInboxMock = vi.fn();
 
 vi.mock("#execution/wire/session-inbox-resume.js", () => ({
@@ -15,7 +16,7 @@ vi.mock("#execution/wire/session-inbox-resume.js", () => ({
 
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
-  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
+  getRawHookByToken: (...args: unknown[]) => getRawHookByTokenMock(...args),
   getWorld: (...args: unknown[]) => getWorldMock(...args),
 }));
 
@@ -29,7 +30,7 @@ const command = {
 describe("settleContinuationConflictStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getWorldMock.mockResolvedValue("world");
+    getWorldMock.mockResolvedValue(world);
     resumeSessionInboxMock.mockResolvedValue({ runId: "wrun_owner" });
     cancelRunMock.mockResolvedValue(undefined);
   });
@@ -43,7 +44,7 @@ describe("settleContinuationConflictStep", () => {
     });
 
     expect(resumeSessionInboxMock).toHaveBeenCalledWith("slack:C1:T1", command);
-    expect(cancelRunMock).toHaveBeenCalledWith("world", "wrun_collector", {
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "wrun_collector", {
       cancelReason: "Session candidate did not acquire continuation ownership",
     });
   });
@@ -71,15 +72,15 @@ describe("settleContinuationConflictStep", () => {
     resumeSessionInboxMock
       .mockRejectedValueOnce(new HookNotFoundError("slack:C1:T1"))
       .mockResolvedValueOnce({ runId: "wrun_owner" });
-    getHookByTokenMock.mockResolvedValue({ runId: "wrun_owner" });
+    getRawHookByTokenMock.mockResolvedValue({ runId: "wrun_owner" });
 
     await settleContinuationConflictStep({
       command,
       continuationToken: "slack:C1:T1",
     });
 
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
-    expect(getHookByTokenMock).toHaveBeenCalledWith("slack:C1:T1");
+    expect(getRawHookByTokenMock).toHaveBeenCalledOnce();
+    expect(getRawHookByTokenMock).toHaveBeenCalledWith("slack:C1:T1");
     expect(resumeSessionInboxMock).toHaveBeenNthCalledWith(
       2,
       sessionCommandHookToken("wrun_owner"),
@@ -89,7 +90,7 @@ describe("settleContinuationConflictStep", () => {
 
   it("identifies a legacy delivery whose owner can no longer be resolved", async () => {
     resumeSessionInboxMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
+    getRawHookByTokenMock.mockRejectedValue(new HookNotFoundError("slack:C1:T1"));
 
     await expect(
       settleContinuationConflictStep({

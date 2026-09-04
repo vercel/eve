@@ -59,7 +59,7 @@ const { session, response } = await client.sessions.create({
 await response.result();
 ```
 
-`clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
+`clientContext` is ephemeral context for the current turn. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. The context remains available to every model call in the turn, then disappears before the next turn. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
 
 ## Send attachments
 

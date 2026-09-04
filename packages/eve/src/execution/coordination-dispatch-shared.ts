@@ -48,6 +48,7 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
@@ -56,8 +57,7 @@ export type DispatchPlanEntry =
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly callbackBaseUrl?: string;
-  /** Internal hook that receives child completion and HITL payloads. */
-  readonly parentContinuationToken?: string;
+  readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
