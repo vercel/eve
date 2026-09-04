@@ -1,6 +1,24 @@
-import type { SendTurnPayload } from "#client/types.js";
+import type { MessageResponse } from "#client/message-response.js";
+import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
-import type { UserContent } from "ai";
+
+export interface ActiveTurn {
+  readonly abortController: AbortController;
+  acceptedFollowUps: number;
+  readonly cancel: () => Promise<CancelSessionResult>;
+  readonly completion: Promise<void>;
+  readonly followUpDispatches: Set<Promise<void>>;
+  receivedFollowUps: number;
+  readonly resolveCompletion: () => void;
+  readonly response: Promise<MessageResponse | undefined>;
+  readonly resolveResponse: (response: MessageResponse | undefined) => void;
+}
+
+export interface PendingMessageSubmission {
+  readonly createdAt: number;
+  readonly id: string;
+  readonly message: string;
+}
 
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
@@ -50,20 +68,6 @@ export function createAbortSignal(
   second: AbortSignal,
 ): AbortSignal {
   return first ? AbortSignal.any([first, second]) : second;
-}
-
-export function summarizeUserContent(message: string | UserContent): string {
-  if (typeof message === "string") return message;
-
-  const parts: string[] = [];
-  for (const part of message) {
-    if (part.type === "text") {
-      parts.push(part.text);
-    } else if (part.type === "file") {
-      parts.push(part.filename ? `[file: ${part.filename}]` : "[file]");
-    }
-  }
-  return parts.join("\n");
 }
 
 export function isAbortError(error: unknown): boolean {

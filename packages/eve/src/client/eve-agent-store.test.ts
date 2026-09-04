@@ -4,6 +4,7 @@ import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -778,6 +779,157 @@ describe("EveAgentStore steering", () => {
       text: "Replacement reply.",
       type: "text",
     });
+  });
+});
+
+describe("EveAgentStore background tasks", () => {
+  it("keeps following after a background tool receipt", async () => {
+    const initialEvents = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_0" }),
+      createActionResultEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { status: "working", taskId: "task_1" },
+          toolName: "write_later",
+        },
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "The background task started.",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const callbackStream = controlledStreamResponse();
+    const [callbackStarted, callbackCompleted, callbackWaiting] = stampTestEvents([
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "The background task finished.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, id: `callback_${index}` },
+    }));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(initialEvents))
+      .mockResolvedValueOnce(callbackStream.response);
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    callbackStream.emit(callbackStarted!);
+    callbackStream.emit(callbackCompleted!);
+    callbackStream.emit(callbackWaiting!);
+
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+        state: "done",
+        stepIndex: 0,
+        text: "The background task finished.",
+        type: "text",
+      }),
+    );
+    expect(store.snapshot.status).toBe("ready");
+    detachEveAgentStore(store);
+  });
+
+  it("recognizes background subagent receipts", async () => {
+    const initialEvents = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_0" }),
+      {
+        data: {
+          backgroundTask: { status: "working", taskId: "task_1" },
+          callId: "call_1",
+          output: "Started.",
+          subagentName: "researcher",
+        },
+        type: "subagent.completed",
+      },
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const callbackStream = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(initialEvents))
+      .mockResolvedValueOnce(callbackStream.response);
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    detachEveAgentStore(store);
+  });
+
+  it("reconciles an optimistic submission containing a file", async () => {
+    const message = [
+      { text: "Review this document", type: "text" as const },
+      {
+        data: "data:text/plain;base64,SGVsbG8=",
+        filename: "notes.txt",
+        mediaType: "text/plain",
+        type: "file" as const,
+      },
+    ];
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message, sequence: 0, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message });
+
+    const userMessages = store.snapshot.data.messages.filter(
+      (candidate) => candidate.role === "user",
+    );
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.metadata?.optimistic).toBeUndefined();
+    expect(userMessages[0]?.parts).toMatchObject([
+      { state: "done", text: "Review this document", type: "text" },
+      { filename: "notes.txt", mediaType: "text/plain", type: "file" },
+    ]);
+  });
+
+  it("only reconciles an optimistic submission with its matching server message", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({
+        message: "Framework-authored task state",
+        sequence: 0,
+        turnId: "turn_internal",
+      }),
+      createMessageReceivedEvent({ message: "Hello", sequence: 1, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "Hello" });
+
+    const userMessages = store.snapshot.data.messages.filter((message) => message.role === "user");
+    expect(userMessages).toHaveLength(2);
+    expect(userMessages.map((message) => message.parts[0])).toEqual([
+      { state: "done", text: "Hello", type: "text" },
+      { state: "done", text: "Framework-authored task state", type: "text" },
+    ]);
+    expect(userMessages[0]?.metadata?.optimistic).toBeUndefined();
   });
 });
 
