@@ -195,6 +195,21 @@ function typeOnlyFixtures(): void {
     },
   });
 
+  defineDynamic({
+    events: {
+      "session.started": () => ({
+        review: defineRemoteAgent({
+          description: "Delegate response review.",
+          url: "https://review.example.com",
+        }),
+        triage: defineRemoteAgent({
+          description: "Delegate request triage.",
+          url: "https://triage.example.com",
+        }),
+      }),
+    },
+  });
+
   // @ts-expect-error A dynamic local-subagent selection must use a static model.
   defineDynamic({
     events: {

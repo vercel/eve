@@ -72,6 +72,43 @@ describe("resolveRemoteAgentForAction", () => {
       headers: { authorization: "Bearer selected" },
     });
   });
+
+  it("finds the owning resolver for a keyed dynamic map entry", async () => {
+    const definition = {
+      dynamic: {
+        eventNames: ["session.started"],
+        events: { "session.started": () => null },
+        logicalPath: "subagents/specialists.ts",
+        sourceId: "subagents/specialists.ts",
+        sourceKind: "module",
+      },
+      kind: "subagent",
+      logicalPath: "subagents/specialists.ts",
+      name: "specialists",
+      nodeId: "subagents/specialists",
+      sourceId: "subagents/specialists.ts",
+      sourceKind: "module",
+    } as const;
+
+    const resolved = await resolveRemoteAgentForAction({
+      dynamicRemoteAgent: {
+        description: "Selected remote triage.",
+        path: "/eve/v1/session",
+        url: "https://triage.example.com",
+      },
+      nodeId: "subagents/specialists#triage",
+      registry: new Map([[definition.nodeId, { definition }]]),
+      remoteAgentName: "specialists__triage",
+    });
+
+    expect(resolved).toMatchObject({
+      logicalPath: "subagents/specialists.ts",
+      name: "specialists__triage",
+      nodeId: "subagents/specialists#triage",
+      sourceId: "subagents/specialists.ts",
+      url: "https://triage.example.com",
+    });
+  });
 });
 
 describe("resolveRemoteAgentStreamHeaders", () => {

@@ -17,11 +17,6 @@ import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-ag
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import {
-  SessionDynamicSubagentSelectionsKey,
-  TurnDynamicSubagentSelectionsKey,
-  type DurableDynamicSubagentSelection,
-} from "#context/keys.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import {
   isAgentHandleAction,
@@ -29,7 +24,11 @@ import {
   type RuntimeSession,
 } from "#subagents/handle-dispatch.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import {
+  getDynamicSubagentSelection,
+  getDynamicSubagentSelectionByName,
+  isDynamicSubagentNodeId,
+} from "#context/dynamic-subagent-lifecycle.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
@@ -105,10 +104,12 @@ export function planAgentDispatch(input: {
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
     if (knownAgentIds.has(agentId)) {
-      const dynamicSubagentSelection =
-        input.bundle.subagentRegistry.dynamicNodeIds?.has(input.action.nodeId) === true
-          ? getDynamicSubagentSelection(input.ctx, input.action.nodeId)
-          : undefined;
+      const dynamicSubagentSelection = isDynamicSubagentNodeId(
+        input.bundle.subagentRegistry.dynamicNodeIds ?? new Set(),
+        input.action.nodeId,
+      )
+        ? getDynamicSubagentSelection(input.ctx, input.action.nodeId)
+        : undefined;
       return {
         action: input.action,
         agentId,
@@ -135,8 +136,10 @@ function classifyFreshStart(input: {
 }): Extract<OwnerAgentDispatchPlanEntry, { kind: "reject" | "start" }> {
   const { action } = input;
   const registry = input.bundle.subagentRegistry.subagentsByNodeId;
-  const isDynamicSubagent =
-    input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
+  const isDynamicSubagent = isDynamicSubagentNodeId(
+    input.bundle.subagentRegistry.dynamicNodeIds ?? new Set(),
+    action.nodeId,
+  );
   const dynamicSubagentSelection = isDynamicSubagent
     ? getDynamicSubagentSelection(input.ctx, action.nodeId)
     : undefined;
@@ -237,13 +240,7 @@ function resolveAgentInvocationAction(input: {
   const registered = bundle.subagentRegistry.subagentsByName.get(input.input.target);
   const dynamicSelection =
     registered === undefined
-      ? Object.values({
-          ...input.ctx.get(SessionDynamicSubagentSelectionsKey),
-          ...input.ctx.get(TurnDynamicSubagentSelectionsKey),
-        }).find(
-          (selection: DurableDynamicSubagentSelection) =>
-            selection !== null && selection.prepared?.name === input.input.target,
-        )
+      ? getDynamicSubagentSelectionByName(input.ctx, input.input.target)
       : undefined;
   const definition =
     registered?.definition ??
