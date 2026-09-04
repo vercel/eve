@@ -100,39 +100,37 @@ export async function fireSessionCallbackStep(input: {
     return;
   }
 
+  let callback: SessionCallback;
   try {
-    const callback = parseSerializedSessionCallback(value);
-    const body =
-      input.status === "completed"
-        ? buildCompletedCallbackBody({
-            callback,
-            output: input.output,
-            sessionId,
-            usage: input.usage,
-          })
-        : {
-            callId: callback.callId,
-            error: {
-              code: SESSION_FAILED,
-              message: toErrorMessage(input.error),
-            },
-            kind: "session.failed" as const,
-            sessionId,
-            subagentName: callback.subagentName,
-            usage: input.usage,
-          };
-
-    const response = await postSessionCallbackRequest({ body, url: callback.url });
-
-    if (!response.ok) {
-      throw new Error(`Session callback failed with HTTP ${response.status}.`);
-    }
+    callback = parseSerializedSessionCallback(value);
   } catch (error) {
-    log.error("failed to post session callback", {
-      error,
-      sessionId,
-    });
+    log.error("invalid session callback metadata", { error, sessionId });
     throw error;
+  }
+  const body =
+    input.status === "completed"
+      ? buildCompletedCallbackBody({
+          callback,
+          output: input.output,
+          sessionId,
+          usage: input.usage,
+        })
+      : {
+          callId: callback.callId,
+          error: {
+            code: SESSION_FAILED,
+            message: toErrorMessage(input.error),
+          },
+          kind: "session.failed" as const,
+          sessionId,
+          subagentName: callback.subagentName,
+          usage: input.usage,
+        };
+
+  const response = await postSessionCallbackRequest({ body, url: callback.url });
+
+  if (!response.ok) {
+    throw new Error(`Session callback failed with HTTP ${response.status}.`);
   }
 }
 
