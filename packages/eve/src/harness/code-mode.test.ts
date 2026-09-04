@@ -1,4 +1,4 @@
-import { jsonSchema } from "ai";
+import { asSchema, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -7,6 +7,7 @@ import {
   applyCodeModeTool,
   codeModeBridgeRequestLimit,
   claimsForCodeMode,
+  createDiscoveryTools,
   DESCRIBE_TOOLS_NAME,
   SEARCH_TOOLS_NAME,
 } from "#harness/code-mode.js";
@@ -148,7 +149,6 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain(DESCRIBE_TOOLS_NAME);
     expect(description).toContain('"names"');
     expect(description).toContain('"query"');
-    expect(description).toContain("Returns an array");
     expect(description).toContain("substring");
     expect(description).not.toContain('"q"');
   });
@@ -200,6 +200,13 @@ describe("applyCodeModeTool", () => {
       expect(applied.modelTools.gated).toBeDefined();
       expect(applied.modelTools.background).toBeDefined();
       expect(applied.modelTools.provider).toBeDefined();
+      const description = applied.modelTools[CODE_MODE_TOOL_NAME]!.description!;
+      expect(description).toContain(
+        "search_tools: (input: { query?: string; }) => Promise<{ name: string; description: string; requiresDirectCall: boolean; }[]>;",
+      );
+      expect(description).toContain(
+        'describe_tools: (input: { names: string[]; }) => Promise<Array<{ name: string; description: string; requiresDirectCall: boolean; inputSchema: Record<string, unknown>; } | { name: string; error: "unknown tool"; }>>;',
+      );
     },
   );
 
@@ -214,5 +221,44 @@ describe("applyCodeModeTool", () => {
     });
     expect(applied.modelTools).toBe(tools);
     expect(applied.harnessTools).toBe(harnessTools);
+  });
+});
+
+describe("createDiscoveryTools", () => {
+  const entry = {
+    name: "add",
+    description: "Add numbers.",
+    inputSchema: { type: "object" },
+    requiresDirectCall: false,
+  };
+  const tools = createDiscoveryTools([entry]);
+
+  it("declares the array returned by search, including no matches", async () => {
+    const search = tools[SEARCH_TOOLS_NAME];
+    const result = await search.execute({});
+    expect(result).toEqual([
+      { name: "add", description: "Add numbers.", requiresDirectCall: false },
+    ]);
+    expect(await asSchema(search.outputSchema).validate!(result)).toMatchObject({
+      success: true,
+      value: result,
+    });
+
+    const empty = await search.execute({ query: "missing" });
+    expect(empty).toEqual([]);
+    expect(await asSchema(search.outputSchema).validate!(empty)).toMatchObject({
+      success: true,
+      value: [],
+    });
+  });
+
+  it("declares both known-tool descriptions and unknown-tool errors", async () => {
+    const describe = tools[DESCRIBE_TOOLS_NAME];
+    const result = await describe.execute({ names: ["add", "missing"] });
+    expect(result).toEqual([entry, { name: "missing", error: "unknown tool" }]);
+    expect(await asSchema(describe.outputSchema).validate!(result)).toMatchObject({
+      success: true,
+      value: result,
+    });
   });
 });

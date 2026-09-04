@@ -151,15 +151,19 @@ export function isCodeModeAgentTool(definition: HarnessToolDefinition): boolean 
 }
 
 /** Discovery covers the complete advertised catalog, independently of execution routing. */
-export function createDiscoveryTools(
-  catalog: readonly CodeModeToolCatalogEntry[],
-): Record<string, ToolSet[string]> {
+export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[]) {
+  const toolSummarySchema = z.object({
+    name: z.string(),
+    description: z.string(),
+    requiresDirectCall: z.boolean(),
+  });
   return {
     [SEARCH_TOOLS_NAME]: {
       description:
         "Search all available tools by case-insensitive substring of their name or description. " +
-        "Use a short term, or omit query to list all tools. Returns an array of { name, description, requiresDirectCall }.",
+        "Use a short term, or omit query to list all tools.",
       inputSchema: z.object({ query: z.string().optional() }),
+      outputSchema: z.array(toolSummarySchema),
       execute: async ({ query }: { readonly query?: string }) => {
         const needle = query?.toLowerCase().trim() ?? "";
         return catalog
@@ -170,19 +174,24 @@ export function createDiscoveryTools(
             requiresDirectCall,
           }));
       },
-    } as ToolSet[string],
+    },
     [DESCRIBE_TOOLS_NAME]: {
       description:
-        "Return an array of { name, description, inputSchema, requiresDirectCall } for the requested names. " +
         "Describe every tool needed for the task, including final writes, before executing it.",
       inputSchema: z.object({ names: z.array(z.string()) }),
+      outputSchema: z.array(
+        z.union([
+          toolSummarySchema.extend({ inputSchema: z.record(z.string(), z.unknown()) }),
+          z.object({ name: z.string(), error: z.literal("unknown tool") }),
+        ]),
+      ),
       execute: async ({ names }: { readonly names: readonly string[] }) =>
         names.map((name) => {
           const entry = catalog.find((candidate) => candidate.name === name);
           return entry === undefined ? { error: "unknown tool", name } : entry;
         }),
-    } as ToolSet[string],
-  };
+    },
+  } satisfies ToolSet;
 }
 
 /** Descriptor-only stand-in for a claimed tool; the body executes it in its own step. */
