@@ -31,7 +31,7 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
+import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
@@ -83,7 +83,6 @@ export interface AgentOtelInstrumentationInput {
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
-/** OTel event definition and its trusted framework context runner. */
 export interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
@@ -224,7 +223,7 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
-              ...runtimeContextAttributes(event.runtimeContext),
+              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
             },
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
@@ -305,6 +304,7 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": agentName,
+                  ...runtimeAttributes.agentLineageAttributes(turn),
                   "agent.session.id": event.sessionId,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
@@ -362,7 +362,7 @@ export function createAgentOtelInstrumentation(
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
-          ...runtimeContextAttributes(event.runtimeContext),
+          ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
         },
       },
       attempt.context,

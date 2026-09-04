@@ -201,6 +201,213 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("returns a child trace id only for an exact acknowledgement", async () => {
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 1,
+      traceId: "3".repeat(32),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "accepted-child", status: "accepted", trace: traceSeed },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "mismatched-child",
+            status: "accepted",
+            trace: { ...traceSeed, spanId: "5".repeat(16) },
+          },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent: {
+        callId: "call-remote",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 0 },
+      },
+      parentTraceContext: {
+        spanId: "2".repeat(16),
+        traceFlags: 1,
+        traceId: "1".repeat(32),
+      },
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+      traceSeed,
+    };
+
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "accepted-child",
+      traceId: traceSeed.traceId,
+    });
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "mismatched-child",
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("traceparent");
+  });
+
+  it("does not retry an unrelated bad request", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { error: "Invocation trace context does not match traceparent.", ok: false },
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: createRemoteAgent(),
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+        traceSeed: {
+          spanId: "4".repeat(16),
+          traceFlags: 1,
+          traceId: "3".repeat(32),
+        },
+      }),
+    ).rejects.toThrow("HTTP 400");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toHaveProperty("trace");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("traceparent");
+  });
+
+  it("falls back to a capped root when the receiver does not trust delegated lineage", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            code: "UNTRUSTED_AGENT_INVOCATION",
+            error: "This deployment does not accept delegated agent lineage.",
+            ok: false,
+          },
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        remote: createRemoteAgent(),
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+        traceSeed: {
+          spanId: "4".repeat(16),
+          traceFlags: 1,
+          traceId: "3".repeat(32),
+        },
+      }),
+    ).resolves.toEqual({ sessionId: "remote-session" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      invocation: { rootSessionId: "root-session" },
+      trace: { seed: { traceId: "3".repeat(32) } },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty(
+      "invocation",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty("trace");
+  });
+
+  it("does not retry an unrelated forbidden response", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ code: "FORBIDDEN", error: "Forbidden.", ok: false }, { status: 403 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        remote: createRemoteAgent(),
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+        traceSeed: {
+          spanId: "4".repeat(16),
+          traceFlags: 1,
+          traceId: "3".repeat(32),
+        },
+      }),
+    ).rejects.toThrow("HTTP 403");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

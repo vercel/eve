@@ -31,6 +31,8 @@ export interface ForwardedPrincipal {
  */
 export type TrustedForwarders = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
 
+export const UNTRUSTED_AGENT_INVOCATION = "UNTRUSTED_AGENT_INVOCATION";
+
 export type ForwardedPrincipalParseResult =
   | {
       readonly forwardedPrincipal: ForwardedPrincipal;
@@ -101,16 +103,38 @@ export async function resolveForwardedPrincipal(input: {
   const value = input.payload.forwardedPrincipal;
   if (value === undefined) return { accepted: false, auth: input.forwarder };
 
-  if (input.trustedForwarders === undefined) {
-    return Response.json(
-      { error: "This deployment does not accept a forwarded principal.", ok: false },
-      { status: 403 },
-    );
-  }
-
   const parsed = parseForwardedPrincipal(value);
   if (!parsed.ok) {
     return Response.json({ error: parsed.message, ok: false }, { status: 400 });
+  }
+
+  const authorized = await authorizeTrustedForwarder({
+    assertion: "forwarded-principal",
+    forwarder: input.forwarder,
+    trustedForwarders: input.trustedForwarders,
+  });
+  if (authorized instanceof Response) return authorized;
+
+  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
+  const initiator =
+    parsed.forwardedPrincipal.initiator === undefined
+      ? current
+      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
+  return { accepted: true, auth: current, initiatorAuth: initiator };
+}
+
+export async function authorizeTrustedForwarder(input: {
+  readonly assertion: "agent-invocation" | "forwarded-principal";
+  readonly forwarder: SessionAuthContext;
+  readonly trustedForwarders: TrustedForwarders | undefined;
+}): Promise<true | Response> {
+  if (input.trustedForwarders === undefined) {
+    return input.assertion === "agent-invocation"
+      ? untrustedAgentInvocationResponse("This deployment does not accept delegated agent lineage.")
+      : Response.json(
+          { error: "This deployment does not accept a forwarded principal.", ok: false },
+          { status: 403 },
+        );
   }
 
   let accepted: boolean;
@@ -125,19 +149,16 @@ export async function resolveForwardedPrincipal(input: {
       { status: 500 },
     );
   }
-  if (!accepted) {
-    return Response.json(
-      { error: "Caller is not authorized to assert a forwarded principal.", ok: false },
-      { status: 403 },
-    );
-  }
+  if (accepted) return true;
 
-  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
-  const initiator =
-    parsed.forwardedPrincipal.initiator === undefined
-      ? current
-      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
-  return { accepted: true, auth: current, initiatorAuth: initiator };
+  return input.assertion === "agent-invocation"
+    ? untrustedAgentInvocationResponse(
+        "Caller is not authorized to assert delegated agent lineage.",
+      )
+    : Response.json(
+        { error: "Caller is not authorized to assert a forwarded principal.", ok: false },
+        { status: 403 },
+      );
 }
 
 /**
@@ -209,4 +230,8 @@ function formatForwardedPrincipalParseError(error: z.ZodError): string {
     return `${path}: ${issue.message}`;
   });
   return `Invalid forwardedPrincipal metadata: ${messages.join("; ")}`;
+}
+
+function untrustedAgentInvocationResponse(error: string): Response {
+  return Response.json({ code: UNTRUSTED_AGENT_INVOCATION, error, ok: false }, { status: 403 });
 }

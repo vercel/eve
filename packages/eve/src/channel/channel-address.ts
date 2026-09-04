@@ -160,6 +160,7 @@ export function createChannelAddress<TState = undefined>(input: {
       const handle = await input.runtime.createSession(runInput);
       return createSession(handle.sessionId, input.runtime, {
         ...metadata,
+        trace: handle.trace,
         turnPolicy: input.turnPolicy,
       });
     },
@@ -198,12 +199,12 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async resolveSession() {
       const owner = await input.runtime.resolveContinuation(namespacedToken);
-      return owner === undefined
-        ? undefined
-        : createSession(owner.sessionId, input.runtime, {
-            ...metadata,
-            turnPolicy: input.turnPolicy,
-          });
+      if (owner === undefined) return undefined;
+      return createSession(owner.sessionId, input.runtime, {
+        ...metadata,
+        trace: owner.trace,
+        turnPolicy: input.turnPolicy,
+      });
     },
   };
 }

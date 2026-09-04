@@ -16,6 +16,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { AGENT_TRACE_ATTRIBUTES } from "#tracing/agent-otel-attributes.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
@@ -140,6 +141,9 @@ export function createAgentActionInstrumentation(input: {
     );
     if (state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
+    }
+    if (state.childTraceId !== undefined) {
+      span.setAttribute(AGENT_TRACE_ATTRIBUTES.childTraceId, state.childTraceId);
     }
     return span;
   };

@@ -302,6 +302,7 @@ function toLifecycleEvent(
         channelAudience: input.channelAudience,
         channelKind: input.channelKind,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
         sessionId: input.sessionId,

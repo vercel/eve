@@ -1,12 +1,14 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { SessionStateMap } from "#harness/types.js";
+import { isTraceId } from "#protocol/agent-invocation-trace.js";
 
 import { AGENT_HANDLES_STATE_KEY } from "./state-key.js";
 
 export { AGENT_HANDLES_STATE_KEY };
 
 const MAX_STATUS_LENGTH = 120;
+const traceIdSchema = z.string().refine(isTraceId);
 
 /**
  * Stable identity of one delegated child, minted before its start side
@@ -78,11 +80,13 @@ export type AgentAddress =
       readonly kind: "agent/local";
       readonly sessionId: string;
       readonly continuationToken: string;
+      readonly traceId?: string;
     }
   | {
       readonly kind: "agent/self";
       readonly sessionId: string;
       readonly continuationToken: string;
+      readonly traceId?: string;
     }
   | {
       readonly kind: "agent/remote";
@@ -91,6 +95,7 @@ export type AgentAddress =
       readonly callbackBaseUrl: string;
       /** Auth/header resolver selected when this child was created; `{}` means none. */
       readonly credentialResolver?: { readonly resolverId?: string };
+      readonly traceId?: string;
     };
 
 /**
@@ -245,17 +250,20 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
     continuationToken: nonEmptyString,
     kind: z.literal("agent/local"),
     sessionId: nonEmptyString,
+    traceId: traceIdSchema.optional(),
   }),
   z.strictObject({
     continuationToken: nonEmptyString,
     kind: z.literal("agent/self"),
     sessionId: nonEmptyString,
+    traceId: traceIdSchema.optional(),
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
     credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
+    traceId: traceIdSchema.optional(),
     url: z.url(),
   }),
 ]);

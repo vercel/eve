@@ -45,6 +45,7 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import type { TraceCoordinates } from "#protocol/agent-invocation-trace.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -59,6 +60,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly acceptedTraceCoordinates?: TraceCoordinates;
   readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
@@ -178,7 +180,9 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | DynamicSubagentAgentConfig
       | undefined;
 
-    const commandInbox = createSessionCommandInbox();
+    const commandInbox = createSessionCommandInbox({
+      acceptedTraceCoordinates: input.acceptedTraceCoordinates,
+    });
     const stableCommandToken = sessionCommandHookToken(sessionId);
     const authorizationHookToken = `${sessionId}:auth`;
     let sessionState: DurableSessionState;

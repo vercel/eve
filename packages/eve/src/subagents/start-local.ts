@@ -30,6 +30,7 @@ export async function startLocalSubagent(input: {
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly traceSeed: Parameters<typeof buildSubagentRunInput>[0]["traceSeed"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
@@ -53,6 +54,7 @@ export async function startLocalSubagent(input: {
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,
     parentTraceContext: input.parentTraceContext,
+    traceSeed: input.traceSeed,
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
@@ -63,11 +65,15 @@ export async function startLocalSubagent(input: {
 
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   let childSessionId: string;
+  let confirmedTraceId: string | undefined;
   try {
-    await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
-      childRuntime.createSession(runInput),
+    const created = await contextStorage.run(
+      new ContextContainer({ localDevRequest: input.localDevRequest }),
+      () => childRuntime.createSession(runInput),
     );
+    confirmedTraceId = created.trace?.traceId;
     childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    if (created.sessionId !== childSessionId) confirmedTraceId = undefined;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,
@@ -75,6 +81,7 @@ export async function startLocalSubagent(input: {
       subagentName: action.subagentName,
     });
     return {
+      childTraceId: confirmedTraceId,
       kind: "error",
       result: {
         callId: action.callId,
@@ -91,11 +98,17 @@ export async function startLocalSubagent(input: {
     };
   }
 
-  const address = {
+  const address: {
+    continuationToken: string;
+    kind: typeof targetKind;
+    sessionId: string;
+    traceId?: string;
+  } = {
     continuationToken: childContinuationToken,
     kind: targetKind,
     sessionId: childSessionId,
-  } as const;
+  };
+  if (confirmedTraceId !== undefined) address.traceId = confirmedTraceId;
   return {
     address,
     callId: action.callId,

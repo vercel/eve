@@ -16,6 +16,7 @@ import {
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -85,6 +86,10 @@ export function buildRunContext(input: {
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
+  }
+
+  if (run.traceSeed !== undefined) {
+    ctx.set(SessionTraceSeedKey, run.traceSeed);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

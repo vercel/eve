@@ -15,6 +15,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionSendCommandResult,
+  SessionTraceCoordinates,
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
@@ -34,6 +35,8 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
   readonly id: string;
+  /** @internal Trace coordinates acknowledged when this session was created. */
+  readonly trace?: SessionTraceCoordinates;
   /** Sends a message to this exact session ID without creating or following a replacement. */
   send(
     message: string | UserContent,
@@ -94,10 +97,14 @@ export interface SessionHandle {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly trace?: SessionTraceCoordinates;
+    readonly turnPolicy?: TurnPolicy;
+  } = {},
 ): Session {
   return {
     id,
+    trace: metadata.trace,
     async send(message, options) {
       const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);

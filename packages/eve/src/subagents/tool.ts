@@ -3,10 +3,10 @@ import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/
 import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
-  RunInput,
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  RunInput,
   SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -96,6 +96,7 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
+  readonly traceSeed?: SessionTraceContext;
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
@@ -136,6 +137,7 @@ export function buildSubagentRunInput(input: {
     subagentName: action.subagentName,
   };
   if (input.taskId !== undefined) adapterState.taskId = input.taskId;
+  if (input.traceSeed !== undefined) adapterState.traceId = input.traceSeed.traceId;
   const sharesSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
       .inheritsParent === true || input.selfAgent;
@@ -177,9 +179,17 @@ export function buildSubagentRunInput(input: {
       },
     },
     parentTraceContext: input.parentTraceContext,
+    traceSeed: input.traceSeed,
     activityObserver: input.activityObserver,
   };
   if (input.taskId !== undefined) runInput.taskId = input.taskId;
+  if (input.traceSeed !== undefined) {
+    runInput.acceptedTraceCoordinates = {
+      spanId: input.traceSeed.spanId,
+      traceFlags: input.traceSeed.traceFlags,
+      traceId: input.traceSeed.traceId,
+    };
+  }
 
   return { childContinuationToken, runInput };
 }

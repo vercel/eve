@@ -66,6 +66,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { readAcceptedTraceCoordinatesMetadata } from "#execution/session-command-inbox.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -76,6 +77,7 @@ import {
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
+import type { TraceCoordinates } from "#protocol/agent-invocation-trace.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -85,6 +87,7 @@ const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 const log = createLogger("execution.workflow-runtime");
 
 interface WorkflowHookRecord {
+  readonly acceptedTraceCoordinates?: TraceCoordinates;
   readonly runId: string;
 }
 
@@ -153,6 +156,7 @@ export function createWorkflowRuntime(config: {
         agentName: effectiveAgent.turnAgent.id,
         ctx,
         parentTraceContext: input.parentTraceContext,
+        traceSeed: input.traceSeed,
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
@@ -208,6 +212,9 @@ export function createWorkflowRuntime(config: {
       };
       const taskId = input.taskId ?? input.callback?.taskId;
       if (taskId !== undefined) workflowInput.taskId = taskId;
+      if (input.acceptedTraceCoordinates !== undefined) {
+        workflowInput.acceptedTraceCoordinates = input.acceptedTraceCoordinates;
+      }
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }
@@ -266,6 +273,7 @@ export function createWorkflowRuntime(config: {
           return getEvents();
         },
         sessionId: run.runId,
+        trace: input.acceptedTraceCoordinates,
       };
     },
 
@@ -303,10 +311,13 @@ export function createWorkflowRuntime(config: {
 
     async resolveContinuation(
       continuationToken: string,
-    ): Promise<{ sessionId: string } | undefined> {
+    ): Promise<{ sessionId: string; trace?: TraceCoordinates } | undefined> {
       try {
         const hook = await getHookByToken(continuationToken);
-        return { sessionId: hook.runId };
+        return {
+          sessionId: hook.runId,
+          trace: readAcceptedTraceCoordinatesMetadata(hook),
+        };
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;
@@ -518,6 +529,7 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
   }
 
   return {
+    acceptedTraceCoordinates: readAcceptedTraceCoordinatesMetadata(value),
     runId,
   };
 }

@@ -11,6 +11,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   applyLiveDeliveryAudienceCeiling,
+  decisionToTraceContentCeiling,
   readForwardedTraceAssertion,
 } from "#shared/forwarded-trace-policy.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
@@ -18,6 +19,7 @@ import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
+import { allocateChildSessionTraceSeed } from "#tracing/agent-child-trace-seed.js";
 
 export type SubagentStartTarget =
   | {
@@ -42,6 +44,7 @@ export async function startSubagent(input: {
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
+  readonly instrumentationCallId?: string;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
@@ -55,6 +58,16 @@ export async function startSubagent(input: {
   readonly taskId?: string;
   readonly target: SubagentStartTarget;
 }): Promise<DispatchOutcome> {
+  const actionCallId = input.instrumentationCallId;
+  const actionTraceContext =
+    actionCallId === undefined
+      ? undefined
+      : readActionTraceContext(
+          input.serializedContext,
+          input.session.sessionId,
+          input.batchEvent.turnId,
+          actionCallId,
+        );
   const storedParentTraceContext =
     readActionTraceContext(
       input.serializedContext,
@@ -77,6 +90,33 @@ export async function startSubagent(input: {
             forwardedTracePolicy,
           ),
         };
+  const decisionCeiling = decisionToTraceContentCeiling(parentTraceContext?.decision);
+  const ceiling =
+    decisionCeiling === undefined
+      ? forwardedTracePolicy?.ceiling
+      : forwardedTracePolicy === undefined
+        ? decisionCeiling
+        : {
+            recordInputs: decisionCeiling.recordInputs && forwardedTracePolicy.ceiling.recordInputs,
+            recordOutputs:
+              decisionCeiling.recordOutputs && forwardedTracePolicy.ceiling.recordOutputs,
+          };
+  const traceSeed =
+    actionCallId === undefined
+      ? undefined
+      : allocateChildSessionTraceSeed({
+          callId: actionCallId,
+          forwardedTracePolicy:
+            ceiling === undefined
+              ? undefined
+              : {
+                  ceiling,
+                  originAudience: forwardedTracePolicy?.originAudience ?? liveAudience ?? "unknown",
+                },
+          sessionId: input.session.sessionId,
+          turnId: input.batchEvent.turnId,
+        });
+  const callerTraceContext = actionCallId === undefined ? parentTraceContext : actionTraceContext;
 
   switch (input.target.kind) {
     case "local":
@@ -93,7 +133,8 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
+        parentTraceContext: callerTraceContext,
+        traceSeed,
         activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
@@ -112,7 +153,8 @@ export async function startSubagent(input: {
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
+        parentTraceContext: callerTraceContext,
+        traceSeed,
         activityObserver: input.activityObserver,
         session: input.session,
         taskId: input.taskId,

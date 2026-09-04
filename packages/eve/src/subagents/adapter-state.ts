@@ -1,3 +1,5 @@
+import { isTraceId } from "#protocol/agent-invocation-trace.js";
+
 /**
  * Durable state for the subagent adapter, split from the adapter itself so
  * harness code can identify a delegated child run without reaching the
@@ -32,6 +34,7 @@ export interface SubagentAdapterState extends Record<string, unknown> {
   readonly subagentName: string;
   /** Owning task when this child was started by a background workflow tool. */
   readonly taskId?: string;
+  readonly traceId?: string;
 }
 
 /**
@@ -56,6 +59,7 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
     typeof state.parentSessionId === "string" &&
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0 &&
-    (state.taskId === undefined || (typeof state.taskId === "string" && state.taskId.length > 0))
+    (state.taskId === undefined || (typeof state.taskId === "string" && state.taskId.length > 0)) &&
+    (state.traceId === undefined || isTraceId(state.traceId))
   );
 }
