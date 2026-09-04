@@ -35,11 +35,23 @@ export const integrationMarkdown = (integration: Integration): string => {
     integration.configure ??
     (setup ? renderConnectionVariants(setup, setup.configureVariants) : "");
 
+  const relatedResources = integration.relatedResources?.length
+    ? [
+        section(
+          "Related resources",
+          integration.relatedResources
+            .map((resource) => `- [${resource.title}](${resource.href}): ${resource.description}`)
+            .join("\n"),
+        ),
+      ]
+    : [];
+
   return [
     `${typeLabel[integration.type]} integration for eve. ${integration.tagline}`,
     section("Install", install),
     section("Quick start", quickStart),
     section("Configure", configure),
+    ...relatedResources,
     `[Read the full ${typeLabel[integration.type].toLowerCase()} documentation](${integration.docsHref})`,
   ].join("\n\n");
 };
