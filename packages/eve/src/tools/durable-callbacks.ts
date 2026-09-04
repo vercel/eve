@@ -1,6 +1,6 @@
 import type { Approval } from "#approval/definition.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonPrimitive } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
   | "approvalRequest"
@@ -100,6 +100,50 @@ export function hasUnregisteredDurableDynamicCallbacks(
       (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
     ),
   );
+}
+
+type DurableCallbackJsonValue<T> = T extends (...args: never[]) => unknown
+  ? never
+  : T extends JsonPrimitive
+    ? T
+    : T extends readonly (infer TItem)[]
+      ? readonly DurableCallbackJsonValue<TItem>[]
+      : T extends object
+        ? DurableCallbackJsonObject<T>
+        : never;
+
+type DurableCallbackJsonObject<T extends object> =
+  Extract<keyof T, symbol> extends never
+    ? {
+        readonly [TKey in keyof T]:
+          | DurableCallbackJsonValue<Exclude<T[TKey], undefined>>
+          | Extract<T[TKey], undefined>;
+      }
+    : never;
+
+/**
+ * Defines a replayable callback for tools created outside eve's authored-source
+ * transform, such as tools returned by a provider package.
+ *
+ * Put every per-tool value in `closure`. eve snapshots that JSON-serializable
+ * object when the dynamic tool resolves and passes it as the first argument to
+ * the current callback implementation during both live execution and replay.
+ */
+export function defineDurableCallback<
+  TClosure extends object,
+  TArgs extends unknown[],
+  TResult,
+>(input: {
+  readonly callback: (closure: TClosure, ...args: TArgs) => TResult;
+  readonly closure: TClosure & DurableCallbackJsonObject<TClosure>;
+}): (...args: TArgs) => TResult {
+  const callback = (...args: TArgs): TResult => input.callback(input.closure, ...args);
+  const durableCallback = (closure: JsonObject, ...args: never[]): TResult =>
+    Reflect.apply(input.callback, undefined, [closure, ...args]) as TResult;
+  return stampDurableDynamicCallback(callback, {
+    callback: durableCallback,
+    closure: input.closure as JsonObject,
+  });
 }
 
 /** Marks a live callback with the descriptor needed to register it at resolve time. */

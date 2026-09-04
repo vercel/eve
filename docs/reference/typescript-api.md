@@ -34,6 +34,7 @@ export default defineTool({
 | ----------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `defineAgent`                                         | `eve`                                                                   | `agent/agent.ts`                                                                       | [agent.ts](../agent-config)                            |
 | `defineTool`                                          | `eve/tools`                                                             | `agent/tools/<name>.ts`                                                                | [Tools](../tools)                                      |
+| `defineDurableCallback`                               | `eve/tools`                                                             | provider-package dynamic tool factories                                                | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineDynamic`                                       | `eve`, `eve/tools`, `eve/skills`, `eve/instructions`, `eve/connections` | dynamic model or subagent `agent.ts`; `agent/{tools,skills,instructions,connections}/` | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineMcpClientConnection`                           | `eve/connections`                                                       | `agent/connections/<name>.ts`                                                          | [MCP connections](../connections/mcp)                  |
 | `defineOpenAPIConnection`                             | `eve/connections`                                                       | `agent/connections/<name>.ts`                                                          | [OpenAPI connections](../connections/openapi)          |
@@ -110,7 +111,7 @@ import template from "../../prompts/template.txt?raw";
 | Import                                                                      | Holds                                                                     |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types   |
-| `eve/tools`                                                                 | `defineTool`, `defineDynamic`, `disableTool`, generic tool types          |
+| `eve/tools`                                                                 | `defineTool`, `defineDurableCallback`, `defineDynamic`, tool types        |
 | `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                      |
 | `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                              |
 | `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                |
