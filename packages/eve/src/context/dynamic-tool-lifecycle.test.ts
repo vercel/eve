@@ -768,6 +768,36 @@ describe("dispatchDynamicToolEvent", () => {
     expect(ctx.get(SessionDynamicToolRuntimeRevisionKey)).toBe("deployment:dpl_new");
   });
 
+  it.each(["session.started", "turn.started", "step.started"] as const)(
+    "omits a resolver with a lossy input schema at %s, including after durable replay",
+    async (eventType) => {
+      const ctx = createCtx();
+      const execute = vi.fn(async () => ({ ok: true }));
+      const resolver = createResolver("normalize", [eventType], () => ({
+        unsafe: stampTestTool(
+          defineTool({
+            description: "Must not accept whitespace without trimming it first",
+            inputSchema: z.object({ value: z.string().trim().min(1).optional() }),
+            execute,
+          }),
+        ),
+        sibling: createReplayableTool(),
+      }));
+
+      await dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [resolver],
+        messages: [],
+        event: makeEvent(eventType),
+      });
+
+      expect(buildDynamicTools(ctx)).toEqual([]);
+      const replayed = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(ctx))));
+      expect(buildDynamicTools(replayed)).toEqual([]);
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it("leaves unsupported connection input schemas for the MCP server to validate", async () => {
     const ctx = createCtx();
     const inputSchema: JsonObject = {
