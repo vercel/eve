@@ -119,16 +119,19 @@ export default defineEval({
       const afterAnswer = await blocking.send("UPGRADE-read-afteranswer");
       await requireExecution(t, readExecution(afterAnswer), NEW_MARKER, newExecution.deploymentId);
 
-      const cancelledLive = t.target.watchTurn(cancellable.sessionId!, {
-        startIndex: requireStreamIndex(cancellable),
-      });
-      await cancelledLive.cancel();
-      const cancelled = await cancelledLive.result();
-      cancelled.event("turn.cancelled", { count: 1 });
-      cancelled.notEvent("turn.failed");
-      cancelled.notEvent("session.failed");
-      const afterCancel = await cancelledLive.session.send("UPGRADE-read-aftercancel");
+      const cancellation = await cancellable.cancel();
+      await t.require(
+        cancellation.status,
+        satisfies(
+          (status: string) => status === "accepted",
+          "the old session accepts cancellation",
+        ),
+      );
+      // The parked turn already emitted its boundary; cancellation must not invent another.
+      const afterCancel = await cancellable.send("UPGRADE-read-aftercancel");
       await requireExecution(t, readExecution(afterCancel), NEW_MARKER, newExecution.deploymentId);
+      afterCancel.notEvent("turn.cancelled");
+      afterCancel.notEvent("input.requested");
 
       await pendingBackground.respond([
         { requestId: backgroundRequest.requestId, optionId: "continue" },
