@@ -123,7 +123,7 @@ export async function cancelOwnedTask(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {
-  const delivery = await sendTaskCommand({
+  await sendTaskCommand({
     command: { kind: "cancel" },
     taskInboxToken: input.entry.taskInboxToken,
   });
@@ -139,8 +139,10 @@ export async function cancelOwnedTask(input: {
   if (!isTerminalTaskStatus(view.status)) {
     throw new Error(`Task "${input.entry.taskId}" did not commit cancellation before timeout.`);
   }
-  if (view.status !== "cancelled" || delivery !== "delivered") return view;
+  if (view.status !== "cancelled") return view;
 
+  // The task inbox may be closed after an earlier cancellation committed but
+  // failed to stop its child. Retrying must still finish that cancellation.
   await cancelTaskOwnedWork({
     cancelOwnedWork: input.cancelOwnedWork,
     entry: input.entry,

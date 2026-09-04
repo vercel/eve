@@ -76,6 +76,40 @@ describe("task cancellation", () => {
     expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
   });
 
+  it("retries child cancellation after the cancelled task's inbox has closed", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.metadata,
+      status: "cancelled",
+      taskId: entry.taskId,
+    });
+    const cancelOwnedWork = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Child cancellation failed"))
+      .mockResolvedValueOnce(undefined);
+    await expect(cancelOwnedTask({ cancelOwnedWork, entry })).rejects.toThrow(
+      "Child cancellation failed",
+    );
+
+    vi.mocked(sendTaskCommand).mockResolvedValue("unreachable");
+    await expect(cancelOwnedTask({ cancelOwnedWork, entry })).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    expect(cancelOwnedWork).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves child work untouched when completion won the cancellation race", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.metadata,
+      lastOutput: { type: "result", data: "Finished" },
+      status: "completed",
+      taskId: entry.taskId,
+    });
+    const cancelOwnedWork = vi.fn();
+    await cancelOwnedTask({ cancelOwnedWork, entry });
+    expect(cancelOwnedWork).not.toHaveBeenCalled();
+    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
+  });
+
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: entry.metadata,
