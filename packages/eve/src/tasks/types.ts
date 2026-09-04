@@ -3,6 +3,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
 } from "#channel/types.js";
 import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
@@ -171,7 +172,7 @@ export interface TaskInboundInputRequest {
 export interface TaskInboundAnswerInput {
   readonly auth?: unknown;
   readonly childContinuationToken: string;
-  readonly childSessionInbox?: import("#execution/wire/session-inbox-contract.js").SessionInboxAddress;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly inputResponses: readonly {
     readonly optionId?: string;
