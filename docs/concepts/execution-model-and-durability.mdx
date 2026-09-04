@@ -60,11 +60,22 @@ Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up fro
 
 There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
 
-You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
+For ordinary tools, eve manages the workflow around your executor. Use [`defineWorkflowTool`](../tools/workflows) when your own tool body needs durable waits, such as a timer, webhook, or human answer. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
 
 ## Parked work
 
-Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off. Background tools and subagents return a task receipt instead, so the turn continues and later task notifications deliver progress or the outcome.
+Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off.
+
+Background execution is a separate choice about result delivery. A background workflow tool
+returns a task receipt so the parent turn can continue; the tool's workflow may then run or
+suspend independently. A default workflow tool can suspend too, with its original tool call
+still pending. Ordinary background tools run their executor inside the initiating step and do
+not gain durable waits by setting `execution: "background"`.
+
+A generator's `yield` reports progress; an awaited workflow operation provides the durable wait.
+For background tools, ordinary yields are stream-only, while `yield task.postMessage(...)`
+requests a parent-agent turn. See [background execution](../tools#background-execution) and
+[workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 
 ## Message delivery and steering
 

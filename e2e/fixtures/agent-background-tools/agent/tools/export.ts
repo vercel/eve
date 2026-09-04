@@ -1,8 +1,8 @@
-import { defineTool } from "eve/tools";
+import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
 import { z } from "zod";
 
-export default defineTool({
+export default defineWorkflowTool({
   description: "Start a durable background export.",
   execution: "background",
   inputSchema: z.strictObject({ query: z.string() }),

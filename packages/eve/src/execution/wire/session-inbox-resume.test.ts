@@ -9,15 +9,18 @@ import {
 } from "#execution/wire/session-inbox-resume.js";
 
 const getHookByTokenMock = vi.fn();
+const getRawHookByTokenMock = vi.fn();
 const resumeHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
+  getWorld: async () => ({ hooks: { getByToken: getRawHookByTokenMock } }),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 afterEach(() => {
   getHookByTokenMock.mockReset();
+  getRawHookByTokenMock.mockReset();
   resumeHookMock.mockReset();
 });
 
@@ -45,17 +48,27 @@ describe("session inbox target resolution", () => {
   });
 
   it("selects raw send for a markerless continuation owned by the stable-inbox cohort", async () => {
-    getHookByTokenMock.mockResolvedValue(
+    getRawHookByTokenMock.mockResolvedValue(
       sessionHook("session-1", sessionCommandHookToken("session-1")),
     );
 
     await expect(
       resolveSessionInboxWireTarget(sessionHook("session-1", "continuation-1")),
     ).resolves.toEqual({ variant: "send", version: 0 });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stable inbox belonging to a different run without hydrating its metadata", async () => {
+    getRawHookByTokenMock.mockResolvedValue({ runId: "different-run" });
+
+    await expect(
+      resolveSessionInboxWireTarget(sessionHook("session-1", "continuation-1")),
+    ).rejects.toThrow(/belongs to run "different-run", expected "session-1"/);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("selects deliver for a markerless continuation without a stable inbox", async () => {
-    getHookByTokenMock.mockRejectedValue(
+    getRawHookByTokenMock.mockRejectedValue(
       new HookNotFoundError(sessionCommandHookToken("session-1")),
     );
 

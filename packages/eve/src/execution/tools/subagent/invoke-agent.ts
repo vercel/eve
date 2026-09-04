@@ -15,6 +15,7 @@ import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
+import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
@@ -24,14 +25,6 @@ export type InternalAgentInput = {
   readonly outputSchema?: JsonObject;
   readonly target: string;
 };
-
-export interface AgentInput {
-  readonly agentId?: string;
-  readonly key: string;
-  readonly message: string;
-  readonly outputSchema?: JsonObject;
-  readonly target: string;
-}
 
 /**
  * Asks the owning session to spawn an agent for a workflow tool run. Spawning
@@ -67,6 +60,7 @@ const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-
 /** Invokes an agent from a task-owned background workflow tool. */
 export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonValue> {
   validateAgentInput(input, true);
+  readWorkflowToolRunRef(ctx);
   return await invokeAgent(
     ctx,
     {

@@ -1,7 +1,9 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import { agent } from "#execution/tools/subagent/invoke-agent.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
@@ -38,7 +40,7 @@ export interface WorkflowBodyResult {
 
 type WorkflowToolExecute = (
   input: unknown,
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   task?: TaskExec,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
@@ -123,13 +125,18 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
   return execute as WorkflowToolExecute;
 }
 
-function createWorkflowBodyContext(input: WorkflowBodyInput, signal: AbortSignal): ToolContext {
+function createWorkflowBodyContext(
+  input: WorkflowBodyInput,
+  signal: AbortSignal,
+): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  return {
+  const ctx: ToolContext & WorkflowToolContext = {
+    agent: (input) => agent(ctx, input),
+    ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
@@ -140,6 +147,7 @@ function createWorkflowBodyContext(input: WorkflowBodyInput, signal: AbortSignal
     session: input.session,
     toolName: input.toolName,
   };
+  return ctx;
 }
 
 function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {

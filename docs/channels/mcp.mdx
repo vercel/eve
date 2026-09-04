@@ -202,7 +202,7 @@ A tool result with `isError: true` means the call itself was rejected. A `failed
 
 Cancellation is cooperative, so call `agent_get` after `agent_cancel` until the state becomes terminal.
 
-Optional output schemas are limited to 64 KiB, 32 levels, and 2,048 nodes. External `$ref` values are rejected.
+Requests are bounded: the whole MCP request body is limited to 1 MiB, `message` to 64 KiB, each input-response `text` to 16 KiB (both measured as UTF-8 bytes, not characters), and one `agent_update` to 64 responses. Optional output schemas are limited to 64 KiB, 32 levels, and 2,048 nodes, and external `$ref` values are rejected. Oversized bodies receive a JSON-RPC `413`; oversized fields fail input validation before any work starts.
 
 ### Durability guarantees
 

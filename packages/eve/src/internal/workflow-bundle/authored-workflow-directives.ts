@@ -1,5 +1,3 @@
-import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
-
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
 
@@ -30,6 +28,7 @@ type AstNode = {
   typeParameters?: AstNode | null;
   value?: unknown;
   arguments?: AstNode[];
+  source?: AstNode;
 };
 
 type AstProgram = { body?: AstNode[] };
@@ -40,8 +39,6 @@ interface DirectiveFunctionNode {
 }
 
 export interface AuthoredWorkflowDirectiveSource {
-  /** Name of the top-level `"use workflow"` function the default export's `execute` is or references. */
-  readonly executeWorkflow?: string;
   readonly hasDirectives: boolean;
   readonly hasWorkflowDirective: boolean;
   readonly source: string;
@@ -49,7 +46,7 @@ export interface AuthoredWorkflowDirectiveSource {
 
 /**
  * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A tool's `execute` method is hoisted
+ * whose first statement is the directive. A marked `defineWorkflowTool` executor is hoisted
  * into that shape here; every other placement is a build error, because an
  * ignored directive would run side effects inline in a replayed body.
  */
@@ -57,9 +54,14 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  const program = (await parseWithNitroRolldownAst(input.filePath, input.source)) as AstProgram;
+  const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
+  const program = (await parseWithNitroRolldownAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
-
+  if (body.some((node) => node.source?.value === "eve/workflow")) {
+    throw new Error(
+      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(input) or ctx.ask(request) in its executor.`,
+    );
+  }
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
     const directive = readWorkflowDirective(statement);
@@ -67,7 +69,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
           `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
-          ` or, for "use workflow", the "execute" method of the module's default export.`,
+          ` or the "execute" method of a default-exported defineWorkflowTool().`,
       );
     }
   }
@@ -91,29 +93,21 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     isFunctionLike(executeProperty.value)
       ? executeProperty.value
       : undefined;
-  if (executeFunction !== undefined) allowed.add(executeFunction);
+  if (executeFunction !== undefined) {
+    allowed.add(executeFunction);
+  }
 
   const found = collectDirectiveFunctions(program as AstNode);
   if (found.length === 0) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
-  // Discovery gates on the SDK's line-based pre-scan; a directive it cannot see
-  // would compile here into a stub with no run behind it.
-  const visibleToPrescan = detectWorkflowPatterns(input.source).hasDirective;
-
   for (const entry of found) {
-    if (!visibleToPrescan) {
-      throw new Error(
-        `${JSON.stringify(entry.directive)} in "${input.filePath}" is not on its own line. ` +
-          `Write it as the first statement of the function body, on a line by itself.`,
-      );
-    }
     if (!allowed.has(entry.fn)) {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or, for "use workflow", the "execute" method of the module's default export.`,
+          ` or the "execute" method of a default-exported defineWorkflowTool().`,
       );
     }
     if (entry.fn.async !== true) {
@@ -132,13 +126,11 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   const hoist = found.find((entry) => entry.fn === executeFunction);
   if (hoist === undefined || executeProperty === undefined) {
-    const prepared: AuthoredWorkflowDirectiveSource = {
+    return {
       hasDirectives: true,
       hasWorkflowDirective,
       source: input.source,
     };
-    const referenced = readExecuteReference(executeProperty, found);
-    return referenced === undefined ? prepared : { ...prepared, executeWorkflow: referenced };
   }
 
   if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
@@ -149,27 +141,10 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   }
 
   return {
-    executeWorkflow: HOISTED_EXECUTE_NAME,
     hasDirectives: true,
     hasWorkflowDirective,
     source: hoistExecuteMethod(input.source, executeProperty, hoist.fn),
   };
-}
-
-/** `execute: deploy`, where `deploy` is a top-level `"use workflow"` declaration. */
-function readExecuteReference(
-  executeProperty: AstNode | undefined,
-  found: readonly DirectiveFunctionNode[],
-): string | undefined {
-  const value = executeProperty?.value;
-  if (!isAstNode(value) || value.type !== "Identifier" || typeof value.name !== "string") {
-    return undefined;
-  }
-  const name = value.name;
-  const target = found.find(
-    (entry) => entry.directive === "use workflow" && entry.fn.id?.name === name,
-  );
-  return target === undefined ? undefined : name;
 }
 
 function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | undefined {
