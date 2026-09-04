@@ -94,7 +94,7 @@ export default await withEve({
 
 Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` discovers direct workspace members, adds their services and transport routes, and returns a plain Vercel configuration. Vercel can then build `web` and every eve agent independently. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
 
-Generated transport routes are inserted before a filesystem handler or an authored catch-all route. eve reserves each generated `eve-<agent>` service name and exact `/<agent>/eve/v1/*` transport route; other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
+Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
 
 Custom agent channel endpoints are not published automatically. Expose one explicitly by routing it to the generated service:
 
