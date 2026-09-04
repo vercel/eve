@@ -97,12 +97,6 @@ export type WorkflowToolRunMessage =
 
 export const workflowToolRunHook = defineHook<WorkflowToolRunMessage>();
 
-export function deriveWorkflowToolRunOwner(inboxToken: string): WorkflowToolRunOwner {
-  return {
-    inbox: `${inboxToken}:workflow`,
-  };
-}
-
 export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };
 
 export function isWorkflowToolRunControlMessage(

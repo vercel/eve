@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   deliverTaskInputResponsesStep: vi.fn(),
   disposeHook: vi.fn(),
   openWorkflowToolRunOwnerInbox: vi.fn(() => ({
-    dispose: vi.fn(),
+    owner: { inbox: "generated-owner-token" },
     reader: { channel: "workflow" },
   })),
   raceChannelReads: vi.fn(),
@@ -115,7 +115,7 @@ describe("taskRunWorkflow", () => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
     mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
-      dispose: vi.fn(),
+      owner: { inbox: "generated-owner-token" },
       reader: { channel: "workflow" },
     });
     mocks.executeWorkflowBody.mockResolvedValue({
@@ -264,6 +264,10 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: { inbox: "generated-owner-token" } }),
+      expect.any(AbortSignal),
+    );
   });
 
   it.each(["tool", "subagent"])(

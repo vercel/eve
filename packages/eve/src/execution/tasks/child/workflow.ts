@@ -19,10 +19,7 @@ import {
   type WorkflowBodyDefinition,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
-import {
-  deriveWorkflowToolRunOwner,
-  type WorkflowToolRunRequestMessage,
-} from "#execution/tools/workflow/messages.js";
+import type { WorkflowToolRunRequestMessage } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
 import {
@@ -78,7 +75,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   "use workflow";
 
   const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
-  const workflowToolRunInbox = openWorkflowToolRunOwnerInbox(input.taskInboxToken);
+  const workflowToolRunInbox = openWorkflowToolRunOwnerInbox();
   const readers = [workflowToolRunInbox.reader, createChannelReader("commands", commands)] as const;
   let ownsHook = false;
   let view = input.initialView;
@@ -173,7 +170,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
   } finally {
     if (ownsHook) {
-      await workflowToolRunInbox.dispose();
       await disposeHook(commands);
     }
   }
@@ -240,7 +236,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
               {
                 ...input.workflow,
                 execution: "background",
-                owner: deriveWorkflowToolRunOwner(input.taskInboxToken),
+                owner: workflowToolRunInbox.owner,
               },
               bodyController.signal,
             ),

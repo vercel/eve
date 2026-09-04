@@ -9,7 +9,7 @@ import type {
 } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
-import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
@@ -55,7 +55,7 @@ export async function startWorkflowTask(input: {
     readonly turnId: string;
   };
   readonly initiatorAuth: SessionAuth["initiator"];
-  readonly parentContinuationToken: string;
+  readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
   readonly session: RuntimeSession;
   readonly task: RuntimeWorkflowTaskRequest;
@@ -66,7 +66,7 @@ export async function startWorkflowTask(input: {
       callId: task.callId,
       executeInput: task.executeInput,
       input: task.input,
-      owner: deriveWorkflowToolRunOwner(input.parentContinuationToken),
+      owner: input.owner,
       resultKind: task.resultKind,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },

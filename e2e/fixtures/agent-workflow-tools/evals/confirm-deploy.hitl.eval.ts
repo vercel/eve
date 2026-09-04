@@ -11,7 +11,7 @@ export default defineEval({
       toolName: "confirm_deploy",
     });
     parked.event("action.partial", {
-      count: 1,
+      count: (count) => count >= 1,
       data: { result: { toolName: "confirm_deploy", output: "awaiting approval" } },
     });
     parked.calledTool("confirm_deploy", { status: "pending", count: 1 });

@@ -248,7 +248,7 @@ describe("workflow tools", () => {
           const world = await getWorld();
           const parentHooks = (await world.hooks.list({ runId: run.runId })).data;
           expect(
-            parentHooks.some((hook) => hook.token === `${run.runId}:turn-control:0:inbox:workflow`),
+            parentHooks.some((hook) => hook.token === `${run.runId}:turn-control:0:inbox`),
           ).toBe(owner === "inline");
           expect(
             filterEventsByType(asked, "action.partial").map((event) => event.data.result.output),

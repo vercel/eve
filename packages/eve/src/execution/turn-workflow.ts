@@ -93,7 +93,6 @@ export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<vo
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
-  let workflowToolRunInbox: WorkflowToolRunOwnerInbox | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -105,9 +104,7 @@ export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<vo
       throw error;
     }
 
-    // Opened after the inbox claim so a losing duplicate never contends for
-    // it; the turn starts no run before this point.
-    workflowToolRunInbox = openWorkflowToolRunOwnerInbox(inbox.token);
+    const workflowToolRunInbox = openWorkflowToolRunOwnerInbox();
     const readers: TurnReaders = [workflowToolRunInbox.reader, inboxReader];
 
     // Claimed after the inbox claim so a losing duplicate run never
@@ -214,7 +211,7 @@ export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<vo
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          parentContinuationToken: inbox.token,
+          workflowToolRunOwner: workflowToolRunInbox.owner,
           parentWritable: cursor.parentWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
@@ -283,7 +280,6 @@ export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<vo
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
-    if (workflowToolRunInbox !== undefined) await workflowToolRunInbox.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }

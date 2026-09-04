@@ -47,7 +47,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   defineHook: () => ({
     create: (options?: { readonly token?: string }) => {
-      const token = options?.token ?? "hook";
+      const token = options?.token ?? "generated-owner-token";
       return createDefinedHookMock(token, definedHookPayloads.get(token) ?? []);
     },
     resume: async () => null,
@@ -765,7 +765,7 @@ describe("turnWorkflow", () => {
     expect(dispatchCoordinationStep).toHaveBeenCalledWith({
       action: "dispatch-workflow-tasks",
       callbackBaseUrl: "https://eve.example.com",
-      parentContinuationToken: "turn-token:inbox",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable,
       serializedContext: { state: "pending" },
       sessionState: pendingState,
@@ -911,7 +911,7 @@ describe("turnWorkflow", () => {
         prompt: "Approve deploy?",
       },
     };
-    definedHookPayloads.set("turn-token:inbox:workflow", [workflowRequest]);
+    definedHookPayloads.set("generated-owner-token", [workflowRequest]);
     installInbox([
       {
         delivery: {
@@ -1028,7 +1028,7 @@ describe("turnWorkflow", () => {
       output: "done",
       subagentName: "research",
     };
-    definedHookPayloads.set("turn-token:inbox:workflow", [
+    definedHookPayloads.set("generated-owner-token", [
       {
         kind: "request",
         from: {
