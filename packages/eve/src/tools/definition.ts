@@ -373,6 +373,7 @@ export function stampToolDefinition<
   T extends {
     readonly description: string;
     readonly execute: (...args: never[]) => unknown;
+    readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
