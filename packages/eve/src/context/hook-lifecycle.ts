@@ -1,7 +1,7 @@
 import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { HookContext } from "#public/definitions/hook.js";
+import type { HookContext, ResponseReleaseCandidate } from "#public/definitions/hook.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
@@ -40,6 +40,25 @@ export async function dispatchStreamEventHooks(input: {
     }
     throw error;
   }
+}
+
+/** Runs ordered pre-release hooks. */
+export async function dispatchBeforeResponseReleaseHooks(input: {
+  readonly candidate: ResponseReleaseCandidate;
+  readonly ctx: ContextContainer;
+  readonly registry: RuntimeHookRegistry;
+}): Promise<"release" | "skip"> {
+  const hookCtx = buildHookContext(input.ctx);
+  for (const entry of input.registry.beforeResponseRelease) {
+    const decision: unknown = await entry.handler(input.candidate, hookCtx);
+    if (decision !== undefined && decision !== "skip") {
+      throw new Error(
+        `Hook "${entry.slug}" returned ${JSON.stringify(decision)} from beforeResponseRelease; expected undefined or "skip".`,
+      );
+    }
+    if (decision === "skip") return "skip";
+  }
+  return "release";
 }
 
 /** Builds the {@link HookContext} surfaced to one handler. */

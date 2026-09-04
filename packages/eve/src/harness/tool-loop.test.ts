@@ -916,6 +916,44 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("suppresses a skipped response before a turn settles", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Sensitive draft", role: "assistant" }] },
+      text: "Sensitive draft",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const beforeResponseRelease = vi.fn().mockResolvedValue("skip");
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        beforeResponseRelease,
+      }),
+    );
+    const previous = { content: "Earlier context", role: "user" as const };
+
+    const result = await runStep(createTestSession({ history: [previous] }), {
+      message: "Create a response",
+    });
+
+    expect(beforeResponseRelease).toHaveBeenCalledWith({
+      history: [
+        previous,
+        { content: "Create a response", role: "user" },
+        { content: "Sensitive draft", role: "assistant" },
+      ],
+      output: "Sensitive draft",
+      turnId: "",
+    });
+    expect(result.session.history).toEqual([
+      previous,
+      { content: "Create a response", role: "user" },
+      { content: "Sensitive draft", role: "assistant" },
+    ]);
+    expect(result.settledTurn).toEqual({ output: "" });
+  });
+
   it("omits user messages with no model-visible content", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -2663,7 +2701,10 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const beforeResponseRelease = vi.fn().mockResolvedValue(undefined);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { beforeResponseRelease }),
+    );
     const session = createTestSession({ outputSchema: { type: "object" } });
 
     const result = await runStep(session, { message: "Hi" });
@@ -2691,6 +2732,7 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(result.session.outputSchema).toBeUndefined();
+    expect(beforeResponseRelease).not.toHaveBeenCalled();
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {
@@ -9601,7 +9643,6 @@ describe("createToolLoopHarness", () => {
       outputSchema,
       state,
     });
-
     const result = await runStep(session);
 
     expect(result.next).toBeNull();
