@@ -24,11 +24,17 @@ on the deployment that accepted their input; the holder does not interpret their
 state. A small migration extension for existing sessions appears near the bottom.
 
 This proposal covers the inbox, steering, finalization, tool, task, and delivery
-contracts together.
-The implementation detail here is intentional: replace the old ownership machinery
-with explicit interfaces, rather than retain both orchestration systems behind a
-new facade. The interfaces below are proposed internal eve APIs, not new public SDK
-exports or claims about the forthcoming Workflow API's exact spelling.
+contracts together. **Implementation means deleting the superseded workflow
+orchestration and rebuilding around the contracts below.** Entire implementation
+directories may be replaced. Existing internal files, helper signatures, and folder
+boundaries have no compatibility requirement. Retain useful domain logic and the
+behavioral guarantees this plan specifies; remove the old ownership machinery.
+
+The implementation detail here is intentional: it defines the clean boundaries
+to build after that removal. The new interfaces must not delegate to the old
+parent loop, inline/child dispatch, or completion-token protocol. They are proposed
+internal eve APIs, not new public SDK exports or claims about the forthcoming
+Workflow API's exact spelling.
 
 ## Exactly what the holder holds
 
@@ -709,12 +715,29 @@ withdraws unresolved requests and releases waiters. Cancellation preserves the
 use `runtime.result`; collectors retain debounce and expiry. Application-authored
 `createHook` and `createWebhook` remain unchanged.
 
-## What the implementation removes
+## Delete the old orchestration and rebuild
 
-Build the new path around the interfaces above, then remove the superseded path.
-Do not preserve inline/child mode switches, parent acknowledgements, or old token
-routing as hidden implementations of the new interfaces. Migration adapters, when
-needed, live outside the normal execution path.
+Treat the current workflow orchestration as a subsystem to replace. Begin the
+implementation by identifying its removal boundary and the domain functions worth
+retaining. Remove the superseded state machines, transports, and ownership code,
+then implement the new contracts directly. Work can be split into reviewable
+commits, but the completed implementation must have one session/turn execution
+path. A new API over the existing parent loop does not satisfy this design.
+
+Prefer deleting whole modules or directories when their responsibilities are
+replaced. When a module mixes useful domain logic with obsolete coordination,
+extract the necessary domain functions into their new home and delete the old
+module. Do not copy its orchestration into a renamed file or preserve its call
+graph through adapters. Compatibility branches, capability flags, parent
+acknowledgements, and old token routing must not survive as hidden implementations
+of the new interfaces. Future legacy-session migration belongs outside the normal
+execution path.
+
+The map below identifies the main removal boundaries, not an exhaustive deletion
+list. Follow their callers and dependencies: remove orphaned exports, workflow
+registrations, transport types, compatibility helpers, and tests that only assert
+the obsolete choreography. Preserve and update tests for externally observable
+behavior, delivery guarantees, and failure handling.
 
 | Existing machinery                                                                                                                                                                                                                                                                       | Replacement or retained responsibility                                                                                                                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -728,13 +751,45 @@ needed, live outside the normal execution path.
 | [`workflow-entry-finalization.ts`](../packages/eve/src/execution/workflow-entry-finalization.ts) and premature terminal emission in [`harness/emission.ts`](../packages/eve/src/harness/emission.ts)                                                                                     | One turn-owned finalizer after the inbox decision; preserve authored lifecycle behavior, usage, caller notification, and actual task/subagent supervision.           |
 | Session/channel code that treats a session ID as a stream/run ID                                                                                                                                                                                                                         | `SessionDirectory` for resolution, then `SessionEvents` or `SessionSnapshots` for the operation.                                                                     |
 
-Suggested module boundaries are `session/resources`, `session/storage`,
-`session/holding-workflow`, `inbox/owner-inbox`, and `turn/{workflow,execute,reduce,finalize}`.
-These are responsibilities to keep small, not a requirement for a class or framework
-at each boundary. Storage and domain modules stay free of durable workflow control;
-only the workflow adapter touches SDK stream and hook primitives. Reuse domain
-logic that already implements hydration, tools, tasks, emissions, or authorization;
-remove the obsolete coordination around it.
+Assess [`execution/tools/workflow/`](../packages/eve/src/execution/tools/workflow/)
+and [`execution/tasks/parent/`](../packages/eve/src/execution/tasks/parent/) as whole
+directory replacement candidates. Their useful outcome conversions, task ownership
+checks, and state projections can be extracted; their existing transports and
+owner/caller wiring do not determine the new structure. Rebuild blocking tools,
+background tasks, and input correlation against the new owner inbox and session
+admission contracts. Actual task and subagent relationships still require the
+behavior specified above. Keeping that behavior does not require keeping these
+directories.
+
+Build the replacement as small modules with explicit dependencies:
+
+- `session/resources` owns identities, the immutable descriptor, and directory
+  resolution. Channels use it before dispatch and pass only references and input.
+- `session/storage` implements `SessionEvents` and `SessionSnapshots` directly over
+  the chosen storage primitive. It carries no parent cursor or execution policy.
+- `session/holding-workflow` composes resource setup, first dispatch, and the frozen
+  rekey contract. It must not import the agent execution loop or snapshot reducers.
+- `inbox/owner-inbox` owns hook claims, readers, buffering, and correlation. Domain
+  decisions belong to the receiving owner.
+- `turn/{workflow,execute,reduce,finalize}` owns admission, execution, settlement,
+  and committed state. The first execution step hydrates the snapshot and uses the
+  existing harness through eve-owned interfaces.
+
+These boundaries do not require a class or extensibility framework each. Keep SDK
+calls in the workflow/storage adapters and reuse ordinary functions for composition
+inside steps. An adapter translates an eve contract to SDK primitives; it must not
+translate that contract back into the deleted parent/child protocol. Reuse proven
+hydration, tool execution, authorization, task state, and event formatting logic
+only where it fits the new boundaries without carrying the old coordination along.
+
+Review completion through the resulting dependency graph as well as behavior:
+creation reaches the minimal holder; later submissions reach independent turn
+candidates; each receiving owner has its own inbox; and execution reads/writes
+storage by reference. No normal path reaches the old driver, inline promotion,
+completion-token exchanges, or parent-owned persistence. Required cleanup,
+supervision, and delivery behavior must be rebuilt in the new owners and pass the
+implementation gates; leaving those responsibilities in the old parent is not a
+completed implementation.
 
 ## Session lifetime and cleanup
 
@@ -800,6 +855,7 @@ work and does not gate this first version:
 
 | Gate                                   | Required evidence                                                                                                                                                                                                                                  |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestration replacement              | Main removal boundaries identified; useful domain logic extracted; superseded modules/directories and orphaned wiring removed; one session/turn path uses the new interfaces directly, with no legacy orchestration hidden behind adapters.        |
 | Resource contracts and minimal holder  | Distinct session/run/event/snapshot IDs round-trip; resources resolve after initialization and for historical reads; first start follows readiness; only rekey reaches the holder; duplicate/conflicting/bounded aliases preserve existing claims. |
 | Durable admission                      | Early follow-ups; duplicate starts after hook release; queue order; late finalization input; actual-owner changes; failed candidates visible without new traffic.                                                                                  |
 | Snapshot and execution safety          | Restore/commit/replay; stale writers after hard cancellation; output flush; no duplicate effects or terminal outcomes during recovery; bounded acknowledgement and supervision cost.                                                               |
