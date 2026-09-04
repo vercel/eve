@@ -8,6 +8,7 @@ import {
   parse as parseJsonc,
 } from "#compiled/jsonc-parser/index.js";
 import type { RegistryConfig, RegistrySource } from "#compiled/shadcn-registry/index.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { WEB_APP_TEMPLATE_FILES } from "#setup/scaffold/create/web-template.js";
 
 interface RegistryPackage {
@@ -49,7 +50,8 @@ function parseRegistries(path: string, value: unknown): Record<string, RegistryS
 }
 
 async function readRegistryPackage(appRoot: string): Promise<RegistryPackage> {
-  const path = join(appRoot, "package.json");
+  const context = await resolveEveProjectContext(appRoot);
+  const path = join(context.environmentRoot, "package.json");
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
