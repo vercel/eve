@@ -475,19 +475,13 @@ describe("createAgentOtelInstrumentation", () => {
         context: expect.objectContaining(parent),
       }),
     ]);
-    expect(session.attributes).toMatchObject({
-      "agent.session.kind": "delegated",
-      "agent.trace.schema.version": 4,
-    });
+    expect(session.attributes).toMatchObject({ "agent.trace.schema.version": 3 });
     expect(invocation.spanContext().traceId).toBe(seed.traceId);
     expect(invocation.parentSpanContext?.spanId).toBe(seed.spanId);
     expect(invocation.attributes).toMatchObject({
-      "agent.invocation.role": "execution",
       "agent.parent_call.id": "call-child",
       "agent.parent_run.id": "parent-session",
       "agent.root_run.id": "root-session",
-      "agent.session.kind": "delegated",
-      "agent.trace.schema.version": 4,
       "gen_ai.conversation.id": "child-session",
       "gen_ai.operation.name": "invoke_agent",
     });
@@ -847,7 +841,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.attributes).toMatchObject({
       "agent.channel.audience": "public",
       "agent.session.id": "session-1",
-      "agent.trace.schema.version": 4,
+      "agent.trace.schema.version": 3,
     });
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
@@ -1777,9 +1771,8 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await runtime.provider.forceFlush();
 
-    const action = runtime.exporter
-      .getFinishedSpans()
-      .find((span) => span.name === "invoke_agent weather");
+    const spans = runtime.exporter.getFinishedSpans();
+    const action = byName(spans, "agent.action")[0];
     expect(action?.attributes).toMatchObject({
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
@@ -1792,6 +1785,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(
       Object.keys(action?.attributes ?? {}).some((key) => key.startsWith("gen_ai.usage.")),
     ).toBe(false);
+    expect(byName(spans, "execute_tool weather")).toHaveLength(1);
   });
 
   it("captures model and tool inputs/outputs on the operation spans", async () => {

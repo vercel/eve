@@ -21,7 +21,6 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { ActivityObserverKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -56,7 +55,6 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
-import { readInternalTraceSeed, type InternalRunInput } from "#execution/internal-run-input.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
@@ -68,7 +66,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { readAcceptedTraceCoordinatesMetadata } from "#execution/session-operation-metadata.js";
+import { readAcceptedTraceCoordinatesMetadata } from "#execution/session-command-inbox.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -79,7 +77,7 @@ import {
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
-import { traceCoordinatesEqual, type TraceCoordinates } from "#protocol/agent-invocation-trace.js";
+import type { TraceCoordinates } from "#protocol/agent-invocation-trace.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -148,19 +146,26 @@ export function createWorkflowRuntime(config: {
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
       });
-      const internalInput = input as InternalRunInput;
       const ctx = buildRunContext({
         bundle,
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
-        run: internalInput,
+        run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
         parentTraceContext: input.parentTraceContext,
-        traceSeed: readInternalTraceSeed(input),
+        traceSeed: input.traceSeed,
       });
+      const acceptedTraceCoordinates =
+        input.traceSeed === undefined
+          ? undefined
+          : {
+              spanId: input.traceSeed.spanId,
+              traceFlags: input.traceSeed.traceFlags,
+              traceId: input.traceSeed.traceId,
+            };
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
@@ -215,8 +220,8 @@ export function createWorkflowRuntime(config: {
       };
       const taskId = input.taskId ?? input.callback?.taskId;
       if (taskId !== undefined) workflowInput.taskId = taskId;
-      if (internalInput.acceptedTraceCoordinates !== undefined) {
-        workflowInput.acceptedTraceCoordinates = internalInput.acceptedTraceCoordinates;
+      if (acceptedTraceCoordinates !== undefined) {
+        workflowInput.acceptedTraceCoordinates = acceptedTraceCoordinates;
       }
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
@@ -262,42 +267,22 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      let acceptedSessionId = run.runId;
-      let acceptedTraceCoordinates = internalInput.acceptedTraceCoordinates;
-      if (
-        internalInput.acceptedTraceCoordinates !== undefined &&
-        input.continuationToken !== undefined
-      ) {
-        const owner = await waitForCommandHookOwner(input.continuationToken);
-        acceptedSessionId = owner.runId;
-        acceptedTraceCoordinates =
-          owner.acceptedTraceCoordinates !== undefined &&
-          traceCoordinatesEqual(
-            internalInput.acceptedTraceCoordinates,
-            owner.acceptedTraceCoordinates,
-          )
-            ? owner.acceptedTraceCoordinates
-            : undefined;
-      }
-
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
         events ??= parseNdjsonStream<MessageStreamEvent>(
-          () => getRun(acceptedSessionId).getReadable(),
+          () => getRun(run.runId).getReadable(),
           normalizePersistedEvent,
         );
         return events;
       };
 
-      return attachAcceptedTraceCoordinates(
-        {
-          get events() {
-            return getEvents();
-          },
-          sessionId: acceptedSessionId,
+      return {
+        get events() {
+          return getEvents();
         },
-        acceptedTraceCoordinates,
-      );
+        sessionId: run.runId,
+        trace: acceptedTraceCoordinates,
+      };
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
@@ -334,13 +319,13 @@ export function createWorkflowRuntime(config: {
 
     async resolveContinuation(
       continuationToken: string,
-    ): Promise<{ sessionId: string } | undefined> {
+    ): Promise<{ sessionId: string; trace?: TraceCoordinates } | undefined> {
       try {
         const hook = await getHookByToken(continuationToken);
-        return attachAcceptedTraceCoordinates(
-          { sessionId: hook.runId },
-          readAcceptedTraceCoordinatesMetadata(hook),
-        );
+        return {
+          sessionId: hook.runId,
+          trace: readAcceptedTraceCoordinatesMetadata(hook),
+        };
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;

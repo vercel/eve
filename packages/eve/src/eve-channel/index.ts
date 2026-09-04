@@ -1,6 +1,5 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { RunInput, SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
-import { readAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import {
   authorizeTrustedForwarder,
   resolveForwardedPrincipal,
@@ -56,6 +55,7 @@ import { parseTraceparent } from "#protocol/traceparent.js";
 import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
 import {
   traceCoordinatesEqual,
+  type AgentInvocationTrace,
   type TraceCoordinates,
   validateAgentInvocationBinding,
 } from "#protocol/agent-invocation-trace.js";
@@ -89,7 +89,6 @@ import {
   resolveOnMessage,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
-import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 export * from "#eve-channel/types.js";
 
@@ -110,6 +109,15 @@ function acceptedSessionResponse(sessionId: string, traceContext?: TraceCoordina
     },
     status: 202,
   });
+}
+
+function resolveCreateParentTraceContext(input: {
+  readonly legacy?: SessionTraceContext;
+  readonly trace?: AgentInvocationTrace;
+}): SessionTraceContext | undefined {
+  if (input.trace === undefined) return input.legacy;
+  if (input.trace.parent === undefined) return undefined;
+  return { ...input.trace.parent, isRemote: true };
 }
 
 /**
@@ -177,6 +185,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        // Legacy callback senders may still continue a trace via traceparent.
+        // This never establishes framework parent lineage or relaxes root-session limits.
         const legacyParentTraceContext =
           body.callback === undefined
             ? undefined
@@ -207,17 +217,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           });
           if (authorized instanceof Response) return authorized;
         }
-        const parsedParentTraceContext =
-          body.trace?.parent === undefined
-            ? body.trace === undefined
-              ? legacyParentTraceContext
-              : undefined
-            : {
-                isRemote: true,
-                spanId: body.trace.parent.spanId,
-                traceFlags: body.trace.parent.traceFlags,
-                traceId: body.trace.parent.traceId,
-              };
+        const parsedParentTraceContext = resolveCreateParentTraceContext({
+          legacy: legacyParentTraceContext,
+          trace: body.trace,
+        });
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -238,7 +241,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            const acceptedTraceCoordinates = readAcceptedTraceCoordinates(owner);
+            const acceptedTraceCoordinates = owner.trace;
             const replayedTraceCoordinates =
               body.trace !== undefined &&
               acceptedTraceCoordinates !== undefined &&
@@ -313,9 +316,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           const createInput: {
-            -readonly [
-              K in keyof Omit<InternalRunInput, "adapter" | "channelName" | "requestId">
-            ]: Omit<InternalRunInput, "adapter" | "channelName" | "requestId">[K];
+            -readonly [K in keyof Omit<RunInput, "adapter" | "channelName" | "requestId">]: Omit<
+              RunInput,
+              "adapter" | "channelName" | "requestId"
+            >[K];
           } = {
             activityObserver: body.activityObserver,
             auth: messageResult.auth,
@@ -338,7 +342,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             title: messageResult.title,
           };
           if (body.trace !== undefined) {
-            createInput.acceptedTraceCoordinates = body.trace.seed;
             createInput.traceSeed =
               acceptedForwardedTracePolicy === undefined
                 ? body.trace.seed
@@ -356,7 +359,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return acceptedSessionResponse(handle.sessionId, readAcceptedTraceCoordinates(handle));
+        return acceptedSessionResponse(handle.sessionId, handle.trace);
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {

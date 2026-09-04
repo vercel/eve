@@ -20,6 +20,7 @@ import {
   decisionToTraceContentCeiling,
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
+import { isTraceId } from "#protocol/agent-invocation-trace.js";
 
 interface AgentTraceContextState {
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;
@@ -355,12 +356,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     attemptIndex: value.attemptIndex,
     callId: value.callId,
     channelAudience: normalizeChannelAudience(value.channelAudience),
-    childTraceId:
-      typeof value.childTraceId === "string" &&
-      /^[0-9a-f]{32}$/u.test(value.childTraceId) &&
-      !/^0+$/u.test(value.childTraceId)
-        ? value.childTraceId
-        : undefined,
+    childTraceId: isTraceId(value.childTraceId) ? value.childTraceId : undefined,
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
     kind: value.kind,
     name: value.name,

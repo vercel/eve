@@ -441,15 +441,22 @@ describe("createWorkflowRuntime#createSession", () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
+    const trace = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
         adapter,
         auth: null,
+        continuationToken: "operation-token",
         input: { message: "hello" },
         mode: "conversation",
+        traceSeed: trace,
       }),
-    ).resolves.toMatchObject({ sessionId: "driver-run" });
+    ).resolves.toMatchObject({ sessionId: "driver-run", trace });
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });

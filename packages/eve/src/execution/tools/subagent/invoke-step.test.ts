@@ -10,6 +10,7 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { recordActionChildTraceId } from "#tracing/agent-trace-context-store.js";
 
 vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -27,6 +28,13 @@ vi.mock("#execution/tools/subagent/invoke-preparation.js", () => ({
 vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
+}));
+vi.mock("#tracing/agent-trace-context-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  recordActionChildTraceId: vi.fn((serializedContext) => ({
+    ...serializedContext,
+    childTraceRecorded: true,
+  })),
 }));
 const action = {
   callId: "call-1",
@@ -235,6 +243,56 @@ describe("owner agent invocation dispatch", () => {
     expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
+  });
+
+  it("records an acknowledged child trace before returning a failed dispatch", async () => {
+    const reserved = {
+      callId: "call-1",
+      identity: { id: "agent-receipt", name: "research", nodeId: "subagents/research" },
+      operationId: "receipt-operation",
+      phase: "reserved" as const,
+      ownerId: "task-1",
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [reserved] }),
+    } as never);
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      session: {
+        ...session,
+        state: setAgentHandleStore(undefined, { handles: [reserved] }),
+      },
+      plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
+    } as never);
+    const childTraceId = "a".repeat(32);
+    vi.mocked(startSubagent).mockResolvedValue({
+      childTraceId,
+      kind: "error",
+      result: {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: { code: "SUBAGENT_START_FAILED", message: "failed" },
+        subagentName: "research",
+      },
+      session: session as never,
+    });
+
+    const failed = await dispatch();
+
+    expect(recordActionChildTraceId).toHaveBeenCalledWith(
+      {},
+      "parent",
+      "turn-1",
+      "call-1",
+      childTraceId,
+    );
+    expect(failed).toMatchObject({
+      kind: "failed",
+      serializedContext: { childTraceRecorded: true },
+    });
   });
 });
 

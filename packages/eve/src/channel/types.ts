@@ -95,12 +95,16 @@ export interface SessionParent {
  * Structural rather than an OTel `SpanContext` so the channel surface stays
  * free of tracing dependencies.
  */
-export interface SessionTraceContext {
-  readonly decision?: InstrumentationDecision;
-  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
+export type SessionTraceCoordinates = {
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;
+};
+
+export interface SessionTraceContext extends SessionTraceCoordinates {
+  readonly decision?: InstrumentationDecision;
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
+  readonly isRemote?: boolean;
 }
 
 /** Framework-owned identity for one inbound channel operation. */
@@ -526,6 +530,8 @@ export interface RunInput {
    * because trace state is scoped to one session's context.
    */
   readonly parentTraceContext?: SessionTraceContext;
+  /** @internal Replay-stable trace seed proposed by framework dispatch. */
+  readonly traceSeed?: SessionTraceContext;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit
@@ -579,6 +585,8 @@ export interface RunHandle {
    * key on it: workflow-backed runs expose the workflow run id.
    */
   readonly sessionId: string;
+  /** @internal Trace coordinates accepted for this newly created session. */
+  readonly trace?: SessionTraceCoordinates;
 }
 
 /**
@@ -607,7 +615,9 @@ export interface Runtime {
    * delivering input or starting a run. Returns `undefined` when no session
    * owns the token.
    */
-  resolveContinuation(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+  resolveContinuation(
+    continuationToken: string,
+  ): Promise<{ sessionId: string; trace?: SessionTraceCoordinates } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

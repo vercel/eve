@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
-import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { none } from "#public/channels/auth.js";
@@ -137,14 +136,11 @@ describe("eve ID-addressed session routes", () => {
 
   it("accepts a distinct delegated trace and acknowledges its coordinates", async () => {
     const seed = { spanId: "4".repeat(16), traceFlags: 1, traceId: "3".repeat(32) };
-    const createSession = vi
-      .fn()
-      .mockImplementation(async (input) =>
-        attachAcceptedTraceCoordinates(
-          { events: new ReadableStream(), sessionId: "wrun_A" },
-          input.acceptedTraceCoordinates,
-        ),
-      );
+    const createSession = vi.fn().mockImplementation(async (input) => ({
+      events: new ReadableStream(),
+      sessionId: "wrun_A",
+      trace: input.traceSeed,
+    }));
     const args = attachRouteSessionCreator(createArgs(), createSession);
     const invocation = {
       callId: "call-1",
@@ -201,7 +197,7 @@ describe("eve ID-addressed session routes", () => {
 
   it("re-acknowledges only an exact replay of accepted trace coordinates", async () => {
     const seed = { spanId: "4".repeat(16), traceFlags: 1, traceId: "3".repeat(32) };
-    const owner = attachAcceptedTraceCoordinates(createFixedSession({ id: "wrun_A" }), seed);
+    const owner = createFixedSession({ id: "wrun_A", trace: seed });
     const createSession = vi.fn();
     const args = attachRouteSessionCreator(
       {

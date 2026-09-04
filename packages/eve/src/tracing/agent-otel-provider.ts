@@ -31,7 +31,7 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
+import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
@@ -61,7 +61,6 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { agentExecutionAttributes } from "#tracing/agent-invocation-attributes.js";
 
 interface SpanState {
   readonly context: Context;
@@ -84,7 +83,6 @@ export interface AgentOtelInstrumentationInput {
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
-/** OTel event definition and its trusted framework context runner. */
 export interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
@@ -225,7 +223,7 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
-              ...runtimeContextAttributes(event.runtimeContext),
+              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
             },
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
@@ -293,8 +291,7 @@ export function createAgentOtelInstrumentation(
       }));
     }
     if (event.turnId !== undefined) {
-      const turnId = event.turnId;
-      const turn = await input.stateStore.getTurn(event.sessionId, turnId);
+      const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
       if (turn !== undefined) {
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
@@ -303,13 +300,19 @@ export function createAgentOtelInstrumentation(
             input.tracer.startSpan(
               agentSpanName(agentName),
               {
-                attributes: agentExecutionAttributes({
-                  agentName,
-                  frameworkVersion: input.frameworkVersion,
-                  sessionId: event.sessionId,
-                  turn,
-                  turnId,
-                }),
+                attributes: {
+                  "agent.framework.name": "eve",
+                  "agent.framework.version": input.frameworkVersion,
+                  "agent.name": agentName,
+                  ...runtimeAttributes.agentLineageAttributes(turn),
+                  "agent.session.id": event.sessionId,
+                  "agent.subagent.name": turn.subagentName,
+                  "agent.turn.id": event.turnId,
+                  "agent.turn.sequence": turn.sequence,
+                  "gen_ai.agent.name": agentName,
+                  "gen_ai.conversation.id": event.sessionId,
+                  "gen_ai.operation.name": "invoke_agent",
+                },
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,
               },
@@ -334,7 +337,7 @@ export function createAgentOtelInstrumentation(
           }
           span.end();
         }
-        await input.stateStore.deleteTurn(event.sessionId, turnId);
+        await input.stateStore.deleteTurn(event.sessionId, event.turnId);
       }
     }
     // `session.waiting` is not terminal — the session may resume with a new
@@ -359,7 +362,7 @@ export function createAgentOtelInstrumentation(
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
-          ...runtimeContextAttributes(event.runtimeContext),
+          ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
         },
       },
       attempt.context,

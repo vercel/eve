@@ -180,7 +180,9 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | DynamicSubagentAgentConfig
       | undefined;
 
-    const commandInbox = createSessionCommandInbox(input);
+    const commandInbox = createSessionCommandInbox({
+      acceptedTraceCoordinates: input.acceptedTraceCoordinates,
+    });
     const stableCommandToken = sessionCommandHookToken(sessionId);
     const authorizationHookToken = `${sessionId}:auth`;
     let sessionState: DurableSessionState;
