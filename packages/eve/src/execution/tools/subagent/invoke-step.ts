@@ -1,3 +1,4 @@
+import { replyTargetToken, type ReplyTarget } from "#execution/inbox/types.js";
 import {
   createAgentErrorResult,
   dispatchToClaimedAgentAddress,
@@ -10,7 +11,7 @@ import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-ag
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { holdingWorkflowReference } from "#execution/workflow-references.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
@@ -19,9 +20,9 @@ import {
   readDurableSession,
   replaceDurableSessionSnapshot,
   type DurableSessionState,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView } from "#execution/tasks/runtime.js";
 import {
   getAgentHandleStore,
   writeHandles,
@@ -72,7 +73,7 @@ export type TaskAgentInvocationDispatchResult =
 export async function dispatchAgentInvocation(input: {
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
-  readonly replyTo: string;
+  readonly replyTo: ReplyTarget;
   readonly request: AgentInvocationRequest;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -162,7 +163,8 @@ export async function dispatchAgentInvocation(input: {
       auth: prepared.auth,
       bundle,
       currentSession: session,
-      parentToken: input.replyTo,
+      parentToken: replyTargetToken(input.replyTo),
+      parentReplyTo: input.replyTo,
       handle: claimed,
       taskId: input.taskId,
     });
@@ -219,7 +221,8 @@ export async function dispatchAgentInvocation(input: {
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
-      parentContinuationToken: input.replyTo,
+      parentContinuationToken: replyTargetToken(input.replyTo),
+      parentReplyTo: input.replyTo,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       serializedContext: prepared.serializedContext,
@@ -275,7 +278,7 @@ export async function dispatchAgentInvocation(input: {
     sessionId: prepared.session.sessionId,
     toolName: outcome.toolName,
     turnId: prepared.batch.event.turnId,
-    workflowId: workflowEntryReference.workflowId,
+    workflowId: holdingWorkflowReference.workflowId,
   });
   if (input.emit !== undefined) {
     await input.emit(event);
@@ -288,11 +291,9 @@ export async function dispatchAgentInvocation(input: {
  * The callback origin is parent-owned, so it is derived from this workflow's
  * own metadata rather than accepted from the inbound request.
  */
-export async function dispatchTaskAgentInvocationStep(
+export async function dispatchTaskAgentInvocation(
   input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "callbackBaseUrl" | "emit">,
 ): Promise<TaskAgentInvocationDispatchResult> {
-  "use step";
-
   if (input.taskId !== undefined) {
     const session = await readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
@@ -309,15 +310,13 @@ export async function dispatchTaskAgentInvocationStep(
 }
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */
-export async function settleTaskAgentInvocationStep(input: {
+export async function settleTaskAgentInvocation(input: {
   readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
-  "use step";
-
   const durable = await readDurableSession(input.sessionState);
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
@@ -375,13 +374,11 @@ export async function settleTaskAgentInvocationStep(input: {
 }
 
 /** Releases any child leases still owned by a completed workflow-tool run. */
-export async function releaseAgentInvocationOwnerStep(input: {
+export async function releaseAgentInvocationOwner(input: {
   readonly cancelled?: boolean;
   readonly ownerId: string;
   readonly sessionState: DurableSessionState;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
-  "use step";
-
   const durable = await readDurableSession(input.sessionState);
   const session = input.cancelled
     ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))

@@ -187,7 +187,7 @@ export function consumeAuthorizationResult(
  * Builds a callback URL for external systems. `name` and `attemptId` identify
  * the exact challenge in the URL path.
  *
- * The URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * The URL addresses the session and the pending authorization attempt.
  * It is independent of the continuation token, so channel re-keying mid-turn
  * does not invalidate the callback URL.
  *
@@ -198,10 +198,9 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
-  const token = authHookToken(sessionId);
   return createWorkflowCallbackUrl(
     baseUrl,
-    createEveConnectionCallbackRoutePath(name, attemptId, token),
+    createEveConnectionCallbackRoutePath(name, attemptId, sessionId),
   );
 }
 
@@ -265,15 +264,6 @@ export function authorizationPendingModelText(connections: readonly string[]): s
 
 export function isPendingAuthorizationToolOutput(value: unknown): boolean {
   return isAuthorizationPendingModelOutput(value) || isAuthorizationSignal(value);
-}
-
-/**
- * Deterministic hook token for all authorization callbacks in a
- * session. Both {@link getHookUrl} (inside tool execution) and the
- * workflow body (which creates the hook upfront) use this token.
- */
-export function authHookToken(sessionId: string): string {
-  return `${sessionId}:auth`;
 }
 
 // ---------------------------------------------------------------------------

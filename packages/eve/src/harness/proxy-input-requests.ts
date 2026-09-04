@@ -1,3 +1,4 @@
+import type { InboxReplyTarget } from "#execution/inbox/types.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { InputRequestKind } from "#shared/input.js";
@@ -11,17 +12,11 @@ const PROXY_INPUT_REQUEST_KINDS = {
   "tool-approval": true,
 } satisfies Readonly<Record<InputRequestKind, true>>;
 
-/**
- * Marks a continuation token as a bare hook a workflow tool run created for one
- * request, resumed with the plain response, rather than a child session inbox.
- */
-export interface AnswerHookRoute {
-  readonly runId: string;
-}
+export type InboxResponseRoute = InboxReplyTarget;
 
 /** Routing and control metadata for one descendant-owned input request. */
 export interface ProxyInputRequest {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
@@ -96,9 +91,13 @@ export function upsertProxyInputRequestState(input: {
   readonly state: SessionStateMap | undefined;
 }): SessionStateMap | undefined {
   const next: Record<string, ProxyInputRequest> = {};
+  const incomingScopes = new Set(input.entries.map(([, route]) => proxyInputRouteKey(route)));
 
   for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
+    if (
+      route.childContinuationToken !== input.forChildContinuationToken ||
+      (route.inboxResponse !== undefined && !incomingScopes.has(proxyInputRouteKey(route)))
+    ) {
       next[requestId] = route;
     }
   }
@@ -284,10 +283,11 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     return undefined;
   }
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
-  const answerHook = "answerHook" in value ? parseAnswerHookRoute(value.answerHook) : undefined;
-  if ("answerHook" in value && answerHook === undefined) return undefined;
+  const inboxResponse =
+    "inboxResponse" in value ? parseInboxResponseRoute(value.inboxResponse) : undefined;
+  if ("inboxResponse" in value && inboxResponse === undefined) return undefined;
   const request: {
-    answerHook?: AnswerHookRoute;
+    inboxResponse?: InboxResponseRoute;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     childRequestId?: string;
@@ -298,7 +298,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
-  if (answerHook !== undefined) request.answerHook = answerHook;
+  if (inboxResponse !== undefined) request.inboxResponse = inboxResponse;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (typeof childRequestId === "string") request.childRequestId = childRequestId;
   if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
@@ -306,11 +306,14 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   return request;
 }
 
-function parseAnswerHookRoute(value: unknown): AnswerHookRoute | undefined {
-  if (value === null || typeof value !== "object" || !("runId" in value)) return undefined;
-  return typeof value.runId === "string" && value.runId.length > 0
-    ? { runId: value.runId }
-    : undefined;
+function parseInboxResponseRoute(value: unknown): InboxResponseRoute | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const route = value as Partial<InboxReplyTarget>;
+  if (route.kind !== "inbox" || typeof route.requestId !== "string" || route.address === undefined)
+    return undefined;
+  if (typeof route.address.token !== "string" || typeof route.address.ownerRunId !== "string")
+    return undefined;
+  return { address: route.address, kind: "inbox", requestId: route.requestId };
 }
 
 function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {
@@ -345,4 +348,20 @@ function isAllowedChildResponseUrl(value: string): boolean {
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {
   return typeof value === "string" && Object.hasOwn(PROXY_INPUT_REQUEST_KINDS, value);
+}
+
+/** Correlation is part of the route because an owner inbox serves many questions. */
+export function proxyInputRouteKey(route: {
+  readonly childContinuationToken: string;
+  readonly inboxResponse?: InboxResponseRoute;
+  readonly childResponseUrl?: string;
+  readonly taskId?: string;
+}): string {
+  return JSON.stringify([
+    route.childContinuationToken,
+    route.inboxResponse?.address.ownerRunId,
+    route.inboxResponse?.requestId,
+    route.childResponseUrl,
+    route.taskId,
+  ]);
 }

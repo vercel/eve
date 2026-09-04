@@ -18,6 +18,7 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnInterruptedEvent,
   createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -1185,50 +1186,53 @@ describe("defaultMessageReducer", () => {
     ).toEqual(["Checking Vienna first.", "tool:call_1", "Now checking Berlin."]);
   });
 
-  it("finalizes partial streamed message and reasoning when the turn is cancelled", () => {
-    const reducer = defaultMessageReducer();
-    const data = reduceServerEvents(reducer, reducer.initial(), [
-      createReasoningAppendedEvent({
-        reasoningDelta: "Thinking",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "Partial",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
-    ]);
-
-    expect(data.messages).toEqual([
-      {
-        id: "turn_1:assistant",
-        metadata: {
-          status: "complete",
+  it.each([createTurnCancelledEvent, createTurnInterruptedEvent])(
+    "finalizes partial streamed output when a turn stops",
+    (settle) => {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createReasoningAppendedEvent({
+          reasoningDelta: "Thinking",
+          sequence: 0,
+          stepIndex: 0,
           turnId: "turn_1",
+        }),
+        createMessageAppendedEvent({
+          messageDelta: "Partial",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        settle({ sequence: 2, turnId: "turn_1" }),
+      ]);
+
+      expect(data.messages).toEqual([
+        {
+          id: "turn_1:assistant",
+          metadata: {
+            status: "complete",
+            turnId: "turn_1",
+          },
+          parts: [
+            { type: "step-start" },
+            {
+              state: "done",
+              stepIndex: 0,
+              text: "Thinking",
+              type: "reasoning",
+            },
+            {
+              state: "done",
+              stepIndex: 0,
+              text: "Partial",
+              type: "text",
+            },
+          ],
+          role: "assistant",
         },
-        parts: [
-          { type: "step-start" },
-          {
-            state: "done",
-            stepIndex: 0,
-            text: "Thinking",
-            type: "reasoning",
-          },
-          {
-            state: "done",
-            stepIndex: 0,
-            text: "Partial",
-            type: "text",
-          },
-        ],
-        role: "assistant",
-      },
-    ]);
-  });
+      ]);
+    },
+  );
 
   it("removes streamed text for a null message completion", () => {
     const reducer = defaultMessageReducer();

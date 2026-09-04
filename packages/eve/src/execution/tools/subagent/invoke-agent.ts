@@ -1,4 +1,5 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
+import { sendInboxStep } from "#execution/inbox/send.js";
+import type { InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 
 import type {
   RuntimeActionResultHookPayload,
@@ -6,15 +7,14 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import {
-  readWorkflowToolRunAdmission,
+  readWorkflowToolRunInbox,
+  createWorkflowReplyTarget,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+} from "#execution/workflow-tool/ask.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
@@ -98,28 +98,20 @@ export async function invokeAgent(
   validateAgentInput(input, false);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
-  const admission = readWorkflowToolRunAdmission(ctx);
+  const inbox = readWorkflowToolRunInbox(ctx);
   claimInvocationId(ctx, options.invocationId);
-  const replies = createHook<AgentInvocationReply>();
-  let ownsReplies = false;
-  try {
-    await claimHookOwnership(replies);
-    ownsReplies = true;
-    if (admission !== undefined) {
-      const admitted = await admission;
-      if (admitted.status === "rejected") throw new Error(admitted.reason);
-    }
-    await resumeHookStep(owner.request, {
+  const replyTo = createWorkflowReplyTarget(ctx, options.invocationId);
+  let messageIndex = 0;
+  {
+    await sendRequest({
       from: run,
-      replyTo: replies.token,
+      replyTo,
       request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
     });
 
-    const iterator = replies[Symbol.asyncIterator]();
     while (true) {
-      const next = await nextAgentReply(iterator, ctx.abortSignal);
-      if (next.done) break;
-      const reply = next.value;
+      const reply = (await nextAgentReply(inbox, options.invocationId, ctx.abortSignal))
+        .payload as AgentInvocationReply;
       if (reply.kind === "runtime-action-result") {
         const result = reply.results.find(
           (candidate): candidate is RuntimeSubagentResult =>
@@ -127,9 +119,9 @@ export async function invokeAgent(
         );
         if (result !== undefined) {
           if (result.origin === "child") {
-            await resumeHookStep(owner.request, {
+            await sendRequest({
               from: run,
-              replyTo: replies.token,
+              replyTo,
               request: { kind: "agent-settled", result },
             });
           }
@@ -140,9 +132,9 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "subagent-input-request") {
-        await resumeHookStep(owner.request, {
+        await sendRequest({
           from: run,
-          replyTo: reply.childContinuationToken,
+          replyTo: { kind: "session", token: reply.childContinuationToken },
           request: {
             kind: "input-batch",
             requests: reply.event.requests,
@@ -156,47 +148,56 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "task-update") {
-        await resumeHookStep(owner.report, {
+        await sendReport({
           from: run,
           update: reply.message,
         });
         continue;
       }
-      await resumeHookStep(owner.request, {
+      await sendRequest({
         from: run,
-        replyTo: replies.token,
+        replyTo,
         request: { event: reply, kind: "authorization-request" },
       });
     }
-  } finally {
-    if (ownsReplies) {
-      try {
-        await disposeHook(replies);
-      } catch {
-        // A result or invocation error is authoritative; reply-hook cleanup is best effort.
-      }
-    }
   }
-  throw new Error(`Agent "${input.target}" closed without a result.`);
+
+  async function sendRequest(
+    payload: import("#execution/workflow-tool/messages.js").WorkflowToolRunRequestMessage,
+  ): Promise<void> {
+    const kind = payload.request.kind;
+    const suffix =
+      kind === "agent-invoke"
+        ? "invoke"
+        : kind === "agent-settled"
+          ? "settled"
+          : `${kind}:${messageIndex++}`;
+    const delivered = await sendInboxStep(owner, {
+      eventId: `${options.invocationId}:${suffix}`,
+      kind: "tool.request",
+      payload,
+    });
+    if (delivered === "gone")
+      throw new Error("The workflow tool owner ended during agent invocation.");
+  }
+
+  async function sendReport(
+    payload: import("#execution/workflow-tool/messages.js").WorkflowToolRunReport,
+  ): Promise<void> {
+    await sendInboxStep(owner, {
+      eventId: `${options.invocationId}:report:${messageIndex++}`,
+      kind: "tool.report",
+      payload,
+    });
+  }
 }
 
 async function nextAgentReply(
-  iterator: AsyncIterator<AgentInvocationReply>,
+  inbox: OwnerInbox,
+  requestId: string,
   signal: AbortSignal | undefined,
-): Promise<IteratorResult<AgentInvocationReply>> {
-  if (signal === undefined) return await iterator.next();
-  if (signal.aborted) throw signal.reason;
-  let rejectAbort: ((reason: unknown) => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject;
-  });
-  const abort = (): void => rejectAbort?.(signal.reason);
-  signal.addEventListener("abort", abort, { once: true });
-  try {
-    return await Promise.race([iterator.next(), aborted]);
-  } finally {
-    signal.removeEventListener("abort", abort);
-  }
+): Promise<InboxEnvelope> {
+  return await inbox.response(requestId, signal);
 }
 
 export function validateAgentInput(

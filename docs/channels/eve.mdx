@@ -47,19 +47,13 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The `202` response means Workflow accepted the durable run. The route does not wait for command
-inbox or continuation-token ownership. The inbox may still be starting, so an immediate follow-up
-or control request can report that the session is not active. The event-stream client retries the
-brief window before the new run becomes readable.
+The `202` response means the session resources and initial state are ready, and the
+first turn is accepted. Immediate follow-ups can safely address the returned session.
 
-Authenticated callers that may retry a create request can pass their own `operationId` for
-create-once semantics. Once the operation owner is active, the same operation under the same
-authenticated principal returns that session instead of dispatching the input again. The create
-route does not wait for a concurrently starting request to publish ownership: simultaneous
-requests can receive different accepted candidate IDs, while only the candidate that claims the
-operation runs its first turn. Retry the operation after startup when you need its canonical
-session ID. Anonymous callers cannot use `operationId`, and operation ownership expires when the
-session is no longer resumable.
+Authenticated callers can pass an `operationId` for create-once semantics. The same
+operation under the same authenticated principal resolves to its canonical session,
+including when creation attempts arrive concurrently. Anonymous callers cannot use
+`operationId`. Operation ownership expires when the session is no longer resumable.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -78,9 +72,11 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
-Follow-up messages use `turnPolicy: "steer"` by default. If a turn is active, eve buffers the message before cooperatively cancelling that turn, then starts the follow-up as a replacement turn with a new turn ID. Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` never steer.
+Follow-up messages use `turnPolicy: "steer"` by default, adding input at the active turn's next safe boundary. Set `turnPolicy: "queue"` when the active turn should finish first, or `turnPolicy: "interrupt"` to replace it. An interruption emits `turn.interrupted` without an idle boundary before the replacement. `inputResponses` never interrupt.
 
-Sending a message to an unknown, terminal, or not-yet-active session ID returns `409` with
+A follow-up `202` means its turn candidate was durably accepted; the session may retire that input if cancellation or terminal settlement wins the race. Read the stream for execution outcomes.
+
+Sending a message when the session lookup fails returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 TypeScript clients expose the stable code as `ClientError.code`. The route never
 creates or follows a replacement session.
@@ -91,7 +87,7 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. The response waits until the cancellation candidate and the turn it targeted have settled. An actual cancellation appears on the stream as `turn.cancelled` followed by `session.waiting`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 

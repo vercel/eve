@@ -76,7 +76,7 @@ export type SessionRespondOptions = SessionDeliveryOptions;
  * `deliver` and event handlers. The framework hydrates the read-only
  * fields from the active context at step start. A write through
  * `continuation.rekey()` updates the context so the
- * runtime can re-key the parked workflow hook at the next step boundary.
+ * turn can ask the holder to claim the additional alias before committing.
  */
 export interface SessionHandle {
   readonly id: string;

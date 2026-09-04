@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { turnWorkflowReference, holdingWorkflowReference } from "#execution/workflow-references.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -153,7 +153,7 @@ describe("parent development Workflow World", () => {
             deploymentId: "generation-a",
             input: new Uint8Array(),
             specVersion: 6,
-            workflowName: workflowEntryReference.workflowId,
+            workflowName: holdingWorkflowReference.workflowId,
           },
         }),
       ).resolves.toBe("generation-b");

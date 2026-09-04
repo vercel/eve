@@ -11,7 +11,7 @@ import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";

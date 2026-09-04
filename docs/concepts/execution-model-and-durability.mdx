@@ -44,7 +44,7 @@ An eve agent spans two execution environments with different responsibilities:
 
 <AgentRuntimeDiagram />
 
-The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
+Each turn runs as an independent durable workflow in the app runtime. A small holding workflow keeps the session streams and continuation aliases alive between turns. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
 App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, and `write_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
 
@@ -68,22 +68,13 @@ Some work has to wait, including a human approving a [tool](../tools) or an inte
 
 ## Message delivery and steering
 
-eve does not maintain a durable FIFO queue of user messages for a session. An
-ID-addressed HTTP delivery and a channel-address delivery both target the
-session's current command inbox; neither is a general message queue.
+Channels resolve the session's immutable resource descriptor and start an independent turn workflow with the accepted input. The descriptor holds stream references; conversation history is restored inside the winning turn after it claims execution ownership. The session event stream stays stable across turns and deployments.
 
-Only one active session can own a channel continuation token. A channel-created
-session commits both its stable session-ID alias and its channel alias before
-processing the first turn, and fails creation if another run already owns the
-channel alias. Rekeying replaces only that channel alias. An HTTP-created
-session has the stable ID alias and no channel continuation token. Competing
-channel input is not forwarded to the owner.
+Only one holder can own a channel continuation token. When simultaneous first messages compete for an address, the losing holder forwards its accepted input to the winner. Rekeying claims an additional alias and retains earlier aliases. HTTP-created sessions use their stable session ID and do not need a channel continuation token.
 
-When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
+Only one turn owns session execution at a time. A candidate that finds another owner forwards its input there and waits for a durable disposition. Messages default to `turnPolicy: "steer"`, which introduces them at the active turn's next safe boundary. `turnPolicy: "queue"` waits until that turn settles. `turnPolicy: "interrupt"` stops the active turn and starts a replacement; `turn.interrupted` closes the old turn without an intervening `session.waiting`. Completed side effects and already-streamed output remain observable.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the driver checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
-
-Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
+Structured `inputResponses` address pending requests by ID and never interrupt a turn. Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. Accepted queued input keeps the deployment that accepted it, while steering is handled by the active owner's deployment. Separate sessions run independently.
 
 ## Subagents
 

@@ -2448,8 +2448,14 @@ async function* eveEventsToTUIStream(
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         break;
 
+      case "turn.interrupted":
+        onTurnCancelled?.(event.data.turnId);
+        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
+        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
+        break;
+
       case "turn.cancelled":
-        // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
+        // A cooperative cancel (`/cancel`, Esc, or Ctrl+C) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);

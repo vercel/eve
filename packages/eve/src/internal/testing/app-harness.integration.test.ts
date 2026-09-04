@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { start } from "#internal/workflow/runtime.js";
+import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { startTestSession } from "#internal/testing/session.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -25,19 +25,16 @@ describe("AppHarness pilot", () => {
     const runtime = await createTestRuntime({ agent: { name: "pilot-agent" } });
 
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "hello pilot harness" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "schedule:app-harness-pilot",
-            mode: "task",
-          }),
-        },
-      ]);
+      const run = await startTestSession({
+        input: { message: "hello pilot harness" },
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          continuationToken: "schedule:app-harness-pilot",
+          mode: "task",
+        }),
+      });
 
-      const result = await run.returnValue;
-      return result.output;
+      return await taskOutput(run);
     });
 
     expect(typeof output).toBe("string");
@@ -71,30 +68,26 @@ describe("AppHarness pilot", () => {
 
     const outputs = await Promise.all([
       runtimeA.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            input: { message: "hello tenant-a" },
-            serializedContext: buildSerializedContext({
-              channelKind: "http",
-              continuationToken: "schedule:app-harness-tenant-a",
-              mode: "task",
-            }),
-          },
-        ]);
-        return (await run.returnValue).output;
+        const run = await startTestSession({
+          input: { message: "hello tenant-a" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "schedule:app-harness-tenant-a",
+            mode: "task",
+          }),
+        });
+        return await taskOutput(run);
       }),
       runtimeB.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            input: { message: "hello tenant-b" },
-            serializedContext: buildSerializedContext({
-              channelKind: "http",
-              continuationToken: "schedule:app-harness-tenant-b",
-              mode: "task",
-            }),
-          },
-        ]);
-        return (await run.returnValue).output;
+        const run = await startTestSession({
+          input: { message: "hello tenant-b" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "schedule:app-harness-tenant-b",
+            mode: "task",
+          }),
+        });
+        return await taskOutput(run);
       }),
     ]);
 
@@ -106,3 +99,17 @@ describe("AppHarness pilot", () => {
     expect(runtimeB.session.bundleCache.size).toBeGreaterThan(0);
   });
 });
+
+async function taskOutput(
+  session: Awaited<ReturnType<typeof startTestSession>>,
+): Promise<string | undefined> {
+  const stream = captureTurnEvents(session);
+  try {
+    const events = await stream.nextTurn();
+    expect(events.at(-1)?.type).toBe("session.completed");
+    return filterEventsByType(events, "message.completed").at(-1)?.data.message ?? undefined;
+  } finally {
+    stream.dispose();
+    await session.cancel();
+  }
+}

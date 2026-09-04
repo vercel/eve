@@ -809,6 +809,51 @@ function createGatewayModelCallError(input: {
 }
 
 describe("createToolLoopHarness", () => {
+  it("proposes settlement while streaming progress and retaining the active turn", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 123 },
+    });
+    const events: UnstampedMessageStreamEvent[] = [];
+    const proposals: import("#harness/types.js").HarnessSettlement[] = [];
+    const run = createToolLoopHarness(
+      createTestConfig(
+        "conversation",
+        async (event) => {
+          events.push(event);
+        },
+        {
+          handleSettlement: async (proposal) => {
+            proposals.push(proposal);
+          },
+        },
+      ),
+    );
+    const session = setHarnessEmissionState(createTestSession(), {
+      sessionStarted: false,
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "",
+      nextTurnId: "turn_owner",
+    });
+    const result = await run(session, { message: "Hello" });
+    expect(events.some((event) => event.type === "message.completed")).toBe(true);
+    expect(
+      events.some((event) => event.type === "turn.completed" || event.type === "session.waiting"),
+    ).toBe(false);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.events.map((event) => event.type)).toEqual([
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(getHarnessEmissionState(result.session.state).turnId).toBe("turn_owner");
+    expect(result.settledTurn).toEqual({ output: "Hello!" });
+  });
+
   it("uses one projected history view for step consumers while preserving raw history", async () => {
     setupMockAgent({
       finishReason: "stop",

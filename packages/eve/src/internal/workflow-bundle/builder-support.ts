@@ -227,7 +227,7 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
 }
 
 /**
- * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * `workflow` resolves to the compiled SDK workflow entry. A `workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
  * build here rather than the driver later.
  */
@@ -252,8 +252,8 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
       }
 
       return resolveFirstExistingPath([
-        join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-        join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+        join(workingDir, ".generated", "compiled", "@workflow", "core-body", "index.js"),
+        join(workingDir, "dist", "src", "compiled", "@workflow", "core-body", "index.js"),
       ]);
     },
   };
@@ -271,8 +271,8 @@ export function createEvePackageImportsPlugin(
       if (compiledSubpath !== undefined) {
         if (options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js") {
           return resolveFirstExistingPath([
-            join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-            join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+            join(workingDir, ".generated", "compiled", "@workflow", "core-body", "index.js"),
+            join(workingDir, "dist", "src", "compiled", "@workflow", "core-body", "index.js"),
           ]);
         }
 

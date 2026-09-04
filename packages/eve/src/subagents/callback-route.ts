@@ -1,4 +1,5 @@
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { sendSubagentReply } from "#subagents/reply.js";
+import { readCallbackCapability } from "#subagents/callback-capability.js";
 import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -104,13 +105,6 @@ const taskEventCallbackSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const taskTurnStartedCallbackSchema = z.object({
-  kind: z.literal("turn.started"),
-  sessionId: z.string().min(1),
-  taskId: z.string().min(1),
-  turnId: z.string().min(1),
-});
-
 const taskUpdateCallbackSchema = z.object({
   callId: z.string().min(1),
   kind: z.literal("task.update"),
@@ -169,40 +163,42 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
 
+  const target = readCallbackCapability(token);
+  if (target === undefined) {
+    return Response.json({ error: "Invalid callback capability.", ok: false }, { status: 403 });
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = await readCallbackBody(request);
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const taskEvent = projectTaskEvent(body, token);
+  if (
+    body === null ||
+    typeof body !== "object" ||
+    Reflect.get(body, "callId") !== target.requestId
+  ) {
+    return Response.json({ error: "Callback invocation mismatch.", ok: false }, { status: 403 });
+  }
+
+  const taskEvent = projectTaskEvent(body, target.address.token);
   if (taskEvent instanceof Response) return taskEvent;
   if (taskEvent !== undefined) {
     try {
-      await resumeHook(token, taskEvent);
+      if ((await sendSubagentReply(target, taskEvent)) === "gone") throw new Error("Owner ended.");
     } catch {
       return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
     }
     return Response.json({ ok: true }, { status: 202 });
   }
 
-  const update = projectTaskUpdate(body, token);
+  const update = projectTaskUpdate(body, target.address.token);
   if (update instanceof Response) return update;
   if (update !== undefined) {
     try {
-      await resumeHook(token, update);
-    } catch {
-      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
-    }
-    return Response.json({ ok: true }, { status: 202 });
-  }
-
-  const started = rejectDirectTaskTurnStarted(body, token);
-  if (started instanceof Response) return started;
-  if (started !== undefined) {
-    try {
-      await resumeHook(token, started);
+      if ((await sendSubagentReply(target, update)) === "gone") throw new Error("Owner ended.");
     } catch {
       return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
     }
@@ -215,10 +211,13 @@ export async function handleSessionCallbackRequest(
   }
 
   try {
-    await resumeHook(token, {
-      kind: "runtime-action-result",
-      results: [result],
-    });
+    if (
+      (await sendSubagentReply(target, {
+        kind: "runtime-action-result",
+        results: [result],
+      })) === "gone"
+    )
+      throw new Error("Owner ended.");
   } catch {
     return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
   }
@@ -266,23 +265,6 @@ function projectTaskEvent(
         kind: "subagent-authorization-event",
         subagentName: payload.subagentName,
       };
-}
-
-function rejectDirectTaskTurnStarted(value: unknown, token: string): Response | undefined {
-  if (callbackKind(value) !== "turn.started") return undefined;
-  const parsed = taskTurnStartedCallbackSchema.safeParse(value);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "Invalid task turn-start callback.", ok: false },
-      { status: 400 },
-    );
-  }
-  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
-  if (tokenRejection !== undefined) return tokenRejection;
-  return Response.json(
-    { error: "Direct subagent task turn callbacks are no longer accepted.", ok: false },
-    { status: 410 },
-  );
 }
 
 function projectTaskUpdate(
@@ -415,4 +397,26 @@ function parseCallbackUsage(value: unknown): TokenUsage | undefined {
   }
   const parsed = tokenUsageWithCostSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
+}
+
+async function readCallbackBody(request: Request): Promise<unknown> {
+  const reader = request.body?.getReader();
+  if (reader === undefined) throw new Error("Missing callback body.");
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > 1024 * 1024) {
+        await reader.cancel();
+        throw new Error("Callback body exceeds its size limit.");
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }

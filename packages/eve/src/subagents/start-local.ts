@@ -1,8 +1,9 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
@@ -29,6 +30,7 @@ export async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
+  readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
@@ -51,7 +53,7 @@ export async function startLocalSubagent(input: {
     fanoutSize: input.fanoutSize,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
-    parentContinuationToken: input.parentContinuationToken,
+    parentReplyTo: input.parentReplyTo,
     parentTraceContext: input.parentTraceContext,
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,
@@ -64,10 +66,11 @@ export async function startLocalSubagent(input: {
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   let childSessionId: string;
   try {
-    await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
-      childRuntime.createSession(runInput),
+    const handle = await contextStorage.run(
+      new ContextContainer({ localDevRequest: input.localDevRequest }),
+      () => childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    childSessionId = handle.sessionId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,

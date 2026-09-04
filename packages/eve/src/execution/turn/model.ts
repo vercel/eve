@@ -1,0 +1,628 @@
+import { bindTurnEvents } from "#execution/turn/events.js";
+import type { HandleSettlementFn } from "#harness/types.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import { contextStorage } from "#context/container.js";
+import {
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} from "#context/dynamic-instruction-lifecycle.js";
+import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
+import {
+  rebindMissingCompiledDynamicToolCallbacks,
+  refreshDynamicSessionToolsForRuntimeRevision,
+} from "#context/dynamic-tool-lifecycle.js";
+import {
+  AuthKey,
+  CapabilitiesKey,
+  HandleEventKey,
+  ModeKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
+  SessionDynamicToolRuntimeRevisionKey,
+  TurnTaskDeliveryKey,
+  TurnTaskStateKey,
+} from "#context/keys.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import {
+  emitTurnPreamble,
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
+import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
+import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
+import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { setChannelContext } from "#execution/channel-context.js";
+import { hasPendingInputBatch } from "#harness/input-requests.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
+import { coalesceTurnInputs } from "#harness/messages.js";
+import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
+import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
+import type { ModelSettlement, ModelStepResult } from "#execution/turn/model-types.js";
+import { derivePendingState } from "#execution/pending-turn-state.js";
+import {
+  createAuthorizationCompletedEvent,
+  createSessionStartedEvent,
+  createTurnStartedEvent,
+  stampMessageStreamEvent,
+} from "#protocol/message.js";
+import {
+  CallbackBaseUrlKey,
+  clearPendingAuthorization,
+  getPendingAuthorization,
+  PendingAuthorizationResultKey,
+} from "#harness/authorization.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
+import { createDurableSessionState, readDurableSession } from "#execution/session/state.js";
+import type { ModelStepInput } from "#execution/turn/model-types.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import {
+  resolveInitiatingTaskContext,
+  resolveTaskDeliveryContext,
+} from "#tasks/delivery-context.js";
+import {
+  readRetainedBackgroundToolResult,
+  runBackgroundStep,
+} from "#execution/tasks/background.js";
+import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
+import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
+import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import { createExecutionHistoryView } from "#execution/history-view.js";
+import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+
+const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
+  "Task mode cannot complete while input requests remain pending.";
+
+function channelDeliveryErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { readonly code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+  }
+  return "CHANNEL_DELIVERY_FAILED";
+}
+
+export type { ModelStepInput };
+
+/** Runs the harness inside the owner's execution step. */
+export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepResult> {
+  let input = rawInput;
+
+  let durableSession = await readDurableSession(input.sessionState);
+  const ctx = await deserializeContext(input.serializedContext);
+  if (rawInput.input?.kind === "deliver") {
+    ctx.set(TurnTaskDeliveryKey, "none");
+    ctx.delete(TurnTaskStateKey);
+  }
+  const adapter = ctx.require(ChannelKey);
+  const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const taskUpdatesEnabled =
+    durableSession.taskId !== undefined &&
+    effectiveAgent.turnAgent.tools.some(
+      (tool) =>
+        tool.kind === "authored-tool" &&
+        tool.behavior?.handling?.kind === "dispatch" &&
+        tool.behavior.handling.target.kind === "task-update",
+    );
+
+  // Populate the callback base URL so getHookUrl() works during tool
+  // execution, preferring eve's active local origin over metadata fallback.
+  try {
+    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
+    const metadata = getWorkflowMetadata();
+    if (typeof metadata.url === "string") {
+      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
+    }
+  } catch {
+    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
+  }
+
+  // Resolve authorization callbacks before the adapter sees the delivery.
+  const pendingAuth = getPendingAuthorization(durableSession.state);
+  let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
+  if (pendingAuth && input.input?.kind === "deliver") {
+    const { matches, remainingPayloads } = matchAuthorizationCallbacks(
+      pendingAuth,
+      input.input.payloads,
+    );
+    input = { ...input, input: { ...input.input, payloads: remainingPayloads } };
+    if (matches.length > 0) {
+      const authResults = matches.map((match) => match.result);
+      ctx.set(PendingAuthorizationResultKey, authResults);
+      durableSession = {
+        ...durableSession,
+        state: clearPendingAuthorization(
+          durableSession.state,
+          authResults.map((result) => result.attemptId ?? result.name),
+        ),
+      };
+      completedAuths = matches;
+      if (remainingPayloads.length === 0) {
+        input = { ...input, input: undefined };
+      }
+    }
+  }
+
+  // Apply deliver-time auth ferried via `resumeHook` (initial-turn
+  // input has no auth; it was seeded by buildRunContext).
+  if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
+    ctx.set(AuthKey, input.input.auth ?? null);
+  }
+
+  const initialSession = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: effectiveAgent.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: effectiveAgent.turnAgent,
+  });
+  const history = createExecutionHistoryView(initialSession);
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    sessionId: initialSession.sessionId,
+  });
+  const initialEmissionState = getHarnessEmissionState(initialSession.state);
+
+  if (rawInput.input?.kind === "deliver") {
+    await contextStorage.run(ctx, () =>
+      instrumentation?.instrumentChannelDelivery({
+        agentName: bundle.turnAgent.id,
+        ctx,
+        delivery: rawInput.input as DeliverHookPayload,
+        rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+        sequence: initialEmissionState.sequence,
+        sessionId: initialSession.sessionId,
+        turnId: activeTurnId(initialEmissionState),
+      }),
+    );
+  }
+
+  const failChannelDeliveries = async (error: unknown): Promise<void> => {
+    await contextStorage.run(ctx, () =>
+      instrumentation?.instrumentChannelDelivery({
+        ctx,
+        error,
+        errorCode: channelDeliveryErrorCode(error),
+        includeTurn: false,
+        outcome: "failed",
+      }),
+    );
+    await instrumentation?.flush();
+  };
+  const adapterCtx = buildAdapterContext(adapter, ctx);
+
+  // Run the adapter's deliver hook for each queued payload and
+  // coalesce the resulting StepInput values.
+  let resolved: StepInput | undefined;
+  if (input.input?.kind === "deliver") {
+    const results: StepInput[] = [];
+    try {
+      for (const payload of input.input.payloads) {
+        const result = adapter.deliver
+          ? await adapter.deliver(payload, adapterCtx)
+          : defaultDeliverResult(payload);
+
+        if (result !== undefined && result !== null) {
+          results.push(result);
+        }
+      }
+    } catch (error) {
+      await failChannelDeliveries(error);
+      throw error;
+    }
+    resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+  } else if (input.input?.kind === "runtime-action-result") {
+    if (input.input.acceptedAtMsByCallId !== undefined) {
+      ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
+    }
+    resolved = { runtimeActionResults: input.input.results };
+  }
+
+  if (
+    resolved !== undefined &&
+    rawInput.input?.kind === "deliver" &&
+    rawInput.input.taskDeliveryId !== undefined
+  ) {
+    const taskContext = resolveTaskDeliveryContext({
+      state: durableSession.state,
+      taskDeliveryId: rawInput.input.taskDeliveryId,
+    });
+    if (taskContext !== undefined) {
+      ctx.set(TurnTaskDeliveryKey, taskContext.phase);
+      resolved = {
+        ...resolved,
+        context: [...(resolved.context ?? []), taskContext.context],
+      };
+    }
+  }
+
+  if (ctx.get(TurnTaskDeliveryKey) === "none") {
+    const taskContext = resolveInitiatingTaskContext({
+      state: durableSession.state,
+      turnId: activeTurnId(initialEmissionState),
+    });
+    if (taskContext !== undefined) {
+      ctx.set(TurnTaskDeliveryKey, taskContext.phase);
+      ctx.set(TurnTaskStateKey, taskContext.context);
+    }
+  }
+
+  // Persist adapter-state mutations across the step boundary.
+  if (input.input?.kind === "deliver") {
+    const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
+    setChannelContext(ctx, updatedAdapter);
+  }
+
+  // Adapter handled the delivery inline; re-park and skip unchanged snapshot writes.
+  if (input.input?.kind === "deliver" && resolved === undefined) {
+    await contextStorage.run(ctx, () =>
+      instrumentation?.instrumentChannelDelivery({
+        ctx,
+        includeTurn: false,
+        outcome: "completed",
+      }),
+    );
+    await instrumentation?.flush();
+    const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
+    const nextSerializedContext = serializeContext(ctx);
+    const nextState =
+      rekeyed === initialSession
+        ? input.sessionState
+        : createDurableSessionState({ session: rekeyed });
+
+    return {
+      action: "park",
+      ...derivePendingState(rekeyed),
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+    };
+  }
+
+  const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
+  const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
+  const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
+  const effectiveNode = {
+    ...bundle.graph.root,
+    turnAgent: effectiveAgent.turnAgent,
+  };
+  const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
+  try {
+    const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+    const dynamicRuntimeRevision = deploymentId
+      ? `deployment:${deploymentId}`
+      : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
+    const sessionStarted = initialEmissionState.sessionStarted;
+
+    if (!sessionStarted) {
+      ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
+      ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
+    } else {
+      const refreshEvent = createSessionStartedEvent({ runtime: runtimeIdentity });
+      await Promise.all([
+        refreshDynamicSessionSubagentsForRuntimeRevision({
+          ctx,
+          resolvers: dynamicSubagentResolvers,
+          event: refreshEvent,
+          messages: history.initial.messages,
+          runtimeRevision: dynamicRuntimeRevision,
+        }),
+        refreshDynamicSessionToolsForRuntimeRevision({
+          ctx,
+          resolvers: dynamicToolResolvers,
+          event: refreshEvent,
+          messages: history.initial.messages,
+          runtimeRevision: dynamicRuntimeRevision,
+        }),
+      ]);
+      await rebindMissingCompiledDynamicToolCallbacks({
+        ctx,
+        event: createTurnStartedEvent({
+          sequence: initialEmissionState.sequence,
+          turnId: activeTurnId(initialEmissionState),
+        }),
+        messages: history.initial.messages,
+        resolvers: dynamicToolResolvers,
+      });
+    }
+  } catch (error) {
+    await failChannelDeliveries(error);
+    throw error;
+  }
+
+  const eventSink = bindTurnEvents({
+    abortSignal: input.abortSignal,
+    ctx,
+    events: input.events,
+    session: initialSession,
+  });
+  const handleEvent = eventSink.handleEvent;
+  let settlement: ModelSettlement | undefined;
+  const handleSettlement: HandleSettlementFn = async (proposal) => {
+    if (settlement !== undefined)
+      throw new Error("A model step proposed more than one settlement.");
+    settlement = {
+      events: proposal.events.map(stampMessageStreamEvent),
+      emissionAfter: proposal.emissionAfter,
+    };
+  };
+
+  try {
+    const mode = ctx.require(ModeKey);
+
+    let stepResult: StepResult;
+    try {
+      // A signal already aborted at entry (cancellation during an in-line
+      // runtime-action wait) must settle before the park-resume stages run,
+      // or the pending batch would re-park and later re-dispatch.
+      throwIfTurnAborted(input.abortSignal);
+      stepResult = await runBackgroundStep(ctx, initialSession, async (enrichedSession) => {
+        ctx.setVirtualContext(HandleEventKey, handleEvent);
+        let schemaSession = resolveEffectiveOutputSchema({
+          agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
+          input: resolved,
+          mode,
+          session: enrichedSession,
+        });
+        await dynamicConnections.rehydrate(
+          initialEmissionState,
+          runtimeIdentity,
+          isHarnessBetweenTurns(schemaSession),
+        );
+        if (completedAuths) {
+          let emissionState = getHarnessEmissionState(schemaSession.state);
+          if (isHarnessBetweenTurns(schemaSession)) {
+            prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
+            let instructionMessages: readonly import("ai").ModelMessage[] = [];
+            const traceContext = await prepareWorkflowPreambleTrace({
+              emissionState,
+              instrumentation,
+            });
+            try {
+              emissionState = await emitTurnPreamble(
+                handleEvent,
+                {},
+                emissionState,
+                runtimeIdentity,
+                traceContext,
+              );
+            } finally {
+              instructionMessages = drainDynamicInstructionUserMessages(ctx);
+              schemaSession = {
+                ...schemaSession,
+                history: [...schemaSession.history, ...instructionMessages],
+              };
+            }
+            schemaSession = setHarnessEmissionState(schemaSession, emissionState);
+          }
+          for (const { authorization, result } of completedAuths) {
+            const candidateId = pendingAuth?.challenges.find(
+              (challenge) => challenge.attemptId === result.attemptId,
+            )?.candidateId;
+            await handleEvent(
+              createAuthorizationCompletedEvent({
+                attemptId: result.attemptId,
+                authorization,
+                candidateId,
+                name: result.name,
+                outcome: "authorized",
+                sequence: emissionState.sequence,
+                stepIndex: emissionState.stepIndex,
+                turnId: emissionState.turnId,
+              }),
+            );
+          }
+        }
+
+        const capabilities = ctx.get(CapabilitiesKey);
+
+        const runHarnessStep = async (
+          lifecycleSession: HarnessSession,
+          stepInput: StepInput | undefined,
+        ): Promise<StepResult> => {
+          const refreshedSession = refreshSessionFromTurnAgent({
+            compactionOverrides: {
+              thresholdPercent: effectiveAgent.thresholdPercent,
+            },
+            session: lifecycleSession,
+            systemPromptAdditions: taskUpdatesEnabled
+              ? [TASK_UPDATE_SESSION_INSTRUCTION]
+              : undefined,
+            turnAgent: effectiveAgent.turnAgent,
+          });
+          const modelSession = refreshedSession;
+
+          const step = createExecutionNodeStep({
+            abortSignal: input.abortSignal,
+            capabilities,
+            clearOnly: input.input?.kind === "clear",
+            compactOnly: input.input?.kind === "compact",
+            createRuntime: createWorkflowRuntime,
+            handleEvent,
+            handleSettlement,
+            historyProjector: history.projector,
+            historyView: history.prepare(modelSession),
+            instrumentation,
+            mode,
+            modelResolutionScope: {
+              moduleMap: bundle.moduleMap,
+              nodeId: bundle.nodeId,
+            },
+            node: effectiveNode,
+            workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+          });
+          return step(modelSession, stepInput);
+        };
+
+        return runHarnessStep(schemaSession, resolved);
+      });
+    } catch (error) {
+      if (!isTurnCancellation(error)) {
+        await failChannelDeliveries(error);
+        throw error;
+      }
+      // Trace and instrumentation state are needed by the cancellation
+      // epilogue to close the operation the discarded step opened.
+      // The session model is also kept because `session.started` is not emitted
+      // again after this cancellation settles.
+      const interrupted = serializeContext(ctx);
+      const retained = readRetainedBackgroundToolResult(ctx);
+      const cancelledSession = await preserveCancelledTurnMessage(
+        retained?.backgroundTaskSession ?? initialSession,
+        resolved,
+      );
+      return {
+        action: "cancelled",
+        ...(retained === undefined
+          ? {}
+          : {
+              backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
+              backgroundTasks: retained.backgroundTasks,
+            }),
+        serializedContext: preserveSerializedInstrumentationState(
+          preserveSerializedAgentTraceState(
+            preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
+            interrupted,
+          ),
+          interrupted,
+        ),
+        sessionState: createDurableSessionState({ session: cancelledSession }),
+      };
+    }
+
+    // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
+    const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
+    const nextSerializedContext = serializeContext(ctx);
+    stepResult = { ...stepResult, session: rekeyed };
+
+    const nextState = createDurableSessionState({ session: stepResult.session });
+    const retained = readRetainedBackgroundToolResult(ctx);
+    const cancellationState = createDurableSessionState({
+      session: await preserveCancelledTurnMessage(
+        retained?.backgroundTaskSession ?? initialSession,
+        resolved,
+      ),
+    });
+    const cancellationContext = preserveSerializedInstrumentationState(
+      preserveSerializedAgentTraceState(
+        preserveSerializedSessionDynamicModelSelection(
+          input.serializedContext,
+          nextSerializedContext,
+        ),
+        nextSerializedContext,
+      ),
+      nextSerializedContext,
+    );
+    const settlementTransition = { settlement, cancellationState, cancellationContext };
+    const sleepDurationMs = readTurnSleepDurationMs(ctx);
+    const sleepTransition = sleepDurationMs === undefined ? {} : { sleepDurationMs };
+    const backgroundTransition =
+      stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
+        ? {}
+        : {
+            backgroundTaskState: createDurableSessionState({
+              session: stepResult.backgroundTaskSession,
+            }),
+            backgroundTasks: stepResult.backgroundTasks,
+          };
+
+    if (
+      stepResult.next !== null &&
+      typeof stepResult.next === "object" &&
+      "done" in stepResult.next
+    ) {
+      if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
+        throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
+      }
+      const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
+      return {
+        action: "done",
+        ...backgroundTransition,
+        ...settlementTransition,
+        output: stepResult.next.output,
+        isError: stepResult.next.isError,
+        ...sleepTransition,
+        serializedContext: nextSerializedContext,
+        sessionState: nextState,
+        usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
+        usageDelta: takeSessionUsageDelta(stepResult.session).delta,
+      };
+    }
+
+    if (stepResult.next === null) {
+      const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
+      if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
+        return {
+          action: "dispatch-workflow-tasks",
+          ...backgroundTransition,
+          ...settlementTransition,
+          pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
+          ...sleepTransition,
+          serializedContext: nextSerializedContext,
+          sessionState: nextState,
+        };
+      }
+
+      const pending = derivePendingState(stepResult.session);
+
+      // `settledTurn` is the harness's explicit settlement verdict. Pending
+      // state may predate this turn, while newly created parks omit the verdict.
+      // `usage` carries only this turn's delta: the take marks the totals
+      // reported, so a persistent child never re-reports earlier spend.
+      if (stepResult.settledTurn !== undefined) {
+        const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
+        return {
+          action: "park",
+          ...backgroundTransition,
+          ...settlementTransition,
+          ...pending,
+          ...sleepTransition,
+          serializedContext: nextSerializedContext,
+          sessionState: createDurableSessionState({ session: reportedSession }),
+          settled: {
+            output: stepResult.settledTurn.output,
+            isError: stepResult.settledTurn.isError,
+            usage: delta,
+          },
+        };
+      }
+
+      return {
+        action: "park",
+        ...backgroundTransition,
+        ...settlementTransition,
+        ...pending,
+        ...sleepTransition,
+        serializedContext: nextSerializedContext,
+        sessionState: nextState,
+      };
+    }
+
+    return {
+      action: "continue",
+      ...backgroundTransition,
+      ...settlementTransition,
+      ...sleepTransition,
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+    };
+  } finally {
+    eventSink.release();
+  }
+}

@@ -15,7 +15,7 @@ After a channel normalizes input, eve runs the same agent runtime regardless of 
 
 ## Overlapping messages
 
-Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve first durably buffers the message, then cooperatively cancels the active turn and starts a replacement turn. The cancelled turn emits `turn.cancelled` followed by `session.waiting`; the replacement starts with a new turn ID. Output already streamed and completed side effects are not rolled back.
+Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve adds it at the next safe boundary. Use `turnPolicy: "interrupt"` to stop the active turn and start a replacement with a new turn ID. Interruption emits `turn.interrupted` without an idle boundary before the replacement. Output already streamed and completed side effects are not rolled back.
 
 Set `turnPolicy: "queue"` on any built-in or custom channel when each turn must finish before the next message starts:
 

@@ -1,3 +1,4 @@
+import { replyTargetToken } from "#execution/inbox/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
@@ -14,7 +15,7 @@ import {
   type DurableSession,
   type DurableSessionState,
   readDurableSession,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import {
@@ -24,7 +25,7 @@ import {
 } from "#harness/emission.js";
 import { emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import type { InboxResponseRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
@@ -45,20 +46,18 @@ interface ProxySubagentEventResult {
 }
 
 /** Proxies one child event through its parent channel across a durable step boundary. */
-export async function runProxySubagentEventStep(input: {
-  readonly answerHook?: AnswerHookRoute;
+export async function runProxySubagentEvent(input: {
+  readonly inboxResponse?: InboxResponseRoute;
   readonly hookPayload: SubagentEventHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<ProxySubagentEventResult> {
-  "use step";
-
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
 
   return emitProxiedSubagentEvent({
-    answerHook: input.answerHook,
+    inboxResponse: input.inboxResponse,
     ctx,
     durableSession,
     hookPayload: input.hookPayload,
@@ -67,14 +66,12 @@ export async function runProxySubagentEventStep(input: {
 }
 
 /** Emits a task request whose proxy routes were committed by a prior step. */
-export async function emitRecordedTaskInputRequestStep(input: {
+export async function emitRecordedTaskInputRequest(input: {
   readonly request: TaskInputRequestDelivery;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<ProxySubagentEventResult> {
-  "use step";
-
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   return await emitProxiedSubagentEvent({
@@ -82,7 +79,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
     durableSession,
     hookPayload: {
       callId: input.request.taskId,
-      childContinuationToken: input.request.replyTo,
+      childContinuationToken: replyTargetToken(input.request.replyTo),
       childSessionId: input.request.taskId,
       event: {
         requests: (input.request.requests ?? [input.request.request]) as never,
@@ -100,7 +97,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
 
 /** Applies one proxied child event to an already-hydrated parent context. */
 export async function emitProxiedSubagentEvent(input: {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
@@ -166,12 +163,12 @@ export async function emitProxiedSubagentEvent(input: {
     proxyEntries !== undefined &&
     input.hookPayload.kind === "subagent-input-request"
   ) {
-    const answerHook = input.answerHook;
+    const inboxResponse = input.inboxResponse;
     scopedSession = upsertProxyInputRequests({
       entries:
-        answerHook === undefined
+        inboxResponse === undefined
           ? proxyEntries
-          : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
+          : proxyEntries.map(([requestId, route]) => [requestId, { ...route, inboxResponse }]),
       forChildContinuationToken: input.hookPayload.childContinuationToken,
       session: scopedSession,
     });

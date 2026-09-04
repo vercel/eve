@@ -1,3 +1,4 @@
+import { normalizePostInput, expandPostBodies } from "#public/channels/discord/message-body.js";
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -13,7 +14,6 @@ import {
   editDiscordOriginalResponse,
   resolveDiscordBotToken,
   sendDiscordChannelMessage,
-  splitDiscordMessageContent,
   triggerDiscordTypingIndicator,
   type DiscordApiOptions,
   type DiscordApiResponse,
@@ -143,6 +143,7 @@ export interface DiscordChannelEvents {
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
+  readonly "turn.interrupted"?: DiscordEventHandler<"turn.interrupted">;
   readonly "session.failed"?: DiscordSessionFailedHandler;
   readonly "session.completed"?: DiscordEventHandler<"session.completed">;
   readonly "session.waiting"?: DiscordEventHandler<"session.waiting">;
@@ -678,23 +679,4 @@ function mergeCredentials(
     webhookVerifier: credentials?.webhookVerifier,
   };
   return merged;
-}
-
-function normalizePostInput(message: string | DiscordMessageBody): DiscordMessageBody {
-  if (typeof message === "string") return { content: message };
-  return message;
-}
-
-function expandPostBodies(body: DiscordMessageBody): readonly DiscordMessageBody[] {
-  if (typeof body.content !== "string") return [body];
-  const chunks = splitDiscordMessageContent(body.content);
-  return chunks.map((content, index) => {
-    if (index === 0) {
-      return { ...body, content };
-    }
-    return {
-      allowed_mentions: body.allowed_mentions,
-      content,
-    };
-  });
 }

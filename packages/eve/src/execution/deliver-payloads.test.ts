@@ -65,7 +65,7 @@ describe("coalesceDeliverPayloads", () => {
   it("preserves task agent requests and authorization events across queued payloads", () => {
     const agentRequests = [
       {
-        replyTo: "agent-reply-1",
+        replyTo: { kind: "session" as const, token: "agent-reply-1" },
         request: {
           input: { message: "Find it", target: "first" },
           invocationId: "call-1:first",
@@ -74,7 +74,7 @@ describe("coalesceDeliverPayloads", () => {
         taskId: "task-1",
       },
       {
-        replyTo: "agent-reply-2",
+        replyTo: { kind: "session" as const, token: "agent-reply-2" },
         request: {
           input: { message: "Find it", target: "second" },
           invocationId: "call-2:second",

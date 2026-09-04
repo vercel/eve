@@ -19,6 +19,7 @@ import {
   createStepStartedEvent,
   createSubagentCalledEvent,
   createTurnCancelledEvent,
+  createTurnInterruptedEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
@@ -320,6 +321,13 @@ describe("message stream protocol", () => {
     expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
       data: { sequence: 2, turnId: "turn_2" },
       type: "turn.cancelled",
+    });
+  });
+
+  it("creates turn.interrupted events without an idle event", () => {
+    expect(createTurnInterruptedEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
+      data: { sequence: 2, turnId: "turn_2" },
+      type: "turn.interrupted",
     });
   });
 

@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { transformWorkflowSdk } from "./transform.mjs";
 
 import {
   buildOpaqueTypesStub,
@@ -171,7 +172,7 @@ export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), transformWorkflowSdk("step")],
   entries: [
     {
       outputPath: "index",

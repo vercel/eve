@@ -1,16 +1,14 @@
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { type DurableSessionState, readDurableSession } from "#execution/session/state.js";
+import { readLatestTaskView } from "#execution/tasks/runtime.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskAuthorizationEventDelivery } from "#tasks/types.js";
 
 /** Validates that a task child's authorization event came from an agent the task owns. */
-export async function acceptTaskAuthorizationEventStep(input: {
+export async function acceptTaskAuthorizationEvent(input: {
   readonly delivery: TaskAuthorizationEventDelivery;
   readonly sessionState: DurableSessionState;
 }): Promise<boolean> {
-  "use step";
-
   const { hookPayload, taskId } = input.delivery;
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, taskId);

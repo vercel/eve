@@ -1,4 +1,4 @@
-import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
+import type { BackgroundTask } from "#execution/tasks/dispatch.js";
 import type { BackgroundToolCall } from "#harness/background-tools.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";

@@ -82,7 +82,10 @@ export function createInstrumentationDispatcher(
       );
       const cleanupSession =
         snapshot.type === "session.completed" || snapshot.type === "session.failed";
-      const cleanupTurn = snapshot.type === "turn.cancelled" || snapshot.type === "turn.failed";
+      const cleanupTurn =
+        snapshot.type === "turn.cancelled" ||
+        snapshot.type === "turn.interrupted" ||
+        snapshot.type === "turn.failed";
       if (cleanupSession || cleanupTurn) {
         const pendingActions = takeInstrumentationActionScopes(
           snapshot.sessionId,
@@ -340,7 +343,11 @@ function releaseTerminalState(event: InstrumentationEvent): void {
   if (event.type === "session.completed" || event.type === "session.failed") {
     releaseAllInstrumentationTurnState(event.sessionId);
   }
-  if (event.type === "turn.cancelled" || event.type === "turn.failed") {
+  if (
+    event.type === "turn.cancelled" ||
+    event.type === "turn.interrupted" ||
+    event.type === "turn.failed"
+  ) {
     releaseAllInstrumentationTurnState(event.sessionId, event.turnId);
   }
 }
@@ -355,7 +362,7 @@ function terminalActionFailure(
   if (event.type === "session.failed" || event.type === "turn.failed") {
     return { error: event.error, outcome: "failed" };
   }
-  if (event.type === "turn.cancelled") {
+  if (event.type === "turn.cancelled" || event.type === "turn.interrupted") {
     return {
       error: new Error("The action was cancelled with its turn."),
       errorCode: "ACTION_CANCELLED",
@@ -374,6 +381,7 @@ function isTerminal(type: InstrumentationEvent["type"]): boolean {
     type.endsWith(".completed") ||
     type.endsWith(".failed") ||
     type.endsWith(".cancelled") ||
+    type.endsWith(".interrupted") ||
     type === "input.resolved"
   );
 }

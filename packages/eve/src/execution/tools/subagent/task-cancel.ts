@@ -1,11 +1,11 @@
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import type { TaskExecutorCancel } from "#execution/tasks/parent/task-cancel.js";
+import type { TaskExecutorCancel } from "#execution/tasks/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { readDurableSession, type DurableSessionState } from "#execution/session/state.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { createLogger, logError } from "#internal/logging.js";
 
@@ -39,13 +39,11 @@ export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
 };
 
 /** Cancels a child turn still claimed by a completed workflow-tool run. */
-export async function cancelAgentInvocationOwnerStep(input: {
+export async function cancelAgentInvocationOwner(input: {
   readonly ownerId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<void> {
-  "use step";
-
   const session = await readDurableSession(input.sessionState);
   const handles = (getAgentHandleStore(session.state)?.handles ?? []).filter(
     (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
@@ -55,7 +53,7 @@ export async function cancelAgentInvocationOwnerStep(input: {
   const remoteContext = handles.some((handle) => handle.address.kind === "agent/remote")
     ? await deserializeContext(input.serializedContext)
     : undefined;
-  await Promise.all(
+  const outcomes = await Promise.allSettled(
     handles.map(async (handle) => {
       try {
         if (handle.address.kind !== "agent/remote") {
@@ -80,7 +78,13 @@ export async function cancelAgentInvocationOwnerStep(input: {
           childSessionId: handle.address.sessionId,
           ownerId: input.ownerId,
         });
+        throw error;
       }
     }),
   );
+  const errors = outcomes.flatMap((outcome) =>
+    outcome.status === "rejected" ? [outcome.reason] : [],
+  );
+  if (errors.length > 0)
+    throw new AggregateError(errors, "Workflow-owned child cancellation did not complete.");
 }

@@ -6,9 +6,10 @@ import {
 } from "#harness/emission.js";
 import {
   getProxyInputRequests,
+  proxyInputRouteKey,
   toProxyInputRequestEntries,
 } from "#harness/proxy-input-requests.js";
-import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import type { InboxResponseRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -62,7 +63,7 @@ export async function emitProxiedInputRequest(input: {
 
 /** One proxied-child bucket of a routed deliver payload. */
 export interface RoutedChildDelivery {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
@@ -85,7 +86,7 @@ export interface RoutedDeliverPayload {
 
 /** In-progress accumulation for one `forChildren` bucket. */
 interface ChildResponseBucket {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   /** Parent-visible request IDs answered in this bucket. */
@@ -120,10 +121,7 @@ export function routeDeliverPayload(input: {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const bucketKey =
-      route.taskId === undefined
-        ? route.childContinuationToken
-        : `${route.childContinuationToken}\0${route.childResponseUrl ?? "local"}\0${route.taskId}`;
+    const bucketKey = proxyInputRouteKey(route);
     const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
@@ -132,7 +130,7 @@ export function routeDeliverPayload(input: {
         parentRequestIds: [response.requestId],
         responses: [toChildInputResponse(response, route)],
         routes: [route],
-        ...(route.answerHook !== undefined && { answerHook: route.answerHook }),
+        ...(route.inboxResponse !== undefined && { inboxResponse: route.inboxResponse }),
         ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
         ...(route.taskId !== undefined && { taskId: route.taskId }),
       });
@@ -145,7 +143,7 @@ export function routeDeliverPayload(input: {
 
   const forChildren = [...responsesByChild.values()].map(
     ({
-      answerHook,
+      inboxResponse,
       childContinuationToken,
       childResponseUrl,
       parentRequestIds,
@@ -172,7 +170,7 @@ export function routeDeliverPayload(input: {
         childContinuationToken,
         payload: { inputResponses: responses },
         retireRequestIds: [...retireRequestIds],
-        ...(answerHook !== undefined && { answerHook }),
+        ...(inboxResponse !== undefined && { inboxResponse }),
         ...(childResponseUrl !== undefined && { childResponseUrl }),
         ...(taskId !== undefined && { taskId }),
       };

@@ -89,7 +89,7 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.adapter.kind).toBe(SUBAGENT_ADAPTER_KIND);
     expect(runInput.adapter.state).toMatchObject({
       callId: "call-1",
-      parentContinuationToken: "parent-token",
+      parentReplyTo: { kind: "session", token: "eve:session:parent-session:inbox" },
       parentSessionId: "parent-session",
       subagentName: "linear",
     });
@@ -110,12 +110,12 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentContinuationToken: "turn-inbox",
+      parentReplyTo: { kind: "session", token: "turn-inbox" },
       session: makeSession(),
     });
 
     expect(runInput.adapter.state).toMatchObject({
-      parentContinuationToken: "turn-inbox",
+      parentReplyTo: { kind: "session", token: "turn-inbox" },
     });
   });
 
@@ -125,13 +125,13 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentContinuationToken: "invocation-reply-hook",
+      parentReplyTo: { kind: "session", token: "invocation-reply-hook" },
       session: makeSession(),
       taskId: "task-1",
     });
 
     expect(runInput.adapter.state).toMatchObject({
-      parentContinuationToken: "invocation-reply-hook",
+      parentReplyTo: { kind: "session", token: "invocation-reply-hook" },
       taskId: "task-1",
     });
     expect(runInput.taskId).toBe("task-1");

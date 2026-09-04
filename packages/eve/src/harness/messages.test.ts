@@ -25,7 +25,7 @@ function textFilePart(overrides: {
 describe("coalesceDeliveries", () => {
   const caller = {
     callId: "call-1",
-    replyTo: { kind: "hook" as const, token: "turn-caller" },
+    replyTo: { kind: "session" as const, token: "turn-caller" },
     subagentName: "research",
   };
 

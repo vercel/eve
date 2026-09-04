@@ -273,6 +273,14 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
+export interface HarnessSettlement {
+  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly emissionAfter: import("#harness/emission-state.js").HarnessEmissionState;
+}
+
+/** Proposes terminal effects for the execution owner to commit after admitting input. */
+export type HandleSettlementFn = (settlement: HarnessSettlement) => Promise<void>;
+
 /**
  * Dependencies injected into the tool-loop harness at construction time.
  */
@@ -305,6 +313,7 @@ export interface ToolLoopHarnessConfig {
    */
   readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
+  readonly handleSettlement?: HandleSettlementFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */

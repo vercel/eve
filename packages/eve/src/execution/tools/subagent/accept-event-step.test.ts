@@ -1,20 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
+import { readDurableSession } from "#execution/session/state.js";
+import { readLatestTaskView } from "#execution/tasks/runtime.js";
+import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event-step.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
 
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
+vi.mock("#execution/session/state.js", () => ({ readDurableSession: vi.fn() }));
+vi.mock("#execution/tasks/runtime.js", () => ({ readLatestTaskView: vi.fn() }));
 
-const sessionState = {
+const sessionState: import("#execution/session/state.js").DurableSessionState = {
   continuationToken: "parent-token",
   emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
   hasProxyInputRequests: false,
   sessionId: "parent-session",
-  version: 1,
-} as const;
+  snapshot: {
+    session: {
+      agent: { system: "" },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+      state: {},
+    },
+  },
+};
 const hookPayload = {
   callId: "call-1",
   childSessionId: "child-1",
@@ -56,7 +64,7 @@ function mockSession(handles: readonly unknown[]): void {
   });
 }
 
-describe("acceptTaskAuthorizationEventStep", () => {
+describe("acceptTaskAuthorizationEvent", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockSession([
@@ -82,7 +90,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
 
   it("accepts an authorization event from the task's claimed child agent", async () => {
     await expect(
-      acceptTaskAuthorizationEventStep({
+      acceptTaskAuthorizationEvent({
         delivery: { hookPayload, taskId: "task-1" },
         sessionState,
       }),
@@ -101,7 +109,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
     ]);
 
     await expect(
-      acceptTaskAuthorizationEventStep({
+      acceptTaskAuthorizationEvent({
         delivery: { hookPayload, taskId: "task-1" },
         sessionState,
       }),
@@ -110,7 +118,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
 
   it("rejects an authorization event from a child session not claimed by the task", async () => {
     await expect(
-      acceptTaskAuthorizationEventStep({
+      acceptTaskAuthorizationEvent({
         delivery: {
           hookPayload: { ...hookPayload, childSessionId: "other-child" },
           taskId: "task-1",
@@ -129,7 +137,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
     });
 
     await expect(
-      acceptTaskAuthorizationEventStep({
+      acceptTaskAuthorizationEvent({
         delivery: { hookPayload, taskId: "task-1" },
         sessionState,
       }),

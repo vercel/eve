@@ -189,6 +189,7 @@ export interface TeamsChannelEvents {
   readonly "turn.failed"?: TeamsEventHandler<"turn.failed">;
   readonly "turn.completed"?: TeamsEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TeamsEventHandler<"turn.cancelled">;
+  readonly "turn.interrupted"?: TeamsEventHandler<"turn.interrupted">;
   readonly "session.failed"?: TeamsSessionFailedHandler;
   readonly "session.completed"?: TeamsEventHandler<"session.completed">;
   readonly "session.waiting"?: TeamsEventHandler<"session.waiting">;

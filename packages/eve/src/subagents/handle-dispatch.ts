@@ -1,3 +1,5 @@
+import { createCallbackCapability } from "#subagents/callback-capability.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 /** Continuation delivery for task-owned agent sessions. */
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -78,6 +80,7 @@ export async function dispatchToClaimedAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
@@ -91,6 +94,7 @@ async function dispatchToAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly handle: { readonly address: AgentAddress; readonly identity: AgentIdentity };
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
@@ -104,6 +108,7 @@ async function dispatchToAgentAddress(input: {
     bundle: input.bundle,
     identity: handle.identity,
     parentToken: input.parentToken,
+    parentReplyTo: input.parentReplyTo,
     taskId: input.taskId,
   });
   if (!delivery.ok) {
@@ -157,6 +162,7 @@ async function deliverToAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
   readonly parentToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly taskId?: string;
 }): Promise<
   Result<
@@ -180,16 +186,17 @@ async function deliverToAgentAddress(input: {
       return err({ cause: error, deliveryAmbiguous: false, permanent: true });
     }
     try {
+      const callbackToken = createCallbackCapability(input.parentReplyTo);
       await continueRemoteAgentSession({
         auth: input.auth,
         callback: {
           callId: action.callId,
           subagentName: identity.name,
           taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
-          token: input.parentToken,
+          token: callbackToken,
           url: createWorkflowCallbackUrl(
             address.callbackBaseUrl,
-            createEveCallbackRoutePath(input.parentToken),
+            createEveCallbackRoutePath(callbackToken),
           ),
         },
         message: readSubagentMessage(action),
@@ -217,7 +224,7 @@ async function deliverToAgentAddress(input: {
         auth: input.auth,
         caller: {
           callId: action.callId,
-          replyTo: { kind: "hook", token: input.parentToken },
+          replyTo: input.parentReplyTo,
           subagentName: identity.name,
           taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
         },

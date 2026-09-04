@@ -405,7 +405,11 @@ describe("resolvePendingCoordination", () => {
           [
             answerToken,
             {
-              answerHook: { runId: "run-1" },
+              inboxResponse: {
+                kind: "inbox",
+                address: { ownerRunId: "run-1", token: "answer-token" },
+                requestId: "question",
+              },
               childContinuationToken: answerToken,
               kind: "question",
             },

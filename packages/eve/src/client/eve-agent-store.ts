@@ -433,16 +433,24 @@ export class EveAgentStore<TData> {
   }
 
   async #sendFollowUp<TOutput>(turn: ActiveTurn, input: SendTurnPayload<TOutput>): Promise<void> {
-    if (input.message === undefined || input.turnPolicy !== "steer") {
+    if (
+      input.message === undefined ||
+      (input.turnPolicy !== "steer" && input.turnPolicy !== "interrupt")
+    ) {
       throw new Error(
-        'eve session is already processing a turn. Send a message with turnPolicy: "steer" to replace it.',
+        'eve session is already processing a turn. Send a message with turnPolicy: "steer" to add input or "interrupt" to replace the turn.',
       );
     }
 
     const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
     assertExclusiveTurnInput(preparedInput);
-    if (preparedInput.message === undefined || preparedInput.turnPolicy !== "steer") {
-      throw new Error('An in-flight follow-up requires a message with turnPolicy: "steer".');
+    if (
+      preparedInput.message === undefined ||
+      (preparedInput.turnPolicy !== "steer" && preparedInput.turnPolicy !== "interrupt")
+    ) {
+      throw new Error(
+        'An in-flight follow-up requires a message with turnPolicy: "steer" or "interrupt".',
+      );
     }
     if (!this.#isActiveTurn(turn)) return await this.send(preparedInput);
 

@@ -60,8 +60,7 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
   }
 
   try {
-    // Import `@workflow/core` dynamically (matching `workflow-steps.ts`,
-    // `turn-workflow.ts`, etc.). A static import here would pull the
+    // Import `@workflow/core` dynamically. A static import here would pull the
     // compiled core into emit.js's static graph and defeat the dynamic
     // chunking those modules rely on — the build emits an
     // `INEFFECTIVE_DYNAMIC_IMPORT` warning and `bin-build-output` fails.

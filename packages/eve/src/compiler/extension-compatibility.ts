@@ -29,48 +29,53 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
-    current: 26,
+    current: 27,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      26: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   channel: {
-    current: 15,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 16],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      15: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   schedule: {
-    current: 8,
-    supported: [1, 2, 3, 4, 6, 7, 8],
+    current: 9,
+    supported: [1, 2, 3, 4, 6, 7, 9],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      8: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   subagent: {
-    current: 8,
-    supported: [3, 4, 6, 7, 8],
+    current: 9,
+    supported: [3, 4, 6, 7, 9],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      8: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   connection: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13],
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      13: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   hook: {
-    current: 19,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19],
+    current: 20,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 20],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -82,22 +87,25 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      19: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 16,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16],
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      16: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 17,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17],
+    current: 18,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      17: "The session holder runtime adds turn.interrupted and replaces turn execution and workflow reply contracts.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

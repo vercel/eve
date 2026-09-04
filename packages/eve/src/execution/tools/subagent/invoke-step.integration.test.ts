@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { createDurableSessionState, readDurableSession } from "#execution/session/state.js";
 import {
   dispatchAgentInvocation,
-  settleTaskAgentInvocationStep,
+  settleTaskAgentInvocation,
 } from "#execution/tools/subagent/invoke-step.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
@@ -91,7 +91,7 @@ describe("blocking workflow agent continuation", () => {
       const dispatched = await dispatchAgentInvocation({
         callbackBaseUrl: "https://parent.example",
         ownerId: "workflow-run-1",
-        replyTo: `reply-${String(index)}`,
+        replyTo: { kind: "session", token: `reply-${String(index)}` },
         request: {
           input: { agentId: identity.id, message, target: identity.name },
           invocationId: callId,
@@ -107,7 +107,7 @@ describe("blocking workflow agent continuation", () => {
         expect.objectContaining({ identity, ownerId: "workflow-run-1", phase: "claimed" }),
       ]);
 
-      const settled = await settleTaskAgentInvocationStep({
+      const settled = await settleTaskAgentInvocation({
         ownerId: "workflow-run-1",
         result: {
           callId,

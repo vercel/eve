@@ -200,6 +200,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
   readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
+  readonly "turn.interrupted"?: ChannelEventHandler<"turn.interrupted", TCtx>;
   readonly "session.failed"?: ChannelSessionFailedHandler<TCtx>;
   readonly "session.completed"?: ChannelEventHandler<"session.completed", TCtx>;
   readonly "session.waiting"?: ChannelEventHandler<"session.waiting", TCtx>;
@@ -310,6 +311,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "turn.failed": null,
   "turn.completed": null,
   "turn.cancelled": null,
+  "turn.interrupted": null,
   "session.failed": null,
   "session.completed": null,
   "session.waiting": null,

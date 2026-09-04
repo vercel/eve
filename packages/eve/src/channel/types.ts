@@ -1,3 +1,4 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type { UserContent } from "ai";
 
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -156,7 +157,7 @@ export interface TurnCaller {
   /** Present when this turn is the executor for a durable background task. */
   readonly taskId?: string;
   readonly replyTo:
-    | { readonly kind: "hook"; readonly token: string }
+    | ReplyTarget
     | { readonly kind: "callback"; readonly token: string; readonly url: string };
 }
 
@@ -192,7 +193,7 @@ export interface DeliverPayload {
 }
 
 /** Controls how a channel message interacts with an active turn. */
-export type TurnPolicy = "steer" | "queue";
+export type TurnPolicy = "steer" | "queue" | "interrupt";
 
 /** Default policy for message sends produced by current channel surfaces. */
 export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
@@ -219,6 +220,7 @@ export type SessionCommand =
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
 
+/** Acceptance confirms a durable candidate; terminal settlement may retire its input. */
 export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "session_not_active" };

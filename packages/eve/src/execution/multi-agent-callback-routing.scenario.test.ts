@@ -9,14 +9,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
-import {
-  notifyTurnCallerStep,
-  resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
+import { notifyTurnCaller, resolveInitialTurnCaller } from "#subagents/parent-notification.js";
+import { fireSessionCallback } from "#subagents/callbacks.js";
 import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
+import { CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {
   createEveCallbackRoutePath,
   createEveConnectionCallbackRoutePath,
@@ -39,7 +36,7 @@ import type { HarnessSession } from "#harness/types.js";
  *    connection hook URL (`getHookUrl`);
  * 3. the remote side validates the callback metadata with the real
  *    create-session parser (`parseSessionCallback`) and posts the settled turn
- *    with the real durable step (`notifyTurnCallerStep`);
+ *    with the real durable step (`notifyTurnCaller`);
  * 4. each parent service only serves its own prefix-stripped `/eve/v1/*`
  *    callback routes — anything else 404s, matching production.
  *
@@ -211,11 +208,7 @@ describe("multi-agent callback routing", () => {
           routed.servicePath === createEveCallbackRoutePath(callbackToken)) ||
         (request.method === "GET" &&
           routed.servicePath ===
-            createEveConnectionCallbackRoutePath(
-              "linear",
-              authorizationAttemptId,
-              authHookToken(sessionId),
-            ));
+            createEveConnectionCallbackRoutePath("linear", authorizationAttemptId, sessionId));
 
       if (!servesPath) {
         response.writeHead(404).end();
@@ -335,9 +328,9 @@ describe("multi-agent callback routing", () => {
           ...callback,
         },
       };
-      const caller = await resolveInitialTurnCallerStep({ serializedContext });
+      const caller = await resolveInitialTurnCaller({ serializedContext });
       await expect(
-        notifyTurnCallerStep({
+        notifyTurnCaller({
           caller,
           lifecycle: "parked",
           sessionId: "remote-session-1",
@@ -366,7 +359,7 @@ describe("multi-agent callback routing", () => {
         `${deploymentOrigin}${agent.publicRoutePrefix}${createEveConnectionCallbackRoutePath(
           "linear",
           attemptId,
-          authHookToken(sessionId),
+          sessionId,
         )}`,
       );
 
@@ -375,11 +368,7 @@ describe("multi-agent callback routing", () => {
       expect(response.status).toBe(200);
       expect(serviceRequests.get(agent.serviceName)).toContainEqual({
         method: "GET",
-        servicePath: createEveConnectionCallbackRoutePath(
-          "linear",
-          attemptId,
-          authHookToken(sessionId),
-        ),
+        servicePath: createEveConnectionCallbackRoutePath("linear", attemptId, sessionId),
       });
     });
   }
@@ -408,7 +397,7 @@ describe("multi-agent callback routing", () => {
       `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
     );
     await expect(
-      fireSessionCallbackStep({
+      fireSessionCallback({
         output: "report done",
         serializedContext: {
           [SessionIdKey.name]: "remote-session-1",

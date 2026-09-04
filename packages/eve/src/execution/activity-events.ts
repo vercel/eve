@@ -189,7 +189,8 @@ export function projectActivityEvents(input: {
     lineage.kind === "root-turn" &&
     (event.type === "turn.completed" ||
       event.type === "turn.failed" ||
-      event.type === "turn.cancelled")
+      event.type === "turn.cancelled" ||
+      event.type === "turn.interrupted")
   ) {
     const outcome =
       event.type === "turn.completed"

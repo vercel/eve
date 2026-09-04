@@ -1,3 +1,5 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
+
 /**
  * Durable state for the subagent adapter, split from the adapter itself so
  * harness code can identify a delegated child run without reaching the
@@ -27,7 +29,7 @@ export const SUBAGENT_ADAPTER_KIND = "subagent";
  */
 export interface SubagentAdapterState extends Record<string, unknown> {
   readonly callId: string;
-  readonly parentContinuationToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly parentSessionId: string;
   readonly subagentName: string;
   /** Owning task when this child was started by a background workflow tool. */
@@ -51,11 +53,26 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
   return (
     typeof state.callId === "string" &&
     state.callId.length > 0 &&
-    typeof state.parentContinuationToken === "string" &&
-    state.parentContinuationToken.length > 0 &&
+    isReplyTarget(state.parentReplyTo) &&
     typeof state.parentSessionId === "string" &&
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0 &&
     (state.taskId === undefined || (typeof state.taskId === "string" && state.taskId.length > 0))
+  );
+}
+
+function isReplyTarget(value: unknown): value is ReplyTarget {
+  if (value === null || typeof value !== "object") return false;
+  const target = value as Partial<ReplyTarget>;
+  if (target.kind === "session") return typeof target.token === "string" && target.token.length > 0;
+  return (
+    target.kind === "inbox" &&
+    typeof target.requestId === "string" &&
+    target.requestId.length > 0 &&
+    target.address !== undefined &&
+    typeof target.address.token === "string" &&
+    target.address.token.length > 0 &&
+    typeof target.address.ownerRunId === "string" &&
+    target.address.ownerRunId.length > 0
   );
 }

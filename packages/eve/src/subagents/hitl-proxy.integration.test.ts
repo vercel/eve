@@ -208,7 +208,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     ctx.set(ChannelKey, slackishAdapter);
 
     // Drive a child HITL batch up through the parent's adapter. This
-    // is the exact call shape used by `runProxySubagentEventStep` on
+    // is the exact call shape used by `runProxySubagentEvent` on
     // the workflow runtime.
     const approvalRequest = buildApprovalRequest("req-approve-1");
     const hookPayload = buildHitlPayload({

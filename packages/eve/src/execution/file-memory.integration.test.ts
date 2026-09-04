@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { startTestSession } from "#internal/testing/session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { start } from "#internal/workflow/runtime.js";
 import { fileMemory, inMemory } from "#public/memory/file/index.js";
 import { defineMemory } from "#public/memory/index.js";
 import { byPrincipal } from "#public/memory/scope.js";
@@ -78,23 +77,21 @@ describe("file memory integration", () => {
 });
 
 async function runTurn(input: { readonly message: string; readonly principalId: string }) {
-  const run = await start(workflowEntry, [
-    {
-      input: { message: input.message },
-      serializedContext: {
-        "eve.auth": {
-          attributes: {},
-          authenticator: "test",
-          principalId: input.principalId,
-          principalType: "user",
-        },
-        "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
-        "eve.channel": { kind: "http", state: {} },
-        "eve.continuationToken": `http:file-memory:${input.principalId}:${crypto.randomUUID()}`,
-        "eve.mode": "conversation",
+  const run = await startTestSession({
+    input: { message: input.message },
+    serializedContext: {
+      "eve.auth": {
+        attributes: {},
+        authenticator: "test",
+        principalId: input.principalId,
+        principalType: "user",
       },
+      "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+      "eve.channel": { kind: "http", state: {} },
+      "eve.continuationToken": `http:file-memory:${input.principalId}:${crypto.randomUUID()}`,
+      "eve.mode": "conversation",
     },
-  ]);
+  });
   const stream = captureTurnEvents(run);
 
   try {

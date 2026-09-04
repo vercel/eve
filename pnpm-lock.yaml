@@ -676,9 +676,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.9.1
-      historical-eve-0-30-8:
-        specifier: npm:eve@0.30.8
-        version: eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.0)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(ai@7.0.84(zod@4.5.4))(aws4fetch@1.0.20)(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(lru-cache@11.5.2)(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

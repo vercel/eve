@@ -1,10 +1,10 @@
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+import type { DurableSessionState } from "#execution/session/state.js";
+import { emitTaskSubagentCalled } from "#execution/tools/subagent/emit-called-step.js";
 import {
-  dispatchTaskAgentInvocationStep,
-  settleTaskAgentInvocationStep,
+  dispatchTaskAgentInvocation,
+  settleTaskAgentInvocation,
 } from "#execution/tools/subagent/invoke-step.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { sendInbox } from "#execution/inbox/send.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
@@ -38,7 +38,7 @@ export async function applyTaskAgentRequest(
   const { request } = delivery;
   switch (request.kind) {
     case "agent-settled": {
-      const settled = await settleTaskAgentInvocationStep({
+      const settled = await settleTaskAgentInvocation({
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
@@ -48,7 +48,7 @@ export async function applyTaskAgentRequest(
       return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
     }
     case "agent-invoke": {
-      const dispatched = await dispatchTaskAgentInvocationStep({
+      const dispatched = await dispatchTaskAgentInvocation({
         ownerId: delivery.ownerId,
         replyTo: delivery.replyTo,
         request,
@@ -58,7 +58,7 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitTaskSubagentCalledStep({
+          const emitted = await emitTaskSubagentCalled({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
             serializedContext: ctx.serializedContext,
@@ -69,9 +69,13 @@ export async function applyTaskAgentRequest(
           };
         }
         case "failed":
-          await resumeHookStep(delivery.replyTo, {
-            kind: "runtime-action-result",
-            results: [dispatched.result],
+          if (delivery.replyTo.kind !== "inbox")
+            throw new Error("An agent invocation must reply to its owning inbox.");
+          await sendInbox(delivery.replyTo.address, {
+            eventId: `${delivery.replyTo.requestId}:failed`,
+            kind: "agent.response",
+            payload: { kind: "runtime-action-result", results: [dispatched.result] },
+            requestId: delivery.replyTo.requestId,
           });
           return {
             serializedContext: ctx.serializedContext,

@@ -12,7 +12,7 @@ import {
  *
  * The streaming capture helper is validated end-to-end against the real
  * workflow in the integration tier — see
- * `src/execution/workflow-entry.integration.test.ts`.
+ * `src/execution/turn-cancellation.integration.test.ts`.
  */
 
 describe("containsEventSequence", () => {

@@ -42,12 +42,12 @@ import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { isTaskControlAction } from "#execution/tasks/control.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }

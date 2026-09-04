@@ -11,7 +11,7 @@ import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /** Synthetic minimal session for storage-layer round-trips. */
@@ -184,7 +184,7 @@ export async function durableSessionRetryFixtureWorkflow(): Promise<DurableSessi
 
   const { workflowRunId: sessionId } = getWorkflowMetadata();
 
-  // Seed write mirrors production, where `createSessionStep` always
+  // Seed write mirrors production, where `createSessionState` always
   // creates the first durable session state before later turns run.
   await durableSessionWriteStep({
     historyDepth: 0,

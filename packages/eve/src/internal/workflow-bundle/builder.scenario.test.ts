@@ -9,7 +9,6 @@ import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
-  resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
@@ -592,14 +591,11 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("bundles hook ownership checks through the workflow core shim", async () => {
+  it("bundles native hook ownership and Run serialization", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-hook-conflict-"));
     const outDir = join(tempRoot, "workflow-build");
     const flowFilePath = join(tempRoot, "flow.ts");
     const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
-    const workflowCoreShimPath = resolvePackageSourceFilePath(
-      "src/internal/workflow-bundle/workflow-core-shim.ts",
-    ).replaceAll("\\", "/");
 
     try {
       await Promise.all([
@@ -616,7 +612,7 @@ describe("WorkflowBundleBuilder", () => {
         writeFile(
           flowFilePath,
           [
-            `import { createHook } from ${JSON.stringify(workflowCoreShimPath)};`,
+            'import { createHook } from "workflow";',
             "export async function claimHook() {",
             '  "use workflow";',
             '  const hook = createHook({ token: "shared-token" });',
@@ -653,7 +649,7 @@ describe("WorkflowBundleBuilder", () => {
 
       expect(decodedWorkflowCode).toContain("getConflict");
       expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
-      expect(decodedWorkflowCode).not.toContain("runtime/run.js");
+      expect(decodedWorkflowCode).toContain("class//workflow//Run");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dispatchAgentInvocation,
-  releaseAgentInvocationOwnerStep,
-  settleTaskAgentInvocationStep,
+  releaseAgentInvocationOwner,
+  settleTaskAgentInvocation,
 } from "#execution/tools/subagent/invoke-step.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
-import { readDurableSession } from "#execution/durable-session-store.js";
+import { readDurableSession } from "#execution/session/state.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 
 vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
@@ -24,7 +24,7 @@ vi.mock("#execution/tools/subagent/start.js", () => ({
 vi.mock("#execution/tools/subagent/invoke-preparation.js", () => ({
   prepareOwnerAgentInvocation: vi.fn(),
 }));
-vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+vi.mock("#execution/session/state.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
@@ -145,7 +145,7 @@ describe("owner agent invocation dispatch", () => {
 
     const first = await dispatchAgentInvocation({
       callbackBaseUrl: "https://parent.example",
-      replyTo: "first-reply",
+      replyTo: { kind: "session" as const, token: "first-reply" },
       request: {
         input: { agentId: "agent-1", message: "First", target: "research" },
         invocationId: "call-1:first",
@@ -172,7 +172,7 @@ describe("owner agent invocation dispatch", () => {
     } as never);
     const second = await dispatchAgentInvocation({
       callbackBaseUrl: "https://parent.example",
-      replyTo: "second-reply",
+      replyTo: { kind: "session" as const, token: "second-reply" },
       request: {
         input: { agentId: "agent-1", message: "Second", target: "research" },
         invocationId: "call-1:second",
@@ -251,7 +251,7 @@ describe("task-owned agent settlement", () => {
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
-    const settled = await settleTaskAgentInvocationStep({
+    const settled = await settleTaskAgentInvocation({
       result: {
         callId: "call-1",
         kind: "subagent-result",
@@ -293,7 +293,7 @@ describe("task-owned agent settlement", () => {
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
-    const released = await releaseAgentInvocationOwnerStep({
+    const released = await releaseAgentInvocationOwner({
       ownerId: "workflow-run-1",
       sessionState: {} as never,
     });
@@ -315,7 +315,7 @@ describe("task-owned agent settlement", () => {
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
-    const released = await releaseAgentInvocationOwnerStep({
+    const released = await releaseAgentInvocationOwner({
       cancelled: true,
       ownerId: "workflow-run-1",
       sessionState: {} as never,
@@ -343,7 +343,7 @@ describe("task-owned agent settlement", () => {
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
-    const settled = await settleTaskAgentInvocationStep({
+    const settled = await settleTaskAgentInvocation({
       ownerId: "workflow-run-1",
       result: {
         callId: "call-1",
@@ -380,7 +380,7 @@ async function dispatch() {
   return await dispatchAgentInvocation({
     callbackBaseUrl: "https://parent.example",
     emit: vi.fn(),
-    replyTo: "agent-reply",
+    replyTo: { kind: "session" as const, token: "agent-reply" },
     request: {
       input: { message: "Find it", target: "research" },
       invocationId: "call-1",

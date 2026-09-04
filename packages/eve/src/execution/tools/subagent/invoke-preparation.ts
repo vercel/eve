@@ -4,7 +4,7 @@ import {
   prepareActionDispatch,
   type PreparedCoordinationDispatch,
 } from "#execution/coordination-dispatch-shared.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { readDurableSession, type DurableSessionState } from "#execution/session/state.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";

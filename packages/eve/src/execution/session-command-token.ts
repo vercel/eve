@@ -17,3 +17,9 @@ export function isSessionCommandHookToken(token: string): boolean {
 export function sessionCommandHookToken(sessionId: string): string {
   return `${SESSION_COMMAND_NAMESPACE}:${sessionId}:inbox`;
 }
+
+/** Decodes the framework session address used by durable task producers. */
+export function readSessionIdFromCommandToken(token: string): string | undefined {
+  if (!isSessionCommandHookToken(token)) return undefined;
+  return token.slice(`${SESSION_COMMAND_NAMESPACE}:`.length, -":inbox".length);
+}
