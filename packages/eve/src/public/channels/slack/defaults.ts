@@ -13,6 +13,7 @@ import {
 import {
   buildAnsweredBlocks,
   renderInputRequestPostParts,
+  routeHitlBlocks,
   type SlackInputRequestPostPart,
 } from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
@@ -22,6 +23,7 @@ import {
   truncateTypingStatus,
 } from "#public/channels/slack/limits.js";
 import type {
+  SlackChannelConfig,
   SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackChannelState,
@@ -205,23 +207,98 @@ function firstNonEmptyLine(text: string): string | undefined {
  * Slack's 50-block message cap. Override by declaring
  * `events["input.requested"]`.
  */
-export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
-  return async (data, channel, _ctx) => {
-    for (const post of buildInputRequestPosts(data.requests)) {
-      const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
-      if (!message.id) continue;
-      const cards = { ...channel.state.pendingApprovalCards };
-      for (const request of post.requests) {
-        if (request.kind === "tool-approval") {
-          cards[request.requestId] = {
-            messageBlocks: post.blocks,
-            messageTs: message.id,
-          };
-        }
+export function defaultInputRequestedHandler(
+  privateToolApprovals?: SlackChannelConfig["privateToolApprovals"],
+): NonNullable<SlackChannelEvents["input.requested"]> {
+  return async (data, channel, ctx) => {
+    const privateApprovals: InputRequest[] = [];
+    const publicRequests: InputRequest[] = [];
+    for (const request of data.requests) {
+      const privateDelivery =
+        privateToolApprovals !== undefined &&
+        request.kind === "tool-approval" &&
+        (privateToolApprovals.when === undefined ||
+          (await privateToolApprovals.when(request, ctx)));
+      (privateDelivery ? privateApprovals : publicRequests).push(request);
+    }
+
+    await postPublicInputRequests(publicRequests, channel);
+    for (const request of privateApprovals) {
+      const reviewer = privateToolApprovals?.reviewer
+        ? await privateToolApprovals.reviewer(request, ctx)
+        : (slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId);
+      if (!reviewer) {
+        log.warn("private tool approval not delivered because no reviewer was resolved", {
+          requestId: request.requestId,
+          sessionId: ctx.session.id,
+        });
+        continue;
       }
-      channel.state.pendingApprovalCards = cards;
+      await postPrivateToolApproval({
+        channel,
+        delivery: privateToolApprovals!.delivery,
+        request,
+        reviewer,
+      });
     }
   };
+}
+
+async function postPublicInputRequests(
+  requests: readonly InputRequest[],
+  channel: Parameters<NonNullable<SlackChannelEvents["input.requested"]>>[1],
+): Promise<void> {
+  for (const post of buildInputRequestPosts(requests)) {
+    const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
+    recordApprovalCards(channel.state, post.requests, {
+      messageBlocks: post.blocks,
+      messageTs: message.id,
+    });
+  }
+}
+
+async function postPrivateToolApproval(input: {
+  readonly channel: Parameters<NonNullable<SlackChannelEvents["input.requested"]>>[1];
+  readonly delivery: "direct-message" | "ephemeral";
+  readonly request: InputRequest;
+  readonly reviewer: string;
+}): Promise<void> {
+  const parts = renderInputRequestPostParts(input.request);
+  const route = {
+    channelId: input.channel.slack.channelId,
+    threadTs: input.channel.slack.threadTs,
+  };
+  const post =
+    input.delivery === "ephemeral"
+      ? input.channel.thread.postEphemeral.bind(input.channel.thread, input.reviewer)
+      : input.channel.thread.postDirectMessage.bind(input.channel.thread, input.reviewer);
+  if (parts.details !== undefined) {
+    await post({ blocks: routeHitlBlocks(parts.details.blocks, route), text: parts.details.text });
+  }
+  const controlBlocks = routeHitlBlocks(parts.controls.blocks, route);
+  const message = await post({ blocks: controlBlocks, text: parts.controls.text });
+  recordApprovalCards(input.channel.state, [input.request], {
+    messageBlocks: controlBlocks,
+    messageChannelId:
+      input.delivery === "direct-message" && typeof message.raw.channel === "string"
+        ? message.raw.channel
+        : undefined,
+    messageTs: message.id,
+    ephemeral: input.delivery === "ephemeral",
+  });
+}
+
+function recordApprovalCards(
+  state: SlackChannelState,
+  requests: readonly InputRequest[],
+  card: NonNullable<SlackChannelState["pendingApprovalCards"]>[string],
+): void {
+  if (!card.messageTs) return;
+  const cards = { ...state.pendingApprovalCards };
+  for (const request of requests) {
+    if (request.kind === "tool-approval") cards[request.requestId] = card;
+  }
+  state.pendingApprovalCards = cards;
 }
 
 /**
@@ -291,7 +368,15 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.settled"(event, channel, _ctx) {
     const cards = channel.state.pendingApprovalCards ?? {};
     const card = cards[event.requestId];
-    if (card === undefined || channel.state.channelId === null) return;
+    if (card === undefined) return;
+    if (card.ephemeral === true) {
+      const next = { ...cards };
+      delete next[event.requestId];
+      channel.state.pendingApprovalCards = next;
+      return;
+    }
+    const messageChannelId = card.messageChannelId ?? channel.state.channelId;
+    if (messageChannelId === null) return;
     const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
     const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
     const blocks = card.messageBlocks.flatMap((block) => {
@@ -310,7 +395,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     });
     await channel.slack.request("chat.update", {
       blocks,
-      channel: channel.state.channelId,
+      channel: messageChannelId,
       text: `Answered: ${answerLabel}`,
       ts: card.messageTs,
     });

@@ -58,6 +58,13 @@ export const HITL_FREEFORM_MODAL_BLOCK_ID = "eve_freeform_block";
  */
 export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
 
+const HITL_ROUTE_PREFIX = `${HITL_ACTION_PREFIX}route:`;
+
+export interface SlackHitlRoute {
+  readonly channelId: string;
+  readonly threadTs: string;
+}
+
 /**
  * Maximum radio-button option count before the renderer falls back to
  * a `static_select` dropdown. Matches Slack's UX guidance (radio
@@ -104,7 +111,8 @@ interface DerivedHitlResponse {
 export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse | null {
   if (!action.actionId.startsWith(HITL_ACTION_PREFIX)) return null;
 
-  const encodedRequest = action.actionId.slice(HITL_ACTION_PREFIX.length);
+  const actionId = unwrapRoutedHitlActionId(action.actionId).actionId;
+  const encodedRequest = actionId.slice(HITL_ACTION_PREFIX.length);
 
   if (action.selectedOptionValue !== undefined) {
     const { kind, requestId } = splitEncodedRequest(encodedRequest);
@@ -151,6 +159,62 @@ function splitEncodedRequest(value: string): {
  */
 export function isHitlAction(actionId: string): boolean {
   return actionId.startsWith(HITL_ACTION_PREFIX);
+}
+
+/** Reads an original session route embedded in a privately delivered HITL card. */
+export function hitlRouteFromActionId(actionId: string): SlackHitlRoute | undefined {
+  return unwrapRoutedHitlActionId(actionId).route;
+}
+
+/** Embeds the original session route into every interactive action in a Block Kit tree. */
+export function routeHitlBlocks(
+  blocks: readonly unknown[],
+  route: SlackHitlRoute,
+): readonly unknown[] {
+  return rewriteActionIds(blocks, (actionId) =>
+    actionId.startsWith(HITL_ACTION_PREFIX)
+      ? `${HITL_ROUTE_PREFIX}${route.channelId}:${route.threadTs}:${actionId.slice(HITL_ACTION_PREFIX.length)}`
+      : actionId,
+  );
+}
+
+function unwrapRoutedHitlActionId(actionId: string): {
+  readonly actionId: string;
+  readonly route?: SlackHitlRoute;
+} {
+  if (!actionId.startsWith(HITL_ROUTE_PREFIX)) return { actionId };
+  const encoded = actionId.slice(HITL_ROUTE_PREFIX.length);
+  const first = encoded.indexOf(":");
+  const second = encoded.indexOf(":", first + 1);
+  if (first <= 0 || second <= first + 1) return { actionId };
+  return {
+    actionId: `${HITL_ACTION_PREFIX}${encoded.slice(second + 1)}`,
+    route: {
+      channelId: encoded.slice(0, first),
+      threadTs: encoded.slice(first + 1, second),
+    },
+  };
+}
+
+function rewriteActionIds(
+  value: readonly unknown[],
+  rewrite: (actionId: string) => string,
+): readonly unknown[] {
+  return value.map((entry) => {
+    if (Array.isArray(entry)) return rewriteActionIds(entry, rewrite);
+    if (typeof entry !== "object" || entry === null) return entry;
+    const record = entry as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(record).map(([key, child]) => [
+        key,
+        key === "action_id" && typeof child === "string"
+          ? rewrite(child)
+          : Array.isArray(child)
+            ? rewriteActionIds(child, rewrite)
+            : child,
+      ]),
+    );
+  });
 }
 
 /**

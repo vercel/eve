@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 function sessionContext(
@@ -20,14 +20,41 @@ function sessionContext(
 
 const sessionCtx = sessionContext();
 
+function approvalRequest(requestId = "approval-1") {
+  return {
+    action: {
+      callId: "call-1",
+      input: { answer: "private draft" },
+      kind: "tool-call" as const,
+      toolName: "review_answer",
+    },
+    allowFreeform: false,
+    display: "confirmation" as const,
+    kind: "tool-approval" as const,
+    options: [
+      { id: "approve", label: "Approve", style: "primary" as const },
+      { id: "cancel", label: "Cancel", style: "danger" as const },
+    ],
+    prompt: "Approve review_answer?",
+    requestId,
+  };
+}
+
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
-  const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
-  const post = vi.fn().mockResolvedValue({ id: "ts1" });
+  const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1", raw: { ok: true } });
+  const postDirectMessage = vi
+    .fn()
+    .mockResolvedValue({ id: "dm1", raw: { channel: "D123", ok: true } });
+  const post = vi.fn().mockResolvedValue({ id: "ts1", raw: { ok: true } });
   const startTyping = vi.fn().mockResolvedValue(undefined);
   const request = vi.fn().mockResolvedValue({ ok: true });
   const channel = {
-    thread: { postEphemeral, post, startTyping } as Partial<SlackEventContext["thread"]>,
-    slack: { channelId: "C123", request } as Partial<SlackEventContext["slack"]>,
+    thread: { postDirectMessage, postEphemeral, post, startTyping } as Partial<
+      SlackEventContext["thread"]
+    >,
+    slack: { channelId: "C123", request, threadTs: "111.222" } as Partial<
+      SlackEventContext["slack"]
+    >,
     state: {
       channelId: "C123",
       threadTs: "111.222",
@@ -35,7 +62,7 @@ function buildChannelStub(state: Partial<SlackChannelState> = {}) {
       ...state,
     },
   } as SlackEventContext;
-  return { channel, post, postEphemeral, request, startTyping };
+  return { channel, post, postDirectMessage, postEphemeral, request, startTyping };
 }
 
 function authRequiredEvent(
@@ -50,6 +77,84 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+describe("defaultInputRequestedHandler private tool approvals", () => {
+  it("delivers the preview and controls ephemerally to the current reviewer", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub();
+    const ctx = sessionContext({
+      attributes: { user_id: "U777" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U777",
+      principalType: "user",
+    });
+
+    await defaultInputRequestedHandler({ delivery: "ephemeral" })(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      ctx,
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postEphemeral).toHaveBeenCalledTimes(2);
+    expect(postEphemeral.mock.calls.every(([userId]) => userId === "U777")).toBe(true);
+    const rendered = JSON.stringify(postEphemeral.mock.calls);
+    expect(rendered).toContain("private draft");
+    expect(rendered).toContain("eve_input:route:C123:111.222:tool-approval:approval-1");
+  });
+
+  it("keeps nonmatching approvals in the public thread", async () => {
+    const { channel, post, postDirectMessage } = buildChannelStub();
+
+    await defaultInputRequestedHandler({
+      delivery: "direct-message",
+      when: () => false,
+    })(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalled();
+    expect(postDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an authored reviewer resolver returns null", async () => {
+    const { channel, post, postDirectMessage, postEphemeral } = buildChannelStub({
+      triggeringUserId: "U_TRIGGER",
+    });
+
+    await defaultInputRequestedHandler({
+      delivery: "direct-message",
+      reviewer: () => null,
+    })(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postDirectMessage).not.toHaveBeenCalled();
+    expect(postEphemeral).not.toHaveBeenCalled();
+  });
+
+  it("delivers a routed approval card in a reviewer DM", async () => {
+    const { channel, post, postDirectMessage } = buildChannelStub();
+
+    await defaultInputRequestedHandler({
+      delivery: "direct-message",
+      reviewer: () => "U_REVIEWER",
+    })(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postDirectMessage).toHaveBeenCalledTimes(2);
+    expect(postDirectMessage.mock.calls.every(([userId]) => userId === "U_REVIEWER")).toBe(true);
+    expect(channel.state.pendingApprovalCards?.["approval-1"]?.messageChannelId).toBe("D123");
+  });
+});
 
 describe("defaultEvents approval lifecycle", () => {
   it("sends candidate progress privately", async () => {

@@ -16,7 +16,12 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse, StrictInputResponses, ValidatedInputResponse } from "#shared/input.js";
+import type {
+  InputRequest,
+  InputResponse,
+  StrictInputResponses,
+  ValidatedInputResponse,
+} from "#shared/input.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -189,8 +194,12 @@ type SlackSessionFailedHandler = (
  * `JSON.stringify` / `JSON.parse`.
  */
 export interface SlackPendingApprovalCard {
+  /** Channel containing the approval card; differs from the session channel for DM delivery. */
+  readonly messageChannelId?: string;
   readonly messageBlocks: readonly unknown[];
   readonly messageTs: string;
+  /** Ephemeral cards cannot be updated with `chat.update`. */
+  readonly ephemeral?: boolean;
 }
 
 export interface SlackChannelState {
@@ -607,6 +616,21 @@ export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
+  /**
+   * Delivers tool-approval previews and controls only to one Slack reviewer.
+   * Questions and session-limit prompts retain the normal thread rendering.
+   */
+  readonly privateToolApprovals?: {
+    readonly delivery: "direct-message" | "ephemeral";
+    /** Limits private delivery to matching approvals. Defaults to every tool approval. */
+    readonly when?: (request: InputRequest, ctx: SessionContext) => boolean | Promise<boolean>;
+    /** Defaults to the Slack user who triggered the active turn. */
+    readonly reviewer?: (
+      request: InputRequest,
+      ctx: SessionContext,
+    ) => string | null | Promise<string | null>;
+  };
+
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
     readonly renderers: readonly SlackActivityRenderer[];
@@ -876,7 +900,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     "reasoning.appended": reasoningHandler,
     "actions.requested": actionsHandler,
     "message.completed": messageCompletedHandler,
-    "input.requested": config.events?.["input.requested"] ?? defaultInputRequestedHandler(),
+    "input.requested":
+      config.events?.["input.requested"] ??
+      defaultInputRequestedHandler(config.privateToolApprovals),
     "authorization.required":
       authorizationRequiredOverride === undefined
         ? defaultEvents["authorization.required"]
