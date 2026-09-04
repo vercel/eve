@@ -1098,7 +1098,6 @@ describe("dispatchDynamicToolEvent", () => {
     expect(tool?.execution).toBe("background");
     const task: TaskExec = {
       binding: { taskId: "task-1", token: "token-1" },
-      delegated: vi.fn(),
       postMessage: (message) => ({ kind: "eve:task-message", message }),
       send: vi.fn(),
       session: {} as TaskExec["session"],

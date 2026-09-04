@@ -40,12 +40,6 @@ export type TaskSendCommand =
   | { readonly kind: "fail"; readonly data: JsonValue }
   | { readonly kind: "cancel" };
 
-/** @deprecated Use workflow-backed background tools with yield descriptors. */
-export interface TaskDelegated<TData extends JsonObject = JsonObject> {
-  readonly kind: "eve:task-delegated";
-  readonly executor: TaskExecutorBinding;
-  readonly receipt: TData & TaskReceipt;
-}
 /** Fixed acknowledgement returned when a background task is admitted. */
 export interface TaskReceipt {
   readonly status: "working";
@@ -60,11 +54,6 @@ export interface TaskExec {
   postMessage(message: string): TaskMessage;
   /** @deprecated Use yields from a workflow-backed background tool. */
   readonly binding: TaskBinding;
-  /** @deprecated Use yields from a workflow-backed background tool. */
-  delegated<TData extends JsonObject>(input: {
-    readonly executor: TaskExecutorBinding;
-    readonly receipt: TData;
-  }): TaskDelegated<TData>;
   /** @deprecated Use yields from a workflow-backed background tool. */
   readonly send: (command: TaskSendCommand) => Promise<void>;
   /** @deprecated Use ctx.session. */

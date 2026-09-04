@@ -146,14 +146,12 @@ function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {
   if (input.taskId === undefined) {
     throw new Error(`Background workflow tool "${input.toolName}" has no task id.`);
   }
-  const removed = (): never => {
-    throw new Error("task.delegated() and task.send() were replaced by yielded task descriptors.");
-  };
   return {
     binding: { taskId: input.taskId, token: input.taskId },
-    delegated: removed,
     postMessage: createTaskMessage,
-    send: removed,
+    send() {
+      throw new Error("task.send() was replaced by yielded task descriptors.");
+    },
     session: undefined as never,
     task: undefined as never,
     taskId: input.taskId,

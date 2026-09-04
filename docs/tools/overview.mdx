@@ -71,6 +71,9 @@ yield task.postMessage("The export needs review."); // one new parent turn
 For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
 return value is available through the completed task's output.
 
+`task.delegated()` has been removed. Move external work into a `"use workflow"` body and
+return its result when it finishes. Rebuild extensions using the removed API after migrating.
+
 `postMessage` is the only yield that wakes the parent agent. Keep values needed by the body
 in local variables; workflow replay reconstructs them across durable waits.
 Use [`ask`](/docs/tools/workflows#ask-a-human-ask) when the body needs an answer from the human.

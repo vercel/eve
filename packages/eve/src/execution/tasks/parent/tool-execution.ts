@@ -267,16 +267,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const task = started.task;
     record.task = task;
 
-    const removed = (): never => {
-      throw new Error(
-        "task.delegated() and task.send() were replaced by yielded task descriptors.",
-      );
-    };
     const taskExec: TaskExec = {
       binding: { taskId: task.taskId, token: task.taskInboxToken },
-      delegated: removed,
       postMessage: createTaskMessage,
-      send: removed,
+      send() {
+        throw new Error("task.send() was replaced by yielded task descriptors.");
+      },
       session: this.initialSession,
       task,
       taskId: task.taskId,

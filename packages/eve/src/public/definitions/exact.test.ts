@@ -100,6 +100,7 @@ describe("definition helper exact inputs", () => {
       async *execute(input, _ctx, task) {
         expectTypeOf(task).toEqualTypeOf<TaskExec>();
         expectTypeOf(task.taskId).toEqualTypeOf<string>();
+        expectTypeOf(task).not.toHaveProperty("delegated");
         yield { jobId: input.jobId };
         return { jobId: input.jobId };
       },
