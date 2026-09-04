@@ -25,7 +25,7 @@ interface GateResult {
 
 export default defineEval({
   description:
-    "Published sessions retain pending work and their stream while later turns execute upgraded and rolled-back agent code.",
+    "Published sessions retain their executable and pending work while new sessions follow code upgrades and rollback.",
   tags: ["redeploy"],
   timeoutMs: 30 * 60_000,
 
@@ -81,17 +81,22 @@ export default defineEval({
       await writeMarker(NEW_MARKER);
       await fixture.deploy(fixture.currentPackage, "inbox-upgrade-checkout");
 
-      const upgraded = await followCodeDeployment(t, idle, "next", NEW_MARKER, [oldExecution]);
+      const { session: fresh, execution: newExecution } = await createSessionOnDeployment(
+        t,
+        sessions,
+        NEW_MARKER,
+        oldExecution,
+      );
+      const upgraded = await followRetainedDeployment(t, idle, "next", oldExecution);
       const next = upgraded.turn;
-      const newExecution = upgraded.execution;
       await t.require(
-        { sessionId: next.sessionId, execution: newExecution },
+        { sessionId: next.sessionId, execution: upgraded.execution },
         satisfies(
           (value: { sessionId: string; execution: Execution }) =>
             value.sessionId === sessionId &&
-            value.execution.deploymentId !== oldExecution.deploymentId &&
+            value.execution.deploymentId === oldExecution.deploymentId &&
             value.execution.runId !== sessionId,
-          "the published parent starts a child turn on the accepting deployment and retains its session ID",
+          "the published parent retains its session ID and executes on its original deployment through a child",
         ),
       );
       let replayIndex = streamIndex;
@@ -100,7 +105,7 @@ export default defineEval({
         const replayed = await replay.result();
         replayed.expectOk();
         replayed.event("turn.completed", { count: 1 });
-        if (attempt === upgraded.attempts - 1) replayed.messageIncludes(NEW_MARKER);
+        if (attempt === upgraded.attempts - 1) replayed.messageIncludes(OLD_MARKER);
         replayIndex = requireStreamIndex(replay.session);
       }
 
@@ -114,10 +119,21 @@ export default defineEval({
         "blocking",
         blockingExecution,
       );
-      const afterAnswer = await followCodeDeployment(t, blocking, "afteranswer", NEW_MARKER, [
-        oldExecution,
+      await followRetainedDeployment(t, blocking, "afteranswer", oldExecution);
+      await blocking.send("UPGRADE-gate-retained");
+      const retainedRequest = blocking.requireInputRequest({ toolName: "upgrade_gate" });
+      const retainedExecution = readRequestedExecution(retainedRequest.prompt);
+      await requireExecution(t, retainedExecution, OLD_MARKER, oldExecution.deploymentId);
+      const retainedAnswer = await blocking.respond([
+        { requestId: retainedRequest.requestId, optionId: "continue" },
       ]);
-      await requireExecution(t, afterAnswer.execution, NEW_MARKER, newExecution.deploymentId);
+      retainedAnswer.expectOk();
+      await requireGateResult(
+        t,
+        retainedAnswer.requireToolCall("upgrade_gate").output,
+        "retained",
+        retainedExecution,
+      );
 
       const cancellation = await cancellable.cancel();
       await t.require(
@@ -128,10 +144,12 @@ export default defineEval({
         ),
       );
       // The parked turn already emitted its boundary; cancellation must not invent another.
-      const afterCancel = await followCodeDeployment(t, cancellable, "aftercancel", NEW_MARKER, [
+      const afterCancel = await followRetainedDeployment(
+        t,
+        cancellable,
+        "aftercancel",
         oldExecution,
-      ]);
-      await requireExecution(t, afterCancel.execution, NEW_MARKER, newExecution.deploymentId);
+      );
       afterCancel.turn.notEvent("turn.cancelled");
       afterCancel.turn.notEvent("input.requested");
 
@@ -144,38 +162,36 @@ export default defineEval({
         receipt.taskId,
         backgroundExecution,
       );
-      let backgroundFollowupError: Error | undefined;
-      try {
-        const afterTask = await followCodeDeployment(
-          t,
-          completedBackground,
-          "aftertask",
-          NEW_MARKER,
-          [oldExecution],
-        );
-        await requireExecution(t, afterTask.execution, NEW_MARKER, newExecution.deploymentId);
-      } catch (error) {
-        if (t.signal.aborted) throw error;
-        // Preserve this failure while collecting evidence from the independent rollback cohorts.
-        backgroundFollowupError = error instanceof Error ? error : new Error(String(error));
-        t.log(`Background follow-up failed: ${backgroundFollowupError.message}`);
-      }
-
-      const fresh = await createSessionOnDeployment(t, sessions, newExecution, oldExecution);
+      await followRetainedDeployment(t, completedBackground, "aftertask", oldExecution);
+      const newTask = await completedBackground.send("UPGRADE-task-afterupgrade");
+      newTask.expectOk();
+      const newReceipt = parseOutput(newTask.requireToolCall("upgrade_task").output) as {
+        taskId: string;
+      };
+      const newPending = await waitForTaskRequest(t, completedBackground);
+      const newRequest = newPending.requireInputRequest({ toolName: "upgrade_task" });
+      const newTaskExecution = readRequestedExecution(newRequest.prompt);
+      await requireExecution(t, newTaskExecution, OLD_MARKER, oldExecution.deploymentId);
+      await newPending.respond([{ requestId: newRequest.requestId, optionId: "continue" }]);
+      const newCompleted = await requireTaskCompletion(
+        t,
+        newPending,
+        newReceipt.taskId,
+        newTaskExecution,
+        "afterupgrade",
+      );
+      await followRetainedDeployment(t, newCompleted, "afternewtask", oldExecution);
 
       // Roll back authored code while retaining the current runtime.
       await writeMarker(OLD_MARKER);
       await fixture.deploy(fixture.currentPackage, "inbox-upgrade-code-rollback");
-      let rollbackDeploymentId: string | undefined;
-      for (const session of [idle, fresh]) {
-        const rollback = await followCodeDeployment(t, session, "rollback", OLD_MARKER, [
-          oldExecution,
-          newExecution,
-        ]);
-        rollbackDeploymentId ??= rollback.execution.deploymentId;
-        await requireExecution(t, rollback.execution, OLD_MARKER, rollbackDeploymentId);
-      }
-      if (backgroundFollowupError !== undefined) throw backgroundFollowupError;
+      const rollback = await followCodeDeployment(t, fresh, "rollback", OLD_MARKER, [
+        oldExecution,
+        newExecution,
+      ]);
+      await requireExecution(t, rollback.execution, OLD_MARKER);
+      await followRetainedDeployment(t, idle, "rollback", oldExecution);
+      await followRetainedDeployment(t, newCompleted, "taskrollback", oldExecution);
     } finally {
       // These isolated fixture sessions have finished the probe; retire their durable resources.
       for (const session of sessions) {
@@ -243,17 +259,17 @@ async function followCodeDeployment(
 async function createSessionOnDeployment(
   t: EveEvalContext,
   sessions: EveEvalSession[],
-  expected: Execution,
+  marker: string,
   previous: Execution,
-): Promise<EveEvalSession> {
+) {
   const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60_000)]);
   for (let attempt = 0; attempt < 10; attempt++) {
     const session = t.newSession();
     sessions.push(session);
     const first = await session.send("UPGRADE-read-fresh", { signal });
     const execution = readExecution(first);
-    if (execution.deploymentId === expected.deploymentId) {
-      await requireExecution(t, execution, expected.marker, expected.deploymentId);
+    if (execution.deploymentId !== previous.deploymentId) {
+      await requireExecution(t, execution, marker);
       await t.require(
         execution.runId === first.sessionId,
         satisfies(
@@ -261,7 +277,7 @@ async function createSessionOnDeployment(
           "the fresh cohort starts its parent on the new deployment",
         ),
       );
-      return session;
+      return { session, execution };
     }
     await requireExecution(t, execution, previous.marker, previous.deploymentId);
     t.log(
@@ -270,6 +286,31 @@ async function createSessionOnDeployment(
     await t.sleep(1_000);
   }
   throw new Error("Alias did not create a session on the new deployment within ten attempts.");
+}
+
+async function followRetainedDeployment(
+  t: EveEvalContext,
+  session: EveEvalSession,
+  key: string,
+  expected: Execution,
+) {
+  const sessionId = session.sessionId;
+  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60_000)]);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const turn = await session.send(`UPGRADE-read-${key}${attempt}`, { signal });
+    const execution = readExecution(turn);
+    await requireExecution(t, execution, expected.marker, expected.deploymentId);
+    await t.require(
+      turn.sessionId === sessionId,
+      satisfies((same: boolean) => same, "retained execution preserves the session ID"),
+    );
+    // Old ingress runs this ordinary read inline in the original session.
+    // A child on the old deployment proves the new ingress caused a retained dispatch.
+    if (execution.runId !== sessionId) return { turn, execution, attempts: attempt + 1 };
+    t.log(`${key}: old ingress still executed inline; waiting for a retained child`);
+    await t.sleep(1_000);
+  }
+  throw new Error("Alias did not exercise retained child execution within ten read-only turns.");
 }
 
 function requireStreamIndex(session: EveEvalSession): number {
@@ -376,6 +417,7 @@ async function requireTaskCompletion(
   initial: EveEvalSession,
   taskId: string,
   expected: Execution,
+  key = "background",
 ) {
   let session = initial;
   for (let turn = 0; turn < 6; turn++) {
@@ -385,7 +427,7 @@ async function requireTaskCompletion(
       if (!message.includes(`Background task ${taskId} (upgrade_task) is completed.`)) continue;
       const start = message.indexOf("{");
       if (start === -1) throw new Error("Completed task notification has no result.");
-      await requireGateResult(t, JSON.parse(message.slice(start)), "background", expected);
+      await requireGateResult(t, JSON.parse(message.slice(start)), key, expected);
       return session;
     }
     const live = t.target.watchTurn(session.sessionId!, {

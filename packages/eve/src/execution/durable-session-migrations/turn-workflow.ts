@@ -27,6 +27,9 @@ import { turnWorkflowInputV1ToV2 } from "./turn-workflow-v1-to-v2.js";
 
 export const TURN_WORKFLOW_INPUT_VERSION = 2;
 
+/** Includes nested session state and the state returned to the pinned parent. */
+export const TURN_STATE_CONTRACT_VERSION = 1;
+
 /** Trusted runtime-action results collected by the parent turn driver. */
 interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
@@ -59,6 +62,7 @@ interface TurnWorkflowInputBase {
   readonly driverCapabilities?: {
     readonly turnInbox?: true;
     readonly cancelledTurnSettle?: true;
+    readonly stateContractVersion?: number;
   };
   readonly mode: RunMode;
   readonly stepInput: TurnStepInput;
@@ -108,7 +112,11 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
   return {
     capabilities: input.capabilities,
     completionToken: input.completionToken,
-    driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+    driverCapabilities: {
+      cancelledTurnSettle: true,
+      stateContractVersion: TURN_STATE_CONTRACT_VERSION,
+      turnInbox: true,
+    },
     initialCancellation: input.initialCancellation,
     initialStep: input.initialStep,
     mode: input.mode,

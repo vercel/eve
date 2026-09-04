@@ -710,6 +710,37 @@ generation scenarios cover live reload; their crash/restart case is skipped
 pending abortable local queue delivery, so they do not establish a production
 package-upgrade path.
 
+### First compatibility implementation
+
+The first implementation takes the retained-executable option. New parents stamp
+`driverCapabilities.stateContractVersion: 1`, independently of the outer
+turn-input version. The value covers both nested session state and the state
+returned to the parent; incompatible changes must advance it. A missing or
+nonmatching contract on Vercel resolves the session parent's original deployment
+before the child claims hooks or executes agent code. If the child is already
+on that deployment, it executes there; otherwise it forwards the exact original
+input to the retained `turnWorkflow` entry. That child continues using the same
+parent stream, reply, cancellation, and pending-work contracts. New sessions with
+matching contracts retain ordinary accepting-deployment code upgrades.
+
+This deliberately pins pre-boundary sessions to original agent code, including
+task-free sessions: absence of task state does not prove that the next turn will
+not create incompatible state. There is no state rewrite or automatic conversion.
+The forwarding run does not own or proxy the old child's hooks. Its prepare step
+persists the target and a World-generated run ID before the start step; retries
+of that start reuse the ID, including after child completion and hook disposal.
+The Workflow integration test injects a lost queue acknowledgement and retries
+again after completion. Parent dispatch deduplication across separately created
+forwarding runs remains part of the broader start-idempotency release gate.
+
+The published-consumer probe now requires the formerly failing task-owning
+session to accept its next message on retained code, then admit, answer, and
+finish another background task. It also starts new blocking work after upgrade,
+verifies current code for fresh sessions, and checks both cohorts through
+agent-code rollback. Hosted results for this implementation are pending.
+Self-hosted retained-generation routing and full runtime downgrade remain
+unimplemented release gates.
+
 ### Refactor release gates
 
 Start with these counterexamples before wiring the full runtime. Record the
