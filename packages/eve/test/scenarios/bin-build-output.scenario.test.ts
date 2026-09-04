@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
@@ -180,6 +181,8 @@ async function runEveBuild(appRoot: string): Promise<ProcessResult> {
 }
 
 describe("eve build process output", () => {
+  const scenarioApp = useScenarioApp();
+
   it("prints successful build output to stdout", async () => {
     const appRoot = await createTemporaryAppRoot({
       prefix: "eve-bin-build-output-success-",
@@ -194,8 +197,13 @@ describe("eve build process output", () => {
   }, 120_000);
 
   it("bundles authored workflow tools into the server and driver output", async () => {
-    const appRoot = await createTemporaryAppRoot({
-      prefix: "eve-bin-build-output-workflow-tool-",
+    const { appRoot } = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "You are a precise assistant.",
+      },
+      installDependencies: true,
+      name: "bin-build-output-workflow-tool",
     });
     await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
     await mkdir(join(appRoot, "agent", "lib"), { recursive: true });
@@ -214,10 +222,11 @@ describe("eve build process output", () => {
     await writeFile(
       join(appRoot, "agent", "tools", "deploy_service.mjs"),
       [
+        'import { defineWorkflowTool } from "eve/tools";',
         'import { sleep } from "workflow";',
         'import { hashPlan } from "../lib/plan.mjs";',
         "",
-        "export default {",
+        "export default defineWorkflowTool({",
         '  description: "Deploy a service.",',
         '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
         "  async execute({ service }) {",
@@ -226,7 +235,7 @@ describe("eve build process output", () => {
         '    await sleep("10ms");',
         "    return { digest };",
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
