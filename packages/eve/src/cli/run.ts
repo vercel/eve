@@ -137,7 +137,7 @@ export function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
   applicationContext: CliApplicationContext,
-  telemetry: Pick<EveCliTelemetry, "trackDevContext">,
+  telemetry: Pick<EveCliTelemetry, "trackDevContext" | "trackInitStage" | "trackOnboardingStage">,
 ): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
@@ -196,7 +196,9 @@ export function createCliProgram(
       }
 
       const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
-      await runExtensionInitCommand(logger, applicationContext.root, target);
+      await runExtensionInitCommand(logger, applicationContext.root, target, undefined, (stage) => {
+        telemetry.trackInitStage(stage);
+      });
     });
 
   extension
@@ -246,12 +248,21 @@ export function createCliProgram(
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, applicationContext.root, target, {
-          agents: options.agents,
-          channelWebNextjs: options.channelWebNextjs,
-          model: options.model,
-          reasoning: options.reasoning,
-        });
+        await runInitCommand(
+          logger,
+          applicationContext.root,
+          target,
+          {
+            agents: options.agents,
+            channelWebNextjs: options.channelWebNextjs,
+            model: options.model,
+            reasoning: options.reasoning,
+          },
+          undefined,
+          (stage) => {
+            telemetry.trackInitStage(stage);
+          },
+        );
       },
     );
 
@@ -417,6 +428,7 @@ export function createCliProgram(
             applicationRoot: applicationContext.root,
             existingLocalServer: existingLocalDevelopmentServer,
             lifecycle,
+            onOnboardingStage: telemetry.trackOnboardingStage,
             options,
             remoteTarget,
             runDevelopmentTui: runtime.runDevelopmentTui,
@@ -518,6 +530,7 @@ export function createCliProgram(
               applicationRoot: applicationContext.root,
               existingLocalServer: false,
               lifecycle,
+              onOnboardingStage: telemetry.trackOnboardingStage,
               options,
               report: onBootProgress,
               runDevelopmentTui: runtime.runDevelopmentTui,

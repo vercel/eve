@@ -12,11 +12,11 @@ eve collects usage data from its CLI to help improve its commands and developmen
 eve sends the following information to Vercel:
 
 - The eve version, operating system, CPU architecture, and whether stdin is a terminal.
-- The command you ran and whether it succeeded, had a usage error, or failed.
-- For `eve dev`, whether you connected to a local or remote agent and whether the UI was interactive or headless.
-- Random identifiers for the CLI session, your eve installation, and the project.
+- The command you ran and whether it succeeded, had a usage error, or failed. For `eve init` and `eve extension init`, eve also records the furthest stage reached: target resolution, scaffolding, dependency installation, Git initialization, or post-initialization handoff.
+- For `eve dev`, whether you connected to a local or remote agent and whether the UI was interactive or headless. For the internal `eve dev --onboard` handoff, eve also records the furthest onboarding stage: model or registry setup, including whether that phase completed, was cancelled, or errored.
+- Random identifiers for the CLI session, your eve installation, and the project, plus whether those identifiers are ephemeral or persistent.
 
-The project identifier lets eve group usage from the same project without sending its name or location. eve derives it from the Git remote when available, otherwise `REPOSITORY_URL` or the working directory, and transforms that value before sending it.
+The project identifier lets eve group usage from the same project without sending its name or location. eve derives it from the Git remote when available, otherwise `REPOSITORY_URL` or the working directory, and transforms that value before sending it. `identity_kind` is `persistent` when eve reads the identifiers from its local configuration and `ephemeral` when it creates fresh in-memory identifiers for that invocation.
 
 ## What eve does not collect
 
@@ -51,6 +51,6 @@ To disable telemetry for one command without changing the saved setting, set `EV
 EVE_TELEMETRY_DISABLED=1 eve dev
 ```
 
-On an interactive terminal, eve displays this information once before it collects telemetry. eve saves your preference in your platform user configuration directory. In CI and Docker environments, eve uses fresh in-memory identifiers for each invocation instead of saving them.
+On an interactive terminal, eve displays this information once before it collects telemetry. eve saves your preference in your platform user configuration directory. In CI and Docker environments, eve uses fresh in-memory identifiers for each invocation instead of saving them and reports `identity_kind` as `ephemeral`. This indicates eve's identifier behavior, not whether the invocation ran in a particular CI provider.
 
 Vercel handles CLI telemetry under the [Vercel Privacy Notice](https://vercel.com/legal/privacy-notice).

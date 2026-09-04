@@ -20,9 +20,21 @@ export type EveCliTelemetryEvent = {
   readonly value: string;
 };
 
+export type EveCliInitStage = "target" | "scaffold" | "install" | "git" | "post_init";
+export type EveCliOnboardingStage =
+  | "model"
+  | "model_cancelled"
+  | "model_error"
+  | "add"
+  | "add_cancelled"
+  | "add_error"
+  | "completed";
+
 export type EveCliTelemetry = {
   trackCommand(command: string): void;
   trackDevContext(context: { target: "local" | "remote"; ui: "tui" | "headless" }): void;
+  trackInitStage(stage: EveCliInitStage): void;
+  trackOnboardingStage(stage: EveCliOnboardingStage): void;
   trackOutcome(outcome: "success" | "usage_error" | "error"): void;
   notify(logger: { error(message: string): void }): Promise<void>;
   flush(): Promise<void>;
@@ -109,6 +121,8 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     event("stdin_is_tty", process.stdin.isTTY ? "true" : "false"),
   ];
   const sessionId = randomUUID();
+  let initStage: EveCliInitStage | undefined;
+  let onboardingStage: EveCliOnboardingStage | undefined;
 
   return {
     trackCommand(command) {
@@ -116,6 +130,12 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     },
     trackDevContext(context) {
       events.push(event("target", context.target), event("ui", context.ui));
+    },
+    trackInitStage(stage) {
+      initStage = stage;
+    },
+    trackOnboardingStage(stage) {
+      onboardingStage = stage;
     },
     trackOutcome(outcome) {
       events.push(event("outcome", outcome));
@@ -145,13 +165,17 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     async flush() {
       if (!(await isEnabled()) || events.length === 0) return;
       try {
-        const identity = isEphemeralEveTelemetryEnvironment()
+        const ephemeralIdentity = isEphemeralEveTelemetryEnvironment();
+        const identity = ephemeralIdentity
           ? createEveTelemetryIdentity()
           : await readOrCreateEveTelemetryIdentity();
         events.push(
+          event("identity_kind", ephemeralIdentity ? "ephemeral" : "persistent"),
           event("installation_id", identity.installationId),
           event("project_id", await resolveEveTelemetryProjectId({ identity })),
         );
+        if (initStage !== undefined) events.push(event("init_stage", initStage));
+        if (onboardingStage !== undefined) events.push(event("onboarding_stage", onboardingStage));
       } catch {
         return;
       }

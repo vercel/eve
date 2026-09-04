@@ -20,6 +20,7 @@ import {
   ClientSession,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
+import type { EveCliOnboardingStage } from "#cli/telemetry/index.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -451,6 +452,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   onboard?: boolean;
+  /** Reports the furthest stage reached by fresh-agent onboarding. */
+  onOnboardingStage?: (stage: EveCliOnboardingStage) => void;
   /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
@@ -508,6 +511,7 @@ export class EveTUIRunner {
   readonly #startup?: TuiStartup;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  readonly #onOnboardingStage?: (stage: EveCliOnboardingStage) => void;
   #initialOnboardingActive = false;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
@@ -623,6 +627,7 @@ export class EveTUIRunner {
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
+    this.#onOnboardingStage = options.onOnboardingStage;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -1791,23 +1796,34 @@ export class EveTUIRunner {
       trigger: "startup" as const,
     };
 
-    const modelOutcome = await this.#executeExtensionCommand(
-      { type: "extension", name: "model", argument: "" },
-      title,
-      {
-        ...journey,
-        suppressSuccessfulTranscript: true,
-        initialModelStep: "provider",
-        setupFlowNavigation: this.#onboardingNavigation(0),
-      },
-    );
+    this.#onOnboardingStage?.("model");
+    let modelOutcome: PromptCommandOutcome | undefined;
+    try {
+      modelOutcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "model", argument: "" },
+        title,
+        {
+          ...journey,
+          suppressSuccessfulTranscript: true,
+          initialModelStep: "provider",
+          setupFlowNavigation: this.#onboardingNavigation(0),
+        },
+      );
+    } catch (error) {
+      this.#onOnboardingStage?.("model_error");
+      throw error;
+    }
     if (modelOutcome?.tone === "error" || modelOutcome?.cancelled === true) {
+      this.#onOnboardingStage?.(
+        modelOutcome.cancelled === true ? "model_cancelled" : "model_error",
+      );
       this.#renderer.setupFlow?.end({ preserveDiagnostics: modelOutcome.tone === "error" });
       return;
     }
 
     let addOutcome: PromptCommandOutcome | undefined;
     try {
+      this.#onOnboardingStage?.("add");
       addOutcome = await this.#executeExtensionCommand(
         { type: "extension", name: "add", argument: "" },
         title,
@@ -1821,7 +1837,19 @@ export class EveTUIRunner {
           },
         },
       );
+    } catch (error) {
+      this.#onOnboardingStage?.("add_error");
+      throw error;
     } finally {
+      if (addOutcome !== undefined) {
+        this.#onOnboardingStage?.(
+          addOutcome.cancelled === true
+            ? "add_cancelled"
+            : addOutcome.tone === "error"
+              ? "add_error"
+              : "completed",
+        );
+      }
       // `/add` is the final onboarding phase. Release the shared panel so the
       // ordinary chat prompt can own input, retaining deploy/setup evidence on failure.
       this.#renderer.setupFlow?.end({ preserveDiagnostics: addOutcome?.tone === "error" });

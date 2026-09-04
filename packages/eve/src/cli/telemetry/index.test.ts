@@ -135,6 +135,9 @@ describe("createEveCliTelemetry", () => {
     expect(events).toContainEqual(expect.objectContaining({ key: "target", value: "remote" }));
     expect(events).toContainEqual(expect.objectContaining({ key: "ui", value: "headless" }));
     expect(events).toContainEqual(
+      expect.objectContaining({ key: "identity_kind", value: "persistent" }),
+    );
+    expect(events).toContainEqual(
       expect.objectContaining({ key: "installation_id", value: "installation_123" }),
     );
     expect(events).toContainEqual(
@@ -143,6 +146,48 @@ describe("createEveCliTelemetry", () => {
     expect(resolveEveTelemetryProjectId).toHaveBeenCalledWith({
       identity: { installationId: "installation_123", projectSalt: "project_salt_123" },
     });
+  });
+
+  it("records the furthest init stage without error details", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("init");
+    telemetry.trackInitStage("target");
+    telemetry.trackInitStage("install");
+
+    await telemetry.flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(expect.objectContaining({ key: "init_stage", value: "install" }));
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ key: "init_stage", value: "target" }),
+    );
+  });
+
+  it("records the final onboarding stage without user selections", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("dev");
+    telemetry.trackOnboardingStage("model");
+    telemetry.trackOnboardingStage("add_error");
+
+    await telemetry.flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "onboarding_stage", value: "add_error" }),
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ key: "onboarding_stage", value: "model" }),
+    );
   });
 
   it("skips telemetry when identity initialization fails", async () => {
@@ -168,7 +213,15 @@ describe("createEveCliTelemetry", () => {
 
     expect(readOrCreateEveTelemetryIdentity).not.toHaveBeenCalled();
     expect(createEveTelemetryIdentity).toHaveBeenCalledOnce();
-    expect(String(write.mock.calls[0]?.[0])).toContain("ephemeral_installation_123");
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "identity_kind", value: "ephemeral" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "installation_id", value: "ephemeral_installation_123" }),
+    );
   });
 
   it("flushes an allowlisted outcome through a telemetry-disabled child process", async () => {

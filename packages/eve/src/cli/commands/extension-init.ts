@@ -39,6 +39,8 @@ export interface ExtensionInitCliLogger {
   log(message: string): void;
 }
 
+export type ExtensionInitStage = "target" | "scaffold" | "install" | "git" | "post_init";
+
 export interface ExtensionInitCommandDependencies {
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
@@ -221,7 +223,9 @@ export async function runExtensionInitCommand(
   parentDirectory: string,
   target: string | undefined,
   dependencies: ExtensionInitCommandDependencies = defaultDependencies,
+  trackStage?: (stage: ExtensionInitStage) => void,
 ): Promise<void> {
+  trackStage?.("target");
   // Coding agent with no target: print a setup guide, same gate as agent init.
   if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
     logger.log(initExtensionInstructions());
@@ -256,6 +260,7 @@ export async function runExtensionInitCommand(
       );
     }
 
+    trackStage?.("scaffold");
     progress.update("Creating extension");
     initLog.debug("creating extension");
     const agentStartedAt = dependencies.now();
@@ -279,6 +284,7 @@ export async function runExtensionInitCommand(
     agentElapsedMs = dependencies.now() - agentStartedAt;
     initLog.debug("creating extension done", { ms: agentElapsedMs });
 
+    trackStage?.("install");
     progress.update("Installing dependencies", `${packageManager} install`);
     initLog.debug(`installing dependencies with ${packageManager}`);
     const installStartedAt = dependencies.now();
@@ -316,6 +322,7 @@ export async function runExtensionInitCommand(
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
+    trackStage?.("git");
     progress.update("Initializing Git repository");
     initLog.debug("initializing git repository");
     gitResult = await dependencies.tryInitializeGit(projectPath);
@@ -323,6 +330,7 @@ export async function runExtensionInitCommand(
     progress.stop();
   }
 
+  trackStage?.("post_init");
   logger.log(
     `${pc.green("✓")} Created an ${EVE_WORDMARK} extension in ${pc.bold(projectPath!)} ${pc.dim(`in ${formatElapsed(agentElapsedMs!)}`)}`,
   );
