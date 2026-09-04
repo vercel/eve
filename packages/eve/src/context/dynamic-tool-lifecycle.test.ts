@@ -1,5 +1,6 @@
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z as z3 } from "zod/v3";
 
 import { z } from "#compiled/zod/index.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
@@ -9,6 +10,7 @@ import {
   type OldSourceOffsetDynamicToolMetadata,
   type OldStepFunctionDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
+import { clearDynamicToolSchemas } from "#context/dynamic-tool-schema-replay.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -386,6 +388,7 @@ const dynamicCallbackRegistry = getDynamicCallbackRegistry();
 function simulateColdStart(ctx: ContextContainer): void {
   for (const metadata of ctx.get(SessionDynamicToolMetadataKey) ?? []) {
     dynamicCallbackRegistry.delete(metadata.name);
+    clearDynamicToolSchemas(metadata);
   }
   ctx.clearVirtualContext();
 }
@@ -1163,6 +1166,190 @@ describe("dispatchDynamicToolEvent", () => {
       input: {},
       toolName: "query",
     });
+  });
+
+  it("preserves live input transformations when replaying a session tool", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => {
+      const entry = defineTool({
+        description: "normalize input",
+        inputSchema: z.strictObject({
+          value: z.string().trim().min(1).optional(),
+        }),
+        execute: async () => ({ ok: true }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: () => ({ ok: true }), closure: {} },
+      });
+      return { normalize: entry };
+    });
+    const resolver = createResolver("normalizer", ["session.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+    simulateColdStart(ctx);
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    const [tool] = buildDynamicTools(ctx);
+    const validate = asSchema(tool!.inputSchema).validate;
+    await expect(validate?.({ value: " " })).resolves.toMatchObject({ success: false });
+    await expect(validate?.({ value: "  kept  " })).resolves.toEqual({
+      success: true,
+      value: { value: "kept" },
+    });
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("upgrades pre-fix metadata to live schema replay during a cold rebind", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => {
+      const entry = defineTool({
+        description: "normalize legacy metadata",
+        inputSchema: z.strictObject({ value: z.string().trim().min(1) }),
+        execute: async () => ({ ok: true }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: () => ({ ok: true }), closure: {} },
+      });
+      return { normalize_pre_fix: entry };
+    });
+    const resolver = createResolver("pre-fix", ["session.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    const [current] = ctx.get(SessionDynamicToolMetadataKey)!;
+    const { inputSchemaIsLive: _live, ...preFixMetadata } = current!;
+    ctx.set(SessionDynamicToolMetadataKey, [preFixMetadata]);
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+    dynamicCallbackRegistry.delete(preFixMetadata.name);
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    const [tool] = buildDynamicTools(ctx);
+    const validate = asSchema(tool!.inputSchema).validate;
+    await expect(validate?.({ value: " " })).resolves.toMatchObject({ success: false });
+    await expect(validate?.({ value: "  kept  " })).resolves.toEqual({
+      success: true,
+      value: { value: "kept" },
+    });
+    expect(ctx.get(SessionDynamicToolMetadataKey)?.[0]?.inputSchemaIsLive).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves Zod 3 input transformations during replay", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("zod-three", ["session.started"], () => {
+      const entry = defineTool({
+        description: "normalize legacy input",
+        inputSchema: z3.object({ value: z3.string().trim().min(1) }),
+        execute: async () => ({ ok: true }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: () => ({ ok: true }), closure: {} },
+      });
+      return { normalize_legacy: entry };
+    });
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    const [tool] = buildDynamicTools(ctx);
+    const validate = asSchema(tool!.inputSchema).validate;
+    await expect(validate?.({ value: " " })).resolves.toMatchObject({ success: false });
+    await expect(validate?.({ value: "  kept  " })).resolves.toEqual({
+      success: true,
+      value: { value: "kept" },
+    });
+  });
+
+  it("keeps same-named live schemas isolated across sessions", async () => {
+    const createNormalizer = (minimum: number) => {
+      const entry = defineTool({
+        description: "normalize isolated input",
+        inputSchema: z.strictObject({ value: z.string().trim().min(minimum) }),
+        execute: async () => ({ ok: true }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: () => ({ ok: true }), closure: {} },
+      });
+      return { normalize_isolated: entry };
+    };
+    const shortCtx = createCtx();
+    const longCtx = createCtx();
+
+    await dispatchDynamicToolEvent({
+      ctx: shortCtx,
+      resolvers: [createResolver("short", ["session.started"], () => createNormalizer(2))],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    await dispatchDynamicToolEvent({
+      ctx: longCtx,
+      resolvers: [createResolver("long", ["session.started"], () => createNormalizer(4))],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    const shortValidate = asSchema(buildDynamicTools(shortCtx)[0]!.inputSchema).validate;
+    const longValidate = asSchema(buildDynamicTools(longCtx)[0]!.inputSchema).validate;
+    await expect(shortValidate?.({ value: " abc " })).resolves.toEqual({
+      success: true,
+      value: { value: "abc" },
+    });
+    await expect(longValidate?.({ value: " abc " })).resolves.toMatchObject({ success: false });
+  });
+
+  it("fails closed when a live schema has not been rebound", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("unbound", ["session.started"], () => {
+      const entry = defineTool({
+        description: "require live validation",
+        inputSchema: z.strictObject({ value: z.string().trim() }),
+        execute: async () => ({ ok: true }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: () => ({ ok: true }), closure: {} },
+      });
+      return { require_live_schema: entry };
+    });
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    const [metadata] = ctx.get(SessionDynamicToolMetadataKey)!;
+    clearDynamicToolSchemas(metadata!);
+
+    expect(() => buildDynamicTools(ctx)).toThrow(
+      'Dynamic tool "require_live_schema" cannot replay its live input schema',
+    );
   });
 
   it("provides inline auth to a replayed session-scoped tool", async () => {

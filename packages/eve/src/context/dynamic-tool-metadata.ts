@@ -6,7 +6,9 @@ interface DynamicToolMetadataBase {
   readonly description: string;
   readonly execution?: "background";
   readonly inputSchema: JsonObject;
+  readonly inputSchemaIsLive?: true;
   readonly outputSchema?: JsonObject;
+  readonly outputSchemaIsLive?: true;
   readonly resolverSlug: string;
   readonly entryKey: string;
 }
@@ -88,12 +90,26 @@ function convertSourceOffsetMetadata(
   return { ...metadata, callbacks };
 }
 
+function preserveResolvedLiveSchemaMarkers(
+  metadata: CurrentDynamicToolMetadata,
+  resolved: CurrentDynamicToolMetadata | undefined,
+): CurrentDynamicToolMetadata {
+  if (resolved === undefined) return metadata;
+  return {
+    ...metadata,
+    ...(resolved.inputSchemaIsLive === true ? { inputSchemaIsLive: true } : {}),
+    ...(resolved.outputSchemaIsLive === true ? { outputSchemaIsLive: true } : {}),
+  };
+}
+
 /** Converts persisted metadata without changing already-persisted callback closures. */
 export function toCurrentDynamicToolMetadata(
   persisted: PersistedDynamicToolMetadata,
   resolved?: CurrentDynamicToolMetadata,
 ): CurrentDynamicToolMetadata {
-  if (isCurrentDynamicToolMetadata(persisted)) return persisted;
+  if (isCurrentDynamicToolMetadata(persisted)) {
+    return preserveResolvedLiveSchemaMarkers(persisted, resolved);
+  }
   if (resolved === undefined) {
     throw new Error(
       `Dynamic tool "${persisted.name}" uses old persisted metadata, but its resolver did not return a current replacement.`,
@@ -114,7 +130,7 @@ export function toCurrentDynamicToolMetadata(
         );
       }
     }
-    return convertSourceOffsetMetadata(persisted);
+    return preserveResolvedLiveSchemaMarkers(convertSourceOffsetMetadata(persisted), resolved);
   }
   if (
     persisted.approvalResponseStepFnName !== undefined &&

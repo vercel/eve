@@ -11,6 +11,10 @@ import {
   type CurrentDynamicToolMetadata,
   type PersistedDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
+import {
+  replayDynamicToolInputSchema,
+  replayDynamicToolOutputSchema,
+} from "#context/dynamic-tool-schema-replay.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
 import type {
@@ -24,7 +28,6 @@ import {
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
 } from "#tools/durable-callbacks.js";
-import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -131,11 +134,11 @@ export function replayDynamicTools(
                 );
               },
             }),
-      inputSchema: toInputSchema(entry.inputSchema),
+      inputSchema: replayDynamicToolInputSchema(entry),
       name: entry.name,
       execution: entry.execution,
       approval: buildReplayedApproval(entry),
-      outputSchema: toOutputSchema(entry.outputSchema),
+      outputSchema: replayDynamicToolOutputSchema(entry),
       ...(toModelOutputReference === undefined
         ? {}
         : {
