@@ -9,6 +9,10 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import {
+  getTurnClientContextState,
+  setTurnClientContextState,
+} from "#harness/turn-client-context.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
@@ -124,6 +128,24 @@ describe("setHarnessEmissionState", () => {
     const retrieved = getHarnessEmissionState(session.state);
 
     expect(retrieved).toEqual(state);
+  });
+
+  it("clears client context when the emission state moves between turns", () => {
+    const turnId = "turn_5";
+    const session = setTurnClientContextState(createSession(), {
+      insertionIndex: 0,
+      messages: ["current page"],
+      turnId,
+    });
+
+    const updated = setHarnessEmissionState(session, {
+      sequence: 6,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "",
+    });
+
+    expect(getTurnClientContextState(updated.state, turnId)).toBeUndefined();
   });
 });
 
