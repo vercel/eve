@@ -47,7 +47,12 @@ export function resolveVercelProductionCallbackBaseUrl(): string | null {
 export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
   const configuredLocalBaseUrl = process.env[WORKFLOW_LOCAL_BASE_URL_ENV]?.trim();
   const localBaseUrl = configuredLocalBaseUrl ? configuredLocalBaseUrl : undefined;
-  const resolved = resolveVercelProductionCallbackBaseUrl() ?? localBaseUrl ?? metadataUrl;
+  const vercelDevBaseUrl =
+    process.env.VERCEL_ENV === "development" && process.env.VERCEL_URL
+      ? `http://${process.env.VERCEL_URL}`
+      : undefined;
+  const resolved =
+    resolveVercelProductionCallbackBaseUrl() ?? vercelDevBaseUrl ?? localBaseUrl ?? metadataUrl;
   const baseUrl = resolved.replace(/\/$/, "");
   const publicRoutePrefix = normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]);
   return publicRoutePrefix === undefined ? baseUrl : `${baseUrl}${publicRoutePrefix}`;
