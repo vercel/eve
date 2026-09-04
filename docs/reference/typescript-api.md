@@ -182,6 +182,8 @@ export default defineAgent({
 
 Pass another bare OpenAI model slug to override the default. `experimental_chatgpt()` remains as a deprecated alias.
 
+`chatgpt()` uses stateless requests (`store: false`). eve retains reasoning summaries and encrypted reasoning in session history and replays them after tool calls and on later turns. You do not need to configure `reasoning.encrypted_content` explicitly.
+
 Authentication is delegated entirely to the Codex CLI:
 
 1. Install or upgrade `codex` and run `codex login`.

@@ -1,3 +1,4 @@
+import { isObject } from "#shared/guards.js";
 import { getDefaultCodexTokenBroker, type CodexTokenBroker } from "./token-broker.js";
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
@@ -23,14 +24,38 @@ export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
 
   return async (input: FetchInput, init?: RequestInit): Promise<Response> => {
     const url = rewriteCodexEndpoint(requestUrl(input), codexApiEndpoint);
+    const requestInit = stripInputItemIds(init);
     const token = await broker.getToken({ reason: "request" });
-    const first = await httpFetch(url, authenticatedInit(input, init, token));
+    const first = await httpFetch(url, authenticatedInit(input, requestInit, token));
     if (first.status !== 401 || !isReplayable(input, init)) return first;
 
     await first.body?.cancel();
     const refreshed = await broker.getToken({ reason: "rejected" });
-    return httpFetch(url, authenticatedInit(input, init, refreshed));
+    return httpFetch(url, authenticatedInit(input, requestInit, refreshed));
   };
+}
+
+function stripInputItemIds(init: RequestInit | undefined): RequestInit | undefined {
+  if (typeof init?.body !== "string") return init;
+
+  let body: unknown;
+  try {
+    body = JSON.parse(init.body);
+  } catch {
+    return init;
+  }
+  if (!isObject(body) || !Array.isArray(body.input)) return init;
+
+  // Only response item IDs are forbidden; tool call IDs and IDs inside tool
+  // inputs or outputs belong to the conversation and must survive replay.
+  let changed = false;
+  for (const item of body.input) {
+    if (isObject(item) && "id" in item) {
+      delete item.id;
+      changed = true;
+    }
+  }
+  return changed ? { ...init, body: JSON.stringify(body) } : init;
 }
 
 export function rewriteCodexEndpoint(input: string, codexApiEndpoint = CODEX_API_ENDPOINT): string {
