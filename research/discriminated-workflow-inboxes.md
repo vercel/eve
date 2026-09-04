@@ -1,5 +1,5 @@
 ---
-issue: https://github.com/vercel/eve/issues/876
+issue: none
 status: proposed
 last_updated: "2026-09-04"
 ---
@@ -23,8 +23,8 @@ generation negotiation, or upgrade coordinator in the main design. New turns run
 on the deployment that accepted their input; the holder does not interpret their
 state. A small migration extension for existing sessions appears near the bottom.
 
-This is the unified proposal for [PR #3005](https://github.com/vercel/eve/pull/3005),
-including its inbox, steering, finalization, tool, task, and delivery contracts.
+This proposal covers the inbox, steering, finalization, tool, task, and delivery
+contracts together.
 The implementation detail here is intentional: replace the old ownership machinery
 with explicit interfaces, rather than retain both orchestration systems behind a
 new facade. The interfaces below are proposed internal eve APIs, not new public SDK
@@ -393,9 +393,8 @@ server-only (`isWebhook: false`) and omit `HookOptions.metadata`.
 | Background task        | `eve:task-inbox:v1:<taskId>`               | Work and requests that can outlive the initiating turn                    |
 | Activity collector     | Existing random callback capability        | Independent batch reduction, debounce, and expiry                         |
 
-Provider and authorization hooks are intentional **lookup-only aliases**. They
-replace #3005's direct provider-to-session resume and its prohibition on lookup-only
-hooks. Only receiving hooks feed an inbox; an alias's job is to reserve an address.
+Provider and authorization hooks are **lookup-only aliases**. Only receiving
+hooks feed an inbox; an alias's job is to reserve an address.
 Holder control requests use correlated results or confirming reads without creating
 per-request reply hooks.
 
@@ -420,10 +419,9 @@ hook permits bounded claim retries. An ambiguous send error retains the input an
 identity. An idle gap in the turn token is safe because it is neither the session
 lookup address nor the stream identity.
 
-Successful resume proves durable receipt, not application. The retained Local
-World spike reproduces an owner receiving a message after its last application
-decision and then completing without applying it. A loser must not do
-`resumeHook(); return`.
+Successful resume proves durable receipt, not application. An owner can receive
+a message after its last application decision and then complete without applying
+it. A loser must retain delivery responsibility after `resumeHook()` succeeds.
 
 The candidate protocol therefore retains input until a committed disposition:
 
@@ -521,7 +519,7 @@ timing alone is not an ordering contract across hooks.
 Pump failure aborts active work and wakes every waiter as an owner failure.
 Disposal releases waiters without requiring future input and follows terminal-state
 and pending-input accounting. Readers, pending receives, registration, cancellation,
-and disposal under Workflow replay still require the planned pump spike.
+and disposal under Workflow replay still require Workflow-backed validation.
 
 ## Steering and owner finalization
 
@@ -674,31 +672,9 @@ remain available. An event reference alone does not solve these issues.
 Work through supported legacy versions, public-ID mapping, address transfer, and
 recovery after the clean new-session design lands. Do not add holder generations,
 automatic replacement, adopt/retire commands, or an upgrade router to v1 to anticipate
-that work. The existing replacement spike is evidence for stream continuity, not a
-commitment to shipping live holder replacement in the first implementation.
+that work. Live holder replacement remains outside the first implementation.
 
-## Evidence and implementation gates
-
-The [three retained tests](./spikes/adjacent-session-workflow/spike.integration.test.ts)
-and [spike workflows](./spikes/adjacent-session-workflow/workflows.ts) passed against
-the Local World on eve `a37938d3d225e87071e15d135ee17189e5188f20`, using
-`@workflow/core@5.0.0-beta.48`. They establish independent terminating writers,
-sequential checkpoints, additive alias lookup, a received-but-unapplied event,
-and continued reads/writes after completing the original holder and adopting its
-stream in a replacement. Both an attached reader and a saved resume cursor retain
-continuity. They predate the SDK assumption in this revision: serialized-handle publication is
-historical test scaffolding, not the planned writer API. They do not prove the
-candidate protocol or a production migration path.
-
-Reproduce in a disposable checkout; the test builder requires these discovery paths:
-
-```sh
-cp research/spikes/adjacent-session-workflow/workflows.ts packages/eve/src/internal/testing/adjacent-workflow-spike.ts
-cp research/spikes/adjacent-session-workflow/spike.integration.test.ts packages/eve/src/execution/adjacent-workflow-spike.integration.test.ts
-pnpm --filter eve build:js
-pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/adjacent-workflow-spike.integration.test.ts
-rm packages/eve/src/internal/testing/adjacent-workflow-spike.ts packages/eve/src/execution/adjacent-workflow-spike.integration.test.ts
-```
+## Implementation gates
 
 Implement the new-session topology in the following order. Migration is follow-up
 work and does not gate this first version:
