@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   deferTurnStep: vi.fn(),
   forwardSubmissionStep: vi.fn(),
   awaitTurnStep: vi.fn(),
-  awaitExecutorStep: vi.fn(),
+  awaitRunStep: vi.fn(),
   sendInboxStep: vi.fn(),
   sleep: vi.fn(),
 }));
@@ -37,8 +37,8 @@ vi.mock("#execution/turn/admission.js", () => ({
   forwardSubmissionStep: mocks.forwardSubmissionStep,
   awaitTurnStep: mocks.awaitTurnStep,
 }));
-vi.mock("#execution/turn/await-executor.js", () => ({
-  awaitExecutorStep: mocks.awaitExecutorStep,
+vi.mock("#internal/workflow/await-run.js", () => ({
+  awaitRunStep: mocks.awaitRunStep,
 }));
 import { turnWorkflow } from "#execution/turn/workflow.js";
 
@@ -136,7 +136,7 @@ describe("turn workflow ownership", () => {
     mocks.failTurnStep.mockResolvedValue({ deliveries: {}, terminal: true });
     mocks.sendInboxStep.mockResolvedValue("delivered");
     mocks.sleep.mockResolvedValue(undefined);
-    mocks.awaitExecutorStep.mockImplementation(() => new Promise(() => {}));
+    mocks.awaitRunStep.mockImplementation(() => new Promise(() => {}));
   });
 
   it("disposes a failed claim without finalizing state it never owned", async () => {
@@ -298,7 +298,7 @@ describe("turn workflow ownership", () => {
     const actor = testInbox();
     const completed = deferred<void>();
     mocks.createOwnerInbox.mockReturnValue(actor.inbox);
-    mocks.awaitExecutorStep.mockReturnValue(completed.promise);
+    mocks.awaitRunStep.mockReturnValue(completed.promise);
     mocks.executeTurnStep
       .mockResolvedValueOnce(progress({ action: "wait", pendingRunIds: ["tool-run"] }))
       .mockResolvedValueOnce(progress());
@@ -306,7 +306,7 @@ describe("turn workflow ownership", () => {
     await flush();
     completed.resolve();
     await flush();
-    expect(mocks.awaitExecutorStep).toHaveBeenCalledExactlyOnceWith("tool-run");
+    expect(mocks.awaitRunStep).toHaveBeenCalledExactlyOnceWith("tool-run");
     expect(mocks.finalizeTurnStep).not.toHaveBeenCalled();
     actor.push({ eventId: "outcome", kind: "tool.outcome", payload: {} });
     await run;
@@ -316,7 +316,7 @@ describe("turn workflow ownership", () => {
   it("fails a waiting owner on native executor failure without polling", async () => {
     const actor = testInbox();
     mocks.createOwnerInbox.mockReturnValue(actor.inbox);
-    mocks.awaitExecutorStep.mockRejectedValue(new Error("executor failed"));
+    mocks.awaitRunStep.mockRejectedValue(new Error("executor failed"));
     mocks.executeTurnStep.mockResolvedValue(
       progress({ action: "wait", pendingRunIds: ["tool-run"] }),
     );
@@ -324,7 +324,7 @@ describe("turn workflow ownership", () => {
     expect(mocks.failTurnStep).toHaveBeenCalledWith(
       expect.objectContaining({ error: "executor failed" }),
     );
-    expect(mocks.awaitExecutorStep).toHaveBeenCalledOnce();
+    expect(mocks.awaitRunStep).toHaveBeenCalledOnce();
   });
 
   it("claims a token produced during finalization before releasing the owner", async () => {
@@ -358,7 +358,7 @@ describe("turn workflow ownership", () => {
     const model = deferred<TurnExecutionResult>();
     let failExecutor!: (error: Error) => void;
     mocks.createOwnerInbox.mockReturnValue(actor.inbox);
-    mocks.awaitExecutorStep.mockReturnValue(
+    mocks.awaitRunStep.mockReturnValue(
       new Promise((_resolve, reject) => {
         failExecutor = reject;
       }),

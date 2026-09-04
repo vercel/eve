@@ -1,4 +1,4 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { createOwnerInbox } from "#execution/inbox/owner.js";
 import { publishOwnerStep } from "#execution/inbox/readiness.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
@@ -59,4 +59,19 @@ async function startTestToolStep(owner: InboxAddress, workflowId: string): Promi
     workflowId,
   });
   await acknowledgeWorkflowTools({ runs: [run] });
+}
+
+/** Exercises native Run accessors across the compiled workflow/step boundary. */
+export async function inspectInboxConflictWorkflow(
+  token: string,
+): Promise<{ runId: string; status: string }> {
+  "use workflow";
+  const hook = createHook({ token });
+  try {
+    const conflict = await hook.getConflict();
+    if (conflict === null) throw new Error("Expected an existing inbox owner.");
+    return { runId: conflict.runId, status: await conflict.status };
+  } finally {
+    hook.dispose();
+  }
 }

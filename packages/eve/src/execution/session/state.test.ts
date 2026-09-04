@@ -26,7 +26,7 @@ describe("session checkpoint state", () => {
         state: { pending: { callId: "call" } },
       },
     });
-    const durable = await readDurableSession(state);
+    const durable = readDurableSession(state);
     expect(durable.agent).toEqual({ system: "Current instructions" });
     expect(durable.agent).not.toHaveProperty("modelReference");
     const restored = hydrateDurableSession({
@@ -44,7 +44,6 @@ describe("session checkpoint state", () => {
       session: createSession({ sessionId: "session", continuationToken: "old", turnAgent }),
     });
     const next = replaceDurableSessionSnapshot({
-      state,
       session: { ...state.snapshot.session, continuationToken: "new" },
     });
     expect(next.continuationToken).toBe("new");

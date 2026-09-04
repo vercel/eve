@@ -2,7 +2,6 @@ import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/
 import { createOwnerInbox } from "#execution/inbox/owner.js";
 import type { InboxAddress, InboxEnvelope } from "#execution/inbox/types.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
-import { disposeHook } from "#execution/hook-ownership.js";
 import type { AcceptedSubmission } from "#execution/turn/types.js";
 import { initializeHolderStep, redirectHolderStep } from "#execution/session/holding-steps.js";
 import { startTurnStep } from "#execution/session/dispatch.js";
@@ -35,7 +34,7 @@ export async function holdingWorkflow(input: HoldingWorkflowInput): Promise<void
       const hook = createHook<never>({ token: input.initialToken });
       const conflict = await hook.getConflict();
       if (conflict !== null) {
-        await disposeHook(hook);
+        hook.dispose();
         await redirectHolderStep(workflowRunId, conflict.runId, input.firstTurn);
         return;
       }
@@ -60,7 +59,7 @@ export async function holdingWorkflow(input: HoldingWorkflowInput): Promise<void
           const conflict = await hook.getConflict();
           if (conflict === null) aliases.set(command.token, hook);
           else {
-            await disposeHook(hook);
+            hook.dispose();
             status = "conflict";
           }
         }
@@ -73,7 +72,7 @@ export async function holdingWorkflow(input: HoldingWorkflowInput): Promise<void
       } satisfies InboxEnvelope);
     }
   } finally {
-    for (const hook of aliases.values()) await disposeHook(hook);
+    for (const hook of aliases.values()) hook.dispose();
     await control.dispose();
   }
 }

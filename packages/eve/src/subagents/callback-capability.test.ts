@@ -24,6 +24,8 @@ describe("callback capabilities", () => {
     for (const data of [
       { kind: "inbox", requestId: "id", address: { token: "t" } },
       { kind: "inbox", address: { token: "t", ownerRunId: "r" } },
+      { kind: "inbox", requestId: "id", address: null },
+      { kind: "inbox", requestId: "id", address: "not-an-address" },
     ]) {
       expect(
         readCallbackCapability(

@@ -1,7 +1,7 @@
 import type { HookPayload, RunInput, SessionCommand, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/session/state.js";
 import type { SessionResources, SnapshotRecordRef } from "#execution/session/resources.js";
-import type { ModelStepResult } from "#execution/turn/model-types.js";
+import type { ModelResult } from "#execution/turn/model-types.js";
 import type { InboxEnvelope } from "#execution/inbox/types.js";
 
 export interface InitialSessionSeed {
@@ -50,7 +50,7 @@ export interface InitializedSessionCheckpoint {
   readonly deliveries: Readonly<Record<string, DeliveryDisposition>>;
   readonly queue: readonly PendingSubmission[];
   readonly caller?: TurnCaller;
-  readonly result?: ModelStepResult;
+  readonly result?: ModelResult;
   readonly inputs?: readonly PendingSubmission[];
   readonly runtimeResults?: readonly import("#shared/action-types.js").RuntimeActionResult[];
   readonly runtimeResultTimes?: Readonly<Record<string, number>>;

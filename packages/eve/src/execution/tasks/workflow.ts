@@ -1,3 +1,4 @@
+import { watchAdmissionOwnerStep } from "#execution/inbox/admission.js";
 import { createOwnerInbox } from "#execution/inbox/owner.js";
 import { publishOwnerStep } from "#execution/inbox/readiness.js";
 import type { InboxEnvelope, ReplyTarget } from "#execution/inbox/types.js";
@@ -41,6 +42,7 @@ import {
 } from "#tasks/types.js";
 
 export interface TaskRunWorkflowInput {
+  readonly admissionOwnerRunId: string;
   readonly initialView: TaskView;
   readonly parentContinuationToken: string;
   readonly taskInboxToken: string;
@@ -101,6 +103,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     );
     if (claim.kind === "conflict") return;
 
+    let watcher:
+      | Promise<{ kind: "watch-complete" } | { kind: "watch-failed"; error: unknown }>
+      | undefined = watchAdmissionOwnerStep(input.admissionOwnerRunId, inbox.address).then(
+      () => ({ kind: "watch-complete" as const }),
+      (error) => ({ kind: "watch-failed" as const, error }),
+    );
     await appendTaskViewStep({ view });
     while (!isFinished()) {
       pendingInbox ??= inbox.next().then(
@@ -108,9 +116,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         (error) => ({ kind: "reader-failure" as const, error }),
       );
       const incoming = pendingInbox;
-      const read = await (body === undefined
-        ? incoming
-        : Promise.race([incoming, body.then((outcome) => ({ kind: "body" as const, outcome }))]));
+      const active =
+        body === undefined
+          ? incoming
+          : Promise.race([incoming, body.then((outcome) => ({ kind: "body" as const, outcome }))]);
+      const read = await (dispatchAcknowledged || watcher === undefined
+        ? active
+        : Promise.race([active, watcher]));
+      if (read.kind === "watch-complete") {
+        watcher = undefined;
+        continue;
+      }
+      if (read.kind === "watch-failed") throw read.error;
       if (read.kind === "reader-failure") throw read.error;
       if (read.kind === "body") {
         executorSettled = true;
@@ -129,6 +146,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       pendingInbox = undefined;
       const envelope = read.envelope;
+      if (envelope.kind === "admission.closed") {
+        if (!dispatchAcknowledged) {
+          await applyPayload({ kind: "task-command", command: { kind: "cancel" } });
+          return;
+        }
+        continue;
+      }
       if (envelope.kind.startsWith("tool.")) {
         const from = (envelope.payload as { from: { runId: string; callId: string } }).from;
         if (
@@ -181,7 +205,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   }
 
   function isFinished(): boolean {
-    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && executorSettled;
+    return (
+      isTerminalTaskStatus(view.status) &&
+      executorSettled &&
+      (dispatchAcknowledged || view.status === "cancelled")
+    );
   }
 
   async function handleUpdate(update: TaskInboundUpdate): Promise<void> {

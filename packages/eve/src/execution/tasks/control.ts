@@ -7,9 +7,7 @@ import {
   lookupTaskEntries,
   readTaskView,
 } from "#execution/tasks/views.js";
-import type { BackgroundTask } from "#execution/tasks/dispatch.js";
 import { sendTaskCommand, awaitTerminalTaskView } from "#execution/tasks/runtime.js";
-import { cancelTaskOwnedWork, type TaskExecutorCancel } from "#execution/tasks/cancel.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskInboundUpdate, type TaskView } from "#tasks/types.js";
@@ -19,7 +17,13 @@ import {
   TASK_UPDATE_TOOL_NAME,
 } from "#tools/framework/task-contract.js";
 
-export type DeliverTaskUpdate = (input: {
+export type TaskExecutorCancel = (input: {
+  readonly entry: SessionTaskIndexEntry;
+  readonly serializedContext?: Record<string, unknown>;
+  readonly session?: RuntimeSession;
+}) => Promise<void>;
+
+type DeliverTaskUpdate = (input: {
   readonly adapter?: ChannelAdapter;
   readonly callback: unknown;
   readonly update: TaskInboundUpdate;
@@ -32,7 +36,6 @@ export function isTaskControlAction(action: RuntimeToolCallActionRequest): boole
 export async function executeTaskControlAction(input: {
   readonly action: RuntimeToolCallActionRequest;
   readonly adapter?: ChannelAdapter;
-  readonly bundle: import("#runtime/sessions/runtime-context-keys.js").CompiledBundle;
   readonly cancelOwnedWork?: TaskExecutorCancel;
   readonly deliverUpdate?: DeliverTaskUpdate;
   readonly parentStepIndex?: number;
@@ -42,7 +45,6 @@ export async function executeTaskControlAction(input: {
 }): Promise<{
   readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly pendingTask?: BackgroundTask;
 }> {
   const { action, session } = input;
   if (action.toolName === TASK_UPDATE_TOOL_NAME) {
@@ -127,8 +129,7 @@ export async function cancelOwnedTask(input: {
     : await awaitTerminalTaskView(input.entry.taskRunId);
   if (view.status !== "cancelled" || delivery !== "delivered") return view;
 
-  await cancelTaskOwnedWork({
-    cancelOwnedWork: input.cancelOwnedWork,
+  await input.cancelOwnedWork?.({
     entry: input.entry,
     serializedContext: input.serializedContext,
     session: input.session,

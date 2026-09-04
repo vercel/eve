@@ -1,4 +1,4 @@
-import type { InboxAddress, InboxEnvelope, ReplyTarget } from "#execution/inbox/types.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import type {
@@ -8,8 +8,6 @@ import type {
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";
-
-export type WorkflowToolRunOwner = InboxAddress;
 
 /**
  * Requests the owner must apply on the run's behalf because they touch
@@ -28,7 +26,7 @@ export interface WorkflowToolAuthorizationRequest {
 }
 
 /** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
-export interface WorkflowToolAskRequest {
+interface WorkflowToolAskRequest {
   readonly kind: "ask";
   readonly request: ToolInputRequest;
 }
@@ -86,26 +84,4 @@ export interface WorkflowToolRunRequestMessage {
 export interface WorkflowToolRunOutcomeMessage {
   readonly from: WorkflowToolRunRef;
   readonly result: WorkflowToolRunOutcome;
-}
-
-export type WorkflowToolEnvelope =
-  | (InboxEnvelope<WorkflowToolRunReport> & { readonly kind: "tool.report" })
-  | (InboxEnvelope<WorkflowToolRunRequestMessage> & { readonly kind: "tool.request" })
-  | (InboxEnvelope<WorkflowToolRunOutcomeMessage> & { readonly kind: "tool.outcome" });
-
-export function deriveWorkflowToolRunOwner(
-  token: string,
-  ownerRunId: string,
-): WorkflowToolRunOwner {
-  return { ownerRunId, token };
-}
-
-export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };
-
-export function isWorkflowToolRunControlMessage(
-  value: unknown,
-): value is WorkflowToolRunControlMessage {
-  if (typeof value !== "object" || value === null) return false;
-  const { kind, reason } = value as { kind?: unknown; reason?: unknown };
-  return kind === "cancel" && typeof reason === "string";
 }

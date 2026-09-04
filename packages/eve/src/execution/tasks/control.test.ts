@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelOwnedTask, executeTaskControlAction } from "#execution/tasks/control.js";
 import {
@@ -6,28 +6,13 @@ import {
   sendTaskCommand,
   awaitTerminalTaskView,
 } from "#execution/tasks/runtime.js";
-import { cancelWorkflowToolRun } from "#execution/workflow-tool/cancel.js";
-
-const { cancelRun, getRun } = vi.hoisted(() => ({
-  cancelRun: vi.fn(),
-  getRun: vi.fn(),
-}));
-
 vi.mock("#execution/tasks/runtime.js", () => ({
   readLatestTaskView: vi.fn(),
   awaitTerminalTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
-vi.mock("#execution/workflow-tool/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
-vi.mock("#internal/workflow/runtime.js", () => ({
-  cancelRun,
-  getRun,
-  getWorld: vi.fn(() => ({})),
-}));
-
 const entry = {
   createdByTurnId: "turn-1",
-  executor: { data: { hookToken: "run-hook", runId: "run-1" }, kind: "workflow-tool" },
   metadata: { kind: "tool", name: "export" },
   taskId: "task-1",
   taskInboxToken: "task-token",
@@ -37,66 +22,63 @@ const entry = {
 describe("task cancellation", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.useFakeTimers();
     vi.mocked(sendTaskCommand).mockResolvedValue("delivered");
-    getRun.mockReturnValue({ status: Promise.resolve("completed") });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("cancels task-owned work after cancellation commits", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      executor: { binding: entry.executor },
+  it("waits for committed cancellation before stopping child work without polling", async () => {
+    const terminal = {
       metadata: entry.metadata,
       status: "cancelled",
       taskId: entry.taskId,
-    });
-    const cancelled = cancelOwnedTask({ entry });
-    await vi.runAllTimersAsync();
-    await cancelled;
-    expect(sendTaskCommand).toHaveBeenNthCalledWith(1, {
+    } as const;
+    const enteredWait = Promise.withResolvers<void>();
+    let commit!: () => void;
+    vi.mocked(readLatestTaskView).mockResolvedValue({ ...terminal, status: "working" });
+    vi.mocked(awaitTerminalTaskView).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          commit = () => resolve(terminal);
+          enteredWait.resolve();
+        }),
+    );
+    const cancelOwnedWork = vi.fn();
+    const cancelled = cancelOwnedTask({ entry, cancelOwnedWork });
+    await enteredWait.promise;
+    expect(cancelOwnedWork).not.toHaveBeenCalled();
+    expect(sendTaskCommand).toHaveBeenCalledExactlyOnceWith({
       command: { kind: "cancel" },
       taskInboxToken: "task-token",
     });
-    expect(cancelWorkflowToolRun).toHaveBeenCalledWith(
-      { hookToken: "run-hook", runId: "run-1" },
-      "Task task-1 was cancelled.",
-    );
-    expect(cancelRun).not.toHaveBeenCalled();
-  });
-
-  it("does not reinterpret an unknown executor binding", async () => {
-    const external = { data: { id: "external" }, kind: "external" };
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      executor: { binding: external },
-      metadata: entry.metadata,
-      status: "cancelled",
-      taskId: entry.taskId,
+    commit();
+    expect(await cancelled).toBe(terminal);
+    expect(cancelOwnedWork).toHaveBeenCalledExactlyOnceWith({
+      entry,
+      serializedContext: undefined,
+      session: undefined,
     });
-    const cancelled = cancelOwnedTask({ entry: { ...entry, executor: external } });
-    await vi.runAllTimersAsync();
-    await cancelled;
-    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
-  });
-
-  it("waits for a committed terminal view without polling the task", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.metadata,
-      status: "working",
-      taskId: entry.taskId,
-    });
-    vi.mocked(awaitTerminalTaskView).mockResolvedValue({
-      metadata: entry.metadata,
-      status: "cancelled",
-      taskId: entry.taskId,
-    });
-    await cancelOwnedTask({ entry });
     expect(readLatestTaskView).toHaveBeenCalledOnce();
-    expect(awaitTerminalTaskView).toHaveBeenCalledWith("task-run");
-    expect(getRun).not.toHaveBeenCalled();
+    expect(awaitTerminalTaskView).toHaveBeenCalledExactlyOnceWith("task-run");
   });
+
+  it.each([
+    { status: "completed", delivery: "delivered" },
+    { status: "cancelled", delivery: "unreachable" },
+  ] as const)(
+    "does not cancel child work for $status with $delivery delivery",
+    async ({ status, delivery }) => {
+      vi.mocked(sendTaskCommand).mockResolvedValue(delivery);
+      const common = { metadata: entry.metadata, taskId: entry.taskId };
+      vi.mocked(readLatestTaskView).mockResolvedValue(
+        status === "completed"
+          ? { ...common, status, lastOutput: { type: "result", data: "done" } }
+          : { ...common, status },
+      );
+      const cancelOwnedWork = vi.fn();
+      await cancelOwnedTask({ entry, cancelOwnedWork });
+      expect(cancelOwnedWork).not.toHaveBeenCalled();
+      expect(awaitTerminalTaskView).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("task updates", () => {
@@ -113,7 +95,6 @@ describe("task updates", () => {
         kind: "tool-call",
         toolName: "task_update",
       },
-      bundle: {} as never,
       parentStepIndex: 2,
       parentTurnId: "turn-child",
       serializedContext: { "eve.sessionCallback": { taskId: "task-1" } },
@@ -146,13 +127,12 @@ describe("task updates", () => {
         kind: "subagent",
         state: {
           callId: "call-agent",
-          parentContinuationToken: "agent-reply-hook",
+          replyTo: { kind: "session", token: "agent-reply-hook" },
           parentSessionId: "session-parent",
           subagentName: "worker",
           taskId: "task-1",
         },
       },
-      bundle: {} as never,
       parentStepIndex: 2,
       parentTurnId: "turn-child",
       serializedContext: {},

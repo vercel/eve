@@ -7,6 +7,12 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
 
+const parentReplyTo: BuildSubagentRunInput["parentReplyTo"] = {
+  kind: "inbox",
+  address: { ownerRunId: "parent-turn-run", token: "parent-inbox" },
+  requestId: "call-1",
+};
+
 function makeSession(): HarnessSession {
   return {
     agent: {
@@ -34,10 +40,12 @@ function makeAction(): RuntimeSubagentDispatchRequest {
 }
 
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
+  input: Omit<BuildSubagentRunInput, "selfAgent" | "source" | "parentReplyTo"> &
+    Partial<Pick<BuildSubagentRunInput, "selfAgent" | "parentReplyTo">>,
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({
     ...input,
+    parentReplyTo: input.parentReplyTo ?? parentReplyTo,
     selfAgent: input.selfAgent ?? false,
     source: { type: "runtime" },
   });
@@ -89,7 +97,7 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.adapter.kind).toBe(SUBAGENT_ADAPTER_KIND);
     expect(runInput.adapter.state).toMatchObject({
       callId: "call-1",
-      parentReplyTo: { kind: "session", token: "eve:session:parent-session:inbox" },
+      parentReplyTo,
       parentSessionId: "parent-session",
       subagentName: "linear",
     });
@@ -104,18 +112,18 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.mode).toBe("conversation");
   });
 
-  it("routes parent notifications to an active turn inbox when supplied", () => {
+  it("preserves an explicit session destination for parent notifications", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentReplyTo: { kind: "session", token: "turn-inbox" },
+      parentReplyTo: { kind: "session", token: "session-address" },
       session: makeSession(),
     });
 
     expect(runInput.adapter.state).toMatchObject({
-      parentReplyTo: { kind: "session", token: "turn-inbox" },
+      parentReplyTo: { kind: "session", token: "session-address" },
     });
   });
 
@@ -125,13 +133,13 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentReplyTo: { kind: "session", token: "invocation-reply-hook" },
+      parentReplyTo,
       session: makeSession(),
       taskId: "task-1",
     });
 
     expect(runInput.adapter.state).toMatchObject({
-      parentReplyTo: { kind: "session", token: "invocation-reply-hook" },
+      parentReplyTo,
       taskId: "task-1",
     });
     expect(runInput.taskId).toBe("task-1");
@@ -249,6 +257,7 @@ describe("buildSubagentRunInput", () => {
   it("uses a declared local outputSchema on the persistent child's first turn", () => {
     const schema = { properties: { result: { type: "string" } }, type: "object" };
     const { runInput } = buildSubagentRunInput({
+      parentReplyTo,
       action: makeAction(),
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
@@ -266,6 +275,7 @@ describe("buildSubagentRunInput", () => {
     const declared = { properties: { declared: { type: "string" } }, type: "object" };
     const requested = { properties: { requested: { type: "number" } }, type: "object" };
     const { runInput } = buildSubagentRunInput({
+      parentReplyTo,
       action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
@@ -302,6 +312,7 @@ describe("buildSubagentRunInput", () => {
 
   it("passes a resolved local subagent description into the child message", () => {
     const { runInput } = buildSubagentRunInput({
+      parentReplyTo,
       action: {
         ...makeAction(),
         description: "Runtime action event description.",
@@ -360,6 +371,7 @@ describe("buildSubagentRunInput", () => {
   it("uses the root agent's declared outputSchema for a fresh built-in copy", () => {
     const schema = { properties: { result: { type: "string" } }, type: "object" };
     const { runInput } = buildSubagentRunInput({
+      parentReplyTo,
       action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },

@@ -1,3 +1,9 @@
+import { withContextScope } from "#context/run-step.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { HandleEventKey } from "#context/keys.js";
+import { hydrateDurableSession } from "#execution/session.js";
+import { createDurableSessionState, type DurableSessionState } from "#execution/session/state.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
@@ -102,5 +108,40 @@ export function bindTurnEvents(input: {
         messages: lifecycleMessages,
       });
     },
+  };
+}
+
+/** Applies non-model events with the same lifecycle and persisted context as model events. */
+export async function emitTurnEvent(input: {
+  readonly events: WritableStream<Uint8Array>;
+  readonly event: UnstampedMessageStreamEvent;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<{
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}> {
+  const ctx = await deserializeContext(input.serializedContext);
+  const effective = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
+  const session = hydrateDurableSession({
+    durable: input.sessionState.snapshot.session,
+    turnAgent: effective.turnAgent,
+    compactionOverrides: { thresholdPercent: effective.thresholdPercent },
+  });
+  const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
+    const sink = bindTurnEvents({ ctx, events: input.events, session: enrichedSession });
+    try {
+      ctx.setVirtualContext(HandleEventKey, sink.handleEvent);
+      await sink.handleEvent(input.event, enrichedSession.history);
+      return { result: undefined, session: enrichedSession };
+    } finally {
+      sink.release();
+    }
+  });
+  return {
+    serializedContext: serializeContext(ctx),
+    sessionState: createDurableSessionState({
+      session: reconcileSessionContinuationToken(ctx, scoped.session),
+    }),
   };
 }

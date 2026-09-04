@@ -46,33 +46,18 @@ export interface DurableSessionSnapshot {
   readonly session: DurableSession;
 }
 
-export function projectSessionState(input: {
-  readonly session: HarnessSession;
-}): Omit<DurableSessionState, "snapshot"> {
-  return {
-    continuationToken: input.session.continuationToken,
-    emissionState: getHarnessEmissionState(input.session.state),
-    hasProxyInputRequests: hasProxyInputRequests(input.session.state),
-    sessionId: input.session.sessionId,
-  };
-}
-
-export async function readDurableSession(state: DurableSessionState): Promise<DurableSession> {
+export function readDurableSession(state: DurableSessionState): DurableSession {
   return state.snapshot.session;
 }
 
 export function createDurableSessionState(input: {
   readonly session: HarnessSession;
 }): DurableSessionState {
-  return {
-    ...projectSessionState(input),
-    snapshot: { session: projectToDurableSession(input.session) },
-  };
+  return replaceDurableSessionSnapshot({ session: projectToDurableSession(input.session) });
 }
 
 export function replaceDurableSessionSnapshot(input: {
   readonly session: DurableSession;
-  readonly state: DurableSessionState;
 }): DurableSessionState {
   return {
     continuationToken: input.session.continuationToken,

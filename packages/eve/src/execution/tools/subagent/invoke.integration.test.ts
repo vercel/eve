@@ -4,7 +4,7 @@ import { createDurableSessionState, readDurableSession } from "#execution/sessio
 import {
   dispatchAgentInvocation,
   settleTaskAgentInvocation,
-} from "#execution/tools/subagent/invoke-step.js";
+} from "#execution/tools/subagent/invoke.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
@@ -28,7 +28,7 @@ describe("blocking workflow agent continuation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(prepareOwnerAgentInvocation).mockImplementation(async (input) => {
-      const session = await readDurableSession(input.sessionState);
+      const session = readDurableSession(input.sessionState);
       return {
         adapter: {},
         adapterCtx: {},

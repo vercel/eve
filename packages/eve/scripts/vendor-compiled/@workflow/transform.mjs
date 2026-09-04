@@ -10,7 +10,7 @@ export function transformWorkflowSdk(mode) {
       const offset = normalized.lastIndexOf(marker);
       if (offset < 0 || !normalized.endsWith(".js")) return null;
       const patterns = detectWorkflowPatterns(source);
-      if (!patterns.hasUseStep && !patterns.hasUseWorkflow && !patterns.hasSerde) return null;
+      if (!patterns.hasDirective && !patterns.hasSerde) return null;
       const filename = `@workflow/core/${normalized.slice(offset + marker.length)}`;
       const result = await applySwcTransform(filename, source, mode, id);
       return { code: result.code, map: null };

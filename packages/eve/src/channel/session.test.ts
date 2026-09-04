@@ -270,11 +270,6 @@ describe("buildSessionHandle", () => {
   });
 
   it("is idempotent: a redundant continuation.rekey does not write", () => {
-    // Authors call continuation.rekey from hot-path event handlers
-    // (e.g. Slack's `message.completed`). The handler can't always
-    // know whether the token has actually changed, so the SessionHandle
-    // itself short-circuits redundant writes — the workflow body
-    // shouldn't tear down and recreate its park hook for a no-op.
     let writeCount = 0;
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");

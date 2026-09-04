@@ -11,7 +11,7 @@ export interface ModelSettlement {
   readonly emissionAfter: HarnessEmissionState;
 }
 
-export type ModelStepPayload =
+export type ModelPayload =
   | Exclude<HookPayload, RuntimeActionResultHookPayload>
   | {
       readonly kind: "runtime-action-result";
@@ -19,8 +19,8 @@ export type ModelStepPayload =
       readonly results: readonly RuntimeActionResult[];
     };
 
-export interface ModelStepInput {
-  readonly input: ModelStepPayload | undefined;
+export interface ModelInput {
+  readonly input: ModelPayload | undefined;
   readonly abortSignal?: AbortSignal;
   readonly events: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -47,12 +47,11 @@ export type ModelOutcome =
     }
   | { readonly action: "dispatch-workflow-tasks"; readonly pendingTaskCallIds: readonly string[] };
 
-export type ModelStepResult = ModelOutcome & {
+export type ModelResult = ModelOutcome & {
   readonly settlement?: ModelSettlement;
   readonly cancellationState?: DurableSessionState;
   readonly cancellationContext?: Record<string, unknown>;
   readonly sleepDurationMs?: number;
-  readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;

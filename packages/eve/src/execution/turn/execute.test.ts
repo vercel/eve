@@ -55,7 +55,7 @@ vi.mock("#execution/workflow-tool/start.js", () => ({
   acknowledgeWorkflowTools: mocks.acknowledgeTools,
 }));
 vi.mock("#execution/route-child-delivery.js", () => ({ routeDeliverToChildren: mocks.route }));
-vi.mock("#execution/turn/model.js", () => ({ runModelStep: mocks.model }));
+vi.mock("#execution/turn/model.js", () => ({ runModel: mocks.model }));
 vi.mock("#execution/turn/runtime-events.js", () => ({ applyRuntimeEvents: mocks.runtime }));
 vi.mock("#subagents/parent-notification.js", () => ({
   bindTurnCallerContext: async (input: { serializedContext: unknown }) => input.serializedContext,
@@ -190,8 +190,7 @@ describe("turn execution boundary", () => {
     });
   });
 
-  it("commits executor ownership before acknowledging tasks and blocking tools", async () => {
-    const task = { taskId: "task", taskRunId: "run", taskInboxToken: "task-inbox" };
+  it("commits executor ownership before acknowledging blocking tools", async () => {
     checkpoint = {
       ...checkpoint,
       phase: "running",
@@ -207,17 +206,14 @@ describe("turn execution boundary", () => {
     };
     const tool = { callId: "call", hookToken: "tool-inbox", runId: "tool-run", toolName: "tool" };
     const dispatchedState = replaceDurableSessionSnapshot({
-      state: checkpoint.state,
       session: recordWorkflowToolRun(checkpoint.state.snapshot.session, tool),
     });
     mocks.dispatch.mockResolvedValue({
       sessionState: dispatchedState,
       results: [],
-      pendingTasks: [task],
     });
     await run({ checkpoint: ref, work: { kind: "dispatch" } });
     expect(mocks.append.mock.lastCall?.[1]).toMatchObject({
-      pendingTaskAcks: [task],
       pendingToolAcks: [tool],
     });
     expect(mocks.acknowledgeTools).toHaveBeenCalledWith({ runs: [tool] });
@@ -349,6 +345,21 @@ describe("admission and progress", () => {
       continuationToken: "alias",
       claimedContinuationToken: "previous-alias",
     });
+  });
+  it.each([
+    ["cancelled", "cancelled"],
+    ["done", "settle"],
+  ] as const)("settles %s before consuming remaining inputs", (action, expected) => {
+    checkpoint = {
+      ...checkpoint,
+      inputs: [pending({ kind: "send", payload: { message: "Arrived during execution" } })],
+      result: {
+        action,
+        sessionState: checkpoint.state,
+        serializedContext: {},
+      },
+    };
+    expect(projectProgress(ref, checkpoint).action).toBe(expected);
   });
   it("does not resume a blocking batch after only one result", () => {
     checkpoint = {

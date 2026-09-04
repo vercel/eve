@@ -4,7 +4,7 @@ import { createOwnerInbox } from "#execution/inbox/owner.js";
 import type { InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
 import { awaitTurnStep, forwardSubmissionStep } from "#execution/turn/admission.js";
-import { awaitExecutorStep } from "#execution/turn/await-executor.js";
+import { awaitRunStep } from "#internal/workflow/await-run.js";
 import { executeTurnStep } from "#execution/turn/execute.js";
 import { failTurnStep, finalizeTurnStep } from "#execution/turn/finalize.js";
 import {
@@ -28,15 +28,17 @@ export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceip
     try {
       const claim = await inbox.claim();
       if (claim.kind === "owned") {
+        const eventIds = new Set([input.submission.eventId]);
         let result: Exclude<TurnExecutionResult, { kind: "progress" }>;
         try {
-          result = await executeClaimedTurn(input, inbox, (ref) => {
+          result = await executeClaimedTurn(input, inbox, eventIds, (ref) => {
             checkpoint = ref;
           });
         } catch (error) {
           return await failTurnStep({
             session: input.session,
             submission: input.submission,
+            eventIds: [...eventIds],
             checkpoint,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -62,6 +64,7 @@ export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceip
 async function executeClaimedTurn(
   input: TurnWorkflowInput,
   inbox: OwnerInbox,
+  eventIds: Set<string>,
   observeCheckpoint: (ref: SnapshotRecordRef) => void,
 ): Promise<Exclude<TurnExecutionResult, { kind: "progress" }>> {
   const controller = new AbortController();
@@ -73,6 +76,7 @@ async function executeClaimedTurn(
   let ownerFailure: { error: unknown } | undefined;
   const observeEnvelope = (envelope: InboxEnvelope): void => {
     const submission = submissionFromEnvelope(envelope);
+    if (submission !== undefined) eventIds.add(submission.eventId);
     if (submission !== undefined && interruptionKind(submission, turnId, taskId) !== undefined) {
       controller.abort(new TurnCancelledError());
     }
@@ -107,7 +111,7 @@ async function executeClaimedTurn(
       if (executors.has(runId) || completedExecutors.has(runId)) continue;
       executors.set(
         runId,
-        awaitExecutorStep(runId).then(
+        awaitRunStep(runId).then(
           () => {
             executors.delete(runId);
             completedExecutors.add(runId);
@@ -183,6 +187,7 @@ async function executeClaimedTurn(
         const receipt = await finalizeTurnStep({
           session: input.session,
           checkpoint: progress.checkpoint,
+          eventIds: [...eventIds],
           claimedContinuationToken: progress.continuationToken || undefined,
           kind:
             initialKind === "reset" || initialKind === "timeout"

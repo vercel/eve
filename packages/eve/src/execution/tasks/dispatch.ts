@@ -6,7 +6,7 @@ import {
   sendTaskCommandToOwner,
   startTaskRun,
 } from "#execution/tasks/runtime.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandToken } from "#execution/session-command-token.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
@@ -64,7 +64,7 @@ export async function beginBackgroundTask(input: {
   const owner = await startTaskRun({
     taskInboxToken: task.taskInboxToken,
     initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
-    parentContinuationToken: sessionCommandHookToken(input.session.sessionId),
+    parentContinuationToken: sessionCommandToken(input.session.sessionId),
   });
   return { ...task, taskRunId: owner.runId };
 }

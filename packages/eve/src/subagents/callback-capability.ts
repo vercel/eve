@@ -1,4 +1,4 @@
-import type { InboxReplyTarget, ReplyTarget } from "#execution/inbox/types.js";
+import { isReplyTarget, type InboxReplyTarget, type ReplyTarget } from "#execution/inbox/types.js";
 
 const PREFIX = "eve:callback:";
 const MAX_TOKEN_BYTES = 4096;
@@ -21,23 +21,10 @@ export function readCallbackCapability(token: string): InboxReplyTarget | undefi
   } catch {
     return undefined;
   }
-  if (value === null || typeof value !== "object") return undefined;
-  const target = value as Partial<InboxReplyTarget>;
-  if (
-    target.kind !== "inbox" ||
-    typeof target.requestId !== "string" ||
-    target.requestId.length === 0 ||
-    target.address === null ||
-    typeof target.address !== "object" ||
-    typeof target.address.token !== "string" ||
-    target.address.token.length === 0 ||
-    typeof target.address.ownerRunId !== "string" ||
-    target.address.ownerRunId.length === 0
-  )
-    return undefined;
+  if (!isReplyTarget(value) || value.kind !== "inbox") return undefined;
   return {
     kind: "inbox",
-    requestId: target.requestId,
-    address: { token: target.address.token, ownerRunId: target.address.ownerRunId },
+    requestId: value.requestId,
+    address: { token: value.address.token, ownerRunId: value.address.ownerRunId },
   };
 }

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   send: vi.fn(),
   body: vi.fn(),
+  watch: vi.fn(),
 }));
 vi.mock("#execution/inbox/owner.js", () => ({
   createOwnerInbox: () => ({
@@ -20,6 +21,7 @@ vi.mock("#execution/inbox/owner.js", () => ({
     dispose: mocks.dispose,
   }),
 }));
+vi.mock("#execution/inbox/admission.js", () => ({ watchAdmissionOwnerStep: mocks.watch }));
 vi.mock("#execution/inbox/readiness.js", () => ({ publishOwnerStep: mocks.publish }));
 vi.mock("#execution/inbox/send.js", () => ({ sendInboxStep: mocks.send }));
 vi.mock("#execution/workflow-tool/body.js", () => ({
@@ -37,11 +39,62 @@ describe("workflow tool quiescence", () => {
     vi.resetAllMocks();
     vi.useFakeTimers();
     mocks.claim.mockResolvedValue({ kind: "owned" });
+    mocks.watch.mockImplementation(() => new Promise(() => {}));
     mocks.observe.mockReturnValue(mocks.stop);
     mocks.send.mockResolvedValue("delivered");
     mocks.next.mockResolvedValue({ eventId: "ready", kind: "tool.ready", payload: {} });
   });
   afterEach(() => vi.useRealTimers());
+  it("disposes without authored work when closure precedes admission", async () => {
+    mocks.watch.mockResolvedValue(undefined);
+    mocks.next.mockResolvedValue({ eventId: "closed", kind: "admission.closed", payload: null });
+    await workflowToolRunWorkflow(input);
+    expect(mocks.watch).toHaveBeenCalledExactlyOnceWith("turn-run", {
+      token: "tool",
+      ownerRunId: "tool-run",
+    });
+    expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it("retains its pending read when marker delivery finishes first", async () => {
+    const event = Promise.withResolvers<InboxEnvelope>();
+    mocks.next.mockReturnValueOnce(event.promise);
+    mocks.watch.mockResolvedValue(undefined);
+    mocks.body.mockResolvedValue({ status: "completed", output: "done" });
+    const run = workflowToolRunWorkflow(input);
+    await vi.advanceTimersByTimeAsync(0);
+    event.resolve({ eventId: "ready", kind: "tool.ready", payload: {} });
+    await run;
+    expect(mocks.next).toHaveBeenCalledOnce();
+    expect(mocks.body).toHaveBeenCalledOnce();
+  });
+  it("surfaces failed closure-marker delivery before admission", async () => {
+    mocks.next.mockImplementation(() => new Promise(() => {}));
+    mocks.watch.mockRejectedValue(new Error("marker write failed"));
+    await expect(workflowToolRunWorkflow(input)).rejects.toThrow("marker write failed");
+    expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it("does not abort an admitted body when its initiating owner completes", async () => {
+    const owner = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<{ status: "completed"; output: string }>();
+    mocks.watch.mockReturnValue(owner.promise);
+    mocks.body.mockImplementation(() => {
+      started.resolve();
+      return finished.promise;
+    });
+    const run = workflowToolRunWorkflow(input);
+    await started.promise;
+    owner.resolve();
+    await Promise.resolve();
+    expect(mocks.body.mock.calls[0]![1].aborted).toBe(false);
+    expect(mocks.dispose).not.toHaveBeenCalled();
+    finished.resolve({ status: "completed", output: "done" });
+    await run;
+    expect(mocks.send.mock.calls[0]![1].payload.result.status).toBe("completed");
+  });
   it.each(["cancellation", "reader failure"])(
     "holds ownership through slow authored cleanup after %s",
     async (cause) => {

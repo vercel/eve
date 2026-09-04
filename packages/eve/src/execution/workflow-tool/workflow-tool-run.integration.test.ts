@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ownerInboxTestWorkflow } from "#internal/testing/owner-inbox-workflow.js";
+import {
+  inspectInboxConflictWorkflow,
+  ownerInboxTestWorkflow,
+} from "#internal/testing/owner-inbox-workflow.js";
 import {
   confirmDeployWorkflow,
   failingDeployWorkflow,
@@ -32,6 +35,11 @@ describe("unified owner transport", () => {
     ]);
     expect(await readStartedOwner(second.runId)).toEqual(owner);
     await expect(second.returnValue).resolves.toEqual([]);
+    const inspection = await start(inspectInboxConflictWorkflow, [owner.token]);
+    await expect(inspection.returnValue).resolves.toEqual({
+      runId: owner.ownerRunId,
+      status: "running",
+    });
     await sendInbox(owner, { eventId: "finish", kind: "session.submit", payload: "done" });
     await first.returnValue;
   });

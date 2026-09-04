@@ -1,4 +1,4 @@
-import { replyTargetToken, type ReplyTarget } from "#execution/inbox/types.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import {
   createAgentErrorResult,
   dispatchToClaimedAgentAddress,
@@ -65,7 +65,7 @@ export type AgentInvocationDispatchResult =
       readonly sessionState: DurableSessionState;
     };
 
-export type TaskAgentInvocationDispatchResult =
+type TaskAgentInvocationDispatchResult =
   | { readonly kind: "not-admitted"; readonly sessionState: DurableSessionState }
   | AgentInvocationDispatchResult;
 
@@ -80,7 +80,7 @@ export async function dispatchAgentInvocation(input: {
   readonly ownerId: string;
   readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
   const prepared = await prepareOwnerAgentInvocation({
     invocation: input.request.input,
@@ -99,7 +99,6 @@ export async function dispatchAgentInvocation(input: {
   const sessionState = (): DurableSessionState =>
     replaceDurableSessionSnapshot({
       session: projectToDurableSession(session),
-      state: input.sessionState,
     });
   const applyHandleCommand = (command: AgentHandleStoreCommand): AgentHandleStoreCommandResult => {
     const applied = applyTaskAgentHandleCommand(session, command);
@@ -163,7 +162,6 @@ export async function dispatchAgentInvocation(input: {
       auth: prepared.auth,
       bundle,
       currentSession: session,
-      parentToken: replyTargetToken(input.replyTo),
       parentReplyTo: input.replyTo,
       handle: claimed,
       taskId: input.taskId,
@@ -221,7 +219,6 @@ export async function dispatchAgentInvocation(input: {
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
-      parentContinuationToken: replyTargetToken(input.replyTo),
       parentReplyTo: input.replyTo,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
@@ -295,7 +292,7 @@ export async function dispatchTaskAgentInvocation(
   input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "callbackBaseUrl" | "emit">,
 ): Promise<TaskAgentInvocationDispatchResult> {
   if (input.taskId !== undefined) {
-    const session = await readDurableSession(input.sessionState);
+    const session = readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
     const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
@@ -317,7 +314,7 @@ export async function settleTaskAgentInvocation(input: {
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
     (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
@@ -369,7 +366,7 @@ export async function settleTaskAgentInvocation(input: {
     );
   }
   return {
-    sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
+    sessionState: replaceDurableSessionSnapshot({ session }),
   };
 }
 
@@ -379,7 +376,7 @@ export async function releaseAgentInvocationOwner(input: {
   readonly ownerId: string;
   readonly sessionState: DurableSessionState;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const session = input.cancelled
     ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))
     : applyTaskAgentHandleCommand(durable, {
@@ -388,9 +385,7 @@ export async function releaseAgentInvocationOwner(input: {
       }).session;
   return {
     sessionState:
-      session === durable
-        ? input.sessionState
-        : replaceDurableSessionSnapshot({ session, state: input.sessionState }),
+      session === durable ? input.sessionState : replaceDurableSessionSnapshot({ session }),
   };
 }
 

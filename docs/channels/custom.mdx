@@ -82,10 +82,9 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
-Cold-start sends return their accepted candidate without waiting for address
-ownership. If simultaneous sends race, eve forwards the losing candidate's
-message to the winner; resolve the address after startup when you need a fixed
-handle to the canonical owner.
+Cold-start sends wait until the winning session owns the address and its streams
+and initial state are ready. If simultaneous sends race, eve forwards the losing
+candidate's message to the winner and returns that canonical session handle.
 
 ```ts
 const source = from(threadId);
@@ -127,7 +126,7 @@ const inputResponses = parseInputResponses(decodedResponses);
 await source.respond(inputResponses, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"` and adds input at the active turn's next safe boundary. Use `"interrupt"` to stop that turn and start a replacement, or `"queue"` when the active turn should finish first. Configure the policy on `defineChannel(...)` or override one send:
 
 ```ts
 export default defineChannel({
@@ -147,8 +146,9 @@ export default defineChannel({
 
 The same override is available on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never steers: it delivers only addressed input responses. Use `cancel()` when you need to stop work without a replacement message.
 
-Attaching does no lookup. The first operation reports whether the ID is active.
-Call `resolveSession(address)` only when you explicitly need to snapshot an
+Attaching does no lookup. Each operation resolves the session when it dispatches.
+An accepted message may still be retired if terminal settlement wins the race;
+read the stream for its outcome. Call `resolveSession(address)` when you need an
 address's current owner as a fixed handle.
 
 ## Operation semantics
@@ -162,8 +162,9 @@ address's current owner as a fixed handle.
 - `reset` terminally retires the current session. A later address `send()` creates
   a fresh session; a fixed `Session` handle remains pinned to the retired ID.
 
-Control operations never create a session. Unknown or inactive targets return a
-benign no-active status. Authenticate and deduplicate command webhooks before
+Control operations never create a session. A missing session lookup returns a
+no-active status. Cancel and reset wait for settlement; compact and clear return
+once their candidates are accepted and report their outcomes on the stream. Authenticate and deduplicate command webhooks before
 calling `reset`, because a delayed duplicate can retire a newer address owner.
 
 ## CORS
@@ -330,7 +331,7 @@ Custom channels write their own function that joins the identity fields. The fra
 
 When the identity that should address a session is not known until later, re-key the live address with `channel.continuation?.rekey(rawToken)`. The runtime preserves the current channel namespace.
 
-Re-keying changes the address of the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
+Re-keying adds another address for the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
 The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelContinuationOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
 
@@ -359,7 +360,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-At the next workflow boundary, the runtime claims the new park hook before releasing the old token. If another active session already owns the new token, the re-keying session fails instead of taking it over. After a successful re-key, inbound deliveries still addressed to the old token are dropped, so coordinate with your senders to use the new token.
+At the next workflow boundary, the holder claims the new alias and retains the existing aliases. If another active session already owns the new token, re-keying fails instead of taking it over. After a successful re-key, both old and new tokens resolve to the same session until it terminates.
 
 ## File uploads
 

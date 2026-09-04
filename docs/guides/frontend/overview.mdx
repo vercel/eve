@@ -107,15 +107,15 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it. To replace an active turn with a follow-up, send the message with `turnPolicy: "steer"`. eve accepts the message through the durable session, cancels the active turn, and keeps the hook attached through the replacement turn:
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it. To replace an active turn with a follow-up, send the message with `turnPolicy: "interrupt"`. eve accepts the message, stops the active turn, and keeps the hook attached through the replacement turn:
 
 ```tsx
-await agent.send(message, { turnPolicy: "steer" });
+await agent.send(message, { turnPolicy: "interrupt" });
 ```
 
-Other message sends and HITL responses reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
+Use `turnPolicy: "steer"` to add input at the active turn's next safe boundary. You can answer pending HITL requests with `respond(...)` while the owner remains active. Other message sends reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
 
-`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
+`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves once the cancellation candidate and targeted turn have settled, or when no turn is active. It rejects if the cancellation request fails. An actual cancellation emits `turn.cancelled` followed by `session.waiting` on the same stream, so the session is safe to continue.
 
 ```tsx
 if (agent.status === "submitted" || agent.status === "streaming") {

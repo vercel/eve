@@ -55,23 +55,16 @@ export type DispatchPlanEntry =
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
-  readonly callbackBaseUrl?: string;
   /** Internal hook that receives child completion and HITL payloads. */
   readonly parentContinuationToken?: string;
-  readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/** Owner-side results plus any task-control work that still needs acknowledgement. */
+/** Owner-side results and updated domain state. */
 export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
-  readonly pendingTasks: readonly {
-    readonly taskInboxToken: string;
-    readonly taskId: string;
-    readonly taskRunId: string;
-  }[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
@@ -111,7 +104,7 @@ export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<PreparedCoordinationDispatch | undefined> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingCoordinationBatch(durableSession.state);
 
   if (pending === undefined) return undefined;

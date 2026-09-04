@@ -45,7 +45,6 @@ export async function startSubagent(input: {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
-  readonly parentContinuationToken: string | undefined;
   readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
@@ -94,7 +93,6 @@ export async function startSubagent(input: {
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
-        parentContinuationToken: input.parentContinuationToken,
         parentReplyTo: input.parentReplyTo,
         parentTraceContext,
         activityObserver: input.activityObserver,
@@ -114,7 +112,6 @@ export async function startSubagent(input: {
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
         parentReplyTo: input.parentReplyTo,
         parentTraceContext,
         activityObserver: input.activityObserver,

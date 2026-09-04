@@ -4,6 +4,7 @@ import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type {
+  HookPayload,
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
@@ -15,7 +16,6 @@ import type { JsonValue } from "#shared/json.js";
 import { isInputRequest } from "#shared/input.js";
 import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -24,11 +24,9 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
   outputTokens: 0,
 };
 
-// Wire schemas of the child→parent callback route. Possession of the
-// callback token is the authorization to settle; results bind to the
-// pending call by callId. `sessionId` is informational (tracing and
-// diagnostics) and never verified — new senders emit it, older eve
-// deployments may omit it.
+// Possession of the callback token authorizes delivery to one pending
+// invocation. The owner validates the reply against its child state;
+// an optional sessionId is diagnostic and grants no authority.
 
 const eventCoordinateSchema = z.number().int().nonnegative();
 
@@ -183,46 +181,24 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Callback invocation mismatch.", ok: false }, { status: 403 });
   }
 
-  const taskEvent = projectTaskEvent(body, target.address.token);
-  if (taskEvent instanceof Response) return taskEvent;
-  if (taskEvent !== undefined) {
-    try {
-      if ((await sendSubagentReply(target, taskEvent)) === "gone") throw new Error("Owner ended.");
-    } catch {
-      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
-    }
-    return Response.json({ ok: true }, { status: 202 });
-  }
-
-  const update = projectTaskUpdate(body, target.address.token);
-  if (update instanceof Response) return update;
-  if (update !== undefined) {
-    try {
-      if ((await sendSubagentReply(target, update)) === "gone") throw new Error("Owner ended.");
-    } catch {
-      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
-    }
-    return Response.json({ ok: true }, { status: 202 });
-  }
-
-  const result = projectSessionCallbackResult(body);
-  if (result instanceof Response) {
-    return result;
-  }
-
+  const payload = projectCallbackPayload(body);
+  if (payload instanceof Response) return payload;
   try {
-    if (
-      (await sendSubagentReply(target, {
-        kind: "runtime-action-result",
-        results: [result],
-      })) === "gone"
-    )
-      throw new Error("Owner ended.");
+    if ((await sendSubagentReply(target, payload)) === "gone") throw new Error("Owner ended.");
   } catch {
     return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+function projectCallbackPayload(body: unknown): HookPayload | TaskInboundUpdate | Response {
+  const taskEvent = projectTaskEvent(body);
+  if (taskEvent !== undefined) return taskEvent;
+  const update = projectTaskUpdate(body);
+  if (update !== undefined) return update;
+  const result = projectSessionCallbackResult(body);
+  return result instanceof Response ? result : { kind: "runtime-action-result", results: [result] };
 }
 
 function callbackKind(value: unknown): unknown {
@@ -232,7 +208,6 @@ function callbackKind(value: unknown): unknown {
 
 function projectTaskEvent(
   value: unknown,
-  token: string,
 ): SubagentAuthorizationEventHookPayload | SubagentInputRequestHookPayload | Response | undefined {
   const kind = callbackKind(value);
   if (kind !== "task.input-requested" && kind !== "task.authorization") return undefined;
@@ -241,14 +216,6 @@ function projectTaskEvent(
     return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
   }
   const payload = parsed.data;
-  if (readTaskIdFromInboxToken(token) !== undefined) {
-    const tokenRejection = rejectMismatchedTaskToken(token, payload.taskId);
-    if (tokenRejection !== undefined) return tokenRejection;
-    return Response.json(
-      { error: "Direct subagent task events are no longer accepted.", ok: false },
-      { status: 410 },
-    );
-  }
   return payload.kind === "task.input-requested"
     ? {
         callId: payload.callId,
@@ -267,18 +234,11 @@ function projectTaskEvent(
       };
 }
 
-function projectTaskUpdate(
-  value: unknown,
-  token: string,
-): TaskInboundUpdate | Response | undefined {
+function projectTaskUpdate(value: unknown): TaskInboundUpdate | Response | undefined {
   if (callbackKind(value) !== "task.update") return undefined;
   const parsed = taskUpdateCallbackSchema.safeParse(value);
   if (!parsed.success) {
     return Response.json({ error: "Invalid task update callback.", ok: false }, { status: 400 });
-  }
-  if (readTaskIdFromInboxToken(token) !== undefined) {
-    const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
-    if (tokenRejection !== undefined) return tokenRejection;
   }
   return {
     callId: parsed.data.callId,
@@ -287,12 +247,6 @@ function projectTaskUpdate(
     updateEpoch: parsed.data.updateEpoch,
     updateIndex: parsed.data.updateIndex,
   };
-}
-
-function rejectMismatchedTaskToken(token: string, taskId: string): Response | undefined {
-  return readTaskIdFromInboxToken(token) === taskId
-    ? undefined
-    : Response.json({ error: "Task callback token mismatch.", ok: false }, { status: 403 });
 }
 
 function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {

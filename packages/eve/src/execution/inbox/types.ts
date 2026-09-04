@@ -37,6 +37,23 @@ export interface InboxReplyTarget {
 
 export type ReplyTarget = InboxReplyTarget | { readonly kind: "session"; readonly token: string };
 
+export function isReplyTarget(value: unknown): value is ReplyTarget {
+  if (value === null || typeof value !== "object") return false;
+  const target = value as Partial<ReplyTarget>;
+  if (target.kind === "session") return typeof target.token === "string" && target.token.length > 0;
+  return (
+    target.kind === "inbox" &&
+    typeof target.requestId === "string" &&
+    target.requestId.length > 0 &&
+    target.address !== null &&
+    typeof target.address === "object" &&
+    typeof target.address.token === "string" &&
+    target.address.token.length > 0 &&
+    typeof target.address.ownerRunId === "string" &&
+    target.address.ownerRunId.length > 0
+  );
+}
+
 export function replyTargetToken(target: ReplyTarget): string {
   return target.kind === "inbox" ? target.address.token : target.token;
 }

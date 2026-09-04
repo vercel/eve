@@ -47,7 +47,7 @@ import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workfl
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { ModelSettlement, ModelStepResult } from "#execution/turn/model-types.js";
+import type { ModelSettlement, ModelResult } from "#execution/turn/model-types.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
@@ -64,7 +64,7 @@ import {
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/session/state.js";
-import type { ModelStepInput } from "#execution/turn/model-types.js";
+import type { ModelInput } from "#execution/turn/model-types.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
   resolveInitiatingTaskContext,
@@ -96,13 +96,11 @@ function channelDeliveryErrorCode(error: unknown): string {
   return "CHANNEL_DELIVERY_FAILED";
 }
 
-export type { ModelStepInput };
-
 /** Runs the harness inside the owner's execution step. */
-export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepResult> {
+export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
   let input = rawInput;
 
-  let durableSession = await readDurableSession(input.sessionState);
+  let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
@@ -446,8 +444,6 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
               : undefined,
             turnAgent: effectiveAgent.turnAgent,
           });
-          const modelSession = refreshedSession;
-
           const step = createExecutionNodeStep({
             abortSignal: input.abortSignal,
             capabilities,
@@ -457,7 +453,7 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
             handleEvent,
             handleSettlement,
             historyProjector: history.projector,
-            historyView: history.prepare(modelSession),
+            historyView: history.prepare(refreshedSession),
             instrumentation,
             mode,
             modelResolutionScope: {
@@ -467,7 +463,7 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
             node: effectiveNode,
             workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
           });
-          return step(modelSession, stepInput);
+          return step(refreshedSession, stepInput);
         };
 
         return runHarnessStep(schemaSession, resolved);
@@ -489,19 +485,8 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
       );
       return {
         action: "cancelled",
-        ...(retained === undefined
-          ? {}
-          : {
-              backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
-              backgroundTasks: retained.backgroundTasks,
-            }),
-        serializedContext: preserveSerializedInstrumentationState(
-          preserveSerializedAgentTraceState(
-            preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
-            interrupted,
-          ),
-          interrupted,
-        ),
+        backgroundTasks: retained?.backgroundTasks,
+        serializedContext: retainExecutionContext(input.serializedContext, interrupted),
         sessionState: createDurableSessionState({ session: cancelledSession }),
       };
     }
@@ -519,28 +504,16 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
         resolved,
       ),
     });
-    const cancellationContext = preserveSerializedInstrumentationState(
-      preserveSerializedAgentTraceState(
-        preserveSerializedSessionDynamicModelSelection(
-          input.serializedContext,
-          nextSerializedContext,
-        ),
-        nextSerializedContext,
-      ),
-      nextSerializedContext,
-    );
-    const settlementTransition = { settlement, cancellationState, cancellationContext };
-    const sleepDurationMs = readTurnSleepDurationMs(ctx);
-    const sleepTransition = sleepDurationMs === undefined ? {} : { sleepDurationMs };
-    const backgroundTransition =
-      stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
-        ? {}
-        : {
-            backgroundTaskState: createDurableSessionState({
-              session: stepResult.backgroundTaskSession,
-            }),
-            backgroundTasks: stepResult.backgroundTasks,
-          };
+    const transition = {
+      settlement,
+      cancellationState,
+      cancellationContext: retainExecutionContext(input.serializedContext, nextSerializedContext),
+      sleepDurationMs: readTurnSleepDurationMs(ctx),
+      backgroundTasks:
+        stepResult.backgroundTaskSession === undefined ? undefined : stepResult.backgroundTasks,
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+    };
 
     if (
       stepResult.next !== null &&
@@ -553,13 +526,9 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
       const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
       return {
         action: "done",
-        ...backgroundTransition,
-        ...settlementTransition,
+        ...transition,
         output: stepResult.next.output,
         isError: stepResult.next.isError,
-        ...sleepTransition,
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
         usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
         usageDelta: takeSessionUsageDelta(stepResult.session).delta,
       };
@@ -570,12 +539,8 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
       if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
         return {
           action: "dispatch-workflow-tasks",
-          ...backgroundTransition,
-          ...settlementTransition,
+          ...transition,
           pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-          ...sleepTransition,
-          serializedContext: nextSerializedContext,
-          sessionState: nextState,
         };
       }
 
@@ -589,11 +554,8 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
         const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
         return {
           action: "park",
-          ...backgroundTransition,
-          ...settlementTransition,
+          ...transition,
           ...pending,
-          ...sleepTransition,
-          serializedContext: nextSerializedContext,
           sessionState: createDurableSessionState({ session: reportedSession }),
           settled: {
             output: stepResult.settledTurn.output,
@@ -605,24 +567,29 @@ export async function runModelStep(rawInput: ModelStepInput): Promise<ModelStepR
 
       return {
         action: "park",
-        ...backgroundTransition,
-        ...settlementTransition,
+        ...transition,
         ...pending,
-        ...sleepTransition,
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
       };
     }
 
     return {
       action: "continue",
-      ...backgroundTransition,
-      ...settlementTransition,
-      ...sleepTransition,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
+      ...transition,
     };
   } finally {
     eventSink.release();
   }
+}
+
+function retainExecutionContext(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, unknown> {
+  return preserveSerializedInstrumentationState(
+    preserveSerializedAgentTraceState(
+      preserveSerializedSessionDynamicModelSelection(before, after),
+      after,
+    ),
+    after,
+  );
 }

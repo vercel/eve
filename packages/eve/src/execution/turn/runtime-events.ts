@@ -8,8 +8,10 @@ import type { InboxAddress, InboxEnvelope } from "#execution/inbox/types.js";
 import { sendInbox } from "#execution/inbox/send.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwner } from "#execution/tools/subagent/task-cancel.js";
-import { releaseAgentInvocationOwner } from "#execution/tools/subagent/invoke-step.js";
-import { emitWorkflowToolRunReport } from "#execution/workflow-tool/emit-workflow-tool-run-report-step.js";
+import { releaseAgentInvocationOwner } from "#execution/tools/subagent/invoke.js";
+import { emitTurnEvent } from "#execution/turn/events.js";
+import { createActionPartialEvent } from "#protocol/message.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type {
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunReport,
@@ -25,7 +27,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
   isInboxSubagentResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
-import { runProxySubagentEvent } from "#subagents/event-proxy-step.js";
+import { runProxySubagentEvent } from "#subagents/event-proxy.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 /** Applies execution traffic to hydrated state inside the turn's existing step. */
@@ -107,10 +109,24 @@ export async function applyRuntimeEvents(input: {
       continue;
     }
     if (envelope.kind === "tool.report") {
-      await emitWorkflowToolRunReport({
-        ...(message as WorkflowToolRunReport),
-        parentWritable: input.eventsWriter,
+      const report = message as WorkflowToolRunReport;
+      const applied = await emitTurnEvent({
+        event: createActionPartialEvent({
+          result: createRuntimeToolResultFromValue({
+            callId: report.from.callId,
+            output: report.update,
+            toolName: report.from.toolName,
+          }),
+          sequence: report.from.sequence,
+          stepIndex: report.from.stepIndex,
+          turnId: report.from.turnId,
+        }),
+        events: input.eventsWriter,
+        serializedContext,
+        sessionState: state,
       });
+      state = applied.sessionState;
+      serializedContext = applied.serializedContext;
       continue;
     }
     if (envelope.kind === "tool.request") {

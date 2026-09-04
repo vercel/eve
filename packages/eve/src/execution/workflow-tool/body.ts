@@ -4,12 +4,11 @@ import type { SessionContext } from "#context/session-context.js";
 import { attachWorkflowToolRunContext } from "#execution/workflow-tool/ask.js";
 import {
   type WorkflowToolRunOutcome,
-  type WorkflowToolRunOwner,
   type WorkflowToolRunRef,
   type WorkflowToolRunReport,
 } from "#execution/workflow-tool/messages.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
-import type { OwnerInbox } from "#execution/inbox/types.js";
+import type { InboxAddress, OwnerInbox } from "#execution/inbox/types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -27,7 +26,7 @@ export interface WorkflowBodyDefinition {
 }
 
 export interface WorkflowBodyInput extends WorkflowBodyDefinition {
-  readonly owner: WorkflowToolRunOwner;
+  readonly owner: InboxAddress;
 }
 
 type WorkflowToolExecute = (

@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { stampTestEvent, stampTestEvents } from "#internal/testing/events.js";
 import {
+  createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -11,6 +12,7 @@ import {
   createSessionWaitingEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
+  createTurnInterruptedEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
   EVE_STREAM_VERSION_HEADER,
@@ -702,13 +704,13 @@ describe("EveAgentStore session resume", () => {
 });
 
 describe("EveAgentStore steering", () => {
-  it("accepts an in-flight steer and follows its replacement turn", async () => {
+  it("follows accepted input when the preceding turn settles before it starts", async () => {
     const activeStream = controlledStreamResponse();
     const replacementStream = controlledStreamResponse();
     const [
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -717,7 +719,7 @@ describe("EveAgentStore steering", () => {
     ] = stampTestEvents([
       createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
-      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+      { type: "turn.completed", data: { sequence: 2, turnId: "turn_1" } },
       createSessionWaitingEvent(),
       createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
@@ -750,7 +752,7 @@ describe("EveAgentStore steering", () => {
       turnPolicy: "steer",
     });
 
-    activeStream.emit(firstCancelled!);
+    activeStream.emit(firstCompleted!);
     activeStream.emit(firstWaiting!);
     activeStream.close();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
@@ -765,7 +767,7 @@ describe("EveAgentStore steering", () => {
     expect(store.snapshot.events).toEqual([
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -778,6 +780,115 @@ describe("EveAgentStore steering", () => {
       text: "Replacement reply.",
       type: "text",
     });
+  });
+});
+
+describe("EveAgentStore active-owner input", () => {
+  it.each(["steer", "interrupt", "retired"] as const)(
+    "settles %s input on the attached stream without another stream request",
+    async (scenario) => {
+      const turnPolicy = scenario === "interrupt" ? "interrupt" : "steer";
+      const stream = controlledStreamResponse();
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(stream.response)
+        .mockResolvedValueOnce(startedResponse());
+      const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+      const firstSend = store.send({ message: "First" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      for (const event of stampTestEvents([
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+        createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      ]))
+        stream.emit(event);
+      await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(2));
+      const followup = store.send({ message: "Follow up", turnPolicy });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      const turnId = turnPolicy === "interrupt" ? "turn_2" : "turn_1";
+      const events: UnstampedMessageStreamEvent[] = [];
+      if (scenario === "retired") {
+        events.push({ type: "session.completed" });
+      } else {
+        if (turnPolicy === "interrupt") {
+          events.push(createTurnInterruptedEvent({ sequence: 2, turnId: "turn_1" }));
+        }
+        events.push(createMessageReceivedEvent({ message: "Follow up", sequence: 3, turnId }));
+        if (turnPolicy === "interrupt") {
+          events.push(createTurnStartedEvent({ sequence: 4, turnId }));
+        }
+        events.push(
+          createMessageCompletedEvent({
+            finishReason: "stop",
+            message: "Done",
+            sequence: 5,
+            stepIndex: 0,
+            turnId,
+          }),
+          createSessionWaitingEvent(),
+        );
+      }
+      for (const [index, event] of events.entries()) stream.emit(stampTestEvent(event, index + 2));
+      stream.close();
+      await Promise.all([firstSend, followup]);
+      expect(store.snapshot.status).toBe("ready");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("answers proxied HITL while its owner remains active", async () => {
+    const stream = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(stream.response)
+      .mockResolvedValueOnce(startedResponse());
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const firstSend = store.send({ message: "Delegate" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    for (const event of stampTestEvents([
+      createMessageReceivedEvent({ message: "Delegate", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createInputRequestedEvent({
+        turnId: "turn_1",
+        sequence: 2,
+        stepIndex: 0,
+        requests: [
+          {
+            kind: "tool-approval",
+            requestId: "child-approval",
+            prompt: "Proceed?",
+            options: [{ id: "approve", label: "Approve" }],
+            action: { kind: "tool-call", callId: "child-tool", toolName: "write", input: {} },
+          },
+        ],
+      }),
+    ]))
+      stream.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(3));
+    expect(store.snapshot.status).toBe("streaming");
+    const inputResponses = [{ optionId: "approve", requestId: "child-approval" }] as const;
+    const response = store.send({ inputResponses });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ inputResponses });
+    expect(store.snapshot.status).toBe("streaming");
+    const completionEvents = [
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Child completed",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+    for (const [index, event] of completionEvents.entries())
+      stream.emit(stampTestEvent(event, index + 3));
+    stream.close();
+    await Promise.all([firstSend, response]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toHaveLength(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -1,32 +1,6 @@
 import type { SessionContext } from "#context/session-context.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#tools/task.js";
-import type { WorkflowToolRunOwner } from "#execution/workflow-tool/messages.js";
-
-export type WorkflowToolRunSessionContext = SessionContext["session"];
-
-export const WORKFLOW_TOOL_EXECUTOR_KIND = "workflow-tool";
-
-/** Private task executor binding for the workflow tool run doing the task's work. */
-export function createWorkflowToolExecutorBinding(
-  input: WorkflowToolRunAddress,
-): TaskExecutorBinding {
-  return {
-    data: { hookToken: input.hookToken, runId: input.runId },
-    kind: WORKFLOW_TOOL_EXECUTOR_KIND,
-  };
-}
-
-export function readWorkflowToolExecutorAddress(
-  executor: TaskExecutorBinding | undefined,
-): WorkflowToolRunAddress | undefined {
-  if (executor?.kind !== WORKFLOW_TOOL_EXECUTOR_KIND) return undefined;
-  const hookToken = executor.data.hookToken;
-  const runId = executor.data.runId;
-  return typeof hookToken === "string" && typeof runId === "string"
-    ? { hookToken, runId }
-    : undefined;
-}
+import type { InboxAddress } from "#execution/inbox/types.js";
 
 export interface WorkflowToolRunInput {
   readonly callId: string;
@@ -34,9 +8,9 @@ export interface WorkflowToolRunInput {
   readonly executeInput?: JsonValue;
   readonly hookToken: string;
   readonly input: JsonObject;
-  readonly owner: WorkflowToolRunOwner;
+  readonly owner: InboxAddress;
   readonly resultKind?: "subagent" | "tool";
-  readonly session: WorkflowToolRunSessionContext;
+  readonly session: SessionContext["session"];
   readonly stepIndex: number;
   readonly toolName: string;
   readonly workflowId: string;

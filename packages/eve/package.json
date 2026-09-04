@@ -483,7 +483,6 @@
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
     "gray-matter": "4.0.3",
-    "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",

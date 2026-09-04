@@ -2,12 +2,9 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import type { DurableSessionState } from "#execution/session/state.js";
 import { routeProxiedDelivery, type RoutedDeliverResult } from "#execution/turn/proxy-delivery.js";
-import {
-  emitRecordedTaskInputRequest,
-  runProxySubagentEvent,
-} from "#subagents/event-proxy-step.js";
+import { emitRecordedTaskInputRequest, runProxySubagentEvent } from "#subagents/event-proxy.js";
 import { recordTerminalTaskViews, recordTaskInputRequest } from "#execution/tasks/input.js";
-import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event-step.js";
+import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 
 /** Routes descendant-bound responses and returns the remaining session input. */

@@ -49,7 +49,7 @@ export async function routeProxiedDelivery(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<RoutedDeliverResult> {
-  let durableSession = await readDurableSession(input.sessionState);
+  let durableSession = readDurableSession(input.sessionState);
   const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
@@ -154,7 +154,7 @@ export async function routeProxiedDelivery(input: {
   const context = {
     serializedContext: input.serializedContext ?? {},
     sessionState: retired
-      ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
+      ? replaceDurableSessionSnapshot({ session: durableSession })
       : input.sessionState,
   };
   if (parentAction !== undefined) return { ...context, ...parentAction };

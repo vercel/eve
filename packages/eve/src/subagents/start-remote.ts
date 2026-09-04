@@ -28,7 +28,6 @@ export async function startRemoteSubagent(input: {
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
   >;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
-  readonly parentContinuationToken: string | undefined;
   readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];

@@ -73,6 +73,10 @@ describe("turn boundary decisions", () => {
       kind: "dispatch",
     });
     expect(reduceTurnBoundary(progress, [steer])).toEqual({ kind: "model" });
+    expect(reduceTurnBoundary({ ...progress, terminal: true }, [steer])).toEqual({
+      kind: "finalize",
+      settlement: "natural",
+    });
   });
   it("does not treat an answer-only interrupt policy as cancellation", () => {
     const command = {

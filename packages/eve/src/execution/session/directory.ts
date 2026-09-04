@@ -20,23 +20,20 @@ export async function publishSessionDescriptor(
   holderRunId: string,
   resources: SessionResources,
 ): Promise<void> {
-  await publishImmutableRecord(descriptorStream(holderRunId), resources);
+  const stream = descriptorStream(holderRunId);
+  if ((await streamTailIndex(stream)) !== -1) {
+    if (!isDeepStrictEqual(await readStreamRecord<SessionResources>(stream), resources)) {
+      throw new Error("An immutable session resource was published with different contents.");
+    }
+    return;
+  }
+  await appendStreamRecords(stream, [resources], true);
 }
 
 export async function initializeSessionResources(resources: SessionResources): Promise<void> {
   await sessionSnapshots.initialize(resources.snapshots);
   // The existing run owns its empty default stream. The first event materializes
   // its contents; readers can wait on that stable address before any write.
-}
-
-async function publishImmutableRecord<T>(stream: string, value: T): Promise<void> {
-  if ((await streamTailIndex(stream)) !== -1) {
-    if (!isDeepStrictEqual(await readStreamRecord<T>(stream), value)) {
-      throw new Error("An immutable session resource was published with different contents.");
-    }
-    return;
-  }
-  await appendStreamRecords(stream, [value], true);
 }
 
 async function resolveHolder(holderRunId: string): Promise<SessionResources> {

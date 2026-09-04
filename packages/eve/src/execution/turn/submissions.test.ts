@@ -132,4 +132,23 @@ describe("task-scoped submission cancellation", () => {
     expect(result.queue).toEqual([other]);
     expect(result.deliveries).toEqual({ queued: "retired", cancel: "applied" });
   });
+  it("does not reapply a duplicate task cancellation to later admitted work", () => {
+    const queued = message("later", "task-a");
+    const initial = checkpoint({ deliveries: { cancel: "applied" }, queue: [queued] });
+    const result = admitSubmissions(initial, [
+      { candidateRunId: "duplicate", submission: cancellation("task-a") },
+    ]);
+    expect(result.queue).toEqual([queued]);
+    expect(result.deliveries).toEqual({ cancel: "applied" });
+  });
+
+  it("does not treat the previous snapshot writer as an active turn after settlement", () => {
+    const queued = message("queued", "task-a");
+    const result = retireTaskSubmissions(
+      checkpoint({ phase: "settled", queue: [queued] }),
+      cancellation("task-a", "turn_owner"),
+    );
+    expect(result.queue).toEqual([queued]);
+    expect(result.deliveries).toEqual({ cancel: "retired" });
+  });
 });

@@ -1,3 +1,4 @@
+import { selectDeliveries } from "#execution/turn/receipts.js";
 import { accountPending } from "#execution/turn/submissions.js";
 import type { TurnSettlementKind } from "#execution/turn/types.js";
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
@@ -15,7 +16,6 @@ import type {
 } from "#execution/turn/types.js";
 import { finalizeModelSettlement } from "#execution/turn/finalize-model.js";
 import { cancellationSettlement, settleCancelledTurn } from "#execution/turn/cancel.js";
-import type { ModelSettlement } from "#execution/turn/model-types.js";
 import { cancelDescendantTurns } from "#execution/turn/cancel-descendants.js";
 import { terminateChildSessions } from "#execution/turn/terminate-children.js";
 import { cancelSessionTimeout } from "#execution/session-timeout-steps.js";
@@ -42,15 +42,8 @@ import { notifyInitializationFailure } from "#execution/turn/initialization-fail
 const log = createLogger("execution.turn.finalize");
 const FAILURE_MESSAGE = "The turn could not complete safely.";
 
-interface FinalizingCheckpoint extends InitializedSessionCheckpoint {
-  readonly finalization: {
-    readonly kind: TurnSettlementKind;
-    readonly settlement?: ModelSettlement;
-    readonly terminal: boolean;
-  };
-}
-
 interface FinalizeTurnInput {
+  readonly eventIds: readonly string[];
   readonly claimedContinuationToken?: string;
   readonly session: SessionResources;
   readonly checkpoint: SnapshotRecordRef;
@@ -72,13 +65,14 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
   );
   if (completed !== undefined) {
     if (isTerminal(completed.checkpoint)) await closeSession(input.session, completed.checkpoint);
-    return receipt(completed.ref, completed.checkpoint);
+    return receipt(completed.ref, completed.checkpoint, input.eventIds);
   }
   if ((await sessionSnapshots.find(input.session.snapshots, `${writeId}:entered`)) !== undefined) {
     throw new Error("The previous finalization attempt did not commit its effects.");
   }
   const loaded = await sessionSnapshots.read<SessionCheckpoint>(input.checkpoint);
-  if (loaded.phase === "initialization-failed") return receipt(input.checkpoint, loaded);
+  if (loaded.phase === "initialization-failed")
+    return receipt(input.checkpoint, loaded, input.eventIds);
   const original = accountPending(loaded, input.pending, input.kind);
   const result = original.result;
   const cancelling =
@@ -119,11 +113,10 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
       emissionAfter: settlement?.emissionAfter ?? checkpoint.state.emissionState,
     };
   }
-  const entering: FinalizingCheckpoint = {
+  const entering: InitializedSessionCheckpoint = {
     ...checkpoint,
     writeId: `${writeId}:entered`,
     phase: "running",
-    finalization: { kind: input.kind, settlement, terminal },
   };
   await sessionSnapshots.append(input.session.snapshots, entering);
 
@@ -233,10 +226,11 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
   };
   const ref = await sessionSnapshots.append(input.session.snapshots, checkpoint);
   if (terminal) await closeSession(input.session, checkpoint);
-  return receipt(ref, checkpoint);
+  return receipt(ref, checkpoint, input.eventIds);
 }
 
 export async function failTurnStep(input: {
+  readonly eventIds: readonly string[];
   readonly session: SessionResources;
   readonly submission: AcceptedSubmission;
   readonly checkpoint?: SnapshotRecordRef;
@@ -252,7 +246,7 @@ export async function failTurnStep(input: {
   if (completed !== undefined) {
     await publishSessionDescriptor(input.session.holderRunId, input.session);
     await closeSession(input.session, completed.checkpoint);
-    return receipt(completed.ref, completed.checkpoint);
+    return receipt(completed.ref, completed.checkpoint, input.eventIds);
   }
   const entered = await sessionSnapshots.find<SessionCheckpoint>(
     input.session.snapshots,
@@ -276,6 +270,7 @@ export async function failTurnStep(input: {
       session: input.session,
       checkpoint: latest.ref,
       kind: "failure",
+      eventIds: input.eventIds,
       pending: [],
     });
   }
@@ -303,7 +298,7 @@ export async function failTurnStep(input: {
   if (failed.writeId !== `${writeId}:entered`) {
     await publishSessionDescriptor(input.session.holderRunId, input.session);
     await closeSession(input.session, failed);
-    return receipt(enteringRef, failed);
+    return receipt(enteringRef, failed, input.eventIds);
   }
   await sessionEvents.append(input.session.events, [failed.event]);
   await notifyInitializationFailure({
@@ -317,7 +312,7 @@ export async function failTurnStep(input: {
   const committed: InitializationFailureCheckpoint = { ...failed, writeId };
   const ref = await sessionSnapshots.append(input.session.snapshots, committed);
   await closeSession(input.session, committed);
-  return receipt(ref, committed);
+  return receipt(ref, committed, input.eventIds);
 }
 
 function isTerminal(checkpoint: SessionCheckpoint): boolean {
@@ -345,11 +340,15 @@ async function closeSession(
   }
 }
 
-function receipt(ref: SnapshotRecordRef, checkpoint: SessionCheckpoint): TurnReceipt {
+function receipt(
+  ref: SnapshotRecordRef,
+  checkpoint: SessionCheckpoint,
+  eventIds: readonly string[],
+): TurnReceipt {
   const terminal = isTerminal(checkpoint);
   return {
     checkpoint: ref,
-    deliveries: checkpoint.deliveries,
+    deliveries: selectDeliveries(checkpoint.deliveries, eventIds),
     terminal,
     ...(!terminal && checkpoint.phase !== "initialization-failed"
       ? { continuationToken: checkpoint.state.snapshot.session.continuationToken }

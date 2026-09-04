@@ -12,14 +12,14 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   request: vi.fn(),
 }));
-vi.mock("#subagents/event-proxy-step.js", () => ({ runProxySubagentEvent: mocks.proxy }));
-vi.mock("#execution/workflow-tool/emit-workflow-tool-run-report-step.js", () => ({
-  emitWorkflowToolRunReport: mocks.report,
+vi.mock("#subagents/event-proxy.js", () => ({ runProxySubagentEvent: mocks.proxy }));
+vi.mock("#execution/turn/events.js", () => ({
+  emitTurnEvent: mocks.report,
 }));
 vi.mock("#execution/tools/subagent/task-cancel.js", () => ({
   cancelAgentInvocationOwner: mocks.cancel,
 }));
-vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
+vi.mock("#execution/tools/subagent/invoke.js", () => ({
   releaseAgentInvocationOwner: mocks.release,
 }));
 vi.mock("#execution/tools/subagent/task-agent-requests.js", () => ({
@@ -106,6 +106,25 @@ describe("runtime owner event application", () => {
       ],
     });
     expect(result.results).toEqual([valid]);
+  });
+
+  it("persists context and session changes from accepted report lifecycle hooks", async () => {
+    const input = fixture();
+    const serializedContext = { channel: { progress: "reported" } };
+    const state = { ...input.state };
+    mocks.report.mockResolvedValue({ serializedContext, sessionState: state });
+    const result = await applyRuntimeEvents({
+      ...input,
+      events: [{ eventId: "report", kind: "tool.report", payload: { from, update: "working" } }],
+    });
+    expect(mocks.report).toHaveBeenCalledExactlyOnceWith({
+      events: input.eventsWriter,
+      serializedContext: input.serializedContext,
+      sessionState: input.state,
+      event: expect.objectContaining({ type: "action.partial" }),
+    });
+    expect(result.state).toBe(state);
+    expect(result.serializedContext).toBe(serializedContext);
   });
 
   it("rejects stale owner targets and unbound child authorization", async () => {

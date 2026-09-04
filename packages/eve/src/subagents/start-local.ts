@@ -29,7 +29,6 @@ export async function startLocalSubagent(input: {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
-  readonly parentContinuationToken: string | undefined;
   readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];

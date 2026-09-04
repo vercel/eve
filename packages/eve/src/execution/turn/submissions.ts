@@ -90,9 +90,15 @@ export function retireTaskSubmissions(
   submission: AcceptedSubmission,
 ): InitializedSessionCheckpoint {
   const command = submission.command;
-  if (command.kind !== "cancel" || command.taskId === undefined) return checkpoint;
+  if (
+    command.kind !== "cancel" ||
+    command.taskId === undefined ||
+    checkpoint.deliveries[submission.eventId] !== undefined
+  )
+    return checkpoint;
   const turnId = checkpoint.state.emissionState.turnId || `turn_${checkpoint.writerRunId}`;
-  const matchesTurn = command.turnId === undefined || command.turnId === turnId;
+  const matchesTurn =
+    command.turnId === undefined || (checkpoint.phase === "running" && command.turnId === turnId);
   const pending = [...checkpoint.queue, ...(checkpoint.inputs ?? [])];
   // A mixed message/answer keeps one candidate identity after splitting.
   const cancelledCandidates = new Set(

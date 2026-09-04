@@ -88,7 +88,7 @@ export const sessionSnapshots = {
     // never make a retry publish an older completed checkpoint as the new head.
     const head = await readHead(stream);
     if (head === undefined) throw new Error("Session snapshot storage has not been initialized.");
-    if (head?.kind !== "record" || head.ref.id !== ref.id) {
+    if (head.kind !== "record" || head.ref.id !== ref.id) {
       await appendStreamRecords<SnapshotEntry>(stream.id, [{ kind: "record", ref }]);
     }
     await appendStreamRecords(ref.id, [checkpoint], true);

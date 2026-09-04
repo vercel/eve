@@ -23,11 +23,8 @@ import {
   holdingWorkflowReference,
   turnWorkflowReference,
 } from "#execution/workflow-references.js";
-import {
-  startWorkflowOnAcceptedDeployment,
-  startWorkflowOnCurrentDeployment,
-} from "#execution/workflow-start.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
+import { sessionCommandToken } from "#execution/session-command-token.js";
 import type { SessionResources } from "#execution/session/resources.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -152,12 +149,6 @@ describe("workflow deployment dispatch", () => {
     }
     expect(observed).toEqual([caller, undefined]);
   });
-
-  it("preserves the accepting deployment when dispatch executes elsewhere", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "current");
-    await startWorkflowOnAcceptedDeployment(turnWorkflowReference, [], "accepted");
-    expect(startMock).toHaveBeenCalledWith(turnWorkflowReference, [], { deploymentId: "accepted" });
-  });
 });
 
 describe("session ingress", () => {
@@ -221,10 +212,15 @@ describe("session ingress", () => {
         acceptedDeploymentId: "accepted-deployment",
       },
     };
-    expect(acceptSubmission(command)).toEqual({
+    const submission = acceptSubmission(command);
+    expect(submission).toEqual({
       command,
       eventId: "task-delivery",
       acceptedDeploymentId: "accepted-deployment",
+    });
+    await dispatchAcceptedSubmission(session, submission);
+    expect(startMock).toHaveBeenCalledWith(turnWorkflowReference, [{ session, submission }], {
+      deploymentId: "accepted-deployment",
     });
   });
 
@@ -235,7 +231,7 @@ describe("session ingress", () => {
 
   it("resolves framework session addresses directly for task notifications", async () => {
     await dispatchSessionCommandByToken(
-      sessionCommandHookToken("public-id"),
+      sessionCommandToken("public-id"),
       { kind: "session-timeout" },
       "expiry-id",
     );

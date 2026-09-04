@@ -20,4 +20,16 @@ describe("snapshot write identity", () => {
     different.set("self", different);
     expect(await equalSnapshot(value, different)).toBe(false);
   });
+
+  it("does not mistake reordered map values for the same attachment at each key", async () => {
+    const left = new Map([
+      ["a", new Blob(["one"])],
+      ["b", new Blob(["two"])],
+    ]);
+    const right = new Map([
+      ["b", new Blob(["one"])],
+      ["a", new Blob(["two"])],
+    ]);
+    expect(await equalSnapshot(left, right)).toBe(false);
+  });
 });

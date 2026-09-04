@@ -45,6 +45,7 @@ export function reduceTurnBoundary(
     if (controls.includes(kind)) return { kind: "finalize", settlement: kind };
   }
   if (progress.action === "cancelled") return { kind: "finalize", settlement: "cancel" };
+  if (progress.terminal) return { kind: "finalize", settlement: "natural" };
   const applicable = pending.some((envelope) => {
     const submission = submissionFromEnvelope(envelope);
     if (submission === undefined) return true;

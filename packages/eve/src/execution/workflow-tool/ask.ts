@@ -1,9 +1,6 @@
-import type { OwnerInbox, InboxReplyTarget } from "#execution/inbox/types.js";
+import type { OwnerInbox, InboxAddress } from "#execution/inbox/types.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
-import type {
-  WorkflowToolRunOwner,
-  WorkflowToolRunRef,
-} from "#execution/workflow-tool/messages.js";
+import type { WorkflowToolRunRef } from "#execution/workflow-tool/messages.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 
 // `Symbol.for`, not a module-local WeakMap: `ask()` ships via the `eve/workflow`
@@ -15,7 +12,7 @@ interface WorkflowToolRunContext {
   readonly inbox: OwnerInbox;
   answerSeq: number;
   readonly from: WorkflowToolRunRef;
-  readonly owner: WorkflowToolRunOwner;
+  readonly owner: InboxAddress;
 }
 
 type WorkflowToolRunContextCarrier = {
@@ -32,7 +29,7 @@ export function attachWorkflowToolRunContext(
   });
 }
 
-function readWorkflowToolRunContext(ctx: ToolContext): WorkflowToolRunContext {
+export function readWorkflowToolRunContext(ctx: ToolContext): WorkflowToolRunContext {
   const context = (ctx as WorkflowToolRunContextCarrier)[WORKFLOW_TOOL_RUN_CONTEXT];
   if (context === undefined) {
     throw new Error(
@@ -40,22 +37,6 @@ function readWorkflowToolRunContext(ctx: ToolContext): WorkflowToolRunContext {
     );
   }
   return context;
-}
-
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
-  return readWorkflowToolRunContext(ctx).from;
-}
-
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
-  return readWorkflowToolRunContext(ctx).owner;
-}
-
-export function readWorkflowToolRunInbox(ctx: ToolContext): OwnerInbox {
-  return readWorkflowToolRunContext(ctx).inbox;
-}
-
-export function createWorkflowReplyTarget(ctx: ToolContext, requestId: string): InboxReplyTarget {
-  return { address: readWorkflowToolRunInbox(ctx).address, kind: "inbox", requestId };
 }
 
 /** Asks through the run's inbox; concurrent questions are correlated independently. */

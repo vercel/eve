@@ -1,3 +1,4 @@
+import { selectDeliveries } from "#execution/turn/receipts.js";
 import {
   commandDelivery,
   admitSubmissions,
@@ -17,9 +18,9 @@ import { acknowledgeDelegatedTasks } from "#execution/tasks/dispatch.js";
 import { acknowledgeWorkflowTools } from "#execution/workflow-tool/start.js";
 import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { runModelStep } from "#execution/turn/model.js";
+import { runModel } from "#execution/turn/model.js";
 import { applyRuntimeEvents } from "#execution/turn/runtime-events.js";
-import type { ModelStepPayload } from "#execution/turn/model-types.js";
+import type { ModelPayload } from "#execution/turn/model-types.js";
 import type {
   AcceptedSubmission,
   PendingSubmission,
@@ -36,7 +37,7 @@ import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-a
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { startSessionTimeout } from "#execution/session-timeout-steps.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 
 export interface ExecuteTurnInput {
@@ -81,7 +82,7 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
       kind: "receipt",
       receipt: {
         checkpoint: input.checkpoint,
-        deliveries: loaded.deliveries,
+        deliveries: selectDeliveries(loaded.deliveries, [input.submission.eventId]),
         terminal: loaded.phase === "terminal" || loaded.phase === "initialization-failed",
       },
     };
@@ -143,7 +144,6 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     checkpoint = {
       ...checkpoint,
       state: replaceDurableSessionSnapshot({
-        state,
         session: {
           ...state.snapshot.session,
           state: {
@@ -174,8 +174,9 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     await publishSessionDescriptor(input.session.holderRunId, input.session);
   }
 
+  const admitted = checkpoint;
   checkpoint = await sessionEvents.withWriter(input.session.events, async (events) => {
-    let state: InitializedSessionCheckpoint = checkpoint!;
+    let state = admitted;
     if (input.work.kind !== "dispatch") {
       const envelopes = input.work.envelopes ?? [];
       const submissions = envelopes.filter((envelope) => envelope.kind === "session.submit");
@@ -234,7 +235,6 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
       const dispatch = await dispatchCoordination({
         action: result.action,
         parentContinuationToken: input.owner.token,
-        parentWritable: events,
         serializedContext: state.serializedContext,
         sessionState: state.state,
       });
@@ -246,13 +246,13 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
           dispatch.results.map((result) => [result.callId, Date.now()]),
         ),
         dispatched: true,
-        pendingTaskAcks: dispatch.pendingTasks,
+        pendingTaskAcks: [],
         pendingToolAcks: getWorkflowToolRuns(dispatch.sessionState.snapshot.session.state),
       };
       return state;
     }
 
-    let payload: ModelStepPayload | undefined;
+    let payload: ModelPayload | undefined;
     const deliveries: DeliverHookPayload[] = [];
     const applied = { ...state.deliveries };
     const remaining = [...(state.inputs ?? [])];
@@ -287,11 +287,7 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
           } else {
             return {
               ...state,
-              result: {
-                action: "cancelled",
-                serializedContext: state.serializedContext,
-                sessionState: state.state,
-              },
+              result: cancelledResult(state),
             };
           }
         }
@@ -315,11 +311,7 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
       if (routed.kind === "cancel-turn")
         return {
           ...state,
-          result: {
-            action: "cancelled",
-            serializedContext: state.serializedContext,
-            sessionState: state.state,
-          },
+          result: cancelledResult(state),
         };
       payload = routed.remainder;
       if (payload === undefined) {
@@ -327,20 +319,14 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
           ...state,
           deliveries: applied,
           inputs: remaining,
-          result: state.result ?? {
-            action: "park",
-            hasPendingAuthorization: false,
-            hasPendingInputBatch: false,
-            sessionState: state.state,
-            serializedContext: state.serializedContext,
-          },
+          result: state.result ?? parkedResult(state),
         };
       }
     }
     if (payload === undefined && state.result === undefined && (state.inputs?.length ?? 0) === 0) {
       return { ...state, result: parkedResult(state) };
     }
-    const result = await runModelStep({
+    const result = await runModel({
       input: payload,
       events,
       abortSignal: input.abortSignal,
@@ -391,6 +377,14 @@ function parkedResult(checkpoint: InitializedSessionCheckpoint) {
   };
 }
 
+function cancelledResult(checkpoint: InitializedSessionCheckpoint) {
+  return {
+    action: "cancelled" as const,
+    sessionState: checkpoint.state,
+    serializedContext: checkpoint.serializedContext,
+  };
+}
+
 async function routePendingResponses(
   checkpoint: InitializedSessionCheckpoint,
   events: WritableStream<Uint8Array>,
@@ -427,11 +421,7 @@ async function routePendingResponses(
     if (routed.kind === "cancel-turn") {
       current = {
         ...current,
-        result: {
-          action: "cancelled",
-          sessionState: current.state,
-          serializedContext: current.serializedContext,
-        },
+        result: cancelledResult(current),
       };
       deliveries[item.submission.eventId] = "applied";
       continue;
@@ -457,32 +447,11 @@ export function projectProgress(
       : result?.action === "park"
         ? result.pendingCoordinationCallIds
         : undefined;
-  const ready = pendingCallIds?.every((callId) =>
-    checkpoint.runtimeResults?.some((result) => result.callId === callId),
-  );
-  const action =
-    (checkpoint.inputs?.length ?? 0) > 0 && pendingCallIds === undefined
-      ? "continue"
-      : result?.action === "cancelled"
-        ? "cancelled"
-        : pendingCallIds !== undefined
-          ? checkpoint.dispatched !== true
-            ? "dispatch"
-            : ready
-              ? "continue"
-              : "wait"
-          : result?.action === "park" &&
-              result.settlement === undefined &&
-              (result.hasPendingAuthorization || result.hasPendingInputBatch)
-            ? "wait"
-            : result === undefined || result.action === "continue"
-              ? "continue"
-              : "settle";
   return {
     checkpoint: ref,
     turnId: checkpoint.state.emissionState.turnId || `turn_${checkpoint.writerRunId}`,
     taskId: checkpoint.caller?.taskId,
-    action,
+    action: nextAction(checkpoint, pendingCallIds),
     terminal: result?.action === "done",
     pendingCallIds,
     pendingRunIds: getWorkflowToolRuns(checkpoint.state.snapshot.session.state).map(
@@ -493,6 +462,32 @@ export function projectProgress(
     continuationToken: checkpoint.state.continuationToken,
     claimedContinuationToken: checkpoint.claimedContinuationToken,
   };
+}
+
+function nextAction(
+  checkpoint: InitializedSessionCheckpoint,
+  pendingCallIds: readonly string[] | undefined,
+): TurnProgress["action"] {
+  const result = checkpoint.result;
+  if (result?.action === "cancelled") return "cancelled";
+  if (result?.action === "done") return "settle";
+  if (pendingCallIds !== undefined) {
+    if (checkpoint.dispatched !== true) return "dispatch";
+    return pendingCallIds.every((callId) =>
+      checkpoint.runtimeResults?.some((result) => result.callId === callId),
+    )
+      ? "continue"
+      : "wait";
+  }
+  if ((checkpoint.inputs?.length ?? 0) > 0 || result === undefined || result.action === "continue")
+    return "continue";
+  if (
+    result.action === "park" &&
+    result.settlement === undefined &&
+    (result.hasPendingAuthorization || result.hasPendingInputBatch)
+  )
+    return "wait";
+  return "settle";
 }
 
 async function initializeCheckpoint(
@@ -532,7 +527,7 @@ async function initializeCheckpoint(
       ? undefined
       : await startSessionTimeout({
           deadline: new Date(Date.now() + (seed.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS)),
-          token: sessionCommandHookToken(input.session.sessionId),
+          token: sessionCommandToken(input.session.sessionId),
         });
   return {
     writeId: "initial",

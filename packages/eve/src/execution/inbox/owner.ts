@@ -1,5 +1,4 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import { disposeHook } from "#execution/hook-ownership.js";
 import type { InboxAddress, InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 
 interface Waiter<T> {
@@ -202,7 +201,7 @@ export function ownerInboxFromHook<T extends InboxEnvelope>(
       errorObservers.clear();
       buffered.length = 0;
       replies.clear();
-      await disposeHook(hook);
+      hook.dispose();
     },
   };
 }

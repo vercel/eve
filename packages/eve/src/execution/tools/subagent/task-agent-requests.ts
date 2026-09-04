@@ -1,13 +1,13 @@
 import type { DurableSessionState } from "#execution/session/state.js";
-import { emitTaskSubagentCalled } from "#execution/tools/subagent/emit-called-step.js";
+import { emitTurnEvent } from "#execution/turn/events.js";
 import {
   dispatchTaskAgentInvocation,
   settleTaskAgentInvocation,
-} from "#execution/tools/subagent/invoke-step.js";
+} from "#execution/tools/subagent/invoke.js";
 import { sendInbox } from "#execution/inbox/send.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
-export interface AgentRequestDelivery {
+interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
@@ -15,13 +15,13 @@ export interface AgentRequestDelivery {
   readonly taskId?: string;
 }
 
-export interface TaskAgentRequestContext {
+interface TaskAgentRequestContext {
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-export interface AppliedTaskAgentRequest {
+interface AppliedTaskAgentRequest {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -58,15 +58,12 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitTaskSubagentCalled({
+          return await emitTurnEvent({
             event: dispatched.event,
-            parentWritable: ctx.parentWritable,
+            events: ctx.parentWritable,
             serializedContext: ctx.serializedContext,
-          });
-          return {
-            serializedContext: emitted.serializedContext,
             sessionState: dispatched.sessionState,
-          };
+          });
         }
         case "failed":
           if (delivery.replyTo.kind !== "inbox")

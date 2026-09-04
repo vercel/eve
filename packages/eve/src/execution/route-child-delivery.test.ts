@@ -1,31 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import {
-  emitRecordedTaskInputRequest,
-  runProxySubagentEvent,
-} from "#subagents/event-proxy-step.js";
+import { emitRecordedTaskInputRequest, runProxySubagentEvent } from "#subagents/event-proxy.js";
 import { recordTaskInputRequest } from "#execution/tasks/input.js";
-import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event-step.js";
+import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event.js";
 import { routeProxiedDelivery } from "#execution/turn/proxy-delivery.js";
 import type { DurableSessionState } from "#execution/session/state.js";
-import { dispatchTaskAgentInvocation } from "#execution/tools/subagent/invoke-step.js";
+import { dispatchTaskAgentInvocation } from "#execution/tools/subagent/invoke.js";
 import { sendInbox } from "#execution/inbox/send.js";
 
-vi.mock("#subagents/event-proxy-step.js", () => ({
+vi.mock("#subagents/event-proxy.js", () => ({
   emitRecordedTaskInputRequest: vi.fn(),
   runProxySubagentEvent: vi.fn(),
 }));
 vi.mock("#execution/tasks/input.js", () => ({
   recordTaskInputRequest: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/accept-event-step.js", () => ({
+vi.mock("#execution/tools/subagent/accept-event.js", () => ({
   acceptTaskAuthorizationEvent: vi.fn(),
 }));
 vi.mock("#execution/turn/proxy-delivery.js", () => ({
   routeProxiedDelivery: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
+vi.mock("#execution/tools/subagent/invoke.js", () => ({
   dispatchTaskAgentInvocation: vi.fn(),
 }));
 vi.mock("#execution/inbox/send.js", () => ({

@@ -24,7 +24,6 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import { sendSubagentReply } from "#subagents/reply.js";
 import type { ReplyTarget } from "#execution/inbox/types.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -231,7 +230,7 @@ export async function resolveInitialTurnCaller(input: {
         url: parsed.callback.url,
       },
       subagentName: parsed.callback.subagentName,
-      taskId: parsed.callback.taskId ?? readTaskIdFromInboxToken(parsed.callback.token),
+      taskId: parsed.callback.taskId,
     };
   }
 

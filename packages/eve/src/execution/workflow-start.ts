@@ -14,37 +14,7 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  return await startWorkflowOnDeployment(
-    workflow,
-    args,
-    process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
-    options,
-  );
-}
-
-/**
- * Starts on the deployment that accepted a delivery when one was stamped,
- * otherwise stays on the deployment executing this call.
- */
-export async function startWorkflowOnAcceptedDeployment<TArgs extends unknown[], TResult>(
-  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
-  args: TArgs,
-  acceptedDeploymentId: string | undefined,
-  options?: StartOptionsWithoutDeploymentId,
-): Promise<Run<unknown> | Run<TResult>> {
-  if (acceptedDeploymentId === undefined) {
-    return await startWorkflowOnCurrentDeployment(workflow, args, options);
-  }
-
-  return await startWorkflowOnDeployment(workflow, args, acceptedDeploymentId, options);
-}
-
-async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
-  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
-  args: TArgs,
-  deploymentId: string | undefined,
-  options?: StartOptionsWithoutDeploymentId,
-): Promise<Run<unknown> | Run<TResult>> {
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
   return await withWorkflowStartContext(async () => {
     if (deploymentId !== undefined) {
       return await start(workflow, args, { ...options, deploymentId });

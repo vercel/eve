@@ -1,4 +1,4 @@
-import type { ReplyTarget } from "#execution/inbox/types.js";
+import { isReplyTarget, type ReplyTarget } from "#execution/inbox/types.js";
 
 /**
  * Durable state for the subagent adapter, split from the adapter itself so
@@ -10,9 +10,8 @@ import type { ReplyTarget } from "#execution/inbox/types.js";
  * Durable adapter kind used for delegated subagent child runs.
  *
  * Framework-owned — authored channel code never constructs a subagent
- * adapter directly. Emitted by `buildSubagentRunInput`
- * (`execution/subagent-tool.ts`) when a parent dispatches a child
- * subagent.
+ * adapter directly. Emitted by `buildSubagentRunInput` when a parent
+ * dispatches a child subagent.
  */
 export const SUBAGENT_ADAPTER_KIND = "subagent";
 
@@ -58,21 +57,5 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0 &&
     (state.taskId === undefined || (typeof state.taskId === "string" && state.taskId.length > 0))
-  );
-}
-
-function isReplyTarget(value: unknown): value is ReplyTarget {
-  if (value === null || typeof value !== "object") return false;
-  const target = value as Partial<ReplyTarget>;
-  if (target.kind === "session") return typeof target.token === "string" && target.token.length > 0;
-  return (
-    target.kind === "inbox" &&
-    typeof target.requestId === "string" &&
-    target.requestId.length > 0 &&
-    target.address !== undefined &&
-    typeof target.address.token === "string" &&
-    target.address.token.length > 0 &&
-    typeof target.address.ownerRunId === "string" &&
-    target.address.ownerRunId.length > 0
   );
 }

@@ -10,7 +10,7 @@ import {
 } from "#internal/testing/events.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandToken } from "#execution/session-command-token.js";
 import { activeTurnToken } from "#execution/turn/address.js";
 import { waitForTurnReceipt } from "#execution/turn/admission.js";
 import { sessionSnapshots } from "#execution/session/snapshots.js";
@@ -318,7 +318,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const commandToken = sessionCommandHookToken(run.sessionId);
+        const commandToken = sessionCommandToken(run.sessionId);
         const cancelHook = await requireHookOwner(activeTurnToken(run.sessionId));
 
         await fixture.toolStarted;
@@ -557,7 +557,7 @@ describe("turn cancellation integration", () => {
         // tool, holding the parent in `waitForRuntimeActionResults`.
         await fixture.toolStarted;
 
-        const cancelToken = sessionCommandHookToken(run.sessionId);
+        const cancelToken = sessionCommandToken(run.sessionId);
 
         await dispatchSessionCommandByToken(cancelToken, { kind: "cancel" });
 
@@ -646,7 +646,7 @@ describe("turn cancellation integration", () => {
           .childSessionId;
         expect(childSessionId).toBeDefined();
 
-        const cancelToken = sessionCommandHookToken(run.sessionId);
+        const cancelToken = sessionCommandToken(run.sessionId);
 
         const cancelHook = await requireHookOwner(activeTurnToken(run.sessionId));
         await dispatchSessionCommandByToken(cancelToken, { kind: "cancel" });
@@ -710,7 +710,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const cancelToken = sessionCommandHookToken(run.sessionId);
+        const cancelToken = sessionCommandToken(run.sessionId);
 
         await fixture.toolStarted;
 
@@ -761,7 +761,7 @@ describe("turn cancellation integration", () => {
         expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
 
         // A fresh candidate retires a late cancellation against the settled snapshot.
-        await dispatchSessionCommandByToken(sessionCommandHookToken(run.sessionId), {
+        await dispatchSessionCommandByToken(sessionCommandToken(run.sessionId), {
           kind: "cancel",
         });
         await dispatchSessionCommandByToken(continuationToken, {

@@ -585,6 +585,69 @@ async function settleAsyncWork(): Promise<void> {
   await Promise.resolve();
 }
 
+describe("EveTUIRunner active-owner input", () => {
+  it("pauses an open input-request stream and resumes after its cursor without cancelling the owner", async () => {
+    const session = stubSession();
+    const requested = stampTestEvent({
+      type: "input.requested",
+      data: {
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "owner-turn",
+        requests: [
+          {
+            kind: "tool-approval",
+            requestId: "child-approval",
+            prompt: "Proceed?",
+            options: [{ id: "approve", label: "Approve" }],
+            action: { kind: "tool-call", callId: "child-tool", toolName: "write", input: {} },
+          },
+        ],
+      },
+    });
+    const cancelReader = vi.fn();
+    const firstStream = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(`${JSON.stringify(requested)}\n`));
+        },
+        cancel: cancelReader,
+      }),
+      { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+    );
+    const accepted = () =>
+      Response.json({ sessionId: "session_test", status: "accepted" }, { status: 202 });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(accepted())
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(accepted())
+      .mockResolvedValueOnce(
+        messageStreamResponseOf([stampTestEvent({ type: "session.completed" }, 1)]),
+      );
+    const readToolApproval = vi.fn(async () => ({ approved: true }));
+    await new EveTUIRunner({
+      session,
+      name: "Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn().mockResolvedValueOnce("Delegate").mockResolvedValueOnce(undefined),
+        readToolApproval,
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) void event;
+        }),
+      }),
+    }).run();
+    expect(readToolApproval).toHaveBeenCalledOnce();
+    expect(cancelReader).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      inputResponses: [{ requestId: "child-approval", optionId: "approve" }],
+    });
+    expect(String(fetchMock.mock.calls[3]?.[0])).toContain("startIndex=1");
+    expect(session.state.streamIndex).toBe(2);
+  });
+});
+
 describe("EveTUIRunner agent header", () => {
   it("reports the paint boundary before rendering the startup header", async () => {
     const order: string[] = [];
@@ -4053,7 +4116,12 @@ describe("EveTUIRunner mid-turn message queue", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
   });
 
-  it("retries a cancel that raced turn dispatch and scopes it once the turn id is known", async () => {
+  it.each([
+    { timing: "before the first event", outcome: "accepted" },
+    { timing: "after the turn starts", outcome: "accepted" },
+    { timing: "before the first event", outcome: "no_active_turn" },
+    { timing: "before the first event", outcome: "error" },
+  ] as const)("sends one cancellation request $timing ($outcome)", async ({ timing, outcome }) => {
     const gate = createDeferred<void>();
     const session = stubSession();
     vi.spyOn(session, "send").mockImplementation(
@@ -4062,47 +4130,50 @@ describe("EveTUIRunner mid-turn message queue", () => {
           cancelTurn: async (turnId) => await session.cancel({ turnId }),
           createStream: async function* () {
             yield stampTestEvent(
-              {
-                type: "turn.started",
-                data: { turnId: "turn-1", sequence: 1 },
-              } as UnstampedMessageStreamEvent,
+              { type: "turn.started", data: { turnId: "turn-1", sequence: 1 } },
               0,
             );
-            // Hold the stream mid-turn until the retry loop has proven both
-            // attempts, then settle the turn as cancelled.
+            yield stampTestEvent(
+              {
+                type: "step.started",
+                data: { turnId: "turn-1", stepIndex: 0, sequence: 2, modelId: "test-model" },
+              },
+              1,
+            );
             await gate.promise;
             yield stampTestEvent(
               {
-                type: "turn.cancelled",
+                type: outcome === "accepted" ? "turn.cancelled" : "turn.completed",
                 data: { turnId: "turn-1", sequence: 2 },
               } as UnstampedMessageStreamEvent,
-              1,
+              2,
             );
-            yield stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 2);
+            yield stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 3);
           },
           sessionId: "session_test",
         }),
     );
-    const cancelCalls: Array<{ turnId?: string } | undefined> = [];
-    vi.spyOn(session, "cancel").mockImplementation(async (options?: { turnId?: string }) => {
-      cancelCalls.push(options);
-      if (cancelCalls.length >= 2) {
-        gate.resolve();
-        return { sessionId: "session_test", status: "accepted" as const };
-      }
-      // The first request raced the dispatch window: the turn workflow has
-      // not claimed its cancel hook yet, so the server reports no turn.
-      return { status: "no_active_turn" as const };
+    const cancel = vi.spyOn(session, "cancel").mockImplementation(async () => {
+      gate.resolve();
+      if (outcome === "error") throw new Error("Transport unavailable");
+      return outcome === "accepted"
+        ? { sessionId: "session_test", status: "accepted" as const }
+        : { status: "no_active_turn" as const };
     });
     const prompts: Array<string | undefined> = ["hello", undefined];
     const seen: string[] = [];
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => prompts.shift()),
+      renderNotice: vi.fn(),
       renderStream: vi.fn(async (result) => {
-        // Esc lands before the first stream event arrives.
-        result.cancel?.();
+        const cancelTwice = () => {
+          result.cancel?.();
+          result.cancel?.();
+        };
+        if (timing === "before the first event") cancelTwice();
         for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
           seen.push(event.type);
+          if (timing === "after the turn starts" && event.type === "step-start") cancelTwice();
         }
       }),
     });
@@ -4110,13 +4181,16 @@ describe("EveTUIRunner mid-turn message queue", () => {
     const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
     await runner.run();
 
-    // `turn.cancelled` reaches the renderer as its own stream event.
-    expect(seen).toContain("turn-cancelled");
-    expect(cancelCalls).toHaveLength(2);
-    // First attempt fired before `turn.started` named the turn; the retry
-    // carries the observed id so it can never cancel a later turn.
-    expect(cancelCalls[0]).toBeUndefined();
-    expect(cancelCalls[1]).toEqual({ turnId: "turn-1" });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith(
+      timing === "before the first event" ? undefined : { turnId: "turn-1" },
+    );
+    if (outcome === "accepted") expect(seen).toContain("turn-cancelled");
+    if (outcome === "error") {
+      expect(renderer.renderNotice).toHaveBeenCalledWith(
+        "Couldn't cancel the turn: Transport unavailable",
+      );
+    }
   });
 
   it("drops a cancel request that arrives after the turn boundary", async () => {

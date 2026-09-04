@@ -112,21 +112,6 @@ export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
 const idleChatGptAuthPollMs = 5_000;
-/**
- * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
- * window (locally the cancel hook is claimed well under a second after the
- * send is accepted) without hammering the cancel route.
- */
-const turnCancelRetryDelayMs = 250;
-const turnCancelAttempts = 8;
-
-async function delayMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
 export type AgentTUIStreamResult = {
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
   abort?: () => void;
@@ -172,7 +157,7 @@ export type AgentTUITurnState = {
   sawSessionFailure: boolean;
   /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
   turnId?: string;
-  /** True while a cooperative-cancel request loop is running for this turn. */
+  /** True while a cooperative-cancel request is running for this turn. */
   cancelInFlight?: boolean;
 };
 
@@ -1472,47 +1457,22 @@ export class EveTUIRunner {
     return this.#createTUIStreamResult(response, () => abortController.abort(), this.#session);
   }
 
-  /**
-   * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. A key-driven cancel that lands in the dispatch
-   * window — after the turn was sent but before the turn workflow claims its
-   * cancel hook (i.e. before `turn.started` reaches the client) — resolves as a
-   * benign `no_active_turn` and would otherwise be silently lost, leaving
-   * the TUI showing "Cancelling…" while the turn runs to completion.
-   * Retrying until the stream reaches its boundary closes that window.
-   *
-   * Once `turn.started` names the turn, each retry carries its id, so a
-   * GUARDED retry that outlives the boundary is a benign no-op. An
-   * UNGUARDED attempt (turnId not yet known) has a residual race: if this
-   * turn's boundary, the queue drain, and the next turn's dispatch all
-   * complete while the request is in flight, the cancel can land on the
-   * next turn. Closing it needs turn-scoped cancel admission server-side
-   * (the #867 ledger); until then the renderer backstops it — a
-   * `turn.cancelled` arriving without a local cancel request in that stream
-   * restores the submitted message into the prompt instead of losing it.
-   * Single-flight per turn: repeated cancel keys join the running loop.
-   */
   async #requestTurnCancellation(
     turnState: AgentTUITurnState,
     sourceSession: ClientSession | undefined,
   ): Promise<void> {
-    if (turnState.cancelInFlight === true) return;
+    if (
+      turnState.cancelInFlight === true ||
+      turnState.boundaryEvent !== undefined ||
+      turnState.aborted === true
+    )
+      return;
     turnState.cancelInFlight = true;
     try {
-      for (let attempt = 0; attempt < turnCancelAttempts; attempt += 1) {
-        if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
-        const turnId = turnState.turnId;
-        try {
-          const result = await sourceSession?.cancel(turnId === undefined ? undefined : { turnId });
-          // Accepted means the turn's cancellation hook consumed the
-          // request; the turn settles at its next safe boundary.
-          if (result?.status === "accepted") return;
-        } catch {
-          // No accepted session yet or a transport failure — retry below;
-          // lifecycle interruption remains the hard client-side escape hatch.
-        }
-        await delayMs(turnCancelRetryDelayMs);
-      }
+      const turnId = turnState.turnId;
+      await sourceSession?.cancel(turnId === undefined ? undefined : { turnId });
+    } catch (error) {
+      this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
     } finally {
       turnState.cancelInFlight = false;
     }
@@ -2499,6 +2459,15 @@ async function* eveEventsToTUIStream(
       default:
         // compaction.* — ignored for v1.
         break;
+    }
+
+    if (
+      event.type === "input.requested" &&
+      (turnState.pendingApprovals.length > 0 || turnState.pendingQuestions.length > 0)
+    ) {
+      // Proxied requests keep their server owner active. Pause this local
+      // reader so the prompt can answer, preserving the session's cursor.
+      break;
     }
   }
 

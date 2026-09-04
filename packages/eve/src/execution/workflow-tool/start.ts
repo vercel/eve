@@ -12,7 +12,6 @@ import { getRun } from "#internal/workflow/runtime.js";
 import { sendInbox } from "#execution/inbox/send.js";
 import type { WorkflowToolRunAddress } from "#execution/workflow-tool/types.js";
 import type { WorkflowToolRunInput } from "#execution/workflow-tool/types.js";
-import { deriveWorkflowToolRunOwner } from "#execution/workflow-tool/messages.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { readStartedOwner } from "#execution/inbox/readiness.js";
@@ -23,7 +22,7 @@ const log = createLogger("execution.workflow-tool-run");
 
 // Derived from the call alone so a replayed dispatch starts a duplicate that
 // loses the claim and still resolves to the workflow tool run that owns the call.
-export function deriveWorkflowToolRunHookToken(input: {
+function deriveWorkflowToolRunHookToken(input: {
   readonly callId: string;
   readonly parentSessionId: string;
   readonly parentTurnId: string;
@@ -83,10 +82,10 @@ export async function startWorkflowTask(input: {
       callId: task.callId,
       executeInput: task.executeInput,
       input: task.input,
-      owner: deriveWorkflowToolRunOwner(
-        input.parentContinuationToken,
-        getWorkflowMetadata().workflowRunId,
-      ),
+      owner: {
+        token: input.parentContinuationToken,
+        ownerRunId: getWorkflowMetadata().workflowRunId,
+      },
       resultKind: task.resultKind,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },

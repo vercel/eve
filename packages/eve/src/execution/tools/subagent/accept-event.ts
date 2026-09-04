@@ -10,7 +10,7 @@ export async function acceptTaskAuthorizationEvent(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<boolean> {
   const { hookPayload, taskId } = input.delivery;
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, taskId);
   if (entry === undefined) return false;
 

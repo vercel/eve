@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ cancel: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", () => ({
   requestWorkflowTurnCancellation: mocks.cancel,
 }));
-vi.mock("#execution/session/state.js", () => ({ readDurableSession: async () => ({ state: {} }) }));
+vi.mock("#execution/session/state.js", () => ({ readDurableSession: () => ({ state: {} }) }));
 vi.mock("#subagents/handles/store.js", () => ({
   getAgentHandleStore: () => ({
     handles: ["one", "two"].map((id) => ({
@@ -19,12 +19,16 @@ import { cancelAgentInvocationOwner } from "#execution/tools/subagent/task-cance
 
 describe("workflow-owned child cancellation", () => {
   it("awaits every child and fails before releasing handles when a cancellation fails", async () => {
+    const cancellingSecond = Promise.withResolvers<void>();
     let finishSecond!: () => void;
-    mocks.cancel.mockRejectedValueOnce(new Error("first child failed")).mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishSecond = resolve;
-      }),
-    );
+    mocks.cancel
+      .mockRejectedValueOnce(new Error("first child failed"))
+      .mockImplementationOnce(() => {
+        cancellingSecond.resolve();
+        return new Promise<void>((resolve) => {
+          finishSecond = resolve;
+        });
+      });
     const rejected = vi.fn();
     const result = cancelAgentInvocationOwner({
       ownerId: "owner",
@@ -34,7 +38,7 @@ describe("workflow-owned child cancellation", () => {
       rejected();
       return error;
     });
-    for (let index = 0; index < 12; index++) await Promise.resolve();
+    await cancellingSecond.promise;
     expect(mocks.cancel).toHaveBeenCalledTimes(2);
     expect(rejected).not.toHaveBeenCalled();
     finishSecond();

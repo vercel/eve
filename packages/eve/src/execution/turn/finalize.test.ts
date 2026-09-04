@@ -163,6 +163,10 @@ beforeEach(() => {
 describe("turn finalization", () => {
   it("keeps a caller parked on HITL and preserves the accepting candidate of queued input", async () => {
     const original = current as InitializedSessionCheckpoint;
+    records.set("proposal", {
+      ...original,
+      deliveries: { ...original.deliveries, "older-turn": "applied" },
+    });
     const pending = {
       submission: {
         eventId: "followup",
@@ -173,14 +177,17 @@ describe("turn finalization", () => {
     };
     const result = await finalizeTurnStep({
       session: resources,
+      eventIds: ["initial", "followup"],
       checkpoint: recordRef("proposal"),
       kind: "natural",
       pending: [{ kind: "session.submit", eventId: "delivery", payload: pending }],
     });
     expect(result.terminal).toBe(false);
+    expect(result.deliveries).not.toHaveProperty("older-turn");
     const committed = records.get("commit") as InitializedSessionCheckpoint;
     expect(committed.caller).toEqual(original.caller);
     expect(committed.queue).toEqual([pending]);
+    expect(committed.deliveries["older-turn"]).toBe("applied");
     expect(committed.claimedContinuationToken).toBeUndefined();
     expect(mocks.notifyCaller).not.toHaveBeenCalled();
     expect(mocks.append.mock.invocationCallOrder[0]).toBeLessThan(
@@ -201,6 +208,7 @@ describe("turn finalization", () => {
     }));
     const result = await finalizeTurnStep({
       session: resources,
+      eventIds: ["initial", "followup"],
       claimedContinuationToken: "acknowledged-alias",
       checkpoint: recordRef("proposal"),
       kind: "natural",
@@ -220,6 +228,7 @@ describe("turn finalization", () => {
     records.set("proposal", current);
     await finalizeTurnStep({
       session: resources,
+      eventIds: ["initial", "followup"],
       checkpoint: recordRef("proposal"),
       kind: "natural",
       pending: [],
@@ -244,6 +253,7 @@ describe("turn finalization", () => {
     records.set("proposal", current);
     const input = {
       session: resources,
+      eventIds: ["initial", "followup"],
       checkpoint: recordRef("proposal"),
       kind: "natural" as const,
       pending: [],
@@ -268,6 +278,7 @@ describe("turn finalization", () => {
     records.set("proposal", current);
     await finalizeTurnStep({
       session: resources,
+      eventIds: ["initial", "followup"],
       checkpoint: recordRef("proposal"),
       kind: "interrupt",
       pending: [],
@@ -289,6 +300,7 @@ describe("turn finalization", () => {
     mocks.finalize.mockRejectedValueOnce(new Error("Lost completion"));
     const input = {
       session: resources,
+      eventIds: ["initial", "followup"],
       checkpoint: recordRef("proposal"),
       kind: "natural" as const,
       pending: [],
@@ -303,6 +315,7 @@ describe("turn finalization", () => {
     await expect(
       failTurnStep({
         session: resources,
+        eventIds: ["initial", "followup"],
         submission: { eventId: "initial", command: { kind: "cancel" } },
         error: "private failure",
       }),
@@ -316,6 +329,7 @@ describe("turn finalization", () => {
     current = undefined;
     const input = {
       session: resources,
+      eventIds: ["initial", "followup"],
       submission: { eventId: "initial", command: { kind: "cancel" as const } },
       error: "private secret detail",
     };
@@ -338,6 +352,7 @@ describe("turn finalization", () => {
     mocks.appendEvents.mockRejectedValueOnce(new Error("Write completion unknown"));
     const input = {
       session: resources,
+      eventIds: ["initial", "followup"],
       submission: {
         eventId: "initial",
         command: { kind: "send" as const, payload: { message: "Hello" } },

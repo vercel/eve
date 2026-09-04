@@ -58,7 +58,7 @@ const remoteReplyTo = "eve:eve:op:0123456789abcdef0123456789abcdef";
 describe("recordTaskInputRequest", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -121,7 +121,7 @@ describe("recordTaskInputRequest", () => {
   });
 
   it("records a narrowed remote response route for a claimed remote child", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -184,7 +184,7 @@ describe("recordTaskInputRequest", () => {
 
 describe("recordTerminalTaskViews", () => {
   it("caches an owned terminal view and releases the task's agent lease", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],

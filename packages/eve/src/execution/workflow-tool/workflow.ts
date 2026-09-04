@@ -1,3 +1,5 @@
+import { watchAdmissionOwnerStep } from "#execution/inbox/admission.js";
+import type { InboxEnvelope } from "#execution/inbox/types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { publishOwnerStep } from "#execution/inbox/readiness.js";
 import { createOwnerInbox } from "#execution/inbox/owner.js";
@@ -29,9 +31,31 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       claim.kind === "owned" ? inbox.address : { token: input.hookToken, ownerRunId: claim.runId },
     );
     if (claim.kind === "conflict") return;
+    let watcher:
+      | Promise<{ kind: "watch-complete" } | { kind: "watch-failed"; error: unknown }>
+      | undefined = watchAdmissionOwnerStep(input.owner.ownerRunId, inbox.address).then(
+      () => ({ kind: "watch-complete" as const }),
+      (error) => ({ kind: "watch-failed" as const, error }),
+    );
+    let pending:
+      | Promise<
+          { kind: "inbox"; envelope: InboxEnvelope } | { kind: "reader-failure"; error: unknown }
+        >
+      | undefined;
     while (!controller.signal.aborted) {
-      const event = await inbox.next();
-      if (event.kind === "tool.ready") break;
+      pending ??= inbox.next().then(
+        (envelope) => ({ kind: "inbox" as const, envelope }),
+        (error) => ({ kind: "reader-failure" as const, error }),
+      );
+      const next = await (watcher === undefined ? pending : Promise.race([pending, watcher]));
+      if (next.kind === "watch-complete") {
+        watcher = undefined;
+        continue;
+      }
+      if (next.kind === "watch-failed" || next.kind === "reader-failure") throw next.error;
+      pending = undefined;
+      if (next.envelope.kind === "admission.closed") return;
+      if (next.envelope.kind === "tool.ready") break;
     }
     const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
     const from = createWorkflowBodyRef(bodyInput);

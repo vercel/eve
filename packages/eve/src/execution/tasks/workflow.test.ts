@@ -5,6 +5,7 @@ import type { TaskView } from "#tasks/types.js";
 
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(),
+  observe: vi.fn(),
   next: vi.fn(),
   dispose: vi.fn(),
   publish: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   wakeUpdate: vi.fn(),
   wakeInput: vi.fn(),
   body: vi.fn(),
+  watch: vi.fn(),
   deliver: vi.fn(),
 }));
 vi.mock("#execution/inbox/owner.js", () => ({
@@ -22,9 +24,10 @@ vi.mock("#execution/inbox/owner.js", () => ({
     claim: mocks.claim,
     next: mocks.next,
     dispose: mocks.dispose,
-    observe: () => () => {},
+    observe: mocks.observe,
   }),
 }));
+vi.mock("#execution/inbox/admission.js", () => ({ watchAdmissionOwnerStep: mocks.watch }));
 vi.mock("#execution/inbox/readiness.js", () => ({ publishOwnerStep: mocks.publish }));
 vi.mock("#execution/tasks/steps.js", () => ({
   appendTaskViewStep: mocks.append,
@@ -54,6 +57,7 @@ const initialView: TaskView = {
   taskId: "task",
 };
 const base = {
+  admissionOwnerRunId: "turn-run",
   initialView,
   parentContinuationToken: "session-token",
   taskInboxToken: "task-token",
@@ -78,6 +82,8 @@ const command = (kind: string, fields = {}): InboxEnvelope => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.claim.mockResolvedValue({ kind: "owned" });
+  mocks.observe.mockReturnValue(() => {});
+  mocks.watch.mockImplementation(() => new Promise(() => {}));
   mocks.next.mockImplementation(() => new Promise(() => {}));
   mocks.body.mockResolvedValue({ status: "completed", output: "done" });
 });
@@ -89,6 +95,40 @@ describe("task owner workflow", () => {
     expect(mocks.publish).toHaveBeenCalledWith({ token: "task-token", ownerRunId: "winner" });
     expect(mocks.append).not.toHaveBeenCalled();
     expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("terminates silently when closure precedes admission", async () => {
+    mocks.watch.mockResolvedValue(undefined);
+    mocks.next.mockResolvedValueOnce({
+      eventId: "closed",
+      kind: "admission.closed",
+      payload: null,
+    });
+    await taskRunWorkflow({ ...base, workflow });
+    expect(mocks.watch).toHaveBeenCalledExactlyOnceWith("turn-run", {
+      token: "task-token",
+      ownerRunId: "task-run",
+    });
+    expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+    expect(mocks.append.mock.calls.at(-1)![0].view.status).toBe("cancelled");
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces failed closure-marker delivery before admission", async () => {
+    mocks.watch.mockRejectedValue(new Error("marker write failed"));
+    await expect(taskRunWorkflow({ ...base, workflow })).rejects.toThrow("marker write failed");
+    expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("allows cancellation to finish before admission without waiting on the initiating turn", async () => {
+    mocks.next.mockResolvedValueOnce(command("cancel"));
+    await taskRunWorkflow({ ...base, workflow });
+    expect(mocks.body).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+    expect(mocks.append.mock.calls.at(-1)![0].view.status).toBe("cancelled");
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
@@ -130,9 +170,24 @@ describe("task owner workflow", () => {
     );
   });
 
-  it("starts one authored body after admission and settles its lifecycle", async () => {
+  it("runs independently after admission when its initiating turn completes", async () => {
+    const owner = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<{ status: "completed"; output: string }>();
+    mocks.watch.mockReturnValue(owner.promise);
+    mocks.body.mockImplementation(() => {
+      started.resolve();
+      return finished.promise;
+    });
     mocks.next.mockResolvedValueOnce(command("ready"));
-    await taskRunWorkflow({ ...base, workflow });
+    const run = taskRunWorkflow({ ...base, workflow });
+    await started.promise;
+    owner.resolve();
+    await Promise.resolve();
+    expect(mocks.body.mock.calls[0]![1].aborted).toBe(false);
+    expect(mocks.dispose).not.toHaveBeenCalled();
+    finished.resolve({ status: "completed", output: "done" });
+    await run;
     expect(mocks.body).toHaveBeenCalledOnce();
     expect(mocks.body.mock.calls[0]![0].owner).toEqual({
       token: "task-token",

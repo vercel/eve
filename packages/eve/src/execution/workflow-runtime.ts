@@ -193,9 +193,7 @@ export function createWorkflowRuntime(config: {
         });
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
-        logError(log, "failed to start workflow run", error, {
-          continuationToken: input.continuationToken,
-        });
+        logError(log, "failed to start workflow run", error);
         throw error;
       }
 
@@ -294,9 +292,7 @@ function activeCommandResult<TCommand extends SessionCommand>(
   const result =
     command.kind === "reset"
       ? { previousSessionId: sessionId, status: "reset" as const }
-      : command.kind === "cancel"
-        ? { sessionId, status: "accepted" as const }
-        : { sessionId, status: "accepted" as const };
+      : { sessionId, status: "accepted" as const };
   return result as SessionCommandResult<TCommand>;
 }
 

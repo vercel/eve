@@ -93,40 +93,47 @@ describe("invocation callback routing", () => {
       results: [expect.objectContaining({ isError: true, output: error, outcome: body.outcome })],
     });
   });
-  it("routes child input requests to the same owner request", async () => {
-    const body = {
-      kind: "task.input-requested",
-      callId: "call-1",
-      childContinuationToken: "child-alias",
-      childSessionId: "child",
-      taskId: "task-1",
-      subagentName: "researcher",
-      event: {
-        turnId: "turn-1",
-        stepIndex: 0,
-        sequence: 1,
-        requests: [
-          {
-            kind: "tool-approval",
-            requestId: "question",
-            prompt: "Continue?",
-            options: [{ id: "approve", label: "Approve" }],
-            action: { kind: "tool-call", callId: "tool-1", toolName: "write", input: {} },
-          },
-        ],
-      },
-    };
-    const response = await handleSessionCallbackRequest(request(body), context());
-    expect(response.status).toBe(202);
-    expect(sendReply).toHaveBeenCalledWith(
-      target,
-      expect.objectContaining({
-        kind: "subagent-input-request",
+  it.each(["private-owner-token", `task:task_1:${"a".repeat(32)}`])(
+    "routes child input requests to the owning invocation at %s",
+    async (ownerToken) => {
+      const owner = { ...target, address: { ...target.address, token: ownerToken } };
+      const body = {
+        kind: "task.input-requested",
         callId: "call-1",
         childContinuationToken: "child-alias",
-      }),
-    );
-  });
+        childSessionId: "child",
+        taskId: "task_1",
+        subagentName: "researcher",
+        event: {
+          turnId: "turn-1",
+          stepIndex: 0,
+          sequence: 1,
+          requests: [
+            {
+              kind: "tool-approval",
+              requestId: "question",
+              prompt: "Continue?",
+              options: [{ id: "approve", label: "Approve" }],
+              action: { kind: "tool-call", callId: "tool-1", toolName: "write", input: {} },
+            },
+          ],
+        },
+      };
+      const response = await handleSessionCallbackRequest(
+        request(body),
+        context(createCallbackCapability(owner)),
+      );
+      expect(response.status).toBe(202);
+      expect(sendReply).toHaveBeenCalledWith(
+        owner,
+        expect.objectContaining({
+          kind: "subagent-input-request",
+          callId: "call-1",
+          childContinuationToken: "child-alias",
+        }),
+      );
+    },
+  );
   it("bounds callback bodies before parsing", async () => {
     expect(
       (

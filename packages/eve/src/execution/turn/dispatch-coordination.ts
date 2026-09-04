@@ -10,7 +10,6 @@ import { createDurableSessionState, readDurableSession } from "#execution/sessio
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { executeTaskControlAction } from "#execution/tasks/control.js";
-import type { BackgroundTask } from "#execution/tasks/dispatch.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { deliverTaskUpdate } from "#execution/tasks/update.js";
 import { startWorkflowTask } from "#execution/workflow-tool/start.js";
@@ -55,14 +54,12 @@ export async function dispatchCoordination(
     return {
       results: normalized.results,
       sessionState: normalized.sessionState,
-      pendingTasks: [],
     };
   }
 
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
-  const pendingTasks: BackgroundTask[] = [];
 
   for (const entry of prepared.plan) {
     if (entry.kind === "workflow-task") {
@@ -83,7 +80,6 @@ export async function dispatchCoordination(
       const control = await executeTaskControlAction({
         action: entry.action,
         adapter: prepared.adapter,
-        bundle: prepared.bundle,
         cancelOwnedWork: cancelBackgroundAgentTask,
         deliverUpdate: deliverTaskUpdate,
         parentStepIndex: batch.event.stepIndex,
@@ -92,7 +88,6 @@ export async function dispatchCoordination(
         session: nextSession,
       });
       nextSession = control.session;
-      if (control.pendingTask !== undefined) pendingTasks.push(control.pendingTask);
       results.push(control.result);
       continue;
     }
@@ -104,7 +99,6 @@ export async function dispatchCoordination(
       nextSession === session
         ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
-    pendingTasks,
   };
 }
 
@@ -112,7 +106,7 @@ async function normalizeWorkflowTaskInterrupt(input: CoordinationDispatchInput):
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: CoordinationDispatchInput["sessionState"];
 }> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
   if (pending === undefined) {
     return { results: [], sessionState: input.sessionState };

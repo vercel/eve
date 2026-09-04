@@ -32,7 +32,7 @@ export async function terminateChildSessions(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<void> {
-  const session = await readDurableSession(input.sessionState);
+  const session = readDurableSession(input.sessionState);
   const errors: unknown[] = [];
 
   // Cooperatively cancel live tasks first: their runs are the single

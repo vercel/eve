@@ -38,7 +38,7 @@ import {
 } from "#execution/tasks/dispatch.js";
 import { parseWorkflowToolInput } from "#execution/workflow-tool/background.js";
 import { sendTaskCommand, sendTaskInboundPayload, startTaskRun } from "#execution/tasks/runtime.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandToken } from "#execution/session-command-token.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import { parseJsonObject } from "#shared/json.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
@@ -471,7 +471,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     }
     const owner = await startTaskRun({
       initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
-      parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
+      parentContinuationToken: sessionCommandToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
       workflow: {
         callId: taskInput.callId,

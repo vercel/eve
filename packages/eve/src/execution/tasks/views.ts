@@ -6,12 +6,6 @@ import { taskViewsToJson } from "#tasks/json.js";
 import { findSessionTaskEntry, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
-/**
- * Result and lookup helpers shared by the task-control executors
- * (`task_cancel` in the dispatch module,
- * task controls in their own).
- */
-
 /** Resolves owned index entries, or the ids this session does not own. */
 export function lookupTaskEntries(
   session: RuntimeSession,
@@ -30,13 +24,6 @@ export function lookupTaskEntries(
     }
   }
   return unknown.length > 0 ? { kind: "unknown", unknown } : { entries, kind: "found" };
-}
-
-/** Reads the latest view of every entry, defaulting to `working`. */
-export async function readTaskViews(
-  entries: readonly SessionTaskIndexEntry[],
-): Promise<TaskView[]> {
-  return Promise.all(entries.map(readTaskView));
 }
 
 export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {

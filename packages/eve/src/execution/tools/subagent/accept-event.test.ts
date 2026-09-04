@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDurableSession } from "#execution/session/state.js";
 import { readLatestTaskView } from "#execution/tasks/runtime.js";
-import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event-step.js";
+import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
 
 vi.mock("#execution/session/state.js", () => ({ readDurableSession: vi.fn() }));
@@ -55,7 +55,7 @@ const taskIndex = {
 };
 
 function mockSession(handles: readonly unknown[]): void {
-  vi.mocked(readDurableSession).mockResolvedValue({
+  vi.mocked(readDurableSession).mockReturnValue({
     agent: { system: "" },
     continuationToken: "parent-token",
     history: [],

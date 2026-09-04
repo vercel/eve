@@ -27,7 +27,7 @@ export async function recordTaskInputRequest(input: {
       readonly sessionState: DurableSessionState;
     }
 > {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
@@ -105,7 +105,7 @@ export async function recordTerminalTaskViews(input: {
   readonly sessionState: DurableSessionState;
   readonly views: readonly TaskView[];
 }): Promise<DurableSessionState> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   for (const view of input.views) {
     if (findSessionTaskEntry(session.state, view.taskId) === undefined) continue;

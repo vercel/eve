@@ -35,8 +35,7 @@ function formatUnknownError(error: unknown): string {
  * Step bridge for `setAttributes`.
  *
  * Mirrors the `__builtin_set_attributes` step from
- * `@workflow/workflow/internal/builtins`. The workflow-body shim's
- * `setAttributes` (in `internal/workflow-bundle/workflow-core-shim.ts`)
+ * `@workflow/workflow/internal/builtins`. The SDK's `setAttributes`
  * dispatches into the workflow runtime with the step id
  * `"__builtin_set_attributes"`; the runtime walks the deployment's step
  * registry to resolve it, so the step has to live inside an
