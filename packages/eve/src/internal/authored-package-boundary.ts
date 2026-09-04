@@ -56,6 +56,15 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 
+      // Package-private imports must be resolved before this bundle is moved
+      // into the generated host, where the owning package scope no longer exists.
+      if (source.startsWith("#")) {
+        const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
+        if (resolvedPackageImport !== undefined) {
+          return { id: resolvedPackageImport };
+        }
+      }
+
       const externalModule = await resolveConfiguredExternalModule.call(this, {
         externalDependencies: input.externalDependencies,
         importer,
@@ -99,7 +108,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       // Resolve through Node's default package-import conditions here so a
       // packed eve installation does not leak #shared/* into the bundle.
       if (source.startsWith("#")) {
-        const resolvedPackageImport = resolvePackageImport(source, input.packageRoot);
+        const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
         if (resolvedPackageImport !== undefined) {
           return { id: resolvedPackageImport };
         }
@@ -301,28 +310,40 @@ function packageImportName(source: string): string {
 }
 
 function nearestPackageName(filePath: string): string | undefined {
+  const packageRoot = nearestPackageRoot(filePath);
+  if (packageRoot === undefined) return undefined;
+
+  try {
+    const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+      name?: unknown;
+    };
+    return typeof manifest.name === "string" && manifest.name.length > 0
+      ? manifest.name
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function nearestPackageRoot(filePath: string): string | undefined {
   let directory = dirname(toCanonicalPath(filePath));
   while (true) {
-    const manifestPath = join(directory, "package.json");
-    if (existsSync(manifestPath)) {
-      try {
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { name?: unknown };
-        return typeof manifest.name === "string" && manifest.name.length > 0
-          ? manifest.name
-          : undefined;
-      } catch {
-        return undefined;
-      }
-    }
+    if (existsSync(join(directory, "package.json"))) return directory;
     const parent = dirname(directory);
-    if (parent === directory) {
-      return undefined;
-    }
+    if (parent === directory) return undefined;
     directory = parent;
   }
 }
 
-function resolvePackageImport(source: string, packageRoot: string): string | undefined {
+function resolvePackageImport(
+  source: string,
+  importer: string | undefined,
+  fallbackPackageRoot: string,
+): string | undefined {
+  const packageRoot =
+    importer === undefined || importer.startsWith("\0")
+      ? fallbackPackageRoot
+      : (nearestPackageRoot(importer) ?? fallbackPackageRoot);
   try {
     const resolved = createRequire(join(packageRoot, "package.json")).resolve(source);
     return isPathInsideOrEqual(toCanonicalPath(resolved), toCanonicalPath(packageRoot))

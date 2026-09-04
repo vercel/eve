@@ -4,11 +4,43 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 
 const PACKAGE_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+
+describe("createGenerationPackageBoundaryPlugin", () => {
+  it("resolves package-private imports from the importing dependency", async () => {
+    const plugin = createGenerationPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: join(PACKAGE_ROOT, "test/consumer-app"),
+    });
+    const resolveId = plugin.resolveId as (
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) => Promise<unknown>;
+    const context: RolldownResolveContext = {
+      async resolve() {
+        throw new Error("package imports should resolve before delegating");
+      },
+    };
+
+    await expect(
+      resolveId.call(
+        context,
+        "#shared/git.js",
+        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        { kind: "import-statement" },
+      ),
+    ).resolves.toEqual({
+      id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
+    });
+  });
+});
 
 describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
   it("resolves eve package imports through the published dist mapping", async () => {
