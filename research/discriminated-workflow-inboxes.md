@@ -111,6 +111,12 @@ not require a live holder. The descriptor is published only after resource and
 initial address setup; resolution before readiness waits with a bound or returns
 a visible initialization failure.
 
+The directory may cache a successfully resolved descriptor by holder run ID within
+its storage/project scope. Publish it once and never rewrite it. Additive rekey
+does not change the descriptor, so all aliases reuse the same entry. Bound the
+cache; do not cache initialization failures as permanent absence. Future changes
+to public-ID or alias mappings are separate from this immutable record.
+
 The active-turn token derives from `sessionId`, not from a candidate or logical
 turn. A forwarding candidate might never execute a logical turn. New execution
 uses the accepting deployment; steering an already active turn uses that owner's
@@ -160,7 +166,9 @@ they are not extra fields for the holder to understand.
 
 Snapshot schema and hydration belong to turn code. Restore after winning the
 active-turn claim, refresh the agent from the accepting deployment, and continue
-with the committed state. An empty snapshot stream is valid only for the designated
+with the committed state. Perform this read inside the first execution step, before
+any model or tool effect; do not add a step just to return hydrated state to another
+step. An empty snapshot stream is valid only for the designated
 initial event; that turn creates the initial session state. A follow-up that wins
 too early releases its claim and waits for bootstrap instead of initializing its
 own session or blocking the first turn.
@@ -247,6 +255,9 @@ framework-owned event identity and target are not duplicated in these payloads.
 Keep routing, transport, and the turn state machine separate. The workflow boundary
 receives resources and an accepted submission; it does not receive parent state,
 a parent writable, a completion token, or a result-return address.
+`session` is required and resolved by trusted server code before `start()`. A turn
+does not need a resource-discovery step. HTTP payloads cannot supply these internal
+references or bypass resource authorization.
 
 ```ts
 interface TurnWorkflowInput {
@@ -373,6 +384,106 @@ use session admission when no turn is active. A candidate can process control or
 settle an obligation without starting a model request. Blocking-tool traffic goes
 directly to its active turn's inbox. Ordinary provider and callback events do not
 wake the holder.
+
+## Read placement and consistency
+
+The common contract is: **channels resolve the holder and immutable resources;
+the turn claims execution ownership and reads the latest committed state.** Keep
+resolution in the shared channel runtime so HTTP, Slack, task, and callback ingress
+do not each implement a discovery protocol. A channel's holder lookup is not an
+active-turn ownership claim.
+
+| Read or operation                   | Where it belongs                   | Reason                                                                               |
+| ----------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
+| Continuation token to holder        | Provider ingress                   | The lookup supplies the holder run ID before candidate start.                        |
+| Public session ID to descriptor     | HTTP ingress through the directory | The adapter owns the ID mapping and can reuse its descriptor cache.                  |
+| Holder ID to descriptor             | Ingress through the directory      | Resolve once on a cache miss; pass `SessionResources` directly to the candidate.     |
+| Latest snapshot and admission state | First execution step, after claim  | History, pending input, and terminal state can change before ownership is acquired.  |
+| Event stream for an HTTP response   | HTTP streaming adapter             | Reuse the resolved `events` reference; opening a reader does not hydrate turn state. |
+
+For a new session, the holder already has `SessionResources` after publishing the
+descriptor and passes it directly into its first start. There is no discovery read
+on that dispatch path. For an existing Slack conversation, the sequence is:
+
+```text
+continuation lookup -> holder ID -> cached descriptor or one descriptor read
+  -> start({ version: 1, session: resources, submission })
+  -> claim active-turn(sessionId)
+     owned: first execution step reads snapshot, admits input, and executes work
+     conflict: forward and account for input; skip snapshot/model work
+```
+
+An HTTP follow-up follows the same contract, entering through
+`directory.resolveSession(sessionId)`. Reuse that result for submission and stream
+serving within the request. Do not preflight the active-turn hook, read a snapshot
+to decide whether a turn is idle, or reread the descriptor inside the candidate.
+Those reads cannot reserve ownership. Required authorization reads still precede
+admission; execution policy, deduplication, and closure checks use state under the
+winning claim.
+
+Reading an immutable descriptor before start is consistent because neither another
+turn nor rekey can change its contents. Persisting it in workflow input therefore
+preserves the same references on replay. It says where to find state, not what that
+state currently contains.
+
+Reading mutable state in ingress is not sufficient, even when no turn is active:
+
+1. Request A reads snapshot revision 7 and observes no active owner.
+2. Request B starts a candidate, claims ownership, commits revision 8, and releases.
+3. A's delayed candidate successfully claims ownership. Its supplied revision 7
+   is stale; a claim establishes exclusion from now on, not since the earlier read.
+
+The required ordering for an ordinary handoff is `previous commit acknowledged ->
+previous claim released -> next claim acquired -> latest snapshot read -> effects`.
+The storage adapter must make an acknowledged commit visible to that subsequent
+reader. A pre-read would need an atomic reservation or validation after the claim;
+a timestamp, owner lookup, or revision carried in input does not supply either.
+The first version therefore passes resource references and the accepted event,
+without a prefetched mutable snapshot. Existing first-event initialization still
+uses the designated initial seed.
+
+This proof depends on exclusive writers, durable flush before release, and reads
+that observe completed commits. Hard cancellation, delayed writers, and step retries
+still require the fencing and reconciliation rules below. Moving a read alone
+does not establish those properties.
+
+### Measured boundaries and remaining performance checks
+
+A temporary Local World experiment with three cases compared the same claim and first
+execution step with descriptor resolution in ingress versus a preceding workflow
+step. The execution step performed snapshot hydration itself. Uncontested candidates
+recorded:
+
+| Descriptor placement         | Persisted candidate steps | Descriptor plus snapshot stream reads | World queue submissions per candidate |
+| ---------------------------- | ------------------------- | ------------------------------------- | ------------------------------------- |
+| Separate discovery step      | 2                         | 2                                     | 1                                     |
+| Ingress, uncached descriptor | 1                         | 2                                     | 1                                     |
+| Ingress, cached descriptor   | 1                         | 1                                     | 1                                     |
+
+The other cases forced the stale-snapshot ordering above and verified that a
+conflicting candidate skipped hydration: zero execution steps with resolved input,
+versus one discovery step with locator input. That case stopped at conflict
+classification and did not exercise forwarding or acknowledgement. All three cases
+passed. The experiment used real hooks and streams with mock execution; its temporary
+writer-handle setup only accommodated the installed SDK and is not the proposed stream interface. No
+experiment code is included in this document-only change.
+
+These counts establish a saved durable step compared with a separate discovery
+step. They do not establish a saved queue invocation: the SDK executed steps inline
+in this experiment. Stream reads count World stream operations, not all underlying
+network requests. The uncached read moved into ingress; it did not disappear.
+
+Measure the complete path from request receipt through first model work, first
+client event, and committed settlement on the hosted adapter. Include alias lookup,
+descriptor/cache work, start serialization, hook claim, snapshot reads, encryption
+and run metadata reads, forwarding, and retries. Count actual requests, bytes, and
+serial dependencies as well as durable steps. Compare cold/warm descriptors, idle
+and busy sessions, realistic snapshot sizes, and bootstrap separately. A locator
+variant that already knows the canonical session ID could combine descriptor
+resolution with the first execution step; the separate-step result does not prove
+a boundary advantage over that variant. The resolved-input contract avoids that
+discovery work in the turn and permits cache and response-reader reuse uniformly.
+Hosted latency and cross-deployment consistency remain implementation gates.
 
 ## One logical inbox per receiving owner
 
