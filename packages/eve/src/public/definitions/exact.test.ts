@@ -66,7 +66,10 @@ describe("definition helper exact inputs", () => {
         start: () => "Build report",
         complete(_input, output) {
           expectTypeOf(output.phase).toEqualTypeOf<string>();
-          return `Report ${output.phase}`;
+          return {
+            label: `Report ${output.phase}`,
+            renderingState: { phase: output.phase },
+          };
         },
         delta(_input, partial) {
           expectTypeOf(partial.phase).toEqualTypeOf<string>();

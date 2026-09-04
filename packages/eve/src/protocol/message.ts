@@ -222,8 +222,14 @@ export type MessageReceivedPart =
  * action lifecycles by call ID rather than assume one event contains every call
  * from an assistant step.
  */
+export interface ActionPresentationState {
+  readonly key: string;
+  readonly value: JsonValue;
+}
+
 export interface ActionPresentation {
   readonly label?: string;
+  readonly state?: ActionPresentationState;
 }
 
 export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentation>>;

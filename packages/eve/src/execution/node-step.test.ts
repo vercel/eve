@@ -219,9 +219,9 @@ function createNoopRuntime(): Runtime {
 describe("createNodeHarnessTools", () => {
   it("adds the framework label start callback to provider-managed web search", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
-    const label = createNodeHarnessTools({ node }).get("web_search")?.label?.start;
+    const tool = createNodeHarnessTools({ node }).get("web_search");
 
-    expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
+    expect(tool?.label?.start?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
   });
 
   it("does not add the framework label to an authored web_search override", async () => {
@@ -230,7 +230,7 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
+    expect(createNodeHarnessTools({ node }).get("web_search")?.label).toBeUndefined();
   });
 
   it("keeps the compiled framework question tool client-side", async () => {
