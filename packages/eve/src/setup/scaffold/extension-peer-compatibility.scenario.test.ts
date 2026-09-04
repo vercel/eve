@@ -41,6 +41,7 @@ describe("extension eve peer compatibility", () => {
           "install",
           "--strict-peer-deps",
           "--ignore-scripts",
+          "--no-audit",
           "--no-package-lock",
           join(root, `eve-${eveVersion}.tgz`),
           join(root, "acme-extension-peer-test-1.0.0.tgz"),
