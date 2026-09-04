@@ -523,6 +523,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           capabilities,
           clearOnly: input.input?.kind === "clear",
           compactOnly: input.input?.kind === "compact",
+          restoreHistoryTo: input.input?.kind === "restore-history" ? input.input.to : undefined,
           createRuntime: createWorkflowRuntime,
           handleEvent,
           historyProjector: history.projector,

@@ -9,6 +9,7 @@ import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.j
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
+import type { BufferedSessionControl } from "#execution/parked-delivery-wait.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 
 const createHookMock = vi.fn();
@@ -128,7 +129,7 @@ describe("TurnControlReceiver", () => {
   it("buffers current and legacy sends that arrive during a turn", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
-    const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+    const bufferedSessionControls: BufferedSessionControl[] = [];
 
     const action = await runReceiver(bufferedDeliveries, {
       bufferedSessionControls,
@@ -137,6 +138,7 @@ describe("TurnControlReceiver", () => {
         { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
         { kind: "clear" },
         { kind: "compact" },
+        { kind: "restore-history", to: 2 },
         { kind: "session-timeout" },
       ]),
     });
@@ -154,7 +156,12 @@ describe("TurnControlReceiver", () => {
       },
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
-    expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+    expect(bufferedSessionControls).toEqual([
+      { kind: "clear" },
+      { kind: "compact" },
+      { kind: "restore-history", to: 2 },
+      { kind: "expired" },
+    ]);
   });
 
   it("consumes a replayed task delivery only once", async () => {
@@ -275,7 +282,7 @@ describe("TurnControlReceiver", () => {
 
   it("forwards cancel and reset through the active turn's private hook", async () => {
     installControlHook([parkResult()], true);
-    const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+    const bufferedSessionControls: BufferedSessionControl[] = [];
 
     const action = await runReceiver([], {
       bufferedSessionControls,
@@ -294,14 +301,14 @@ describe("TurnControlReceiver", () => {
       payload: {},
       token: "turn-control:cancel",
     });
-    expect(bufferedSessionControls).toEqual(["reset"]);
+    expect(bufferedSessionControls).toEqual([{ kind: "reset", reason: "Start over" }]);
   });
 });
 
 function runReceiver(
   bufferedDeliveries: DeliverHookPayload[],
   options: {
-    readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly bufferedSessionControls?: BufferedSessionControl[];
     readonly commandInbox?: SessionCommandInbox;
     readonly seenTaskDeliveries?: Set<string>;
   } = {},

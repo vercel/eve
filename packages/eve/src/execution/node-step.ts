@@ -62,6 +62,8 @@ export interface CreateExecutionNodeStepInput {
   readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
+  /** Restores model history and returns to the parked session. */
+  readonly restoreHistoryTo?: number;
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
@@ -102,6 +104,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    restoreHistoryTo: input.restoreHistoryTo,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,

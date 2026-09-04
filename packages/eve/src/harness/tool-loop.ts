@@ -548,6 +548,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
     };
 
+    if (config.restoreHistoryTo !== undefined) {
+      session = restoreSessionHistory(session, config.restoreHistoryTo);
+      await emit?.(createSessionWaitingEvent());
+      return { next: null, session };
+    }
+
     if (config.clearOnly === true) {
       session = {
         ...session,

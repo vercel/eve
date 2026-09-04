@@ -11,6 +11,7 @@ import type {
   ClearSessionResult,
   CompactSessionResult,
   ResetSessionResult,
+  RestoreHistorySessionResult,
   Runtime,
   SessionAuthContext,
   SessionCallback,
@@ -54,6 +55,8 @@ export interface Session {
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
   clear(): Promise<ClearSessionResult>;
+  /** Queues restoration of an observed model-history snapshot. */
+  restoreHistory(input: { readonly to: number }): Promise<RestoreHistorySessionResult>;
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
   getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
@@ -161,6 +164,12 @@ export function createSession(
     },
     async clear() {
       return await runtime.dispatchSession({ command: { kind: "clear" }, sessionId: id });
+    },
+    async restoreHistory(input) {
+      return await runtime.dispatchSession({
+        command: { kind: "restore-history", to: input.to },
+        sessionId: id,
+      });
     },
     async reset(options) {
       return await runtime.dispatchSession({

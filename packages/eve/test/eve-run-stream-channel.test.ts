@@ -186,6 +186,9 @@ function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
     async clear() {
       return { sessionId: "session_xyz", status: "accepted" };
     },
+    async restoreHistory() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
     async reset() {
       return { previousSessionId: "session_xyz", status: "reset" };
     },
