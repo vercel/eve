@@ -306,6 +306,80 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(deliver).toHaveBeenCalledTimes(2);
   });
 
+  it("stops reporting input_required once the answer is resolved", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ optionId: "yes", requestId: "question" }]),
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({ status: "working" });
+  });
+
+  it("acknowledges a repeated answer that eve already accepted", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    const requestId = invocationInputRequestId("event_1", "question");
+    getReadable.mockImplementation(() =>
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ optionId: "yes", requestId: "question" }]),
+      ]),
+    );
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "yes", requestId }],
+      }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
+    expect(deliver).not.toHaveBeenCalled();
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "no", requestId }],
+      }),
+    ).resolves.toEqual({ message: "Invocation is not waiting for input.", type: "conflict" });
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ requestId, text: "yes" }],
+      }),
+    ).resolves.toMatchObject({ type: "conflict" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a repeated answer after the run completes", async () => {
+    runsGet.mockResolvedValue(run({ status: "completed" }));
+    returnValue.mockResolvedValue({ output: "done" });
+    const requestId = invocationInputRequestId("event_1", "question");
+    getReadable.mockImplementation(() =>
+      eventStream([
+        inputRequestedEvent("event_1", ["question"]),
+        inputResolvedEvent("event_2", [{ requestId: "question", text: "go" }]),
+      ]),
+    );
+
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ requestId, text: "go" }],
+      }),
+    ).resolves.toMatchObject({
+      invocation: { result: "done", status: "completed" },
+      type: "success",
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("projects and clears pending connection authorization", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
     const required = {
@@ -605,6 +679,27 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
     },
     meta: { at: "2026-07-20T00:00:00.000Z", id },
     type: "input.requested",
+  };
+}
+
+function inputResolvedEvent(
+  id: string,
+  responses: readonly { optionId?: string; requestId: string; text?: string }[],
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      resolutions: responses.map((response) => ({
+        kind: "question" as const,
+        outcome: "answered" as const,
+        requestId: response.requestId,
+        response,
+      })),
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_1",
+    },
+    meta: { at: "2026-07-20T00:00:01.000Z", id },
+    type: "input.resolved",
   };
 }
 
