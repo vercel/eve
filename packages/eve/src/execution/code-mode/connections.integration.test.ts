@@ -110,7 +110,7 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
       const parent = new ContextContainer();
       parent.set(SessionIdKey, "session");
       const first = await step(parent, 0);
-      expect(Object.keys(first.modelTools)).toEqual(["connection_search"]);
+      expect(Object.keys(first.modelTools).sort()).toEqual(["code_mode", "connection_search"]);
       expect(first.claimedToolNames).toEqual([]);
       await contextStorage.run(parent, () =>
         first.modelTools.connection_search!.execute!({ keywords: "issues" } as never, {
@@ -124,7 +124,9 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
       const second = await step(next, 1);
       expect(second.claimedToolNames).toEqual(claimed ? ["linear__list_issues"] : []);
       expect(Object.keys(second.modelTools).sort()).toEqual(
-        claimed ? ["code_mode", "connection_search"] : ["connection_search", "linear__list_issues"],
+        claimed
+          ? ["code_mode", "connection_search"]
+          : ["code_mode", "connection_search", "linear__list_issues"],
       );
       expect(executeTool).not.toHaveBeenCalled();
 

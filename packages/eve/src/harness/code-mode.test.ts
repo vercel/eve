@@ -62,6 +62,8 @@ describe("claimsForCodeMode", () => {
       ["gated", tool("gated", { approval: always() })],
       ["skill", tool("skill", { behavior: { availability: [], presentation: "load-skill" } })],
       ["provider", tool("provider", { execute: undefined })],
+      [SEARCH_TOOLS_NAME, tool(SEARCH_TOOLS_NAME)],
+      [DESCRIBE_TOOLS_NAME, tool(DESCRIBE_TOOLS_NAME)],
       ["background", tool("background", { execution: "background" })],
       ["researcher", subagent("researcher")],
       ["agent", { ...subagent("agent"), execution: "background" }],
@@ -99,7 +101,7 @@ describe("applyCodeModeTool", () => {
     const definition = applied.harnessTools.get(CODE_MODE_TOOL_NAME);
     expect(definition?.workflowId).toBe(codeModeWorkflowReference.workflowId);
     const executeInput = definition?.executeInput?.({ js: "return 1;" });
-    expect(parseCodeModeWorkflowInput(executeInput)).toEqual({
+    expect(parseCodeModeWorkflowInput(executeInput)).toMatchObject({
       js: "return 1;",
       mode: "eager",
       toolNames: ["add", "researcher"],
@@ -118,13 +120,13 @@ describe("applyCodeModeTool", () => {
       tools: buildToolSet({ tools: harnessTools }),
     });
     const description = applied.modelTools[CODE_MODE_TOOL_NAME]?.description ?? "";
-    expect(description).toContain("Available tools: add.");
+    expect(description).toContain("Available tools: add, code_mode.");
     expect(description).toContain(SEARCH_TOOLS_NAME);
     expect(description).toContain(DESCRIBE_TOOLS_NAME);
     expect(description).not.toContain('"q"');
   });
 
-  it("drops code_mode entirely when nothing is claimable", async () => {
+  it("keeps code_mode available for discovery when nothing is claimable", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["gated", tool("gated", { approval: always() })],
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
@@ -136,9 +138,43 @@ describe("applyCodeModeTool", () => {
       tools: buildToolSet({ tools: harnessTools }),
     });
     expect(applied.claimedToolNames).toEqual([]);
-    expect(applied.harnessTools.has(CODE_MODE_TOOL_NAME)).toBe(false);
-    expect(Object.keys(applied.modelTools)).toEqual(["gated"]);
+    expect(applied.harnessTools.has(CODE_MODE_TOOL_NAME)).toBe(true);
+    expect(Object.keys(applied.modelTools)).toEqual(["gated", "code_mode"]);
   });
+
+  it.each(["eager", "lazy"] as const)(
+    "pins every advertised tool for discovery in %s mode",
+    async (mode) => {
+      const harnessTools = new Map<string, HarnessToolDefinition>([
+        ["add", tool("add")],
+        ["gated", tool("gated", { approval: always() })],
+        ["background", tool("background", { execution: "background" })],
+        ["provider", tool("provider", { execute: undefined })],
+        ["connection_search", tool("connection_search")],
+        ["task_cancel", tool("task_cancel", { runtimeAction: { kind: "task-control" } })],
+        ["hidden", tool("hidden")],
+        [CODE_MODE_TOOL_NAME, codeModeDefinition()],
+      ]);
+      const tools = buildToolSet({ tools: harnessTools });
+      delete tools.hidden;
+      const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, mode, tools });
+      const input = parseCodeModeWorkflowInput(
+        applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return 1;" }),
+      );
+      expect(input.toolCatalog.map((entry) => entry.name)).toEqual(Object.keys(tools).sort());
+      expect(
+        input.toolCatalog.filter((entry) => !entry.requiresDirectCall).map((entry) => entry.name),
+      ).toEqual(["add"]);
+      expect(input.toolCatalog.find((entry) => entry.name === "gated")?.inputSchema).toEqual({
+        type: "object",
+        properties: { q: { type: "string" } },
+      });
+      expect(applied.claimedToolNames).toEqual(["add"]);
+      expect(applied.modelTools.gated).toBeDefined();
+      expect(applied.modelTools.background).toBeDefined();
+      expect(applied.modelTools.provider).toBeDefined();
+    },
+  );
 
   it("is a no-op when the agent does not enable code_mode", async () => {
     const harnessTools: HarnessToolMap = new Map([["add", tool("add")]]);
