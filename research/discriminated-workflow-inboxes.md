@@ -36,6 +36,13 @@ parent loop, inline/child dispatch, or completion-token protocol. They are propo
 internal eve APIs, not new public SDK exports or claims about the forthcoming
 Workflow API's exact spelling.
 
+This document is the implementation contract for the replacement. Linked research
+provides background on domain boundaries and measurement; its older topology and
+compatibility instructions do not override this plan. Storage fencing, recovery
+after a failed candidate, and provider bootstrap races still need concrete
+mechanisms and evidence. Resolve those implementation gates before shipping; the
+local experiments below do not prove the complete runtime.
+
 ## Exactly what the holder holds
 
 | Resource                      | Holder's responsibility                                                                      | Who uses or interprets it afterward                                                                                   |
@@ -73,11 +80,19 @@ type SessionId = Id<"session">;
 type WorkflowRunId = Id<"workflow-run">;
 type EventStreamId = Id<"event-stream">;
 type SnapshotStreamId = Id<"snapshot-stream">;
+type SnapshotRecordId = Id<"snapshot-record">;
 type EventCursor = Id<"event-cursor">;
 type EventKey = Id<"event">;
 
 type EventStreamRef = Readonly<{ id: EventStreamId }>;
 type SnapshotStreamRef = Readonly<{ id: SnapshotStreamId }>;
+type SnapshotRecordRef = Readonly<{ id: SnapshotRecordId }>;
+
+interface InboxAddress {
+  readonly token: string;
+  readonly ownerRunId: WorkflowRunId;
+  readonly protocol: { readonly family: "eve-inbox"; readonly version: number };
+}
 
 interface SessionResources {
   readonly version: 1;
@@ -95,6 +110,8 @@ storage adapter knows whether an ID encodes a run plus namespace, refers to a
 separate storage object, or needs a lookup. Neither turn code nor the harness
 constructs a stream ID from `sessionId` or substitutes `holderRunId` for it.
 Event cursors belong to their event stream and cannot address snapshots.
+`EventKey` identifies the envelope's `(producer.id, eventId)` pair across retries
+and forwarding; it is independent of the candidate run ID.
 
 The descriptor needs an explicit persistence location. The initial Workflow adapter
 publishes it once in a closed `eve.session.resources` namespace on the holder run.
@@ -112,10 +129,11 @@ interface SessionDirectory {
 Initially, the directory may interpret a run-derived public session ID to locate
 that descriptor. Provider lookup already returns a holder run ID. A future ID
 allocator or directory store can change this mapping without changing callers.
-Descriptors remain readable after hook disposal so historical session streams do
-not require a live holder. The descriptor is published only after resource and
-initial address setup; resolution before readiness waits with a bound or returns
-a visible initialization failure.
+Descriptors remain readable after hook disposal, subject to storage retention and
+encryption-key availability, so historical reads do not require a live holder.
+The descriptor is published only after resource and initial address setup;
+resolution before readiness waits with a bound or returns a visible initialization
+failure.
 
 The directory may cache a successfully resolved descriptor by holder run ID within
 its storage/project scope. Publish it once and never rewrite it. Additive rekey
@@ -133,7 +151,8 @@ deployment. None of these decisions requires upgrading the holder.
 
 Separate the event log from durable program state. Reuse existing eve event and
 session types, but remove the transport from them. These interfaces run in server
-or step context; only their data crosses a Workflow boundary.
+or step context. Workflow inputs carry resource references; snapshot payloads are
+read and used inside executing steps.
 
 ```ts
 interface SessionEvents {
@@ -145,7 +164,8 @@ interface SessionEvents {
 
 interface SessionSnapshots {
   latest(ref: SnapshotStreamRef): Promise<SessionCheckpoint | undefined>;
-  append(ref: SnapshotStreamRef, checkpoint: SessionCheckpoint): Promise<void>;
+  read(ref: SnapshotRecordRef): Promise<SessionCheckpoint>;
+  append(ref: SnapshotStreamRef, checkpoint: SessionCheckpoint): Promise<SnapshotRecordRef>;
   close(ref: SnapshotStreamRef): Promise<void>;
 }
 
@@ -164,21 +184,45 @@ interface SessionCheckpoint {
 ```
 
 `SessionExecutionState` records session/turn status, the active owner and whether
-its previous work settled cleanly. `DeliveryState` holds ordered admitted input
-and applied, retired, or queued event identities. `SessionObligations` preserves
-pending tools/tasks, asks, authorization, runtime responses, and callers, reusing
-existing domain records or their durable references. These must survive a turn;
-they are not extra fields for the holder to understand.
+its previous work settled cleanly, including the last settled record reference.
+An in-progress checkpoint can retain a proposed result without adopting it; its
+execution phase distinguishes that proposal from a settled turn. `DeliveryState`
+holds ordered admitted input and applied, retired, or queued event identities.
+`SessionObligations` preserves pending tools/tasks, asks, authorization, runtime
+responses, and callers, reusing existing domain records or their durable references.
+These must survive a turn; they are not extra fields for the holder to understand.
+Produce one coherent checkpoint from the authoritative domain state; do not keep
+independently mutable copies of fields already represented in that state.
 
 Snapshot schema and hydration belong to turn code. Restore after winning the
 active-turn claim, refresh the agent from the accepting deployment, and continue
 with the committed state. Perform this read inside the first execution step, before
 any model or tool effect; do not add a step just to return hydrated state to another
 step. Returning the full snapshot from a hydration-only step would persist that
-large payload in step history. An empty snapshot stream is valid only for the designated
-initial event; that turn creates the initial session state. A follow-up that wins
-too early releases its claim and waits for bootstrap instead of initializing its
-own session or blocking the first turn.
+large payload in step history.
+
+Here a committed checkpoint is a durably persisted record; its execution phase
+separately records whether the turn has settled and adopted its proposed result.
+
+`latest()` is a bounded read of the current committed checkpoint. It returns
+`undefined` for initialized storage with no checkpoint; it must not wait for a
+future append while the caller holds execution ownership. A read failure is not
+an empty session. Only the descriptor's designated `initialEvent` may initialize
+an empty session from its seed. An early follow-up releases its claim before
+waiting and competing again, so it cannot block the initial turn. The latest read
+bypasses caches; a checkpoint with unfinished work still requires reconciliation
+before a new owner performs effects.
+
+`append()` returns an immutable record reference after persistence; retries of the
+same write identity must not create a different logical checkpoint. Reusing a write
+identity with different content fails visibly instead of replacing its record.
+Subsequent execution and finalization steps use `read(recordRef)` to restore that exact state,
+not a moving stream tail. These records live in the snapshot storage already held
+by the session. No additional holder state or workflow is needed for step handoff.
+The adapter owns efficient record addressing; a run ID or stream ID alone cannot
+identify a particular checkpoint.
+Immutable records may use a bounded cache by record reference within the storage
+scope. Hydrating a mutable working state must not mutate the cached record.
 
 `append` means durable append, not compare-and-swap or an atomic transaction across
 two streams. Event IDs and checkpoint write IDs remain stable on retry. The turn
@@ -197,6 +241,13 @@ through the channel adapter, including its current numeric `startIndex` API.
 ## The holder's input and only command
 
 ```ts
+interface AcceptedSubmission {
+  readonly version: 1;
+  readonly envelope: Omit<InboxEnvelope, "target">;
+  readonly acceptedDeploymentId?: string;
+  readonly initial?: InitialSessionSeed;
+}
+
 interface HoldingWorkflowInput {
   readonly initialAddresses: readonly string[];
   readonly firstTurn?: AcceptedSubmission;
@@ -222,30 +273,49 @@ type RekeyResult = {
 };
 ```
 
-`AcceptedSubmission` is a versioned, serializable input envelope plus accepting
-deployment and any initial session seed. The holder passes it through to the
-start step without decoding agent state. Ordinary session creation supplies
-`firstTurn`; optional existing resources are reserved for migration below.
-Resource initialization creates only missing streams and never truncates supplied
-ones. The descriptor's `initialEvent` enforces first-input precedence.
+`AcceptedSubmission` retains the stable event identity, normalized content or
+command, turn policy, and server-validated authorization, delivery, and caller
+context in its envelope. Forward the complete submission. The trusted dispatch
+adapter binds the target from `SessionResources`; clients do not supply it.
+Session-admission encoding also preserves the accepting deployment and initial seed
+alongside the normalized envelope; forwarding only the message would lose them.
+`InitialSessionSeed` is new-session configuration and initial context, never an
+existing session snapshot. Its domain fields come from current channel and
+session initialization types.
+
+Stamp `acceptedDeploymentId` at ingress for hosted execution; omission is for
+local execution without deployment IDs. Every candidate start, including the
+holder's first dispatch and a queued retry, uses that accepting deployment
+explicitly. Do not substitute the holder's deployment or resolve "latest" again
+when deferred work executes. An unavailable accepting deployment follows visible
+failure/recovery handling without silently changing code versions.
+
+The holder passes the submission through without interpreting agent state.
+Ordinary creation requires `firstTurn`; omitting it is reserved for migration with
+existing resources and imported state. Initialization creates only missing streams
+and never truncates supplied ones. The descriptor's `initialEvent` is derived from
+the first submission and enforces first-input precedence.
 
 The holder's durable body should read like this sequence:
 
 ```text
-allocate session/resource references and create missing streams
+allocate session/resource references
 create the control hook and claim initial aliases
+create missing streams after the address claims succeed
 publish the immutable resource descriptor
-start firstTurn in a durable step, when supplied
+start firstTurn on its accepting deployment in a durable step, when supplied
 for each rekey command:
   claim and retain the additional alias
   reply with claimed / conflict / limit through replyTo
 on holder teardown: release hooks; do not emit or close session streams
 ```
 
-The steps are separate durable boundaries, so the first turn cannot run before
-resource setup completes. Hooks are claimed in workflow context; storage, reply
-sends, and workflow starts run in steps. Retrying the first start preserves its
-submission identity. The holder never awaits that turn's result.
+Claims and resource publication must complete before the first start. This is an
+ordering requirement, not a requirement for a separate step per initialization
+operation. Hooks are claimed in workflow context; combine compatible storage work
+inside a step, and start the first turn only after readiness is durable. Retrying
+that start preserves the submission identity. The holder never awaits the turn's
+result and does not receive a settlement callback.
 
 Repeated rekey to an already held token succeeds without allocating another hook.
 A conflicting or over-limit claim replies with that result and leaves the holder
@@ -254,6 +324,9 @@ handling. A reply uses the requesting owner's existing inbox; it adds no reply
 hook. Reply identities derive from the request ID, and claim success is established
 before the acknowledgement. The tiny command/result contract is frozen in v1;
 new turn code must remain able to speak it.
+If the requesting inbox is already gone, keep the successful alias claim and
+continue the holder loop. A missing reply recipient must not fail the holder or
+undo a rekey. The requester can confirm ownership by lookup when its reply is lost.
 Commands and results use the shared inbox envelope at frozen version 1; its
 framework-owned event identity and target are not duplicated in these payloads.
 
@@ -298,6 +371,11 @@ correlates arrivals during foreground work; owner-specific control handling sign
 cancellation promptly. The inbox does not load snapshots, select deployments, or
 run model work. A turn reducer decides what each decoded event means.
 
+One inbox instance represents one claim attempt. After a conflict, dispose the
+unsuccessful claim. Competing again creates a new inbox and reader with the same
+session token and the same submission identity. Repeating `getConflict()` on the
+old hook observes its recorded conflict; it is not a new ownership attempt.
+
 The claimed execution path has four operations: restore state, reduce input, run
 the next step/wait, and finalize/commit. A single eve-owned turn executor serves
 HTTP, provider, task-update, and callback admission. The harness receives hydrated
@@ -326,12 +404,20 @@ declare function finalizeTurnStep(input: {
 ```
 
 `TurnWork` covers the next model/tool operation or required wait. `TurnSettlement`
-is immutable finalizer input, including the terminal decision, resulting state,
-and delivery dispositions. `TurnReceipt` references the committed revision and
-its input accounting, letting forwarding candidates observe settlement without a
-parent result hook. The reducer is pure; the finalizer performs the existing
-lifecycle/effect work and commits it. These domain types are developed alongside
+is small immutable finalizer input, including the terminal decision, record
+references for the proposed/base state, and delivery dispositions. `TurnReceipt`
+contains the committed record reference and bounded dispositions for the owner's
+admitted inputs. A forwarding candidate can check its disposition without reading
+the full snapshot or waiting on a parent result hook. The reducer is pure; the
+finalizer performs the existing lifecycle/effect work and commits it. These domain types are developed alongside
 their reducers rather than exposing Workflow results as the domain model.
+
+Keep `TurnState` and `TurnStepResult` limited to control projections and
+`SnapshotRecordRef` values at workflow boundaries. Large history, context, and
+proposal data stays in snapshot storage and is read inside the step that uses it.
+The storage implementation must distinguish proposed state from settled state so
+interruption can discard a proposal without losing admitted input or committed
+effects. Measure both input and result bytes, including finalization.
 
 ```text
 POST /session -> holder -> resources ready -> first candidate
@@ -372,10 +458,13 @@ conversation scope; Slack needs installation/workspace, channel, and
 `threadTs ?? ts`, not a timestamp alone.
 
 Concurrent first provider messages may start competing holders. Claim the provider
-address before agent effects; the loser resolves the winning session and transfers
-its initial and buffered input through candidate admission, preserving delivery
-responsibility until acknowledged. Startup conflicts are part of the first
-version; transferring a live session between holders is follow-up work.
+address before creating session streams or performing agent effects. The loser
+resolves the winning holder's descriptor and durably dispatches its initial input
+as a candidate for that session, then releases its own claims and terminates. It
+does not publish a second session descriptor or start an agent against its unused
+resource IDs. Preserve delivery responsibility through that transfer. Conflicting
+initial aliases owned by different sessions fail visibly; do not merge sessions.
+Startup conflicts are part of v1; live holder transfer is follow-up work.
 
 Rekey means **claim another address** through the holder's control inbox. Success
 requires a durable claim and an acknowledgement or confirming lookup. Repeating
@@ -447,6 +536,9 @@ Reading mutable state in ingress is not sufficient, even when no turn is active:
 3. A's delayed candidate successfully claims ownership. Its supplied revision 7
    is stale; a claim establishes exclusion from now on, not since the earlier read.
 
+Only the snapshot stream changed in this example. The immutable resource descriptor
+still points to the same snapshot stream.
+
 The required ordering for an ordinary handoff is `previous commit acknowledged ->
 previous claim released -> next claim acquired -> latest snapshot read -> effects`.
 The storage adapter must make an acknowledged commit visible to that subsequent
@@ -463,10 +555,9 @@ does not establish those properties.
 
 ### Measured boundaries and remaining performance checks
 
-A temporary Local World experiment with three cases compared the same claim and first
-execution step with descriptor resolution in ingress versus a preceding workflow
-step. The execution step performed snapshot hydration itself. Uncontested candidates
-recorded:
+A temporary Local World experiment compared descriptor resolution in ingress with
+a preceding discovery step. Both variants claimed ownership and hydrated inside
+the execution step. Uncontested candidates recorded:
 
 | Descriptor placement         | Persisted candidate steps | Descriptor plus snapshot stream reads | World queue submissions per candidate |
 | ---------------------------- | ------------------------- | ------------------------------------- | ------------------------------------- |
@@ -474,30 +565,26 @@ recorded:
 | Ingress, uncached descriptor | 1                         | 2                                     | 1                                     |
 | Ingress, cached descriptor   | 1                         | 1                                     | 1                                     |
 
-The other cases forced the stale-snapshot ordering above and verified that a
-conflicting candidate skipped hydration: zero execution steps with resolved input,
-versus one discovery step with locator input. That case stopped at conflict
-classification and did not exercise forwarding or acknowledgement. All three cases
-passed. The experiment used real hooks and streams with mock execution; its temporary
-writer-handle setup only accommodated the installed SDK and is not the proposed stream interface. No
-experiment code is included in this document-only change.
+Two further cases reproduced the stale-snapshot race and confirmed that conflict
+classification skipped hydration: zero execution steps with resolved input versus
+one discovery step with locator input. All three cases passed using real hooks and
+streams with mock execution. The fixtures used temporary writer handles for the
+installed SDK and were removed; forwarding, acknowledgement, finalization, record
+references, and fencing were not exercised.
 
-These counts establish a saved durable step compared with a separate discovery
-step. They do not establish a saved queue invocation: the SDK executed steps inline
-in this experiment. Stream reads count World stream operations, not all underlying
-network requests. The uncached read moved into ingress; it did not disappear.
+This establishes a saved durable step against a separate discovery step. The SDK
+executed steps inline, so it does not establish a saved queue invocation. Stream
+counts are World operations, not total network requests. An uncached descriptor
+read moved into ingress; it did not disappear. A locator variant that already knows
+the session ID could combine discovery with execution and also avoid that boundary.
 
-Measure the complete path from request receipt through first model work, first
-client event, and committed settlement on the hosted adapter. Include alias lookup,
-descriptor/cache work, start serialization, hook claim, snapshot reads, encryption
-and run metadata reads, forwarding, and retries. Count actual requests, bytes, and
-serial dependencies as well as durable steps. Compare cold/warm descriptors, idle
-and busy sessions, realistic snapshot sizes, and bootstrap separately. A locator
-variant that already knows the canonical session ID could combine descriptor
-resolution with the first execution step; the separate-step result does not prove
-a boundary advantage over that variant. The resolved-input contract avoids that
-discovery work in the turn and permits cache and response-reader reuse uniformly.
-Hosted latency and cross-deployment consistency remain implementation gates.
+Measure hosted request receipt through first model work, first client event, and
+committed settlement. Include alias lookup, descriptor/cache work, start inputs,
+hook claims, reads of specific records and latest snapshots, encryption/run metadata,
+checkpoint writes, step results, forwarding, and retries. Count actual requests,
+bytes, and serial dependencies as well as steps. Compare cold/warm descriptors,
+idle/busy sessions, realistic history sizes, and bootstrap separately. Hosted
+latency and cross-deployment consistency remain implementation gates.
 
 ## One logical inbox per receiving owner
 
@@ -553,8 +640,9 @@ The candidate protocol therefore retains input until a committed disposition:
 1. Start input carries a stable event identity. Forwarding, start retries, and
    recovery preserve it, including retries after an earlier turn has finished.
 2. The owner commits applied, conclusively retired, and queued event identities
-   with its resulting state. The first prototype follows owner settlement through
-   its run result and checkpoint; a hook receipt is never the acknowledgement.
+   with its resulting state and returns the compact `TurnReceipt`. In v1, candidates
+   follow the actual owner's run result; the receipt references its checkpoint.
+   A hook receipt is never the application acknowledgement.
 3. Queued input remains the originating candidate's responsibility. A checkpoint
    alone does not schedule it. The candidate stays alive until application,
    retirement, or acknowledged transfer to another durable executor.
@@ -597,11 +685,21 @@ acknowledgement cost. Supervision remains enabled when `sessionTimeoutMs: false`
 
 ## Wire protocol and inbox pump
 
-Internal senders receive `InboxAddress { token, protocol: { family: "eve-inbox",
-version: N } }` or a stable session destination for traffic that may outlive a turn.
-The envelope contains `version`, identity `(producer.id, eventId)`, target, and a
-discriminated event with its domain payload. Token `:v1:` identifies the topology;
-envelope versions evolve independently.
+Internal senders receive an `InboxAddress` bound to one `ownerRunId`, or a stable
+session destination for traffic that may outlive a turn. The envelope contains
+`version`, identity `(producer.id, eventId)`, target, and a discriminated event with
+its domain payload. Token `:v1:` identifies the topology; envelope versions evolve
+independently. This implementation uses envelope v1. Future turn versions must
+retain the v1 session-admission contract while older owners can receive input;
+the holder's v1 rekey contract remains frozen for its lifetime.
+
+Direct sends target the addressed owner run, including replies through `replyTo`.
+Receivers check that target before applying an event. An old reply delivered to a
+successor that reused the turn token is stale, not a reply for the successor.
+Session admission instead targets `sessionId`, allowing forwarding candidates to
+follow the actual resumed owner. Preserve logical turn, operation, and request
+guards inside the payload; changing transport owners does not retarget a cancel
+or answer to unrelated work. None of these checks uses hook metadata.
 
 | Events                                                                 | Recipient and correlation                                                       |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -621,8 +719,8 @@ both. Pure answers do not accidentally become steering messages.
 Durable sends derive IDs from the step and logical send key, never the attempt.
 Provider IDs are namespaced; HTTP ingress mints an ID before retryable work. A new
 HTTP request remains a new submission, without a new public idempotency-key API.
-Deduplication spans aliases, candidates, and turns for the
-automatic retry horizon. Pending correlations and unacknowledged input remain
+Deduplication spans aliases, candidates, and turns for the automatic retry horizon.
+Pending correlations and unacknowledged input remain
 protected across ownership release. Bound address count, bytes, buffers, waiters,
 dedupe state, retries, and supervision reads; overflow fails visibly without
 evicting input or releasing previous addresses.
@@ -803,9 +901,10 @@ emit a terminal event. Cleanup retries and late rekey must not resurrect a termi
 session or strand its resources; verify that boundary explicitly.
 
 Session status comes from committed state plus current execution status, not from
-the fact that the holding run is still alive. Idle expiry and execution supervision
+the fact that the holding run is still alive. Session expiry and execution supervision
 remain outside the holder's rekey loop. Preserve the existing timeout policy and
-durable scheduling; disabling session expiry does not disable failure detection.
+durable scheduling; timeout producers use session admission. Disabling session
+expiry does not disable failure detection.
 A small holder does not by itself solve those execution responsibilities.
 
 ## Migration and upgrades after the first version
@@ -850,25 +949,41 @@ that work. Live holder replacement remains outside the first implementation.
 
 ## Implementation gates
 
-Implement the new-session topology in the following order. Migration is follow-up
-work and does not gate this first version:
+Start by defining the removal boundary and resolving three implementation questions
+with small, bounded experiments against the new contracts:
 
-| Gate                                   | Required evidence                                                                                                                                                                                                                                  |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Orchestration replacement              | Main removal boundaries identified; useful domain logic extracted; superseded modules/directories and orphaned wiring removed; one session/turn path uses the new interfaces directly, with no legacy orchestration hidden behind adapters.        |
-| Resource contracts and minimal holder  | Distinct session/run/event/snapshot IDs round-trip; resources resolve after initialization and for historical reads; first start follows readiness; only rekey reaches the holder; duplicate/conflicting/bounded aliases preserve existing claims. |
-| Durable admission                      | Early follow-ups; duplicate starts after hook release; queue order; late finalization input; actual-owner changes; failed candidates visible without new traffic.                                                                                  |
-| Snapshot and execution safety          | Restore/commit/replay; stale writers after hard cancellation; output flush; no duplicate effects or terminal outcomes during recovery; bounded acknowledgement and supervision cost.                                                               |
-| Inbox and turn behavior                | Reader registration/replay/disposal; queue/steer/interrupt/cancel precedence at model, tool, sleep, ask, auth, and finalization boundaries; no lost input or premature lifecycle effects.                                                          |
-| Tools, late events, and cleanup        | Blocking tool/background task ownership; concurrent asks and runtime replies; send failure/cancellation cleanup; late events while idle; expiry and terminal cleanup without a new holder command.                                                 |
-| Stream adapter and end-to-end behavior | Writes by ID through the assumed SDK capability, encrypted cross-deployment reads/writes, cursors, event decoding, closure, deterministic fixtures, and paired hosted latency including starts, claims, snapshots, and forwarding.                 |
+1. Implement immutable record addressing and choose the commit/fencing mechanism.
+   Prove visibility after an acknowledged append, replay of a specific step result, and
+   exclusion of a stale writer after hard cancellation. Revision numbers alone
+   are not a fence. Include the storage and serialization cost.
+2. Choose the durable recovery trigger for a failed holder bootstrap or candidate.
+   Prove it runs without new input and with session expiry disabled, preserves the
+   accepted event, and cannot duplicate uncertain effects. A waiting candidate
+   watching another owner is not supervision of that candidate itself.
+3. Close provider bootstrap races, including simultaneous first messages and the
+   Slack post-to-rekey interval. Prove that one session executes the input and no
+   acknowledged message is stranded in a losing holder.
+
+These mechanisms are required implementation work, not established SDK guarantees.
+Then rebuild the target modules and connect every ingress path, using the following
+gates to review the completed replacement. Migration remains follow-up work and
+does not gate v1:
+
+| Gate                                   | Required evidence                                                                                                                                                                                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestration replacement              | Main removal boundaries identified; useful domain logic extracted; superseded modules/directories and orphaned wiring removed; one session/turn path uses the new interfaces directly, with no legacy orchestration hidden behind adapters.                                     |
+| Resource contracts and minimal holder  | Distinct session/run/event/snapshot IDs round-trip; descriptors are immutable/cacheable; first start follows readiness on the accepting deployment; only rekey reaches the holder; duplicate/conflicting/bounded aliases and missing reply recipients preserve existing claims. |
+| Durable admission                      | Early follow-ups; duplicate starts after hook release; queue order; late finalization input; actual-owner changes; failed candidates visible without new traffic.                                                                                                               |
+| Snapshot and execution safety          | Empty reads return without blocking bootstrap; exact record references replay consistently; proposals remain distinct from settled state; stale writers are fenced; output flush and recovery avoid duplicate effects/outcomes; workflow inputs/results remain small.           |
+| Inbox and turn behavior                | Fresh readers/claims on retries; owner-target guards reject stale replies after token reuse; queue/steer/interrupt/cancel precedence at model, tool, sleep, ask, auth, and finalization boundaries; no lost input or premature lifecycle effects.                               |
+| Tools, late events, and cleanup        | Blocking tool/background task ownership; concurrent asks and runtime replies; send failure/cancellation cleanup; late events while idle; expiry and terminal cleanup without a new holder command.                                                                              |
+| Stream adapter and end-to-end behavior | Writes by ID through the assumed SDK capability, encrypted cross-deployment reads/writes, cursors, event decoding, closure, deterministic fixtures, and paired hosted latency including starts, claims, snapshots, and forwarding.                                              |
 
 Use unit tests for reducers, Workflow-backed scenarios for durable scheduling and
 failure boundaries, and CI fixture evals for streaming behavior (`agent-workflow-tools`,
 `fixture-tasks`, `agent-channels`). Follow [turn performance](./turn-performance.md)
-for paired measurements. The prior successor experiment's continuously owned turn
-token is unnecessary here, but durable input ownership remains mandatory. There is
-no hosted performance result for this topology yet.
+for paired measurements. Durable input ownership remains mandatory. There is no
+hosted performance result for this topology yet.
 
 Runtime implementation must update session/storage documentation, steering and
 `turn.interrupted` semantics, additive rekey, recovery behavior, and the Promise-based
