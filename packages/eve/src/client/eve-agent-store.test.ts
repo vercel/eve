@@ -874,6 +874,38 @@ describe("EveAgentStore background tasks", () => {
     detachEveAgentStore(store);
   });
 
+  it("reconciles an optimistic submission containing a file", async () => {
+    const message = [
+      { text: "Review this document", type: "text" as const },
+      {
+        data: "data:text/plain;base64,SGVsbG8=",
+        filename: "notes.txt",
+        mediaType: "text/plain",
+        type: "file" as const,
+      },
+    ];
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message, sequence: 0, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message });
+
+    const userMessages = store.snapshot.data.messages.filter(
+      (candidate) => candidate.role === "user",
+    );
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.metadata?.optimistic).toBeUndefined();
+    expect(userMessages[0]?.parts).toMatchObject([
+      { state: "done", text: "Review this document", type: "text" },
+      { filename: "notes.txt", mediaType: "text/plain", type: "file" },
+    ]);
+  });
+
   it("only reconciles an optimistic submission with its matching server message", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({

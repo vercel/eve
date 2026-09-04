@@ -4,7 +4,11 @@ import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  isCurrentTurnBoundaryEvent,
+  summarizeUserContent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
 import {
   type ActiveTurn,
   assertExclusiveTurnInput,
@@ -14,7 +18,6 @@ import {
   isAbortError,
   isSettledSessionTail,
   type PendingMessageSubmission,
-  summarizeUserContent,
   toTerminalStreamFailureError,
   updatePendingAuthorizations,
 } from "#client/eve-agent-store-helpers.js";

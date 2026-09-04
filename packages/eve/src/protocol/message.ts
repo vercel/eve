@@ -892,7 +892,7 @@ export function createMessageReceivedEvent(input: {
   };
 }
 
-function summarizeUserContent(message: string | UserContent): string {
+export function summarizeUserContent(message: string | UserContent): string {
   if (typeof message === "string") {
     return message;
   }
