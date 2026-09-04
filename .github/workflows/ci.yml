@@ -179,6 +179,35 @@ jobs:
       - name: Run TUI smoke tests
         run: pnpm test:tui
 
+  test-nitro-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        run: pnpm --filter eve run build
+
+      - name: Verify packed Nitro consumers
+        run: |
+          $env:Path = "$env:PNPM_HOME;$env:Path"
+          pnpm --dir packages/eve exec vitest run --config vitest.scenario.config.ts test/scenarios/nitro-compatibility.scenario.test.ts test/scenarios/nitro-rolldown-packed.scenario.test.ts
+
   test-dev-windows:
     runs-on: windows-latest
     # Temporarily disabled: consistently failing in CI and not currently debuggable.
