@@ -1,3 +1,5 @@
+import type { BufferedSessionControl } from "#execution/parked-delivery-wait.js";
+
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
@@ -473,7 +475,7 @@ async function runDriverLoop(input: {
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
-  const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+  const bufferedSessionControls: BufferedSessionControl[] = [];
   const cancelledTaskIds = new Set<string>();
   const seenTaskDeliveries = new Set<string>();
   const stateCursor = new SessionStateCursor({
@@ -644,8 +646,8 @@ async function runDriverLoop(input: {
         };
       }
 
-      if (next.kind === "clear" || next.kind === "compact") {
-        action = await runTurn({ kind: next.kind });
+      if (next.kind === "clear" || next.kind === "compact" || next.kind === "restore-history") {
+        action = await runTurn(next);
         continue;
       }
 

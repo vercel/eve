@@ -67,6 +67,8 @@ export interface ChannelSource<TState = undefined> {
   compact(): Promise<CompactSessionResult>;
   /** Clears model-message history without creating a session. */
   clear(): Promise<ClearSessionResult>;
+  /** Restores model-message history without creating a session. */
+  restoreHistory(input: { readonly to: number }): Promise<ClearSessionResult>;
   /** Retires the current owner without creating a replacement. */
   reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
 }
@@ -140,6 +142,9 @@ export function createChannelOperations<TState = undefined>(input: {
         },
         async clear() {
           return await bound.clear();
+        },
+        async restoreHistory(restoreInput) {
+          return await bound.restoreHistory(restoreInput);
         },
         async reset(options) {
           return await bound.reset(options);

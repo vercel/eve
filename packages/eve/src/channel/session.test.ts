@@ -143,6 +143,7 @@ describe("fixed session operations", () => {
     await session.respond([{ optionId: "approve", requestId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
+    await session.restoreHistory({ to: 2 });
     await session.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
@@ -173,6 +174,10 @@ describe("fixed session operations", () => {
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(5, {
+      command: { kind: "restore-history", to: 2 },
+      sessionId: "sess_1",
+    });
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(6, {
       command: { kind: "reset", reason: "fresh start" },
       sessionId: "sess_1",
     });

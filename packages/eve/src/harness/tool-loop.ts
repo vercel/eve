@@ -169,6 +169,7 @@ import {
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { restoreSessionHistory } from "#harness/history-restoration.js";
 import {
   getSupersededAuthorizationChallenges,
   setPendingAuthorization,
@@ -578,6 +579,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         turnId: `turn_${emissionState.sequence}`,
       });
     };
+
+    if (config.restoreHistoryTo !== undefined) {
+      session = restoreSessionHistory(session, config.restoreHistoryTo);
+      await emit?.(createSessionWaitingEvent());
+      return { next: null, session };
+    }
 
     if (config.clearOnly === true) {
       session = {

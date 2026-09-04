@@ -56,6 +56,9 @@ export type ClearSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
 
+/** Result of queueing model-history restoration for a session. */
+export type RestoreHistorySessionResult = ClearSessionResult;
+
 // ---------------------------------------------------------------------------
 // Lineage
 // ---------------------------------------------------------------------------
@@ -225,6 +228,10 @@ export type SessionCommand =
     }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
+  | {
+      readonly kind: "restore-history";
+      readonly to: number;
+    }
   | { readonly kind: "reset"; readonly reason?: string };
 
 export type SessionSendCommandResult =
@@ -236,6 +243,11 @@ export type ResetSessionResult =
   | { readonly status: "reset"; readonly previousSessionId: string }
   | { readonly status: "no_active_session" };
 
+export type SessionControlCommand = Extract<
+  SessionCommand,
+  { readonly kind: "clear" | "compact" | "restore-history" | "reset" }
+>;
+
 export type SessionCommandResult<TCommand extends SessionCommand = SessionCommand> =
   TCommand extends { readonly kind: "send" }
     ? SessionSendCommandResult
@@ -245,7 +257,9 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
         ? CompactSessionResult
         : TCommand extends { readonly kind: "clear" }
           ? ClearSessionResult
-          : ResetSessionResult;
+          : TCommand extends { readonly kind: "restore-history" }
+            ? RestoreHistorySessionResult
+            : ResetSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -300,6 +314,12 @@ export interface CompactSessionHookPayload {
 /** Requests a context clear without delivering model input. */
 export interface ClearSessionHookPayload {
   readonly kind: "clear";
+}
+
+/** Requests restoration of an observed model-history snapshot to an earlier index. */
+export interface RestoreHistorySessionHookPayload {
+  readonly kind: "restore-history";
+  readonly to: number;
 }
 
 /**
@@ -382,6 +402,7 @@ export type HookPayload =
   | CompactSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | RestoreHistorySessionHookPayload
   | SessionTimeoutHookPayload
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
