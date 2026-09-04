@@ -4,90 +4,334 @@ status: proposed
 last_updated: "2026-09-04"
 ---
 
-# Stable session streams, replaceable holders, and owner inboxes
+# Stable session storage, a small holder, and independent turns
 
-Use a small **holding workflow** to initialize a session, reserve its addresses,
-and maintain its control lifecycle. It durably starts the first turn after the
-session resources are ready. Ingress starts subsequent turn candidates directly;
-the candidate that claims the session's active-turn hook executes and terminates
-when its work settles. Each receiving execution owner uses one discriminated
-inbox for input, cancellation, reports, requests, and replies.
+Replace the session's parent execution loop with a small **holding workflow** and
+independent terminating turn workflows. The holder creates the session resources,
+claims its addresses, and durably starts the first turn. Later ingress starts turn
+candidates directly. The session's active-turn hook selects the execution owner;
+that owner handles input, tools, steering, and finalization through one inbox.
 
-The public session and stream remain stable while turn workflows and, when
-necessary, the holding workflow run on newer code. A replacement holder references
-the original stream and committed state; retirement does not close that stream.
-The holder does not run the agent, relay ordinary messages, interpret checkpoints,
-or adopt turn results. Its code changes only for its small control protocol.
+Assume the forthcoming Workflow SDK supports writing from a step to another run's
+stream using a stable identifier. We do not need serialized writable handles or a
+handle-discovery workaround. Wrap this capability in eve-owned storage interfaces
+so the execution model does not depend on Workflow's stream representation.
 
-This is the complete proposal for [PR #3005](https://github.com/vercel/eve/pull/3005).
-It replaces that PR's same-deployment inline turns, cross-deployment child turns,
-parent settlement exchange, and reset-only deployment cut. It retains and
-integrates the inbox, steering, finalization, tool, task, and supervision contracts
-below. No companion architecture proposal is required. Runtime implementation
-remains gated on the explicitly identified Workflow and recovery proofs.
+For the first version, the holder stays pinned for the session's lifetime. Its
+only command is additive `rekey`. There is no holder replacement protocol,
+generation negotiation, or upgrade coordinator in the main design. New turns run
+on the deployment that accepted their input; the holder does not interpret their
+state. A small migration extension for existing sessions appears near the bottom.
 
-## Ownership and identity
+This is the unified proposal for [PR #3005](https://github.com/vercel/eve/pull/3005),
+including its inbox, steering, finalization, tool, task, and delivery contracts.
+The implementation detail here is intentional: replace the old ownership machinery
+with explicit interfaces, rather than retain both orchestration systems behind a
+new facade. The interfaces below are proposed internal eve APIs, not new public SDK
+exports or claims about the forthcoming Workflow API's exact spelling.
 
-```text
-POST /session(initial event)
-  -> start holder H(initial event)
-       -> initialize session S, streams, checkpoint, and address claims
-       -> durably start first candidate T1(S, initial event)
-       -> wait for register / adopt / retire / close commands
+## Exactly what the holder holds
 
-follow-up(S) ---------------------------------> start candidate T(S, event)
-provider or callback -> lookup alias -> H
-  -> resolve H's session reference -> S ------> start candidate T(S, event)
-                                                        |
-                                              claim active-turn(S)
-                                                /               \
-                                          execute          forward to owner;
-                                             |             retain input until
-                                             |             disposition is known
-original session streams <-------------------+-- progress and checkpoints
+| Resource                      | Holder's responsibility                                                                      | Who uses or interprets it afterward                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Provider and callback hooks   | Retain an array/map of claimed hook handles; add another on `rekey`.                         | Ingress looks up a token to find this holder and resolve the session. These hooks do not receive ordinary turn input. |
+| One control hook              | Read the frozen `rekey` command and return its claim result.                                 | Turn workflows request registration through this address.                                                             |
+| Primary event stream          | Create it once, or keep the supplied existing stream reference.                              | Turn steps append events; clients read and resume with a cursor.                                                      |
+| Snapshot stream               | Create it once, or keep the supplied existing snapshot reference.                            | Turn steps append committed snapshots and restore them at subsequent starts.                                          |
+| Immutable resource descriptor | Publish the session, holder, stream, and control references once.                            | Ingress, readers, and turn workflows resolve identifiers without assuming they are equal.                             |
+| Initial dispatch input        | Retain the accepted first input in durable workflow input and start it after initialization. | The first candidate takes over delivery and execution responsibility.                                                 |
+
+The last two are the additions to the basic hooks-plus-two-streams picture. The
+descriptor is small immutable metadata. Initial dispatch is a one-time obligation,
+not an inbox of future turns. Neither becomes a mutable copy of session state.
+
+The holder does not retain the latest snapshot in its workflow variables, track
+an active model turn, decode event or snapshot payloads, supervise tools, relay
+messages, run authored lifecycle hooks, or adopt completed turn results. The actual
+session data lives in storage, even when that storage was created by its run.
+After bootstrap, only address claims and their acknowledgements grow its history.
+Limits on aliases and command delivery still apply.
+
+A holder is a resource holder, not a watchdog for model execution. Keep the name
+`holdingWorkflow` so it does not imply a supervision responsibility it lacks.
+
+## Identities and storage references
+
+Use distinct types even when the first implementation derives several values from
+one Workflow run ID. A public session ID, holder run ID, turn run ID, event stream
+ID, snapshot stream ID, and logical turn ID answer different questions.
+
+```ts
+type Id<K extends string> = string & { readonly __kind: K };
+type SessionId = Id<"session">;
+type WorkflowRunId = Id<"workflow-run">;
+type EventStreamId = Id<"event-stream">;
+type SnapshotStreamId = Id<"snapshot-stream">;
+type EventCursor = Id<"event-cursor">;
+type EventKey = Id<"event">;
+
+type EventStreamRef = Readonly<{ id: EventStreamId }>;
+type SnapshotStreamRef = Readonly<{ id: SnapshotStreamId }>;
+
+interface SessionResources {
+  readonly version: 1;
+  readonly sessionId: SessionId;
+  readonly holderRunId: WorkflowRunId;
+  readonly events: EventStreamRef;
+  readonly snapshots: SnapshotStreamRef;
+  readonly control: InboxAddress;
+  readonly initialEvent?: EventKey;
+}
 ```
 
-| Responsibility                                     | Owner                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------- |
-| Stable public identity and readable stream         | Original session and stream identity                                |
-| Bootstrap and first-turn dispatch                  | Initial holding workflow                                            |
-| Continuation/callback addresses and additive rekey | Current holding workflow                                            |
-| Replacement and stream closure                     | Versioned holder control protocol                                   |
-| Model execution, steering, tools, and finalization | Winning terminating turn workflow                                   |
-| Mutable state between turns                        | Durable versioned checkpoint, interpreted by turn code              |
-| Unapplied input                                    | Its durable candidate until accounted for or explicitly transferred |
-| Background work                                    | Independent task workflow; later updates enter session ingress      |
+References are serializable data, not live `WritableStream` objects. Only the
+storage adapter knows whether an ID encodes a run plus namespace, refers to a
+separate storage object, or needs a lookup. Neither turn code nor the harness
+constructs a stream ID from `sessionId` or substitutes `holderRunId` for it.
+Event cursors belong to their event stream and cannot address snapshots.
 
-Keep three internal identities distinct: `sessionId`, `streamRunId`, and
-`holdingRunId`. On creation all three can equal the initial holder's run ID.
-Replacement changes only `holdingRunId`; public session IDs can retain their
-Workflow run-ID format. Each holder publishes an immutable reference containing
-the stable IDs, its generation, and protocol capabilities. These are ordinary
-versioned data, not `HookOptions.metadata`. Provider lookup resolves this reference
-instead of treating `hook.runId` as the public session ID.
+The descriptor needs an explicit persistence location. The initial Workflow adapter
+publishes it once in a closed `eve.session.resources` namespace on the holder run.
+That is a **small third metadata stream**, not another continually written log; it
+contains references, never writer handles or turn state. This uses an existing
+primitive without adding a database. Only the directory adapter knows this layout.
 
-Session lookup, status, cancellation, and expiry resolve the active generation
-and committed session state. The original stream run completing does not mean
-the session completed; APIs must not infer session liveness from that run's status.
+```ts
+interface SessionDirectory {
+  resolveSession(id: SessionId): Promise<SessionResources>;
+  resolveHolder(id: WorkflowRunId): Promise<SessionResources>;
+}
+```
 
-The holder's control token and the active-turn token derive from **session ID**,
-not the current holding run, candidate run, or logical turn ID. Turn run IDs and
-logical turn IDs are separate: a forwarding candidate might never execute a turn.
-An executing turn may suspend for tools, sleep, or input, but does not stay alive
-between settled turns to own the session.
+Initially, the directory may interpret a run-derived public session ID to locate
+that descriptor. Provider lookup already returns a holder run ID. A future ID
+allocator or directory store can change this mapping without changing callers.
+Descriptors remain readable after hook disposal so historical session streams do
+not require a live holder. The descriptor is published only after resource and
+initial address setup; resolution before readiness waits with a bound or returns
+a visible initialization failure.
 
-New execution uses the deployment that accepted its input. Steering an already
-active turn uses that owner's deployment and negotiated protocol. Queued input
-retains its accepting-deployment reference for its eventual execution. A deployment
-change alone neither replaces the holder nor moves an in-progress authored body.
+The active-turn token derives from `sessionId`, not from a candidate or logical
+turn. A forwarding candidate might never execute a logical turn. New execution
+uses the accepting deployment; steering an already active turn uses that owner's
+deployment and supported inbox protocol. Queued input retains its accepting
+deployment. None of these decisions requires upgrading the holder.
+
+## Storage and snapshot interfaces
+
+Separate the event log from durable program state. Reuse existing eve event and
+session types, but remove the transport from them. These interfaces run in server
+or step context; only their data crosses a Workflow boundary.
+
+```ts
+interface SessionEvents {
+  append(ref: EventStreamRef, events: readonly MessageStreamEvent[]): Promise<void>;
+  read(ref: EventStreamRef, after?: EventCursor): ReadableStream<MessageStreamEvent>;
+  tail(ref: EventStreamRef): Promise<EventCursor | undefined>;
+  close(ref: EventStreamRef): Promise<void>;
+}
+
+interface SessionSnapshots {
+  latest(ref: SnapshotStreamRef): Promise<SessionCheckpoint | undefined>;
+  append(ref: SnapshotStreamRef, checkpoint: SessionCheckpoint): Promise<void>;
+  close(ref: SnapshotStreamRef): Promise<void>;
+}
+
+interface SessionCheckpoint {
+  readonly version: number;
+  readonly revision: number;
+  readonly writeId: string;
+  readonly writerRunId: WorkflowRunId;
+  readonly session: DurableSessionSnapshot;
+  readonly serializedContext: Record<string, unknown>;
+  readonly emission: HarnessEmissionState;
+  readonly execution: SessionExecutionState;
+  readonly deliveries: DeliveryState;
+  readonly obligations: SessionObligations;
+}
+```
+
+`SessionExecutionState` records session/turn status, the active owner and whether
+its previous work settled cleanly. `DeliveryState` holds ordered admitted input
+and applied, retired, or queued event identities. `SessionObligations` preserves
+pending tools/tasks, asks, authorization, runtime responses, and callers, reusing
+existing domain records or their durable references. These must survive a turn;
+they are not extra fields for the holder to understand.
+
+Snapshot schema and hydration belong to turn code. Restore after winning the
+active-turn claim, refresh the agent from the accepting deployment, and continue
+with the committed state. An empty snapshot stream is valid only for the designated
+initial event; that turn creates the initial session state. A follow-up that wins
+too early releases its claim and waits for bootstrap instead of initializing its
+own session or blocking the first turn.
+
+`append` means durable append, not compare-and-swap or an atomic transaction across
+two streams. Event IDs and checkpoint write IDs remain stable on retry. The turn
+commit boundary flushes events, writes a complete checkpoint, and accounts for
+its input before releasing ownership. Reconcile an incomplete predecessor before
+another writer proceeds; a stale step must not be mistaken for a newer committed
+snapshot. The delivery/failure section specifies the remaining proof obligations.
+
+The Workflow adapter owns ID resolution, serialization, encryption, flush/close,
+and cursor translation. It uses the assumed SDK operation for writes by ID. We do
+not invent an SDK method signature in this plan. No generic storage plugin registry
+is needed now; these two narrow modules provide the substitution point for a future
+stream primitive. Preserve the existing public stream format and cursor behavior
+through the channel adapter, including its current numeric `startIndex` API.
+
+## The holder's input and only command
+
+```ts
+interface HoldingWorkflowInput {
+  readonly initialAddresses: readonly string[];
+  readonly firstTurn?: AcceptedSubmission;
+  readonly existing?: {
+    readonly sessionId?: SessionId;
+    readonly events?: EventStreamRef;
+    readonly snapshots?: SnapshotStreamRef;
+  };
+}
+
+type HolderCommand = {
+  readonly kind: "rekey";
+  readonly requestId: string;
+  readonly token: string;
+  readonly replyTo: InboxAddress;
+};
+
+type RekeyResult = {
+  readonly kind: "rekey.result";
+  readonly requestId: string;
+  readonly token: string;
+  readonly status: "claimed" | "conflict" | "limit";
+};
+```
+
+`AcceptedSubmission` is a versioned, serializable input envelope plus accepting
+deployment and any initial session seed. The holder passes it through to the
+start step without decoding agent state. Ordinary session creation supplies
+`firstTurn`; optional existing resources are reserved for migration below.
+Resource initialization creates only missing streams and never truncates supplied
+ones. The descriptor's `initialEvent` enforces first-input precedence.
+
+The holder's durable body should read like this sequence:
+
+```text
+allocate session/resource references and create missing streams
+create the control hook and claim initial aliases
+publish the immutable resource descriptor
+start firstTurn in a durable step, when supplied
+for each rekey command:
+  claim and retain the additional alias
+  reply with claimed / conflict / limit through replyTo
+on holder teardown: release hooks; do not emit or close session streams
+```
+
+The steps are separate durable boundaries, so the first turn cannot run before
+resource setup completes. Hooks are claimed in workflow context; storage, reply
+sends, and workflow starts run in steps. Retrying the first start preserves its
+submission identity. The holder never awaits that turn's result.
+
+Repeated rekey to an already held token succeeds without allocating another hook.
+A conflicting or over-limit claim replies with that result and leaves the holder
+and all existing aliases intact. Infrastructure errors follow durable retry/failure
+handling. A reply uses the requesting owner's existing inbox; it adds no reply
+hook. Reply identities derive from the request ID, and claim success is established
+before the acknowledgement. The tiny command/result contract is frozen in v1;
+new turn code must remain able to speak it.
+Commands and results use the shared inbox envelope at frozen version 1; its
+framework-owned event identity and target are not duplicated in these payloads.
+
+## Turn execution interfaces
+
+Keep routing, transport, and the turn state machine separate. The workflow boundary
+receives resources and an accepted submission; it does not receive parent state,
+a parent writable, a completion token, or a result-return address.
+
+```ts
+interface TurnWorkflowInput {
+  readonly version: 1;
+  readonly session: SessionResources;
+  readonly submission: AcceptedSubmission;
+}
+
+type InboxClaim =
+  { readonly kind: "owned" } | { readonly kind: "conflict"; readonly runId: WorkflowRunId };
+
+interface OwnerInbox {
+  readonly address: InboxAddress;
+  claim(): Promise<InboxClaim>;
+  drain(): readonly InboxEnvelope[];
+  next(): Promise<InboxEnvelope>;
+  response(requestId: string): Promise<InboxEnvelope>;
+  dispose(): Promise<void>;
+}
+```
+
+Constructing an inbox creates its reader before any claim. Its pump buffers and
+correlates arrivals during foreground work; owner-specific control handling signals
+cancellation promptly. The inbox does not load snapshots, select deployments, or
+run model work. A turn reducer decides what each decoded event means.
+
+The claimed execution path has four operations: restore state, reduce input, run
+the next step/wait, and finalize/commit. A single eve-owned turn executor serves
+HTTP, provider, task-update, and callback admission. The harness receives hydrated
+state and an eve event sink inside a step and returns progress/settlement proposals.
+It knows neither holder runs nor Workflow streams. A terminating candidate is also
+responsible for forwarding and accounting for its original input when it loses
+the claim; the protocol below is part of this interface, not a discarded loser path.
+
+The state-machine boundary should also be explicit:
+
+```ts
+type TurnDecision =
+  | { readonly kind: "continue"; readonly state: TurnState; readonly work: TurnWork }
+  | { readonly kind: "finalize"; readonly settlement: TurnSettlement };
+
+declare function reduceTurnBoundary(input: {
+  state: TurnState;
+  result: TurnStepResult;
+  pending: readonly InboxEnvelope[];
+}): TurnDecision;
+
+declare function finalizeTurnStep(input: {
+  session: SessionResources;
+  settlement: TurnSettlement;
+}): Promise<TurnReceipt>;
+```
+
+`TurnWork` covers the next model/tool operation or required wait. `TurnSettlement`
+is immutable finalizer input, including the terminal decision, resulting state,
+and delivery dispositions. `TurnReceipt` references the committed revision and
+its input accounting, letting forwarding candidates observe settlement without a
+parent result hook. The reducer is pure; the finalizer performs the existing
+lifecycle/effect work and commits it. These domain types are developed alongside
+their reducers rather than exposing Workflow results as the domain model.
+
+```text
+POST /session -> holder -> resources ready -> first candidate
+follow-up ----> resolve resources ----------> candidate
+provider ----> alias lookup -> descriptor --> candidate
+                                              |
+                                       claim active-turn(sessionId)
+                                        |                    |
+                                  claim won              claim lost
+                                        |                    |
+                               restore -> execute       forward + account
+                                      |                       |
+                           events + snapshot append     retry when needed
+                                      |
+                               settle and terminate
+```
 
 ## Session creation and ingress
 
 HTTP creation performs one start: `holdingWorkflow(createInput)`, whose durable
 input includes the initial event and its identity. The holder completes resource
 initialization before a separate durable step starts the first turn. Initialization
-must finish stream writes, initial checkpoint publication, and required address
-claims. Calling `getWritable()` alone is not a readiness barrier.
+must finish stream creation, descriptor publication, and required address claims.
+Calling `getWritable()` alone is not a readiness barrier. The holder creates the
+snapshot storage; the first claiming turn initializes its session contents.
 
 This ordering prevents the first turn from outrunning its stream and lets dispatch
 retry after the HTTP request ends. Retries preserve the initial event ID. Early
@@ -105,21 +349,21 @@ conversation scope; Slack needs installation/workspace, channel, and
 Concurrent first provider messages may start competing holders. Claim the provider
 address before agent effects; the loser resolves the winning session and transfers
 its initial and buffered input through candidate admission, preserving delivery
-responsibility until acknowledged. A lookup miss during replacement must follow
-the migration protocol below instead of starting a new session.
+responsibility until acknowledged. Startup conflicts are part of the first
+version; transferring a live session between holders is follow-up work.
 
 Rekey means **claim another address** through the holder's control inbox. Success
 requires a durable claim and an acknowledgement or confirming lookup. Repeating
 an address owned by the same holder is a no-op; an address belonging to another
 session is a visible conflict. Previously claimed addresses remain until session
-closure or confirmed replacement. Threadless Slack sessions register their thread
-after the first post returns its timestamp; the post/claim interval needs startup
+closure. Threadless Slack sessions register their thread after the first post
+returns its timestamp; the post/claim interval needs startup
 reconciliation so a racing reply cannot create a second executing session.
 
 Authorization uses one random, session-scoped callback capability with at least
 128 bits of entropy, registered before exposing a challenge URL. Its alias survives
-turn completion and holder replacement. Callback ingress accepts bounded parameters,
-resolves the session, and admits only an `authorization.response`; it cannot select
+turn completion. Callback ingress accepts bounded parameters, resolves the
+session, and admits only an `authorization.response`; it cannot select
 arbitrary tokens or event kinds. The reducer matches the pending connection and
 attempt, and the connection strategy validates provider state. Secrets and
 capabilities stay out of logs.
@@ -132,15 +376,16 @@ wake the holder.
 
 ## One logical inbox per receiving owner
 
-A logical inbox owns its readers, shared buffer, correlations, decoder, and reducer.
-Each receiving hook has one reader and accepts the owner's discriminated protocol.
+A logical inbox owns its readers, shared buffer, correlations, and wire decoder.
+The receiving owner supplies the domain reducer. Each receiving hook has one reader
+and accepts the owner's discriminated protocol.
 Additional hooks reserve distinct addresses or address independent executions;
 message kinds and request IDs do not create hooks. All eve-owned hooks are
 server-only (`isWebhook: false`) and omit `HookOptions.metadata`.
 
 | Owner/address          | Proposed token or scope                    | Purpose                                                                   |
 | ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------- |
-| Holder control         | `eve:session-control:v1:<sessionId>`       | Bootstrap control, address registration, adoption, retirement, closure    |
+| Holder control         | `eve:session-control:v1:<sessionId>`       | Additive rekey and its acknowledgement                                    |
 | Provider alias         | `eve:continuation:v1:<provider-address>`   | Lookup of the current holder and stable session reference                 |
 | Authorization alias    | `eve:auth-callback:v1:<random-capability>` | Authorized callback lookup independent of the active turn                 |
 | Active turn            | `eve:turn-inbox:v1:<sessionId>`            | Session-wide exclusion and active-owner input, reports, requests, replies |
@@ -156,8 +401,8 @@ per-request reply hooks.
 
 A session with `C` provider addresses and `A` callback aliases owns `1 + C + A`
 holder hooks while idle, plus one claimed turn hook while executing. Each blocking
-tool, background task, or collector adds one. Counts exclude authored hooks and
-transient migration/recovery coordination. There is no parent turn inbox or
+tool, background task, or collector adds one. Counts exclude authored hooks and any
+independent recovery execution. There is no parent turn inbox or
 per-kind control/report/reply hook, and no inline-to-child promotion. Every input
 still incurs candidate start/claim work, including steering that ultimately runs
 in an existing owner; fewer hooks do not establish a latency win.
@@ -204,7 +449,7 @@ uses Workflow step results and a parent state cursor. Its old `eve.session` stre
 is a fallback, not today's write path. Removing that parent requires a checkpoint
 readable by stable session ID. It contains the session snapshot, serialized context,
 emission counters, queued input and delivery accounting, pending tasks/asks/auth and
-runtime obligations, terminal state, and owner/generation/revision information.
+runtime obligations, terminal state, and owner/revision information.
 
 Flush output and publish the complete checkpoint before ordinary ownership release.
 Revisions and retry identities must reject stale commits. Hard cancellation needs
@@ -242,7 +487,7 @@ envelope versions evolve independently.
 | `input.response`, `authorization.response`, `runtime.result`           | Matching live request, connection/attempt, or invocation                        |
 | `workflow.report`, `workflow.request`, `workflow.outcome`              | Active turn or task inbox, with operation/request identity                      |
 | `activity.batch`                                                       | Collector, with batch identity                                                  |
-| Address registration, adoption, retirement, closure commands/results   | Holder control, with session generation and request identity                    |
+| `rekey`, `rekey.result`                                                | Holder control and requesting owner inbox, with request identity                |
 
 There is no parent `turn.settled` exchange. Committed state and event dispositions
 replace parent adoption. Framework encoders own identity, targets, and capabilities;
@@ -253,7 +498,7 @@ both. Pure answers do not accidentally become steering messages.
 Durable sends derive IDs from the step and logical send key, never the attempt.
 Provider IDs are namespaced; HTTP ingress mints an ID before retryable work. A new
 HTTP request remains a new submission, without a new public idempotency-key API.
-Deduplication spans aliases, candidates, turns, and holder generations for the
+Deduplication spans aliases, candidates, and turns for the
 automatic retry horizon. Pending correlations and unacknowledged input remain
 protected across ownership release. Bound address count, bytes, buffers, waiters,
 dedupe state, retries, and supervision reads; overflow fails visibly without
@@ -347,87 +592,90 @@ withdraws unresolved requests and releases waiters. Cancellation preserves the
 use `runtime.result`; collectors retain debounce and expiry. Application-authored
 `createHook` and `createWebhook` remain unchanged.
 
-## Stream access and holder replacement
+## What the implementation removes
 
-The installed `@workflow/core@5.0.0-beta.48` exposes `getWritable()` for the current
-run, with namespaces, and `getRun(id).getReadable()` for other runs. A run ID alone
-is not a public foreign-run writer API. The SDK can serialize writable handles
-that retain their original run identity.
+Build the new path around the interfaces above, then remove the superseded path.
+Do not preserve inline/child mode switches, parent acknowledgements, or old token
+routing as hidden implementations of the new interfaces. Migration adapters, when
+needed, live outside the normal execution path.
 
-The retained spike publishes output/checkpoint handles once in a closed bootstrap
-namespace. Turn steps resolve those handles through the original stream run and
-write directly, without waking the holder. Use this supported serialization path
-for the prototype; isolate access behind an eve-owned adapter. Shipping requires
-verification of encryption, flushing, deployment compatibility, and hosted lifetime.
-The spike's sequential numeric checkpoint is not the production commit protocol.
+| Existing machinery                                                                                                                                                                                                                                                                       | Replacement or retained responsibility                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`workflow-entry.ts`](../packages/eve/src/execution/workflow-entry.ts): `runDriverLoop`, parked input routing, mutable crash-cleanup mirror                                                                                                                                              | `holdingWorkflow` keeps resources and aliases; the terminating executor owns session work and failure handling.                                                      |
+| [`turn-dispatch.ts`](../packages/eve/src/execution/turn-dispatch.ts), [`inline-turn.ts`](../packages/eve/src/execution/inline-turn.ts), and the dual paths in [`turn-workflow.ts`](../packages/eve/src/execution/turn-workflow.ts)                                                       | One candidate entrypoint and one claimed turn executor; remove inline promotion and dispatch-and-await-child behavior.                                               |
+| [`turn-control-receiver.ts`](../packages/eve/src/execution/turn-control-receiver.ts), [`turn-control-protocol.ts`](../packages/eve/src/execution/turn-control-protocol.ts), parent notifications in [`turn-execution-cursor.ts`](../packages/eve/src/execution/turn-execution-cursor.ts) | Session-scoped owner inbox plus committed delivery dispositions; remove completion-token exchanges, parent state returns, and continuation relays.                   |
+| [`session-state-cursor.ts`](../packages/eve/src/execution/session-state-cursor.ts) and [`durable-session-store.ts`](../packages/eve/src/execution/durable-session-store.ts) transport responsibilities                                                                                   | `SessionSnapshots` plus a turn-local state value. Retain projection/hydration logic; remove parent-owned persistence and the ordinary path's legacy stream fallback. |
+| [`session-command-inbox.ts`](../packages/eve/src/execution/session-command-inbox.ts)                                                                                                                                                                                                     | Small holder address collection and generic `OwnerInbox`; provider aliases perform lookup and the turn inbox receives traffic.                                       |
+| [`tools/workflow/owner.ts`](../packages/eve/src/execution/tools/workflow/owner.ts), per-kind channels, separate turn cancellation hook                                                                                                                                                   | One receiving inbox per independent tool/task/turn owner, with discriminated events and request correlations.                                                        |
+| `parentWritable` through turn/coordination/terminal step inputs                                                                                                                                                                                                                          | `EventStreamRef` at durable boundaries and an eve event sink inside executing steps. Stream decoding and Workflow serialization stay in the storage adapter.         |
+| [`workflow-entry-finalization.ts`](../packages/eve/src/execution/workflow-entry-finalization.ts) and premature terminal emission in [`harness/emission.ts`](../packages/eve/src/harness/emission.ts)                                                                                     | One turn-owned finalizer after the inbox decision; preserve authored lifecycle behavior, usage, caller notification, and actual task/subagent supervision.           |
+| Session/channel code that treats a session ID as a stream/run ID                                                                                                                                                                                                                         | `SessionDirectory` for resolution, then `SessionEvents` or `SessionSnapshots` for the operation.                                                                     |
 
-Holder inputs have separate `create` and `adopt` forms. Adoption carries stable
-session/stream IDs, a committed checkpoint reference, address inventory, pending
-delivery ownership, and upgrade identity/generation. It creates neither a new
-output stream nor an initial turn.
+Suggested module boundaries are `session/resources`, `session/storage`,
+`session/holding-workflow`, `inbox/owner-inbox`, and `turn/{workflow,execute,reduce,finalize}`.
+These are responsibilities to keep small, not a requirement for a class or framework
+at each boundary. Storage and domain modules stay free of durable workflow control;
+only the workflow adapter touches SDK stream and hook primitives. Reuse domain
+logic that already implements hydration, tools, tasks, emissions, or authorization;
+remove the obsolete coordination around it.
 
-```text
-session S ---> original stream run R (retained storage identity)
-    |
-    +-- H1 on deployment A -- retire without closing R
-    |
-    +-- H2 on deployment B -- adopt S / R / committed state / addresses
-                                  |
-                            future turns write to R
+## Session lifetime and cleanup
+
+Turn completion keeps the event/snapshot streams and holder alive. True session
+termination is owned by terminating execution: stop admission in committed state,
+settle or cancel dependants, account for pending input, run authored lifecycle work,
+and flush terminal output. Then close storage and dispose the holder through the
+execution adapter. Disposal uses Workflow run control, not a new holder command.
+The holder's teardown only releases its hooks; it does not decode snapshots or
+emit a terminal event. Cleanup retries and late rekey must not resurrect a terminal
+session or strand its resources; verify that boundary explicitly.
+
+Session status comes from committed state plus current execution status, not from
+the fact that the holding run is still alive. Idle expiry and execution supervision
+remain outside the holder's rekey loop. Preserve the existing timeout policy and
+durable scheduling; disabling session expiry does not disable failure detection.
+A small holder does not by itself solve those execution responsibilities.
+
+## Migration and upgrades after the first version
+
+The first version assumes the holder is never upgraded. Turn code can evolve while
+continuing to read the supported resource descriptor and speak the frozen rekey
+contract. Snapshot migrations run in the accepting turn, not in the holder. This
+keeps normal deployment changes out of long-lived workflow code.
+
+Keep the optional existing-resource input as the starting point for moving older
+eve sessions onto this topology:
+
+```ts
+const input: HoldingWorkflowInput = {
+  initialAddresses: knownAddresses,
+  existing: {
+    sessionId: previousSessionId,
+    events: previousEventStream,
+    snapshots: importedSnapshotStream,
+  },
+};
 ```
 
-Compare declared control, inbox, turn-input, and checkpoint capabilities with the
-accepting deployment's requirements. A compatible holder remains in place.
-Breaking requirements select an explicit migration; generic runtime failures do
-not trigger replacement. Put adoption/retirement support in the first holder
-version so later code can negotiate with already-pinned execution. Unsupported
-rollbacks and unrepresentable inputs fail before effects; do not silently reset
-the session or fall back to an incompatible deployment.
+Supplying an event stream means use that reference and do not create another event
+stream. Snapshot storage is independent: reuse a compatible snapshot stream or
+create one and import state. A migration-only holder omits `firstTurn`, so adopting
+storage does not replay the initial user request. Subsequent turns use the normal
+admission path. Keeping the original event reference preserves its history and
+cursors; preserving a public session ID additionally requires the directory mapping.
 
-An incompatible replacement has these durable phases:
+This is an extension point, not a complete live-migration design. Older
+`entryWorkflow` versions hold state in step results, so a migration must extract a
+valid snapshot and safely stop the old executor before new turns write. Existing
+provider claims also need a deliberate handoff; releasing one hook and claiming it
+in another run are not atomic. Source-stream retention and encryption material must
+remain available. An event reference alone does not solve these issues.
 
-1. Serialize upgrade with admission, settle or safely quiesce the active turn,
-   and commit state, unresolved input ownership, and the address inventory.
-2. Prepare the latest holder against that state and publish recoverable migration
-   routing discoverable by each address independently of either holder. Creation
-   on a lookup miss must consult that routing.
-3. Transfer address claims, activate one generation, and resume admission. Retry
-   identities and durable recovery must converge concurrent upgrades and recover
-   partial transfers. Fence superseded holders from rekey, close, and state writes.
-4. Retire the old holder without session-terminal events or stream closure.
-
-Disposing one hook and claiming it in another run are separate operations. The
-Local World spike proves sequential token reuse, not atomic address transfer.
-Migration routing/reservations must survive coordinator failure and prevent a
-provider lookup gap from creating a second session. This is a required proof,
-not a guarantee supplied by `getConflict()`. The same rule covers callback aliases
-and control-token transfer. An idle gap in the active-turn token has no such lookup
-responsibility.
-
-Adopting an existing `entryWorkflow` additionally requires a verified adapter for
-its pinned version: quiesce execution and extract state, obligations, input, and
-emission counters from its journals. Stream reference alone cannot migrate that
-state. Old code may lack export/retirement support; unsupported legacy sessions
-need an explicit migration limitation, not a claim of universal adoption or a
-silent reset. This replaces the earlier #3005 policy that reset every pre-cut
-session and started a new provider session.
-
-Reference the original stream rather than transfer its physical ownership. URLs,
-event IDs, existing readers, and resume cursors remain stable. Source stream data,
-metadata, and encryption material must remain available after retirement; replacing
-the holder does not renew retention or permit deleting the original storage run.
-Verify completed-source writes, live reads, historical decoding, cross-deployment
-keys, and retention on every supported World. If a World requires an active source
-run, full holder disposal requires a stream-lifetime primitive before shipping.
-Holder replacement can bound control replay history; it does not bound shared
-stream or conversation history. Checkpoint size and storage costs remain measured
-parts of the design.
-
-Actual session closure fences admission, settles or cancels dependants, accounts
-for pending input, and flushes terminal output. Authored lifecycle work runs in
-terminating execution. Only then does the current holder accept a generation-checked
-generic close command, close shared streams, and release addresses. Retirement
-and closure are distinct operations.
+Work through supported legacy versions, public-ID mapping, address transfer, and
+recovery after the clean new-session design lands. Do not add holder generations,
+automatic replacement, adopt/retire commands, or an upgrade router to v1 to anticipate
+that work. The existing replacement spike is evidence for stream continuity, not a
+commitment to shipping live holder replacement in the first implementation.
 
 ## Evidence and implementation gates
 
@@ -438,7 +686,9 @@ the Local World on eve `a37938d3d225e87071e15d135ee17189e5188f20`, using
 sequential checkpoints, additive alias lookup, a received-but-unapplied event,
 and continued reads/writes after completing the original holder and adopting its
 stream in a replacement. Both an attached reader and a saved resume cursor retain
-continuity. They do not prove the candidate protocol or production migration.
+continuity. They predate the SDK assumption in this revision: serialized-handle publication is
+historical test scaffolding, not the planned writer API. They do not prove the
+candidate protocol or a production migration path.
 
 Reproduce in a disposable checkout; the test builder requires these discovery paths:
 
@@ -450,17 +700,17 @@ pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/exec
 rm packages/eve/src/internal/testing/adjacent-workflow-spike.ts packages/eve/src/execution/adjacent-workflow-spike.integration.test.ts
 ```
 
-Implement as one topology, with these gates in order:
+Implement the new-session topology in the following order. Migration is follow-up
+work and does not gate this first version:
 
-| Gate                           | Required evidence                                                                                                                                                                                                         |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap and durable delivery | Holder initialization before first start; early follow-ups; retried/duplicate starts after hook release; queue ordering; late finalization input; actual-owner changes; failed candidates observable without new traffic. |
-| State and execution safety     | Checkpoint commit/replay; stale writers after hard cancellation; output flush; no duplicate effects or terminal outcomes during recovery; bounded acknowledgement and supervision cost.                                   |
-| Inbox and turn behavior        | Dynamic reader registration/replay/disposal; queue/steer/interrupt/cancel precedence at model, tool, sleep, ask, auth, and finalization boundaries; no lost input or premature lifecycle effects.                         |
-| Tools and late events          | Blocking tool and background task ownership; concurrent asks and runtime replies; send failure and cancellation cleanup; late task/auth/input events with no active turn.                                                 |
-| Replacement                    | Compatible deployment reuse; create versus adopt; concurrent upgrades/ingress, lookup gaps, partial address transfer, coordinator failure, and stale-holder fencing; explicitly supported legacy state extraction.        |
-| Hosted stream lifetime         | Encrypted cross-deployment writes and reads, source completion, cursor continuity, historical decoding, retention, and closure on supported Worlds.                                                                       |
-| End-to-end and performance     | Deterministic fixture coverage and paired hosted measurements against current main and the earlier inline proposal; include starts, claims, checkpoint I/O, forwarding candidates, and recovery work.                     |
+| Gate                                   | Required evidence                                                                                                                                                                                                                                  |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resource contracts and minimal holder  | Distinct session/run/event/snapshot IDs round-trip; resources resolve after initialization and for historical reads; first start follows readiness; only rekey reaches the holder; duplicate/conflicting/bounded aliases preserve existing claims. |
+| Durable admission                      | Early follow-ups; duplicate starts after hook release; queue order; late finalization input; actual-owner changes; failed candidates visible without new traffic.                                                                                  |
+| Snapshot and execution safety          | Restore/commit/replay; stale writers after hard cancellation; output flush; no duplicate effects or terminal outcomes during recovery; bounded acknowledgement and supervision cost.                                                               |
+| Inbox and turn behavior                | Reader registration/replay/disposal; queue/steer/interrupt/cancel precedence at model, tool, sleep, ask, auth, and finalization boundaries; no lost input or premature lifecycle effects.                                                          |
+| Tools, late events, and cleanup        | Blocking tool/background task ownership; concurrent asks and runtime replies; send failure/cancellation cleanup; late events while idle; expiry and terminal cleanup without a new holder command.                                                 |
+| Stream adapter and end-to-end behavior | Writes by ID through the assumed SDK capability, encrypted cross-deployment reads/writes, cursors, event decoding, closure, deterministic fixtures, and paired hosted latency including starts, claims, snapshots, and forwarding.                 |
 
 Use unit tests for reducers, Workflow-backed scenarios for durable scheduling and
 failure boundaries, and CI fixture evals for streaming behavior (`agent-workflow-tools`,
@@ -469,7 +719,7 @@ for paired measurements. The prior successor experiment's continuously owned tur
 token is unnecessary here, but durable input ownership remains mandatory. There is
 no hosted performance result for this topology yet.
 
-Runtime implementation must update session/upgrade documentation, steering and
+Runtime implementation must update session/storage documentation, steering and
 `turn.interrupted` semantics, additive rekey, recovery behavior, and the Promise-based
 `ask()` API. Include the public API changes' minor changeset and fixture coverage.
 This research-only proposal does not change published behavior.
