@@ -11,6 +11,7 @@ import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invok
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
+import { prepareRetainedTurnStep, startRetainedTurnStep } from "#execution/retained-turn-steps.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
@@ -73,6 +74,11 @@ vi.mock("./workflow-steps.js", () => ({
   turnStep: vi.fn(),
 }));
 
+vi.mock("./retained-turn-steps.js", () => ({
+  prepareRetainedTurnStep: vi.fn(),
+  startRetainedTurnStep: vi.fn(),
+}));
+
 vi.mock("#execution/coordination-dispatch-step.js", () => ({
   dispatchCoordinationStep: vi.fn(),
 }));
@@ -111,6 +117,61 @@ describe("turnWorkflow", () => {
     vi.mocked(releaseAgentInvocationOwnerStep).mockReset();
     vi.mocked(cancelAgentInvocationOwnerStep).mockReset();
     definedHookPayloads.clear();
+    vi.mocked(prepareRetainedTurnStep).mockReset();
+    vi.mocked(startRetainedTurnStep).mockReset();
+  });
+
+  it.each([undefined, 2])(
+    "forwards incompatible state contract %s before claiming hooks or running code",
+    async (stateContractVersion) => {
+      const { input } = createInput({ sessionState: createSessionState() });
+      const raw = {
+        ...input,
+        driverCapabilities: { stateContractVersion },
+        legacyField: { retained: true },
+      };
+      const target = { deploymentId: "dpl_old", runId: "wrun_retained" };
+      vi.mocked(prepareRetainedTurnStep).mockResolvedValue(target);
+
+      await turnWorkflow(raw);
+
+      expect(startRetainedTurnStep).toHaveBeenCalledWith(target, raw, raw);
+      expect(turnStep).not.toHaveBeenCalled();
+      expect(createHookMock).not.toHaveBeenCalled();
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("executes a matching state contract without looking up a retained deployment", async () => {
+    const sessionState = createSessionState();
+    const { input } = createInput({ sessionState });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      sessionState,
+      output: "ok",
+      serializedContext: {},
+    });
+
+    await turnWorkflow({ ...input, driverCapabilities: { stateContractVersion: 1 } });
+
+    expect(prepareRetainedTurnStep).not.toHaveBeenCalled();
+    expect(startRetainedTurnStep).not.toHaveBeenCalled();
+    expect(turnStep).toHaveBeenCalledOnce();
+  });
+
+  it("reports a retained start failure to the waiting parent without running incompatible code", async () => {
+    const { input } = createInput({ sessionState: createSessionState() });
+    vi.mocked(prepareRetainedTurnStep).mockRejectedValue(
+      new Error("retained deployment unavailable"),
+    );
+
+    await expect(turnWorkflow(input)).rejects.toThrow("retained deployment unavailable");
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-error" }),
+    );
+    expect(turnStep).not.toHaveBeenCalled();
   });
 
   it("notifies the driver when a turn completes", async () => {

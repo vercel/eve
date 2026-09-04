@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-04"
 ---
 
 # Versioned wire schema for the session inbox
@@ -105,7 +105,7 @@ Normative rules:
   decoder checks version and kind, then normalizes away wire-only fields.
   Legacy v0 is the temporary exception: those writers predate the encoder,
   so its 0→1 migration defensively checks the historic `send`/`deliver`
-  fields until that cohort ages out under the 30-day timeout.
+  fields until that cohort and its possible producers have been retired.
 - **Encode goes through the wire module too.** Every persisted inbox
   payload — sends and controls alike — is built and validated against the
   current schema before it persists, so producer drift dies at the producer
@@ -160,14 +160,22 @@ continuations receive unversioned `deliver`, markerless stable-inbox consumers
 receive unversioned `send` (required by eve 0.30.5–0.31.0), and stamped
 consumers receive their declared version.
 
-| Phase                                               | Emit                                                        | Removable                                                                      |
-| --------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Now                                                 | v0 `deliver`, v0 `send`, or v1 according to the target hook | —                                                                              |
-| Pre-stamp cohorts aged out (30-day session timeout) | current version to stamped hooks                            | markerless classifier and both v0 encoders                                     |
-| Pre-version payloads aged out                       | current version only                                        | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
+| Phase                                                 | Emit                                                        | Removable                                                                      |
+| ----------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Now                                                   | v0 `deliver`, v0 `send`, or v1 according to the target hook | —                                                                              |
+| Pre-stamp owners and producers retired                | current version to stamped hooks                            | markerless classifier and both v0 encoders                                     |
+| Pre-version payloads and all possible writers retired | current version only                                        | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
 
 Each removable row already has its condition written next to the code it
 deletes; #1765 tracks the cleanups.
+
+The default 30-day timeout is not proof that a cohort has retired. Sessions can
+disable expiry, old deployments can still produce messages, and descendants or
+callbacks can outlive a turn. Removal requires accounting for live owners,
+producers, persisted deliveries, and their retry/retention horizons. The
+[owner-inbox upgrade plan](./discriminated-workflow-inboxes.md#deployment-cut)
+preserves this legacy contract while introducing a new topology for new owners;
+it does not require resetting existing sessions.
 
 ## Enforcement
 

@@ -50,7 +50,7 @@ describe("turn workflow wire migrations", () => {
     ).toEqual({
       capabilities: undefined,
       completionToken: "turn-token",
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      driverCapabilities: { cancelledTurnSettle: true, stateContractVersion: 1, turnInbox: true },
       mode: "conversation",
       stepInput: {
         input: delivery,

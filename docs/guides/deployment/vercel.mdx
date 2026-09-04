@@ -92,6 +92,18 @@ Vercel uses the generated output to configure these services:
 
 ## Verify the deployment
 
+### Preserve existing sessions during upgrades
+
+Keep each existing session's original deployment available when you upgrade eve. If the receiving runtime cannot confirm that it understands the session's state and the state its parent can read, it forwards the turn to that original deployment. This includes sessions created before state-compatibility negotiation was introduced.
+
+These sessions keep their IDs, history, pending work, and original agent code. They do not automatically adopt updated instructions or tools. New sessions use the newly deployed agent; sessions with a matching state contract can run later turns on newer deployments.
+
+Retain the original deployment, Workflow data, and credentials needed by its unfinished sessions, tasks, and callbacks. Disabled session expiry can extend this requirement indefinitely. Vercel runtime logs identify forwarded turns with `using retained session code for an incompatible turn state contract` and include the session and execution deployment IDs.
+
+For an agent-code rollback, deploy the earlier authored code with the current eve runtime. Keep the compatibility-capable runtime serving ingress and retain both generations of session executables. Rolling back the eve package itself to a release without this boundary is not a supported downgrade path. This retained-deployment behavior is specific to Vercel; it does not establish compatibility when replacing a self-hosted executable in place.
+
+### Check the deployed agent
+
 Check the health route and connect the development TUI:
 
 ```bash

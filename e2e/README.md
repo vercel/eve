@@ -131,7 +131,36 @@ the current producer must choose the old consumer's wire version, and the real
 old consumer must decode and buffer it. The eval then cancels the deliberately
 blocked turn and verifies that the old session runs the buffered follow-up.
 
-The eval redeploys from inside its test body: it mutates the agent source,
+`agent-inbox-upgrade/evals/inbox-upgrade.redeploy.eval.ts` uses published
+`eve@0.49.0`, whose parent dispatches later turns to the accepting deployment.
+The current entry forwards incompatible turns back to the retained parent
+executable before claiming hooks or running agent code. The probe requires old
+sessions to preserve their IDs and stream cursors, answer and cancel pending
+work, continue after task completion, and start and finish new blocking and
+background work after the upgrade. Execution markers prove each body uses its
+original deployment. A child run on that deployment distinguishes forwarding
+through current ingress from an old ingress executing the ordinary read inline.
+New sessions use current code and follow an agent-code rollback with the current
+runtime retained. Old sessions continue on their original code through rollback.
+Session expiry is disabled throughout.
+
+During alias propagation, bounded read-only turns may still reach a prior
+ingress. Every accepted turn must keep the session usable. The probe requires
+actual deployment and run provenance before accepting each transition.
+The [spike findings](../research/discriminated-workflow-inboxes.md#published-consumer-compatibility-spike)
+record the original fatal task-state failure. The post-task follow-up remains a
+required success assertion; a reset is only used after the probe for cleanup.
+The test does not exercise the proposed new owner topology or self-hosted
+executable retention.
+
+The historical workflow fixture stages a copy of the published package with
+its unusable `eve-source` conditions removed from `package.json`; those point
+to source files absent from npm and otherwise leave `eve/workflow` unresolved
+in the Workflow sandbox. Published runtime code is unchanged. This build
+accommodation is specific to the probe; production upgrades must retain their
+old deployment artifacts.
+
+These evals redeploy from inside their test bodies: they mutate agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
 Because immutable deployment URLs never change what they serve, the eval
