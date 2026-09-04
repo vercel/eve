@@ -187,10 +187,10 @@ export default defineSandbox({
 
 ### Add runtimes with a custom image
 
-The default image includes Node, npm, pnpm, Git, curl, and ripgrep. It does not include Python or other language runtimes. Build an OCI image from the eve image when your local sandbox needs additional system packages:
+The default image includes Node, npm, pnpm, Git, curl, and ripgrep. It does not include Python or other language runtimes. Derive an image from eve's version-matched base image when a Vercel Sandbox needs additional system packages:
 
 ```dockerfile title="Dockerfile"
-FROM ghcr.io/vercel/eve:your_eve_version
+FROM vcr.vercel.com/vercel/eve/base:your_eve_version
 
 USER root
 RUN apt-get update \
@@ -199,31 +199,26 @@ RUN apt-get update \
 USER vercel-sandbox
 ```
 
-Pass the resulting image to `docker()` or `microsandbox()`:
+Build and push the image to a [Vercel Container Registry](https://vercel.com/docs/container-registry) repository. From the linked Vercel project, use the Vercel CLI; it authenticates Docker and adds the team and project segments to the resulting image reference:
+
+```sh
+vercel vcr build docker . eve-python:your_eve_version --push
+```
+
+Pass the resulting VCR image to `vercel()`. Its reference includes your team slug, Vercel project name, repository name, and tag:
 
 ```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
-import { docker } from "eve/sandbox/docker";
+import { vercel } from "eve/sandbox/vercel";
 
 export default defineSandbox({
-  backend: docker({ image: "ghcr.io/acme/my-eve-python:1.0.0" }),
-});
-```
-
-To use the same image when either local OCI backend is available, configure both through `defaultBackend()`:
-
-```ts title="agent/sandbox.ts"
-import { defaultBackend, defineSandbox } from "eve/sandbox";
-
-export default defineSandbox({
-  backend: defaultBackend({
-    docker: { image: "ghcr.io/acme/my-eve-python:1.0.0" },
-    microsandbox: { image: "ghcr.io/acme/my-eve-python:1.0.0" },
+  backend: vercel({
+    image: "vcr.vercel.com/your-team/your-project/eve-python:your_eve_version",
   }),
 });
 ```
 
-`vercel()` always uses eve's version-matched Vercel Sandbox image, so its `image` cannot be overridden. Install additional runtimes in `bootstrap` when you deploy on Vercel, or supply a Vercel Sandbox `source` snapshot, Git revision, or tarball as the template base layer.
+To customize a local Docker or microsandbox backend instead, derive from `ghcr.io/vercel/eve:your_eve_version` and pass the resulting image to that backend.
 
 ### just-bash
 
