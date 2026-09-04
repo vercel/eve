@@ -55,7 +55,6 @@ const taskViewBaseShape = {
     })
     .optional(),
   metadata: taskMetadataSchema,
-  state: z.record(z.string(), z.custom<JsonValue>()).optional(),
   taskId: z.string().min(1),
   usage: z
     .strictObject({

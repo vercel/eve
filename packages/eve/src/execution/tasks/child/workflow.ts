@@ -141,16 +141,9 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (read.next.done) return;
 
       if (read.channel === "report") {
-        const payload = workflowToolRunReportToTaskPayload(
-          read.next.value,
-          view.taskId,
-          updateIndex++,
+        await applyPayload(
+          workflowToolRunReportToTaskPayload(read.next.value, view.taskId, updateIndex++),
         );
-        if (payload.kind === "task-message") {
-          await handleMessage(payload);
-        } else {
-          await applyPayload(payload);
-        }
         continue;
       }
       if (read.channel === "outcome") {

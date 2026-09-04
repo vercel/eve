@@ -35,7 +35,6 @@ const taskOutputJsonSchema = z.object({
 
 const taskViewJsonBaseShape = {
   metadata: taskMetadataJsonSchema,
-  state: z.record(z.string(), jsonValueSchema).optional(),
   taskId: z.string(),
 };
 
@@ -75,7 +74,6 @@ export const TASK_VIEW_OUTPUT_SCHEMA = z.object({
     mode: z.enum(["local", "remote"]).optional(),
     name: z.string(),
   }),
-  state: z.record(z.string(), z.unknown()).optional(),
   status: z.enum(["working", "input_required", "completed", "failed", "cancelled"]),
   taskId: z.string(),
 });

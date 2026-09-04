@@ -1065,7 +1065,7 @@ describe("dispatchDynamicToolEvent", () => {
       _toolCtx: unknown,
       task: TaskExec,
     ) {
-      yield task.setState({ replayed: true });
+      yield task.postMessage("replayed");
       return { done: true };
     });
     const resolver = createResolver("background", ["session.started"], () => {
@@ -1074,7 +1074,7 @@ describe("dispatchDynamicToolEvent", () => {
         execution: "background",
         inputSchema: z.strictObject({}),
         async *execute(_input, _toolCtx, task) {
-          yield task.setState({ replayed: true });
+          yield task.postMessage("replayed");
           return { done: true };
         },
       });
@@ -1102,14 +1102,13 @@ describe("dispatchDynamicToolEvent", () => {
       postMessage: (message) => ({ kind: "eve:task-message", message }),
       send: vi.fn(),
       session: {} as TaskExec["session"],
-      setState: (state) => ({ kind: "eve:task-set-state", state }),
       task: {} as TaskExec["task"],
       taskId: "task-1",
     };
     const output = tool!.execute!({}, executeOptions, task) as AsyncIterable<unknown>;
     const updates = [];
     for await (const update of output) updates.push(update);
-    expect(updates).toEqual([{ kind: "eve:task-set-state", state: { replayed: true } }]);
+    expect(updates).toEqual([{ kind: "eve:task-message", message: "replayed" }]);
     expect(stepFn).toHaveBeenCalledWith({}, {}, expect.anything(), task);
   });
 

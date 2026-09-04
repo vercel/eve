@@ -6,18 +6,6 @@ import { taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
 
 describe("taskViewToJson", () => {
-  it("omits absent optional state from terminal tool results", () => {
-    const output = taskViewToJson({
-      metadata: { kind: "tool", name: "report" },
-      state: undefined,
-      status: "cancelled",
-      taskId: "task-1",
-    });
-
-    expect(output).not.toHaveProperty("state");
-    expect(output).toStrictEqual(JSON.parse(JSON.stringify(output)));
-  });
-
   it("projects only the model-visible task fields", () => {
     const view: TaskView = {
       executor: {
@@ -30,7 +18,6 @@ describe("taskViewToJson", () => {
         mode: "remote",
         name: "researcher",
       },
-      state: { progress: 1 },
       status: "completed",
       taskId: "task-1",
       usage: {
@@ -49,7 +36,6 @@ describe("taskViewToJson", () => {
         mode: "remote",
         name: "researcher",
       },
-      state: { progress: 1 },
       status: "completed",
       taskId: "task-1",
     });

@@ -100,7 +100,7 @@ describe("definition helper exact inputs", () => {
       async *execute(input, _ctx, task) {
         expectTypeOf(task).toEqualTypeOf<TaskExec>();
         expectTypeOf(task.taskId).toEqualTypeOf<string>();
-        yield task.setState({ jobId: input.jobId });
+        yield { jobId: input.jobId };
         return { jobId: input.jobId };
       },
     });

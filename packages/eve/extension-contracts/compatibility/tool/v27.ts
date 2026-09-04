@@ -6,8 +6,8 @@ export default defineTool({
   description: "Start a durable report task.",
   execution: "background",
   inputSchema: z.object({ reportId: z.string() }),
-  async *execute(input, _ctx, task) {
-    yield task.setState({ reportId: input.reportId });
+  async *execute(input) {
+    yield { reportId: input.reportId };
     return { reportId: input.reportId };
   },
 });

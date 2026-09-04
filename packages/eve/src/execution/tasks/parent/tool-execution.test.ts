@@ -49,7 +49,6 @@ describe("ordinary background tool execution", () => {
     const definition: BackgroundExecutableTool = {
       name: "export",
       async *execute(_input, _options, task) {
-        yield task.setState({ phase: "exporting" });
         yield "progress";
         yield task.postMessage("Review the export");
         return { result: "done" };
@@ -67,10 +66,6 @@ describe("ordinary background tool execution", () => {
       }),
     );
     expect(result).toEqual({ status: "working", taskId: "task-1" });
-    expect(sendTaskCommand).toHaveBeenCalledWith({
-      command: { kind: "set-state", state: { phase: "exporting" } },
-      taskInboxToken: "inbox-1",
-    });
     expect(sendTaskCommand).toHaveBeenCalledWith({
       command: { kind: "complete", data: { result: "done" } },
       taskInboxToken: "inbox-1",

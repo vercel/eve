@@ -17,8 +17,8 @@ Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"
 `createHook`, `createWebhook`, `sleep`, retries, and replay. eve adds `ask` from `eve/workflow` for
 questions answered through the session's channel and `agent` for durable subagent delegation. A
 waiting workflow's `yield` is turn progress. A background workflow also receives `task`: yield an
-ordinary value for stream-only progress, `task.setState(...)` for durable task state, or
-`task.postMessage(...)` to wake the parent agent with one message.
+ordinary value for stream-only progress or `task.postMessage(...)` to wake the parent agent
+with one message. Values needed after a durable wait stay in local variables in the workflow body.
 
 A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
 as `deploy`.
@@ -92,7 +92,6 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 | turn while the run lives | parked                              | continues                                   |
 | when the run ends        | result lands in the tool call       | agent is woken with the result or the error |
 | progress (`yield`)       | `action.partial` on the turn        | stream-only; does not wake the agent        |
-| task state               | not applicable                      | `yield task.setState(...)`                  |
 | parent message           | not applicable                      | `yield task.postMessage(...)`               |
 | cancel                   | cancelling the turn cancels the run | `task_cancel`, or the session ending        |
 
@@ -156,8 +155,9 @@ keys. `target` is the model-visible subagent name; pass `agentId` to continue an
 
 ## Report progress: `yield`
 
-A workflow body may be an async generator. Each `yield` is a durable progress snapshot; the return
-value is the result, or the last `yield` when the body returns nothing.
+A workflow body may be an async generator. Each ordinary `yield` reports progress; the return
+value is the result. If the body returns nothing, a waiting tool uses its last yield and a
+background tool completes with `null`.
 
 ```ts
 async *execute({ service }, ctx) {
@@ -171,8 +171,8 @@ async *execute({ service }, ctx) {
 
 For a waiting tool each `yield` streams as an `action.partial` event, last-write-wins by tool call
 id, and never enters model history — the same contract as an in-process generator tool. For a
-background tool each `yield` wakes the owning agent with a note. Returning ends the run with the
-result; throwing ends it with the failure.
+background tool ordinary yields are stream-only; `yield task.postMessage(message)` wakes the
+owning agent. Returning ends the run with the result; throwing ends it with the failure.
 
 ## Cancel and clean up: `ctx.abortSignal`
 

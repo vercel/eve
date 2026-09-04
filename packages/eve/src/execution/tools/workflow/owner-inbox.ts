@@ -13,7 +13,7 @@ import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundMessage, TaskInboundUpdate } from "#tasks/types.js";
-import { isTaskMessage, isTaskSetState } from "#tools/task.js";
+import { isTaskMessage } from "#tools/task.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
@@ -103,13 +103,7 @@ export function workflowToolRunReportToTaskPayload(
   report: WorkflowToolRunReport,
   taskId: string,
   updateIndex: number,
-):
-  | TaskInboundMessage
-  | TaskInboundUpdate
-  | { readonly command: TaskCommand; readonly kind: "task-command" } {
-  if (isTaskSetState(report.update)) {
-    return { command: { kind: "set-state", state: report.update.state }, kind: "task-command" };
-  }
+): TaskInboundMessage | TaskInboundUpdate {
   if (isTaskMessage(report.update)) {
     return {
       callId: report.from.callId,

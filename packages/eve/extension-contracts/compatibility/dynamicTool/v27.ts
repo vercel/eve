@@ -9,8 +9,8 @@ export default defineDynamic({
         description: "Delegate a background report.",
         execution: "background",
         inputSchema: z.object({ reportId: z.string() }),
-        async *execute({ reportId }, _ctx, task) {
-          yield task.setState({ reportId });
+        async *execute({ reportId }) {
+          yield { reportId };
           return { reportId };
         },
       }),

@@ -2,34 +2,16 @@ import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
-const TASK_SET_STATE_KIND = "eve:task-set-state" as const;
 const TASK_MESSAGE_KIND = "eve:task-message" as const;
-
-export type TaskSetState = JsonObject & {
-  readonly kind: typeof TASK_SET_STATE_KIND;
-  readonly state: JsonObject;
-};
 
 export type TaskMessage = JsonObject & {
   readonly kind: typeof TASK_MESSAGE_KIND;
   readonly message: string;
 };
 
-export function createTaskSetState(state: JsonObject): TaskSetState {
-  return { kind: TASK_SET_STATE_KIND, state };
-}
-
 export function createTaskMessage(message: string): TaskMessage {
   if (message.trim() === "") throw new TypeError("Task messages must not be empty.");
   return { kind: TASK_MESSAGE_KIND, message };
-}
-
-export function isTaskSetState(value: unknown): value is TaskSetState {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Reflect.get(value, "kind") === TASK_SET_STATE_KIND
-  );
 }
 
 export function isTaskMessage(value: unknown): value is TaskMessage {
@@ -74,8 +56,6 @@ export interface TaskReceipt {
 export interface TaskExec {
   /** Model-facing durable task identity. */
   readonly taskId: string;
-  /** Returns a descriptor which replaces the task's durable model-visible state when yielded. */
-  setState(state: JsonObject): TaskSetState;
   /** Returns a descriptor which sends one message to the parent when yielded. */
   postMessage(message: string): TaskMessage;
   /** @deprecated Use yields from a workflow-backed background tool. */

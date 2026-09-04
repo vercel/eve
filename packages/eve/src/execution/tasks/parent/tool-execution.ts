@@ -19,13 +19,7 @@ import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.j
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import {
-  createTaskMessage,
-  createTaskSetState,
-  isTaskMessage,
-  isTaskSetState,
-  type TaskExec,
-} from "#tools/task.js";
+import { createTaskMessage, isTaskMessage, type TaskExec } from "#tools/task.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
 import {
@@ -284,7 +278,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       postMessage: createTaskMessage,
       send: removed,
       session: this.initialSession,
-      setState: createTaskSetState,
       task,
       taskId: task.taskId,
     };
@@ -549,31 +542,27 @@ async function executeBackgroundIterable(input: {
   let updateIndex = 0;
   let next = await iterator.next();
   while (!next.done) {
-    if (isTaskSetState(next.value)) {
-      await deliverTaskCommand(input.task, { kind: "set-state", state: next.value.state });
-    } else {
-      const payload = isTaskMessage(next.value)
-        ? {
-            callId: input.callId,
-            kind: "task-message" as const,
-            message: next.value.message,
-            messageEpoch: input.task.taskId,
-            messageIndex: updateIndex++,
-          }
-        : {
-            callId: input.callId,
-            kind: "task-update" as const,
-            message: typeof next.value === "string" ? next.value : JSON.stringify(next.value),
-            updateEpoch: input.task.taskId,
-            updateIndex: updateIndex++,
-          };
-      const outcome = await sendTaskInboundPayload({
-        payload,
-        taskInboxToken: input.task.taskInboxToken,
-      });
-      if (outcome !== "delivered") {
-        throw new Error(`Task run "${input.task.taskId}" did not accept "${payload.kind}".`);
-      }
+    const payload = isTaskMessage(next.value)
+      ? {
+          callId: input.callId,
+          kind: "task-message" as const,
+          message: next.value.message,
+          messageEpoch: input.task.taskId,
+          messageIndex: updateIndex++,
+        }
+      : {
+          callId: input.callId,
+          kind: "task-update" as const,
+          message: typeof next.value === "string" ? next.value : JSON.stringify(next.value),
+          updateEpoch: input.task.taskId,
+          updateIndex: updateIndex++,
+        };
+    const outcome = await sendTaskInboundPayload({
+      payload,
+      taskInboxToken: input.task.taskInboxToken,
+    });
+    if (outcome !== "delivered") {
+      throw new Error(`Task run "${input.task.taskId}" did not accept "${payload.kind}".`);
     }
     next = await iterator.next();
   }

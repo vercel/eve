@@ -28,14 +28,13 @@ a blocker today for any Connect-backed workflow tool and is in scope.
 Motivating case: [vercel/internal-agents#2173](https://github.com/vercel/internal-agents/pull/2173)
 runs Devbox as a background tool and had to build a relay workflow, a webhook
 route, and a `session.completed` adapter because a background `execute()`
-cannot park on an external webhook, cannot resolve the requester's token, and
-cannot put author data in its receipt.
+cannot park on an external webhook or resolve the requester's token.
 
 ## 2. The four cells
 
 |                       | `lifetime: "step"`                                                              | `lifetime: "task"`                                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `suspend: "none"`     | `execute(input, ctx)`. Runs in the step; generator yields are `action.partial`. | `execute(input, ctx, task)`. Runs in the step; `yield task.setState()` then `return` completes. No `postMessage`, no `ask`. |
+| `suspend: "none"`     | `execute(input, ctx)`. Runs in the step; generator yields are `action.partial`. | `execute(input, ctx, task)`. Runs in the step; yields report progress or parent messages, and `return` completes. No `ask`. |
 | `suspend: "workflow"` | `execute(input, ctx)` with `"use workflow"`. Turn parks on the run.             | `execute(input, ctx, task)` with `"use workflow"`. Receipt to the model; run outlives the step; all of §3.                  |
 
 Every cell exists today. What changes: the pair is data the compiler writes
@@ -48,35 +47,31 @@ the workflow column; there is no combined enum.
 
 ### 3.1 The `task` argument and `yield`
 
-`TaskExec` shrinks to identity plus two descriptor constructors. Both return
-tagged JSON and do no I/O, so they are replay-safe in a workflow body.
+`TaskExec` shrinks to identity plus one message constructor. It returns tagged
+JSON and does no I/O, so it is replay-safe in a workflow body.
 
 ```ts
 interface TaskExec {
   readonly taskId: string;
-  setState(state: JsonObject): TaskSetState;
   postMessage(message: string): TaskMessage;
 }
 ```
 
-A background body may `yield` three kinds of value:
+A background body may `yield` two kinds of value:
 
-| form                          | `view.state`          | parent                                  | use                                         |
-| ----------------------------- | --------------------- | --------------------------------------- | ------------------------------------------- |
-| `yield value` (untagged)      | untouched             | not woken; streamed as `action.partial` | transient progress                          |
-| `yield task.setState(state)`  | replaced with `state` | not woken                               | receipt, identifiers, state for later turns |
-| `yield task.postMessage(msg)` | untouched             | woken with `msg` as the turn's input    | something the parent should act on now      |
+| form                          | parent                               | use                                    |
+| ----------------------------- | ------------------------------------ | -------------------------------------- |
+| `yield value` (untagged)      | not woken; streamed as progress      | transient progress                     |
+| `yield task.postMessage(msg)` | woken with `msg` as the turn's input | something the parent should act on now |
 
-Progress is stream-only. Today an untagged yield from a background body wakes
-the parent with a framework-authored note; that goes away, so `postMessage` is
-the one way to wake the parent. `setState` is the only writer of `view.state`
-(§4.1): replace, not merge, silent. `postMessage` is one delivery to the
-parent, like `postMessage` between windows: not stored, attributed to the
-task, run under the existing task-delivery policy. A body that wants both sets
-state and then posts. Neither constructor is importable elsewhere; they live on
-`task` so the type system can withhold them by cell.
+Ordinary yields from authored background tools become stream-only progress.
+Subagent update delivery stays unchanged. `postMessage` sends one message
+attributed to the task under the existing task-delivery policy.
 
-The model receives `{ status: "working", taskId }` as soon as the task is admitted. The receipt is independent of state: a body may set state later, park before setting it, or never set it. `taskId` and the task's private run addresses—not `view.state`—are what resume parked work.
+The model receives `{ status: "working", taskId }` after task admission.
+Workflow-local bindings carry the data needed after a durable wait; replay
+reconstructs them from recorded steps and events. No separate authored task
+snapshot is needed to resume the body.
 
 ### 3.2 Replies: `ask` and provider authorization
 
@@ -135,22 +130,16 @@ export default defineTool({
   execution: "background",
   description: "Start repository work in api-devbox and see it through. Use once per task.",
   inputSchema: devboxInputSchema, // repos, prompt, title?, assistant?, model?, pr?
-  async *execute(input, ctx, task) {
+  async execute(input, ctx) {
     "use workflow";
 
     const events = createWebhook(); // registered before the task exists
     const devbox = await createDevboxTask(input, events.url, ctx); // step
-    yield task.setState({ devboxTaskId: devbox.taskId, taskUrl: devbox.taskUrl, state: "pending" });
 
     try {
       for await (const request of events) {
         const change = parseTaskStateChange(await request.json());
         if (change === null || change.taskId !== devbox.taskId) continue;
-        yield task.setState({
-          devboxTaskId: devbox.taskId,
-          taskUrl: devbox.taskUrl,
-          state: change.state,
-        });
 
         switch (change.state) {
           case "pending":
@@ -250,26 +239,9 @@ Deleted: the relay workflow and route, the `session.completed`/`subagentName`
 adapter, the launch and follow-up fingerprint guards (replay is the idempotency
 mechanism), the `task` continuation argument, and `stop_devbox_task`.
 
-## 4. Task state and messages
+## 4. Task messages
 
-### 4.1 `view.state`
-
-`TaskView` gains an author-owned, model-visible `state?: JsonObject`. It is
-distinct from `status`, the framework's lifecycle verdict: `state` is whatever
-the body last set, opaque to the framework. Present on `working` and
-`input_required` views, retained on terminal ones, included in model-visible
-task JSON and the `[Task state]` projection. Never carries credentials; those
-stay on the private `executor` binding.
-
-### 4.2 The `set-state` command
-
-One new task command through the existing single-writer inbox:
-`{ kind: "set-state", state: JsonObject }`. Accepted while `working` or
-`input_required`, rejected on a terminal view. Replaces `view.state`. Starts no
-turn. Idempotent under the existing hook cursor and the run's
-`(epoch, index, callId)` delivery id.
-
-### 4.3 Messages
+### 4.1 Delivery
 
 `postMessage` is not a task command and does not touch the view. It is the
 parent-session `send` the child workflow already issues for updates
@@ -278,16 +250,15 @@ task instead of the framework's `Background task … update:` prose, deduplicate
 by the same delivery id. The receiving turn runs under the existing
 task-delivery policy.
 
-### 4.4 Wiring
+### 4.2 Wiring
 
 - `runBody` already sends each yield as a `RunReport`. The owner maps
-  `TaskSetState` → `set-state`, `TaskMessage` → parent `send`, untagged →
-  `action.partial` on the stream. The `wakeTaskUpdateParentStep` path for
-  untagged reports is removed.
+  `TaskMessage` → parent `send`, untagged → progress on the stream. Subagent
+  reports retain the `wakeTaskUpdateParentStep` path.
 - `createWorkflowToolBackgroundExecute` returns `{ status: "working", taskId }` after task admission. It never waits for a body yield.
 - The `"Background tools cannot return AsyncIterable"` guard goes; the
-  step-lifetime executor iterates the body and sends each `setState` before
-  completing with the return value.
+  ordinary background executor iterates the body, routes progress and messages,
+  and completes with the return value.
 - Step-scoped auth: `createWorkflowToolContext` builds `getToken`/`requireAuth`
   that work under ambient step context and throw otherwise;
   `runRequestToInputRequestPayload` maps the `authorization` request variant to
@@ -310,8 +281,8 @@ readonly shape: {
 its `workflowId`. `prepareToolBehavior`, the background-call filter in
 `tool-loop.ts`, `dispatchTaskStep`, and `createWorkflowToolBackgroundExecute`
 switch on `shape` instead of re-deriving it. `defineTool` overloads gate the
-capabilities by cell: no `task` on a step-lifetime call; no `postMessage` on a
-non-workflow `TaskExec`.
+capabilities by cell: `task` is available only for background execution, and
+`ask` requires a workflow body.
 
 ## 6. Removed
 
@@ -343,9 +314,10 @@ Both are required for the Devbox migration.
   exists iff `execution === "background"`.
 - `yield` is the only one-way channel from a body to its task, and it never
   asks. There is no post-return path.
-- `view.state` is written only by `setState`; never derived from the tool
-  result or the executor binding. The task run stays the single writer.
-- A fixed `{ status: "working", taskId }` receipt is observed exactly once and never depends on `view.state`.
+- Workflow-local values survive durable waits through replay; there is no
+  authored `TaskView.state` snapshot.
+- A fixed `{ status: "working", taskId }` receipt is observed exactly once and
+  never depends on a body yield.
 - A token never enters a workflow body's replay log.
 - Subagent task behaviour is unchanged.
 
@@ -353,20 +325,20 @@ Both are required for the Devbox migration.
 
 - Structured `ask` responses (a response schema instead of
   `{ optionId?, text? }`).
-- A size bound on `view.state`. It is projected into model context on every
-  task-triggered turn; revisit if it becomes a problem in practice.
+- Externally readable authored task snapshots, pending a concrete consumer.
 
 ## 10. Testing
 
-- Unit: `applyTaskTransition` for `set-state` on each status; descriptor
-  tagging; `defineTool` overload typing via `expectTypeOf`.
-- Integration: `setState` → `view.state` with no parent delivery;
-  `postMessage` → parent `send` with `view.state` untouched; immediate receipt independent of state; `getToken` in a
+- Unit: message descriptor tagging; `defineTool` overload typing via
+  `expectTypeOf`.
+- Integration: ordinary yields remain silent; `postMessage` → parent `send`;
+  receipt independent of body yields; local values remain usable after a
+  durable wait; `getToken` in a
   step of a background run resolves under the session identity; a step-raised
   authorization requirement parks the task `input_required` and resumes on
   callback; `getToken` in the body still throws.
 - Scenario: compiled `shape` for each cell.
-- E2E: rewrite `agent-background-tools/export.ts` as a workflow body that sets
-  a receipt, parks on `createWebhook`, posts a message on callback, and
+- E2E: rewrite `agent-background-tools/export.ts` as a workflow body that
+  parks on `createWebhook`, posts a message on callback, and
   completes. Add a body that parks on `ask` from a background run. Sign-in
   cannot be driven in e2e; it stays at integration tier.

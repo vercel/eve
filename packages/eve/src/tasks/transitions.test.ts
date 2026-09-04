@@ -41,44 +41,19 @@ describe("applyTaskTransition", () => {
     expect(bound).toMatchObject({ action: "accepted", view: { status: "completed" } });
   });
 
-  it("stores author state across input and completion", () => {
-    const stored = applyTaskTransition(view("working"), {
-      kind: "set-state",
-      state: { progress: 0.5 },
-    });
-    expect(stored).toMatchObject({
-      action: "accepted",
-      view: { state: { progress: 0.5 }, status: "working" },
-    });
-    expect(
-      applyTaskTransition(stored.view, { kind: "set-state", state: { progress: 0.5 } }).action,
-    ).toBe("noop");
-
-    const blocked = applyTaskTransition(stored.view, {
+  it("moves through input, answer, and completion", () => {
+    const blocked = applyTaskTransition(view("working"), {
       inputRequests: [{ prompt: "Continue?", requestId: "req-1" }],
       kind: "require-input",
     });
-    expect(blocked).toMatchObject({
-      action: "accepted",
-      view: { state: { progress: 0.5 }, status: "input_required" },
-    });
+    expect(blocked).toMatchObject({ action: "accepted", view: { status: "input_required" } });
     const resumed = applyTaskTransition(blocked.view, { kind: "answered", requestIds: ["req-1"] });
-    expect(resumed).toMatchObject({
-      action: "accepted",
-      view: { state: { progress: 0.5 }, status: "working" },
-    });
+    expect(resumed).toMatchObject({ action: "accepted", view: { status: "working" } });
     const completed = applyTaskTransition(resumed.view, { data: { answer: 42 }, kind: "complete" });
     expect(completed).toMatchObject({
       action: "accepted",
-      view: {
-        lastOutput: { data: { answer: 42 }, type: "result" },
-        state: { progress: 0.5 },
-        status: "completed",
-      },
+      view: { lastOutput: { data: { answer: 42 }, type: "result" }, status: "completed" },
     });
-    expect(
-      applyTaskTransition(completed.view, { kind: "set-state", state: { progress: 1 } }).action,
-    ).toBe("rejected");
   });
 
   it("rejects malformed input batches", () => {

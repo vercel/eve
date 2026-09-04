@@ -9,11 +9,9 @@ export default defineTool({
   async *execute({ query }, _ctx, task) {
     "use workflow";
 
-    yield task.setState({ query, phase: "exporting" });
     yield { progress: 0.5 };
     yield task.postMessage(`Export ${task.taskId}: EXPORT-PROGRESS`);
     await sleep("250ms");
-    yield task.setState({ query, phase: "complete" });
     return { query, result: "EXPORT-COMPLETE" };
   },
 });

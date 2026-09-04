@@ -93,19 +93,6 @@ describe("workflow-tool task input", () => {
 });
 
 describe("workflow-tool task reports", () => {
-  it("maps setState to durable task state without a parent message", () => {
-    expect(
-      workflowToolRunReportToTaskPayload(
-        { from, update: { kind: "eve:task-set-state", state: { progress: 0.5 } } },
-        "task-1",
-        0,
-      ),
-    ).toEqual({
-      command: { kind: "set-state", state: { progress: 0.5 } },
-      kind: "task-command",
-    });
-  });
-
   it("maps postMessage to a distinct parent delivery", () => {
     expect(
       workflowToolRunReportToTaskPayload(

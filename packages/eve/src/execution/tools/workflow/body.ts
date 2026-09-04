@@ -13,7 +13,7 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
-import { createTaskMessage, createTaskSetState, type TaskExec } from "#tools/task.js";
+import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
   readonly callId: string;
@@ -155,7 +155,6 @@ function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {
     postMessage: createTaskMessage,
     send: removed,
     session: undefined as never,
-    setState: createTaskSetState,
     task: undefined as never,
     taskId: input.taskId,
   };
