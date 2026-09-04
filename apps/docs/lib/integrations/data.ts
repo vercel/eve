@@ -73,6 +73,13 @@ export interface ConnectionSpec extends ConnectionSetupSpec {
   openapi?: ConnectionIdentity["openapi"];
 }
 
+/** A guide, package, or reference linked from an integration's Related resources section. */
+export interface RelatedResource {
+  title: string;
+  description: string;
+  href: string;
+}
+
 export interface Integration {
   /** URL slug and lookup key, derived once and reused everywhere. */
   slug: string;
@@ -99,7 +106,33 @@ export interface Integration {
   configure?: string;
   /** Structured connection spec; present only for `type: "connection"`. */
   connection?: ConnectionSpec;
+  /** Guides and references shown after Configure; omitted when empty. */
+  relatedResources?: RelatedResource[];
 }
+
+/** Shared by the GitHub, Linear, and GitHub Tools integrations Foreman builds on. */
+const softwareFactoryGuide: RelatedResource = {
+  title: "Build a software factory with eve",
+  description:
+    "Deploy Foreman, an eve agent system that turns GitHub issues or Linear tickets into reviewed draft pull requests while leaving merge decisions to humans.",
+  href: "https://vercel.com/kb/guide/eve-software-factory",
+};
+
+/** Shared by the Slack, GitHub, Datadog, and Vercel integrations the incident response agent uses. */
+const incidentResponseGuide: RelatedResource = {
+  title: "Build an incident response SRE agent with eve",
+  description:
+    "Deploy a Slack-based investigation agent that connects to Datadog, GitHub, and Vercel, tests root-cause hypotheses, and posts evidence-linked findings in threads.",
+  href: "https://vercel.com/kb/guide/eve-incident-sre-agent",
+};
+
+/** Shared by the Slack and Notion integrations the marketing team template publishes through. */
+const marketingTeamGuide: RelatedResource = {
+  title: "Run a marketing team from Slack with eve",
+  description:
+    "Deploy a Slack-facing lead agent that routes requests to marketing specialists who publish to Notion, Typefully, and Resend, with approval gates on irreversible actions.",
+  href: "https://vercel.com/kb/guide/marketing-team-eve",
+};
 
 /** Docs presentation overlay shared by every integration kind. */
 interface Presentation {
@@ -108,6 +141,8 @@ interface Presentation {
   keywords?: string[];
   /** Optional gallery pill (e.g. "Chat SDK") shown next to the type label. */
   badge?: string;
+  /** Guides and references shown after Configure. */
+  relatedResources?: RelatedResource[];
 }
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
@@ -174,6 +209,7 @@ vercel connect create slack --triggers
 \`\`\`
 
 The channel handles mentions, DMs, typing indicators, delivery, and human-in-the-loop consent with sensible defaults. See the [Slack channel docs](/docs/channels/slack) for customizing each behavior.`,
+    relatedResources: [marketingTeamGuide, incidentResponseGuide],
   },
   discord: {
     logo: "discord",
@@ -333,6 +369,7 @@ export default githubChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   "linear-agent": {
     logo: "linear",
@@ -355,6 +392,7 @@ export default linearChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
+    relatedResources: [softwareFactoryGuide],
   },
   eve: {
     logo: "eve",
@@ -1183,6 +1221,14 @@ export default channel;
 
 See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent an email inbox with Resend",
+        description:
+          "Wire an eve agent to email through the Chat SDK channel and Resend adapter so it can hold threaded, multi-turn conversations, send proactive messages, and process attachments.",
+        href: "https://vercel.com/kb/guide/eve-agent-with-resend",
+      },
+    ],
   },
 };
 const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
@@ -1353,8 +1399,8 @@ The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kern
     quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
-vercel connect create mcp.onkernel.com --name eve-extension
-vercel connect attach mcp.onkernel.com/eve-extension
+vercel connect create kernel --name kernel-mcp --connection-method mcp
+vercel connect attach kernel/kernel-mcp
 \`\`\`
 
 Then mount the extension under \`agent/extensions/\`:
@@ -1362,7 +1408,7 @@ Then mount the extension under \`agent/extensions/\`:
 \`\`\`ts title="agent/extensions/kernel.ts"
 import kernel from "@onkernel/eve-extension";
 
-export default kernel({ connect: "mcp.onkernel.com/eve-extension" });
+export default kernel({ connect: "kernel/kernel-mcp" });
 \`\`\`
 
 The filename supplies the \`kernel\` namespace. The extension adds browser management, Playwright, computer control, managed auth, profiles, proxies, and replay tools under \`kernel__browser__*\`, along with the \`browse\` skill.`,
@@ -1373,6 +1419,20 @@ export { default } from "@onkernel/eve-extension";
 \`\`\`
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
+    relatedResources: [
+      {
+        title: "How to build a browser agent that works behind a login",
+        description:
+          "Combine eve, Vercel Connect, and Kernel managed auth so a user signs in once and the agent drives the authenticated browser without handling credentials.",
+        href: "https://vercel.com/kb/guide/build-a-browser-agent",
+      },
+      {
+        title: "Give your software factory a browser",
+        description:
+          "Attach Kernel's cloud browser to the eve software factory so Foreman can reproduce flow bugs, verify fixes on preview deployments, and save what it learns.",
+        href: "https://vercel.com/kb/guide/software-factory-browser",
+      },
+    ],
   },
   "upstash-agentkit": {
     logo: "upstash",
@@ -1560,6 +1620,7 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   hindsight: {
     logo: "hindsight",
@@ -1800,6 +1861,14 @@ export default browser({
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
 The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent a browser",
+        description:
+          "Changelog introducing the agent-browser extension, which gives eve agents sandboxed tools to navigate, read, click, fill forms, take screenshots, and inspect network activity.",
+        href: "https://vercel.com/changelog/give-your-eve-agent-a-browser",
+      },
+    ],
   },
 };
 
@@ -1841,12 +1910,23 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
     },
+    relatedResources: [
+      incidentResponseGuide,
+      softwareFactoryGuide,
+      {
+        title: "Manage Vercel projects with a software factory",
+        description:
+          "Add Vercel's hosted MCP server to the eve software factory so Foreman can read build logs, runtime errors, and deployment history through app-scoped Vercel Connect auth and a read-only tool allowlist.",
+        href: "https://vercel.com/kb/guide/software-factory-vercel-mcp",
+      },
+    ],
   },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
+    relatedResources: [softwareFactoryGuide],
   },
   notion: {
     logo: "notion",
@@ -1855,6 +1935,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app", "jwtBearer"],
     configureNote:
       "The OpenAPI setup sends the required `Notion-Version` header; bump it as Notion ships new API versions.",
+    relatedResources: [marketingTeamGuide],
   },
   datadog: {
     logo: "datadog",
@@ -1863,6 +1944,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["jwtBearer"],
     configureNote:
       "Match the MCP `url` to your Datadog site (`datadoghq.com`, `datadoghq.eu`, and so on).",
+    relatedResources: [incidentResponseGuide],
   },
   honeycomb: {
     logo: "honeycomb",
@@ -2328,6 +2410,7 @@ export default defineInstrumentation({
 });
 \`\`\``,
     configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
@@ -2480,6 +2563,7 @@ function buildChannel(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2494,7 +2578,8 @@ function buildConnection(entry: IntegrationEntry): Integration {
     throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
   }
   const identity: ConnectionIdentity = entry.connection;
-  const { logo, docsHref, keywords, quickStart, configure, ...setup } = presentation;
+  const { logo, docsHref, keywords, quickStart, configure, relatedResources, ...setup } =
+    presentation;
   const spec: ConnectionSpec = {
     ...setup,
     description: identity.description,
@@ -2513,6 +2598,7 @@ function buildConnection(entry: IntegrationEntry): Integration {
     quickStart,
     configure,
     connection: spec,
+    relatedResources,
   };
 }
 
@@ -2534,6 +2620,7 @@ function buildExtension(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2555,6 +2642,7 @@ function buildMemory(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2576,6 +2664,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
