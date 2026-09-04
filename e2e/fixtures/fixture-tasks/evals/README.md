@@ -1,5 +1,21 @@
 # Task eval transitions
 
+## Remote callback routing regression
+
+`task.input.answer.accepted-complete.remote.eval.ts` reuses the existing remote
+HITL and completion round trip to cover the callback-prefix bug from
+[eve #3047](https://github.com/vercel/eve/pull/3047). The fixture's `vercel.json`
+sets the service route to `/eve/v1`.
+
+Before deploying this fixture, Vercel CI runs `scripts/assert-callback-route.mjs`
+against the built workflow function configuration. It asserts the callback path
+is `/eve/v1/callback/<token>`; the broken build produced
+`/eve/v1/eve/v1/callback/<token>`. A mismatch fails immediately with both paths,
+before running the existing remote eval. Local and Postgres runs exercise the
+remote round trip, but only the Vercel build exercises service-prefix inference.
+
+## Transition declarations
+
 These evals are executable evidence for the background-task contract. They do
 not define that contract.
 

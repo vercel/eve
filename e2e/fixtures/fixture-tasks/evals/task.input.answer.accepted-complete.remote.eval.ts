@@ -10,10 +10,16 @@ import { defineTaskEval } from "./task-transition.js";
 
 const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:user:remote-http-child";
 
-/** A remote task's HITL answer must use its persisted HTTP child route. */
+/**
+ * Also covers the /eve/v1 callback-prefix regression (#3047): vercel.json
+ * mounts this fixture at /eve/v1. The Vercel build check asserts the emitted
+ * callback path is /eve/v1/callback/<token>, never /eve/v1/eve/v1/callback/<token>.
+ * This existing eval then proves the child can deliver HITL and its final result
+ * to the parent over that callback, and resume over its persisted HTTP route.
+ */
 export default defineTaskEval({
   description:
-    "A loopback remote child surfaces HITL and resumes over its remote response route with the remote transport principal intact.",
+    "A remote child delivers HITL and completion through /eve/v1/callback/* and resumes with its HTTP principal intact.",
   transition: {
     primary: "task.input.answer.accepted-complete",
     dimensions: { transport: "remote" },
