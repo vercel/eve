@@ -1,4 +1,4 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload, SessionControlCommand } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -11,11 +11,10 @@ import {
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
+export type BufferedSessionControl = SessionControlCommand | { readonly kind: "expired" };
+
 type NextSessionAction =
-  | { readonly kind: "clear" }
-  | { readonly kind: "compact" }
-  | { readonly kind: "expired" }
-  | { readonly kind: "reset" }
+  | BufferedSessionControl
   | AuthorizationCallbackInstruction
   | {
       readonly delivery: DeliverHookPayload | null;
@@ -32,10 +31,7 @@ export interface AuthorizationCallbackInstruction {
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
-  | { readonly kind: "clear" }
-  | { readonly kind: "compact" }
-  | { readonly kind: "expired" }
-  | { readonly kind: "reset" }
+  | BufferedSessionControl
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
   | AuthorizationCallbackInstruction
@@ -63,7 +59,7 @@ export type NextTurnInstruction =
 export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly bufferedSessionControls: BufferedSessionControl[];
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -85,7 +81,7 @@ export async function nextTurnDelivery(input: {
 
 async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly bufferedSessionControls: BufferedSessionControl[];
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -110,9 +106,7 @@ async function awaitNextTurnDelivery(input: {
       return nextAction;
     }
 
-    if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind };
-    }
+    if (nextAction.kind !== "delivery") return nextAction;
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
@@ -142,7 +136,7 @@ async function awaitNextTurnDelivery(input: {
 
 async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly bufferedSessionControls: BufferedSessionControl[];
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -150,9 +144,7 @@ async function waitForNextSessionAction(input: {
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
-  if (pendingSessionControl !== undefined) {
-    return { kind: pendingSessionControl };
-  }
+  if (pendingSessionControl !== undefined) return pendingSessionControl;
 
   while (
     input.bufferedDeliveries[0] !== undefined &&
@@ -212,8 +204,13 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
-    if (decoded.kind === "clear" || decoded.kind === "compact" || decoded.kind === "reset") {
-      return { kind: decoded.kind };
+    if (
+      decoded.kind === "clear" ||
+      decoded.kind === "compact" ||
+      decoded.kind === "reset" ||
+      decoded.kind === "restore-history"
+    ) {
+      return decoded;
     }
 
     if (decoded.kind === "cancel") {

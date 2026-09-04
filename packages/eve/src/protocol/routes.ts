@@ -34,6 +34,9 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
+/** Stable route pattern for restoring one exact session's model history. */
+export const EVE_SESSION_RESTORE_HISTORY_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/restore-history`;
+
 /** Stable route pattern for resetting one exact session ID. */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
@@ -151,6 +154,11 @@ export function createEveSessionCompactRoutePath(sessionId: string): string {
 /** Builds the ID-addressed clear route for one session. */
 export function createEveSessionClearRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
+}
+
+/** Builds the ID-addressed history-restoration route for one session. */
+export function createEveSessionRestoreHistoryRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/restore-history`;
 }
 
 /** Builds the ID-addressed reset route for one session. */

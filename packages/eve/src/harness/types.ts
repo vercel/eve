@@ -289,6 +289,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** Restores model history to an earlier index without running a model turn. */
+  readonly restoreHistoryTo?: number;
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
@@ -305,6 +307,12 @@ export interface ToolLoopHarnessConfig {
    */
   readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
+  /** Optional history restoration requested before terminal turn release. */
+  readonly beforeResponseRelease?: (input: {
+    readonly history: readonly ModelMessage[];
+    readonly output: unknown;
+    readonly turnId: string;
+  }) => Promise<number | undefined>;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */

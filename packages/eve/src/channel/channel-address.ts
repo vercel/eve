@@ -57,6 +57,7 @@ export interface ChannelAddress<TState = undefined> {
   cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
   compact(): Promise<CompactSessionResult>;
   clear(): Promise<ClearSessionResult>;
+  restoreHistory(input: { readonly to: number }): Promise<ClearSessionResult>;
   reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
   resolveSession(): Promise<Session | undefined>;
 }
@@ -187,6 +188,12 @@ export function createChannelAddress<TState = undefined>(input: {
     async clear() {
       return await input.runtime.dispatchContinuation({
         command: { kind: "clear" },
+        continuationToken: namespacedToken,
+      });
+    },
+    async restoreHistory(restoreInput) {
+      return await input.runtime.dispatchContinuation({
+        command: { kind: "restore-history", to: restoreInput.to },
         continuationToken: namespacedToken,
       });
     },

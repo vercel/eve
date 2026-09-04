@@ -91,6 +91,7 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
+import { ResponseReleaseEventGate } from "#execution/response-release-event-gate.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
@@ -367,6 +368,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
+  const mode = ctx.require(ModeKey);
+  const responseReleaseGate = new ResponseReleaseEventGate(
+    ctx,
+    hookRegistry,
+    mode === "conversation",
+  );
 
   // Persisted chunks and hooks must agree on the stamped id.
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
@@ -381,6 +388,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     event: UnstampedMessageStreamEvent,
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
+    if (responseReleaseGate.intercept(event)) return;
     // A remote task's parent owns its HITL. Forward blocking events over
     // the task callback and keep them out of the child's local channel;
     // otherwise two TUIs can present and answer the same request.
@@ -435,8 +443,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       messages: lifecycleMessages,
     });
   };
-
-  const mode = ctx.require(ModeKey);
 
   let stepResult: StepResult;
   try {
@@ -520,9 +526,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
         const step = createExecutionNodeStep({
           abortSignal: input.abortSignal,
+          beforeResponseRelease: responseReleaseGate.beforeRelease(handleEvent),
           capabilities,
           clearOnly: input.input?.kind === "clear",
           compactOnly: input.input?.kind === "compact",
+          restoreHistoryTo: input.input?.kind === "restore-history" ? input.input.to : undefined,
           createRuntime: createWorkflowRuntime,
           handleEvent,
           historyProjector: history.projector,

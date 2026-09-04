@@ -211,6 +211,7 @@ export type ResolvedToolDefinition = Readonly<
  * the resolved maps.
  */
 export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
+  readonly beforeResponseRelease?: import("#public/definitions/hook.js").BeforeResponseReleaseHook;
   /**
    * Path-relative slug used for diagnostics and ordering.
    */
