@@ -15,6 +15,8 @@ import type {
   RuntimeIdentity,
   RuntimeTraceContext,
 } from "#protocol/message.js";
+import { contextStorage } from "#context/container.js";
+import { TurnTaskDeliveryKey } from "#context/keys.js";
 import {
   createActionsRequestedEvent,
   createActionInputAppendedEvent,
@@ -88,7 +90,12 @@ export async function emitTurnPreamble(
 
   await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
-  if (input.message !== undefined) {
+  const taskDeliveryPhase = contextStorage.getStore()?.get(TurnTaskDeliveryKey);
+  if (
+    input.message !== undefined &&
+    taskDeliveryPhase !== "pending" &&
+    taskDeliveryPhase !== "settled"
+  ) {
     await emitFn(
       createMessageReceivedEvent({
         message: input.message,

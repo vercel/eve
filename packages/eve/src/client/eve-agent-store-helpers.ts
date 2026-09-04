@@ -1,6 +1,25 @@
-import type { SendTurnPayload } from "#client/types.js";
+import type { MessageResponse } from "#client/message-response.js";
+import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
+
+export interface ActiveTurn {
+  readonly abortController: AbortController;
+  acceptedFollowUps: number;
+  readonly cancel: () => Promise<CancelSessionResult>;
+  readonly completion: Promise<void>;
+  readonly followUpDispatches: Set<Promise<void>>;
+  receivedFollowUps: number;
+  readonly resolveCompletion: () => void;
+  readonly response: Promise<MessageResponse | undefined>;
+  readonly resolveResponse: (response: MessageResponse | undefined) => void;
+}
+
+export interface PendingMessageSubmission {
+  readonly createdAt: number;
+  readonly id: string;
+  readonly message: string;
+}
 
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
