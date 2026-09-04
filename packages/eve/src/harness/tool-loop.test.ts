@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -12127,6 +12128,34 @@ describe("createToolLoopHarness", () => {
         content: "You are a test assistant.\n\ndurable-system",
       });
       expect(messages.find((m) => m.role === "system")).toBeUndefined();
+      expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
+    });
+
+    it("keeps later-turn dynamic skill announcements in instructions", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      const announcement = [
+        "Available skills",
+        "Listed skills are available in this run.",
+        "- receipts: Process receipts. (path: /workspace/skills/receipts/SKILL.md)",
+      ].join("\n");
+      ctx.setVirtualContext(PendingSkillAnnouncementKey, announcement);
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${announcement}`,
+      });
+      expect(messages).not.toContainEqual({ role: "user", content: announcement });
       expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
     });
 

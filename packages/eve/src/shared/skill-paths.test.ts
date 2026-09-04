@@ -85,6 +85,27 @@ describe("skill path helpers", () => {
     ).resolves.toBe("/workspace/skills/research/references/catalog.md");
   });
 
+  it("falls back to /workspace/skills when HOME is the filesystem root", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/\n" },
+      },
+    });
+
+    await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
+      FALLBACK_SKILL_ROOT,
+    );
+    await expect(
+      resolveSandboxModelPath({
+        path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toBe("/workspace/skills/research/references/catalog.md");
+    await expect(
+      resolveSandboxModelPath({ path: "$HOME/notes/todo.md", sandbox: sandbox.session }),
+    ).resolves.toBe("/notes/todo.md");
+  });
+
   it("reads only from the resolved HOME skill root when HOME is usable", async () => {
     const sandbox = mockSandbox({
       commands: {

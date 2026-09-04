@@ -1174,7 +1174,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(emissionState.sequence, skillAnnouncement);
+        currentMessages.addSystem({ role: "system", content: skillAnnouncement });
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
