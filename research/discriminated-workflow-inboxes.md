@@ -4,19 +4,20 @@ status: proposed
 last_updated: "2026-09-03"
 ---
 
-# One operational inbox per durable owner
+# One logical inbox per durable owner
 
-eve should use one operational inbox for each independently running workflow
-that receives messages. Messages, controls, and correlated replies become
-discriminated events on that inbox. A background pump reads events in persisted
-order into a bounded buffer; the active owner applies them at step boundaries.
-Continuation aliases and authorization callbacks become lookup-only hooks.
+eve should give each receiving workflow one logical inbox: a set of hooks that
+accept the same discriminated event protocol and feed one buffer and reducer.
+Each hook reserves an address through which that owner can receive messages.
+Every session starts with its stable session-ID hook, then adds external
+addresses when they become known. Senders resume the addressed hook directly.
 All eve-owned hooks omit `HookOptions.metadata`.
 
 This refactor addresses three connected problems:
 
-- Separate hooks for messages, cancellation, reports, and replies create
-  multiple durable cursors, claims, and lifecycle paths for the same owner.
+- Separate hooks for cancellation, reports, and replies give message kinds
+  their own durable cursors and lifecycle paths. Those belong in the protocol;
+  additional hooks are needed only to reserve additional addresses.
 - Current `steer` behavior aborts and replaces the turn. True steering needs
   input to arrive during a step and join the same turn at its next boundary.
 - The harness can publish `turn.completed` before the workflow inspects newly
@@ -27,24 +28,34 @@ settlement semantics. Hosted latency remains a measured outcome: hook counts
 alone do not establish a fix for [#876](https://github.com/vercel/eve/issues/876).
 Use the paired benchmarks in [turn performance](./turn-performance.md).
 
-The design assumes the background pump is Workflow-safe. A small spike will
-verify scheduling, replay, cancellation, and disposal before production conversion.
+The background pump merges the hook iterators while foreground work runs.
+The design assumes this is Workflow-safe; a small spike will verify dynamic
+registration, merged ordering, replay, cancellation, and disposal.
 
 ## Before and after
 
-An **operational inbox** is an iterated hook that receives runtime events. A
-**lookup hook** has no consumer; its built-in owning `runId` locates the session.
-Counts below exclude application-authored hooks and webhooks.
+A **logical inbox** owns the hook readers, shared buffer, correlations, and
+reducer. A **hook** reserves one address and has one reader in that inbox.
+The target is one inbox per owner, with hooks added for addresses rather than
+message kinds. There are no lookup-only hooks.
 
-| Owner                                | Current hooks                                                                  | Proposed hooks                                                           | Operational count          |
-| ------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | -------------------------- |
-| Session without a continuation alias | Stable inbox and gated authorization hook                                      | Stable inbox; optional authorization lookup                              | 2 → 1                      |
-| Session with a continuation alias    | Stable inbox, iterated alias, and gated authorization hook                     | Stable inbox; continuation and optional authorization lookups            | 3 → 1                      |
-| Additional child turn                | Inbox, cancellation, parent control, and workflow report/request/outcome hooks | Turn inbox; reports and settlement return to the parent's existing inbox | 6 → 1                      |
-| Additional workflow-tool run         | Control inbox, plus a hook per answer or agent reply                           | Workflow-tool inbox with request-ID correlations                         | 1 + answer/reply hooks → 1 |
-| Background task                      | Command inbox, workflow report/request/outcome hooks, and answer/reply hooks   | Task inbox; same-owner body results return in memory                     | 4 + answer/reply hooks → 1 |
-| Activity collector                   | Batch hook                                                                     | Collector inbox                                                          | 1 → 1                      |
-| Session timeout                      | Sends to the session inbox                                                     | Sends to the session inbox                                               | 0 → 0                      |
+`A` below is one optional authorization callback hook, added when needed.
+Counts exclude application-authored hooks and webhooks.
+
+| Owner                                       | Current hooks                                                                  | Proposed hooks                                                         | Hook count                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | -------------------------- |
+| HTTP session without a continuation address | Stable inbox and gated authorization hook                                      | Stable hook; optional callback hook in the same inbox                  | 2 → 1 + A                  |
+| Slack session with a known thread           | Stable inbox, replaceable continuation hook, and gated authorization hook      | Stable and thread hooks; optional callback hook, all in the same inbox | 3 → 2 + A                  |
+| Threadless scheduled Slack session          | Stable inbox, temporary continuation hook, and gated authorization hook        | Stable hook first; add the thread hook after posting                   | 3 → 1 + A, then 2 + A      |
+| Additional child turn                       | Inbox, cancellation, parent control, and workflow report/request/outcome hooks | Turn hook; reports and settlement return to the parent's inbox         | 6 → 1                      |
+| Additional workflow-tool run                | Control inbox, plus a hook per answer or agent reply                           | Workflow-tool hook with request-ID correlations                        | 1 + answer/reply hooks → 1 |
+| Background task                             | Command inbox, workflow report/request/outcome hooks, and answer/reply hooks   | Task hook; same-owner body results return in memory                    | 4 + answer/reply hooks → 1 |
+| Activity collector                          | Batch hook                                                                     | Collector hook                                                         | 1 → 1                      |
+| Session timeout                             | Sends to the session inbox                                                     | Sends to the stable session hook                                       | 0 → 0                      |
+
+A session with `C` distinct external addresses owns `1 + C + A` hooks, all
+feeding the same inbox. Previously reserved addresses remain active until the
+session ends. Session IDs remain Workflow run IDs.
 
 The ordinary same-deployment turn remains inline and creates no turn hook.
 Accepted-deployment upgrades, sleep, background work, and coordination can still
@@ -53,19 +64,19 @@ Tool/task body placement follows [subagent execution boundaries](./executor-neut
 
 ### Proposed hook inventory
 
-| Owner or lookup      | Token                                      | Consumer                               | Ownership claim               |
-| -------------------- | ------------------------------------------ | -------------------------------------- | ----------------------------- |
-| Session              | `eve:session-inbox:v1:<runId>`             | Session pump, shared with inline turns | None; unique to the run       |
-| Continuation lookup  | `eve:continuation:v1:<provider-address>`   | None                                   | Initial claim and each re-key |
-| Authorization lookup | `eve:auth-callback:v1:<random-capability>` | None                                   | None; random, session-scoped  |
-| Child turn           | `eve:turn-inbox:v1:<turnId>`               | Turn pump                              | Before owner work             |
-| Workflow-tool run    | `eve:workflow-tool-inbox:v1:<operationId>` | Workflow-tool pump                     | Before owner work             |
-| Background task      | `eve:task-inbox:v1:<taskId>`               | Task pump                              | Before owner work             |
-| Activity collector   | Existing random callback capability        | Collector pump                         | Before owner work             |
+| Address                | Token                                      | Logical inbox                     | Ownership claim              |
+| ---------------------- | ------------------------------------------ | --------------------------------- | ---------------------------- |
+| Stable session         | `eve:session-inbox:v1:<runId>`             | Session, shared with inline turns | None; unique to the run      |
+| External conversation  | `eve:continuation:v1:<provider-address>`   | Same session                      | Once per distinct address    |
+| Authorization callback | `eve:auth-callback:v1:<random-capability>` | Same session                      | None; random, session-scoped |
+| Child turn             | `eve:turn-inbox:v1:<turnId>`               | Turn                              | Before owner work            |
+| Workflow-tool run      | `eve:workflow-tool-inbox:v1:<operationId>` | Workflow-tool                     | Before owner work            |
+| Background task        | `eve:task-inbox:v1:<taskId>`               | Task                              | Before owner work            |
+| Activity collector     | Existing random callback capability        | Collector                         | Before owner work            |
 
-Every hook above is server-only (`isWebhook: false`) and omits `metadata`
-entirely. Lookup hooks store no eve routing payload. The session creates its
-own lookups, so Workflow's owning `runId` supplies the association.
+Every hook above is iterated, server-only (`isWebhook: false`), and created
+without `metadata`. The session creates and owns all of its address hooks,
+including addresses discovered while a child turn is running.
 
 Independent owners retain `start()` plus `getConflict()`: each candidate creates
 its inbox and reader before claiming; only the winner executes the body. Losers
@@ -77,14 +88,13 @@ owner releases its token can still repeat work.
 ## Routing and event contract
 
 ```text
-session-ID request -----------------------------+
-                                               |
-provider event -> continuation lookup -> runId --+-> stable session inbox
-                                               |       |
-auth callback -> capability lookup -> runId -----+       v
-                                                  session pump
+session-ID request -> resume stable hook ------+
+                                              |
+provider event ----> resume conversation hook -+-> merged readers
+                                              |        |
+auth callback -----> resume callback hook -----+   background pump
                                                        |
-                                                  session buffer
+                                                shared session buffer
                                                        |
                                                   session owner
                                                   /           \
@@ -95,17 +105,22 @@ auth callback -> capability lookup -> runId -----+       v
                                                  workflow-tool       task inbox
                                                      inbox
 
-Child reports and settlement return to the parent's existing inbox.
-Each independent receiving owner has its own pump and buffer.
+All session hooks accept the same wire protocol.
+Child traffic returns through the parent's supplied address, normally stable.
 Same-owner calls and results stay in memory.
 ```
 
 After existing authorization checks, session-ID ingress derives the stable
-token and resumes it directly. Provider and callback ingress look up their
-namespaced hook, validate its token and owning run ID, then derive that same
-stable token. Resume uses the token, without a stable-hook preflight or metadata
-discovery. In the reviewed SDK, omitting metadata skips its hydration and key
-resolution path.
+token; provider and callback ingress derive their own namespaced tokens. Each
+calls `resumeHook(token, envelope)` directly. No eve lookup translates an external
+address into the stable address, and no hook metadata selects the protocol.
+Workflow still resolves the token internally; omitting metadata skips its
+hydration path. Explicit session lookup and child supervision may still read
+hook ownership when they need the run ID.
+
+External addresses include the channel and provider conversation scope. For
+Slack, the identity includes the installation/workspace, channel, and
+`threadTs ?? ts`; a timestamp alone is not a global address.
 
 Internal senders receive an `InboxAddress` containing a token and
 `protocol: { family: "eve-inbox", version: N }` in durable input or
@@ -127,7 +142,6 @@ target, and a discriminated event with its existing domain payload:
 | `runtime.result`                                                       | Session, turn, workflow-tool run, task | Invocation request ID                                                    |
 | `workflow.report`, `workflow.request`, `workflow.outcome`              | Session, turn, task                    | Operation/request identity                                               |
 | `activity.batch`                                                       | Activity collector                     | Batch identity                                                           |
-| `turn.continuation-changed`                                            | Session                                | Active turn ID                                                           |
 | `turn.settled`                                                         | Session                                | Turn ID, child inbox/run, finalized state/result, and applied event keys |
 
 The wire contract preserves these invariants:
@@ -141,8 +155,10 @@ The wire contract preserves these invariants:
   namespaced delivery IDs; HTTP ingress mints an ID before retryable work. A new
   HTTP request is a new submission, with no new public idempotency-key API.
 - Deduplication covers automatic retry horizons. Unacknowledged forwards and
-  pending correlations stay protected. Buffers, bytes, waiters, and deduplication
-  state have explicit bounds; overflow fails visibly instead of evicting input.
+  pending correlations stay protected. Deduplication is shared across all hooks,
+  so a retry through another address cannot apply twice. Address count, buffers,
+  bytes, waiters, and deduplication state have explicit bounds; overflow fails
+  visibly instead of evicting input or releasing an earlier address.
   Exact capacities and retention follow the spike and retry-contract review.
 - Invalid versions, kinds, or owner/target combinations fail visibly. Valid but
   stale events follow their domain rules. Schemas remain append-only, with
@@ -151,13 +167,30 @@ The wire contract preserves these invariants:
 
 ## Background pump and turn decisions
 
-One background async iterator continuously feeds the owner's buffer while the
-foreground awaits a model/tool step, sleep, claim, or authored workflow body.
-It wakes matching waiters and signals cancellation or interruption to the active
-abort scope. The foreground reducer owns state changes and lifecycle decisions.
+One background pump merges the owner's hook iterators while the foreground
+awaits a model/tool step, sleep, claim, or authored workflow body. Every event
+passes through the same decoder, deduplication, and buffer. The pump wakes
+matching waiters and signals the active abort scope; the foreground reducer
+owns state changes and lifecycle decisions.
+
+The current session inbox already multiplexes readers. This generalizes that
+pattern across owners and moves source-specific behavior into the event protocol.
+
+The [async iterator merge pattern](https://int.pub/posts/iterables#asynchronous)
+illustrates concurrent reads, but its fixed input list needs dynamic registration
+for this use. Adding a hook must wake the merge and attach its reader without
+waiting for an existing hook to receive a message. Registration of the same
+address by its owner is idempotent.
+
+Preserve each hook's persisted order and make the merged order reproducible
+under Workflow replay. Separate hooks do not imply a global arrival order.
+The spike must verify cross-hook ordering relative to foreground step settlement;
+wall-clock promise completion alone is not the contract.
 
 ```text
-inbox -> background pump -> decode / deduplicate -> bounded buffer
+hooks -> merged reads -> background pump -> decode / deduplicate
+                                                         |
+                                                   shared buffer
                                                          |
                       +----------------------------------+
                       |                                  |
@@ -199,9 +232,10 @@ reset aborts the active scope and applies existing reset semantics.
 
 One abort scope spans a turn or authored body, including inter-step waits. New
 scopes inspect buffered controls before starting work and accept only matching
-targets; a stale cancel cannot affect a later turn. Abort is cooperative: streamed text and completed tool
-effects cannot be undone. Accepted user input, admitted tasks, usage, and existing
-cancellation-state carve-outs survive; admitted tasks need their own cancellation.
+targets; a stale cancel cannot affect a later turn. Abort is cooperative:
+streamed text and completed tool effects cannot be undone. Accepted user input,
+admitted tasks, usage, and existing cancellation-state carve-outs survive;
+admitted tasks need their own cancellation.
 
 Pump failure must abort active work and wake all waiters as an owner failure.
 Disposal releases waiters without requiring another inbound message and occurs
@@ -233,27 +267,51 @@ an intermediate `session.waiting`. Cancellation retains `turn.cancelled` then
 retries, along with usage and structured-result semantics. Retried stream writes
 may redeliver those IDs. External effects retain their idempotency requirements.
 
-## Lookup lifecycle and child accounting
+## Address reservation and child accounting
 
-A channel-created session opens its stable inbox before claiming the continuation
-lookup. A losing candidate forwards initial and buffered input to the winner
-with the original event identities, closes its own records, and exits without
-starting a turn. Registration retries are bounded; startup delays must not start
-duplicate sessions.
+An HTTP-created or threadless scheduled session starts with its stable hook.
+A session started by a Slack message also claims the known conversation hook
+before executing the turn. On a startup conflict, the losing candidate forwards
+initial and buffered input directly to the winning address, preserving event
+identities, then closes its own hooks and exits.
 
-Re-keying claims the new continuation while the stable pump continues reading.
-On conflict, keep the old continuation. On success, persist the new identity
-before retiring the old lookup. Both may briefly resolve to the same inbox;
-ordering begins at durable inbox acceptance.
+Scheduled Slack sessions reserve their conversation address after the first
+post supplies a thread timestamp:
+
+```text
+start scheduled session     hooks = [stable(sessionId)]
+          |
+          v
+post first Slack message -> receive threadTs
+          |
+          v
+session claims thread hook  hooks = [stable(sessionId), slack(threadTs)]
+          |                         |                      |
+          |                         +--> same inbox <------+
+          v
+later Slack replies resume the thread hook directly
+```
+
+Continuation registration becomes additive. A new address joins the running
+inbox after its claim succeeds; earlier addresses keep their readers and remain
+resumable. A mid-session claim conflict fails that reservation visibly and keeps
+existing addresses intact. It never merges two running sessions. This includes
+a competing start between the first Slack post and its address reservation.
+
+The session owns reservations even when a child discovers the address. The child
+requests registration through the parent inbox and awaits the result through
+its own inbox, using the shared request/result protocol. No hook is created in
+the child to stand in for a session address. Registration visibility and bounded
+startup retries remain part of the Workflow spike.
 
 Interactive authorization uses one cryptographically random, session-scoped
 callback capability with at least 128 bits of entropy. It is created before
-exposing a challenge URL and retained across re-keys. The callback
-route accepts only bounded authorization parameters and constructs a version-one
-`authorization.response`. It cannot accept arbitrary operational tokens or event
-kinds. A response must match the pending connection and attempt; the connection
-strategy still validates provider state. Capabilities and returned secrets stay
-out of logs and diagnostics. Session closure disposes both kinds of lookup.
+exposing a challenge URL and adds one hook to the same inbox. The callback route
+accepts bounded authorization parameters and resumes that hook directly with a
+version-one `authorization.response`; it cannot select arbitrary tokens or kinds.
+The shared reducer matches the pending connection and attempt, and the connection
+strategy validates provider state. Capabilities and secrets stay out of logs.
+Session closure disposes every reserved hook and releases all readers.
 
 ### Handoff, forwarding, and settlement
 
@@ -319,7 +377,8 @@ Application-authored `createHook` and `createWebhook` remain unchanged.
 ## Deployment cut
 
 Ship the new tokens, envelopes, owner inputs, callback routing, and terminal
-emission together as the `owner-inbox-v1` topology. New routes do not resume old
+emission together as the `owner-inbox-v1` topology. All hooks in an owner's
+inbox share its protocol contract. New routes do not resume old
 hooks: pre-cut session IDs require a reset, and provider activity on an old
 thread starts a new session. Child entry points reject pre-cut inputs before
 creating hooks or executing work.
@@ -336,20 +395,21 @@ This replaces the pre-cut compatibility policy and metadata discovery in the
 [wire-schema plan](./session-inbox-wire-schema.md). The implementation needs a
 minor changeset and coordinated stream/client/adapter updates. Published docs
 and release notes must cover session reset, steering versus interruption,
-`turn.interrupted`, the `ask()` return type, and delivery/recovery limits.
+`turn.interrupted`, the `ask()` return type, additive continuation addresses,
+and delivery/recovery limits. The session-ID format is unchanged.
 
 ## Verification
 
 These are implementation checks, not results established by this proposal.
 
-| Area                            | Required evidence                                                                                                                                                                                                                                                                                             |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Small Workflow spike            | The pump observes persisted order through long steps, claims, sleeps, replay, and restart; abort reaches supported work; disposal and reader failure release waiters. Verify on Local, Vercel, and other supported Worlds, including configured Postgres. Confirm retry horizons and ambiguous-send behavior. |
-| Structural inventory            | One operational inbox per receiving owner, zero inline turn hooks, no per-answer/cancel/report/reply hooks, and claims only for contested aliases and independent owners. Count lookup hooks separately; verify all eve-owned hooks omit metadata.                                                            |
-| Turn semantics                  | Steer at natural completion keeps the turn ID without a terminal frame; interrupt/cancel precedence and state preservation hold; finalizer retries retain event identities.                                                                                                                                   |
-| Ownership and recovery          | Claim losers never run; re-key and callbacks route correctly; handoff never repeats a step; normal settlement accounts for all input; missing reports and disabled session expiry cannot leave an owner waiting indefinitely.                                                                                 |
-| Other traffic and compatibility | Concurrent asks, sleep races, tasks, subagents, authorization, and collectors work through their owner inboxes. Cover duplicate/stale input, bounds, pre-cut reset, newer ingress to older parents, and internal upgrades/rollback.                                                                           |
-| Hosted performance              | Same-SDK paired measurements include ingress, finalization, supervision, replay, and multi-step/tool traffic across same- and cross-deployment cases. Report durable operations and state size alongside latency; regressions beyond the benchmark's acceptance budget block rollout.                         |
+| Area                            | Required evidence                                                                                                                                                                                                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Small Workflow spike            | Dynamic reader registration wakes a parked merge; per-hook order and merged step-boundary decisions survive replay/restart; abort and reader failure wake foreground work; disposal releases every reader. Verify supported Worlds, including Local, Vercel, and configured Postgres, plus retry horizons. |
+| Structural inventory            | One logical inbox per receiving owner; one hook per reserved address; zero inline turn or per-answer/cancel/report/reply hooks. All hooks share the owner's protocol and omit metadata. Delivery resumes the addressed token without an eve lookup-and-forward step.                                       |
+| Turn semantics                  | Steer at natural completion keeps the turn ID without a terminal frame; interrupt/cancel precedence and state preservation hold; finalizer retries retain event identities.                                                                                                                                |
+| Ownership and recovery          | Initial claim losers never run; scheduled anchoring and mid-session claim conflicts behave explicitly; old addresses remain live; handoff never repeats work; settlement accounts for all input. Missing reports remain detectable with session expiry disabled.                                           |
+| Other traffic and compatibility | Concurrent asks, tasks, subagents, authorization, and collectors share owner inboxes. Cover duplicates across addresses, stale input, all capacity bounds, address cleanup, pre-cut reset, newer ingress to older parents, and internal upgrades/rollback.                                                 |
+| Hosted performance              | Same-SDK paired measurements include ingress, finalization, supervision, replay, and multi-step/tool traffic across same- and cross-deployment cases. Report durable operations and state size alongside latency; regressions beyond the benchmark's acceptance budget block rollout.                      |
 
 Use unit tests for reducers, Workflow-backed scenarios for scheduling and failure
 boundaries, and deterministic fixture evals in CI for streamed behavior. Relevant
@@ -361,7 +421,9 @@ Source baseline: eve `a6e72c470430e0cb807103c5448176034ec3c23d`, with
 [child turn](../packages/eve/src/execution/turn-workflow.ts),
 [owner channels](../packages/eve/src/execution/tools/workflow/owner.ts), and
 [task workflow](../packages/eve/src/execution/tasks/child/workflow.ts) establish
-the inventory. [Inline turn control](../packages/eve/src/execution/inline-turn.ts)
+the inventory. [Slack anchoring](../packages/eve/src/public/channels/slack/slackChannel.ts)
+currently replaces its temporary continuation address after posting.
+[Inline turn control](../packages/eve/src/execution/inline-turn.ts)
 and [harness emission](../packages/eve/src/harness/emission.ts) establish the
 steering/finalization boundary. Metadata behavior is visible in
 [eve ingress](../packages/eve/src/execution/wire/session-inbox-resume.ts) and
