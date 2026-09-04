@@ -1,5 +1,30 @@
 # @eve/self-modification
 
+## 0.0.9
+
+### Patch Changes
+
+- 8da8d37: Publish a compatibility package that forwards existing `@eve/self-modification` imports to the implementation bundled with eve.
+- Updated dependencies [38fd8d9]
+- Updated dependencies [9d0df26]
+- Updated dependencies [98f45ea]
+- Updated dependencies [3b73073]
+- Updated dependencies [4ee6715]
+- Updated dependencies [9091777]
+- Updated dependencies [73aec25]
+- Updated dependencies [98f45ea]
+- Updated dependencies [30a6325]
+- Updated dependencies [1909295]
+- Updated dependencies [0ca3ef7]
+- Updated dependencies [d594b94]
+- Updated dependencies [a6e72c4]
+- Updated dependencies [0e2e10d]
+- Updated dependencies [30a6325]
+- Updated dependencies [9de667a]
+- Updated dependencies [e83e50e]
+- Updated dependencies [00cc672]
+  - eve@0.51.1
+
 ## 0.0.8
 
 ### Patch Changes
