@@ -24,7 +24,7 @@ import {
   type WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
-import { openWorkflowToolRunOwnerChannels } from "#execution/tools/workflow/owner.js";
+import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
 import {
   workflowToolRunOutcomeToTaskCommand,
   workflowToolRunReportToTaskPayload,
@@ -78,11 +78,8 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   "use workflow";
 
   const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
-  const workflowToolRunChannels = openWorkflowToolRunOwnerChannels(input.taskInboxToken);
-  const readers = [
-    ...workflowToolRunChannels.readers,
-    createChannelReader("commands", commands),
-  ] as const;
+  const workflowToolRunInbox = openWorkflowToolRunOwnerInbox(input.taskInboxToken);
+  const readers = [workflowToolRunInbox.reader, createChannelReader("commands", commands)] as const;
   let ownsHook = false;
   let view = input.initialView;
   let dispatchAcknowledged = false;
@@ -140,21 +137,22 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (read.next.done) return;
 
-      if (read.channel === "report") {
-        await applyPayload(
-          workflowToolRunReportToTaskPayload(read.next.value, view.taskId, updateIndex++),
-        );
-        continue;
-      }
-      if (read.channel === "outcome") {
-        await applyPayload({
-          command: workflowToolRunOutcomeToTaskCommand(read.next.value),
-          kind: "task-command",
-        });
-        continue;
-      }
-      if (read.channel === "request") {
-        const request = read.next.value;
+      if (read.channel === "workflow") {
+        const message = read.next.value;
+        if (message.kind === "report") {
+          await applyPayload(
+            workflowToolRunReportToTaskPayload(message, view.taskId, updateIndex++),
+          );
+          continue;
+        }
+        if (message.kind === "outcome") {
+          await applyPayload({
+            command: workflowToolRunOutcomeToTaskCommand(message),
+            kind: "task-command",
+          });
+          continue;
+        }
+        const request = message;
         const kind = request.request.kind;
         if (
           kind === "agent-invoke" ||
@@ -175,7 +173,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
   } finally {
     if (ownsHook) {
-      await workflowToolRunChannels.dispose();
+      await workflowToolRunInbox.dispose();
       await disposeHook(commands);
     }
   }

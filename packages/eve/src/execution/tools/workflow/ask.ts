@@ -67,7 +67,8 @@ export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInput
   const answer = createHook<ToolInputResponse>({
     token: workflowToolRunAnswerToken(context.from.runId, context.answerSeq++),
   });
-  void resumeHookStep(context.owner.request, {
+  void resumeHookStep(context.owner.inbox, {
+    kind: "request",
     from: context.from,
     replyTo: answer.token,
     request: { kind: "ask", request },

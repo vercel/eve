@@ -24,16 +24,14 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import {
   type ChannelReader,
   createChannelReader,
   raceChannelReads,
 } from "#execution/tools/workflow/owner-channels.js";
 import {
-  openWorkflowToolRunOwnerChannels,
-  type WorkflowToolRunOwnerChannels,
-  type WorkflowToolRunOwnerReaders,
+  openWorkflowToolRunOwnerInbox,
+  type WorkflowToolRunOwnerInbox,
 } from "#execution/tools/workflow/owner.js";
 import {
   createTurnCancellationControl,
@@ -46,10 +44,7 @@ import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import {
-  handleWorkflowToolRunOutcome,
-  handleWorkflowToolRunRequest,
-} from "#execution/turn-workflow-tool-run.js";
+import { handleWorkflowToolRunMessage } from "#execution/turn-workflow-tool-run.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -76,7 +71,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   return runTurnOwnedWorkflow(input);
 }
 
-async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
+export async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
@@ -98,7 +93,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
-  let workflowToolRunChannels: WorkflowToolRunOwnerChannels | undefined;
+  let workflowToolRunInbox: WorkflowToolRunOwnerInbox | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -111,9 +106,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     }
 
     // Opened after the inbox claim so a losing duplicate never contends for
-    // them; the turn starts no run before this point.
-    workflowToolRunChannels = openWorkflowToolRunOwnerChannels(inbox.token);
-    const readers: TurnReaders = [...workflowToolRunChannels.readers, inboxReader];
+    // it; the turn starts no run before this point.
+    workflowToolRunInbox = openWorkflowToolRunOwnerInbox(inbox.token);
+    const readers: TurnReaders = [workflowToolRunInbox.reader, inboxReader];
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
@@ -288,13 +283,13 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
-    if (workflowToolRunChannels !== undefined) await workflowToolRunChannels.dispose();
+    if (workflowToolRunInbox !== undefined) await workflowToolRunInbox.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }
 
 type TurnReaders = readonly [
-  ...WorkflowToolRunOwnerReaders,
+  WorkflowToolRunOwnerInbox["reader"],
   ChannelReader<"inbox", TurnInboxPayload>,
 ];
 
@@ -399,8 +394,8 @@ async function waitForRuntimeActionResults(input: {
     }
     if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
-    if (read.channel === "outcome") {
-      const result = await handleWorkflowToolRunOutcome({
+    if (read.channel === "workflow") {
+      const result = await handleWorkflowToolRunMessage({
         callbackMetadataUrl: getWorkflowMetadata().url,
         cursor: input.cursor,
         message: read.next.value,
@@ -409,22 +404,6 @@ async function waitForRuntimeActionResults(input: {
         results.push(result);
         acceptedAtMsByCallId.set(result.callId, Date.now());
       }
-      continue;
-    }
-    if (read.channel === "request") {
-      await handleWorkflowToolRunRequest({
-        callbackMetadataUrl: getWorkflowMetadata().url,
-        cursor: input.cursor,
-        message: read.next.value,
-      });
-      continue;
-    }
-    if (read.channel === "report") {
-      await emitWorkflowToolRunReportStep({
-        from: read.next.value.from,
-        parentWritable: input.cursor.parentWritable,
-        update: read.next.value.update,
-      });
       continue;
     }
 

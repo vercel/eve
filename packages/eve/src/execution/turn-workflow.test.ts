@@ -891,6 +891,7 @@ describe("turnWorkflow", () => {
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
     const requestId = "turn-token:inbox:delivery:0";
     const workflowRequest = {
+      kind: "request",
       from: {
         callId: "call-1",
         execution: "blocking" as const,
@@ -910,7 +911,7 @@ describe("turnWorkflow", () => {
         prompt: "Approve deploy?",
       },
     };
-    definedHookPayloads.set("turn-token:inbox:request", [workflowRequest]);
+    definedHookPayloads.set("turn-token:inbox:workflow", [workflowRequest]);
     installInbox([
       {
         delivery: {
@@ -1027,8 +1028,9 @@ describe("turnWorkflow", () => {
       output: "done",
       subagentName: "research",
     };
-    definedHookPayloads.set("turn-token:inbox:request", [
+    definedHookPayloads.set("turn-token:inbox:workflow", [
       {
+        kind: "request",
         from: {
           callId: "call-1",
           execution: "blocking",
@@ -1048,6 +1050,7 @@ describe("turnWorkflow", () => {
         },
       },
       {
+        kind: "request",
         from: {
           callId: "call-1",
           execution: "blocking",
@@ -1062,9 +1065,8 @@ describe("turnWorkflow", () => {
         replyTo: "agent-reply",
         request: { kind: "agent-settled", result: childResult },
       },
-    ]);
-    definedHookPayloads.set("turn-token:inbox:outcome", [
       {
+        kind: "outcome",
         from: {
           callId: "call-1",
           execution: "blocking",
@@ -1079,7 +1081,7 @@ describe("turnWorkflow", () => {
         result: { output: childResult, status: "completed" },
       },
     ]);
-    installInbox([]);
+    installInbox([], { stayOpen: true });
     vi.mocked(dispatchCoordinationStep).mockResolvedValue({
       results: [],
       sessionState: dispatchedState,
@@ -1087,7 +1089,7 @@ describe("turnWorkflow", () => {
     });
     vi.mocked(applyTaskAgentRequest)
       .mockResolvedValueOnce({ serializedContext: {}, sessionState: invokedState })
-      .mockResolvedValueOnce({ serializedContext: {}, sessionState: settledState });
+      .mockResolvedValue({ serializedContext: {}, sessionState: settledState });
     vi.mocked(releaseAgentInvocationOwnerStep).mockResolvedValue({ sessionState: settledState });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -1119,6 +1121,12 @@ describe("turnWorkflow", () => {
       }),
       expect.objectContaining({
         ownerId: "run-1",
+        replyTo: "agent-reply",
+        request: { kind: "agent-settled", result: childResult },
+      }),
+      expect.objectContaining({
+        ownerId: "run-1",
+        replyTo: "run-1",
         request: { kind: "agent-settled", result: childResult },
       }),
     ]);

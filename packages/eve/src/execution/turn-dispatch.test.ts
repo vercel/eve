@@ -5,6 +5,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import { runTurnOwnedWorkflow } from "#execution/turn-workflow.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
@@ -26,6 +27,10 @@ vi.mock("./dispatch-turn-step.js", () => ({
 
 vi.mock("./forward-turn-delivery-step.js", () => ({
   forwardTurnDeliveryStep: vi.fn(),
+}));
+
+vi.mock("./turn-workflow.js", () => ({
+  runTurnOwnedWorkflow: vi.fn(),
 }));
 
 vi.mock("./workflow-steps.js", () => ({
@@ -312,7 +317,8 @@ describe("dispatchAndAwaitTurn", () => {
       serializedContext: { state: "start" },
       sessionState: state,
     });
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({ initialCancellation: { tasks: true } }),
     );
   });
@@ -352,7 +358,7 @@ describe("dispatchAndAwaitTurn", () => {
     expect(dispatchTurnStep).not.toHaveBeenCalled();
   });
 
-  it("hands an already-completed complex step to the child workflow", async () => {
+  it("runs coordination on the parent from an already-completed inline step", async () => {
     const state = createState("http:test");
     const result = {
       action: "park" as const,
@@ -382,7 +388,8 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         initialStep: {
           beforeStep: expect.objectContaining({ serializedContext: { state: "start" } }),
@@ -424,7 +431,7 @@ describe("dispatchAndAwaitTurn", () => {
     );
   });
 
-  it("carries inline cancellation into the continued child turn", async () => {
+  it("carries inline cancellation into the shared turn runner on the parent", async () => {
     const state = createState("http:test");
     vi.mocked(turnStep).mockImplementationOnce(async (input) => {
       await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
@@ -463,7 +470,8 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         initialCancellation: {},
         initialStep: expect.objectContaining({

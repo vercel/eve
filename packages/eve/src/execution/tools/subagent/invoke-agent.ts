@@ -109,7 +109,8 @@ export async function invokeAgent(
       const admitted = await admission;
       if (admitted.status === "rejected") throw new Error(admitted.reason);
     }
-    await resumeHookStep(owner.request, {
+    await resumeHookStep(owner.inbox, {
+      kind: "request",
       from: run,
       replyTo: replies.token,
       request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
@@ -127,7 +128,8 @@ export async function invokeAgent(
         );
         if (result !== undefined) {
           if (result.origin === "child") {
-            await resumeHookStep(owner.request, {
+            await resumeHookStep(owner.inbox, {
+              kind: "request",
               from: run,
               replyTo: replies.token,
               request: { kind: "agent-settled", result },
@@ -140,7 +142,8 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "subagent-input-request") {
-        await resumeHookStep(owner.request, {
+        await resumeHookStep(owner.inbox, {
+          kind: "request",
           from: run,
           replyTo: reply.childContinuationToken,
           request: {
@@ -156,13 +159,15 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "task-update") {
-        await resumeHookStep(owner.report, {
+        await resumeHookStep(owner.inbox, {
+          kind: "report",
           from: run,
           update: reply.message,
         });
         continue;
       }
-      await resumeHookStep(owner.request, {
+      await resumeHookStep(owner.inbox, {
+        kind: "request",
         from: run,
         replyTo: replies.token,
         request: { event: reply, kind: "authorization-request" },

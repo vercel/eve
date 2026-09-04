@@ -46,10 +46,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -105,10 +102,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -122,7 +116,8 @@ describe("background agent invocation routing", () => {
     expect(mocks.claimHookOwnership.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.resumeHook.mock.invocationCallOrder[0]!,
     );
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-request", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
@@ -172,10 +167,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -231,10 +223,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -242,7 +231,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("inline");
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-request", {
+    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
+      kind: "request",
       from: expect.objectContaining({ execution: "blocking", runId: "run-1" }),
       replyTo: "agent-reply",
       request: {
@@ -290,10 +280,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -302,7 +289,7 @@ describe("background agent invocation routing", () => {
     ).rejects.toEqual(failure.output);
     expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHook).not.toHaveBeenCalledWith(
-      "owner-request",
+      "owner-inbox",
       expect.objectContaining({ request: expect.objectContaining({ kind: "agent-settled" }) }),
     );
   });
@@ -377,10 +364,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -388,7 +372,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-request", {
+    expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
+      kind: "request",
       from,
       replyTo: "child-continuation",
       request: {
@@ -397,7 +382,8 @@ describe("background agent invocation routing", () => {
       },
       requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
     });
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-request", {
+    expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-inbox", {
+      kind: "request",
       from,
       replyTo: "child-continuation",
       request: {
@@ -464,10 +450,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -475,7 +458,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-request", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
@@ -483,7 +467,10 @@ describe("background agent invocation routing", () => {
         kind: "authorization-request",
       },
     });
-    expect(mocks.resumeHook).not.toHaveBeenCalledWith("owner-report", expect.anything());
+    expect(mocks.resumeHook).not.toHaveBeenCalledWith(
+      "owner-inbox",
+      expect.objectContaining({ kind: "report" }),
+    );
   });
 
   it("forwards task-owned child updates to the workflow tool report channel", async () => {
@@ -533,10 +520,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -544,7 +528,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-report", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "report",
       from,
       update: "Still working",
     });

@@ -10,10 +10,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
-  readonly admission: string;
-  readonly outcome: string;
-  readonly report: string;
-  readonly request: string;
+  readonly inbox: string;
 }
 
 /**
@@ -93,16 +90,16 @@ export interface WorkflowToolRunOutcomeMessage {
   readonly result: WorkflowToolRunOutcome;
 }
 
-export const workflowToolRunReportHook = defineHook<WorkflowToolRunReport>();
-export const workflowToolRunRequestHook = defineHook<WorkflowToolRunRequestMessage>();
-export const workflowToolRunOutcomeHook = defineHook<WorkflowToolRunOutcomeMessage>();
+export type WorkflowToolRunMessage =
+  | ({ readonly kind: "report" } & WorkflowToolRunReport)
+  | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
+  | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
+
+export const workflowToolRunHook = defineHook<WorkflowToolRunMessage>();
 
 export function deriveWorkflowToolRunOwner(inboxToken: string): WorkflowToolRunOwner {
   return {
-    admission: `${inboxToken}:admission`,
-    outcome: `${inboxToken}:outcome`,
-    report: `${inboxToken}:report`,
-    request: `${inboxToken}:request`,
+    inbox: `${inboxToken}:workflow`,
   };
 }
 

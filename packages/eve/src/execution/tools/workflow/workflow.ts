@@ -13,7 +13,7 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 
 const CANCEL_GRACE = "30s";
 
-/** Runs one authored workflow tool call and reports to its declared owner hooks. */
+/** Runs one authored workflow tool call and reports to its declared owner hook. */
 export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Promise<void> {
   "use workflow";
 
@@ -49,9 +49,13 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     }
 
     const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
-    await resumeHookStep(input.owner.outcome, message, {
-      ifPresent: outcome.status === "cancelled",
-    });
+    await resumeHookStep(
+      input.owner.inbox,
+      { kind: "outcome", ...message },
+      {
+        ifPresent: outcome.status === "cancelled",
+      },
+    );
   } finally {
     if (ownsInbox) await disposeHook(control.hook);
   }
