@@ -2,31 +2,26 @@ import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationUsage } from "#instrumentation/lifecycle.js";
 
-/** Applies eve's structural token usage attributes to an agent span. */
-export function setAgentUsage(
+/** Applies token usage using one structural or GenAI attribute namespace. */
+export function setSpanUsage(
   span: Span,
   usage: InstrumentationUsage,
-  options: { readonly includeGenAiDetails?: boolean } = {},
+  namespace: "agent" | "gen_ai",
 ): void {
+  const prefix = `${namespace}.usage`;
   if (usage.inputTokens !== undefined) {
-    span.setAttribute("agent.usage.input_tokens", usage.inputTokens);
+    span.setAttribute(`${prefix}.input_tokens`, usage.inputTokens);
   }
   if (usage.outputTokens !== undefined) {
-    span.setAttribute("agent.usage.output_tokens", usage.outputTokens);
+    span.setAttribute(`${prefix}.output_tokens`, usage.outputTokens);
   }
   const details = usage.inputTokenDetails;
   if (details?.cacheReadTokens !== undefined) {
-    if (options.includeGenAiDetails === false) {
-      span.setAttribute("agent.usage.cache_read_tokens", details.cacheReadTokens);
-    } else {
-      span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
-    }
+    const key = namespace === "agent" ? "cache_read_tokens" : "cache_read.input_tokens";
+    span.setAttribute(`${prefix}.${key}`, details.cacheReadTokens);
   }
   if (details?.cacheWriteTokens !== undefined) {
-    if (options.includeGenAiDetails === false) {
-      span.setAttribute("agent.usage.cache_write_tokens", details.cacheWriteTokens);
-    } else {
-      span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
-    }
+    const key = namespace === "agent" ? "cache_write_tokens" : "cache_write.input_tokens";
+    span.setAttribute(`${prefix}.${key}`, details.cacheWriteTokens);
   }
 }
