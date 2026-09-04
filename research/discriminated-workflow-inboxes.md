@@ -168,7 +168,8 @@ Snapshot schema and hydration belong to turn code. Restore after winning the
 active-turn claim, refresh the agent from the accepting deployment, and continue
 with the committed state. Perform this read inside the first execution step, before
 any model or tool effect; do not add a step just to return hydrated state to another
-step. An empty snapshot stream is valid only for the designated
+step. Returning the full snapshot from a hydration-only step would persist that
+large payload in step history. An empty snapshot stream is valid only for the designated
 initial event; that turn creates the initial session state. A follow-up that wins
 too early releases its claim and waits for bootstrap instead of initializing its
 own session or blocking the first turn.
@@ -258,6 +259,13 @@ a parent writable, a completion token, or a result-return address.
 `session` is required and resolved by trusted server code before `start()`. A turn
 does not need a resource-discovery step. HTTP payloads cannot supply these internal
 references or bypass resource authorization.
+
+Keep the full snapshot out of `TurnWorkflowInput`, including its submission payload.
+Workflow start inputs are persisted for every candidate, including candidates that
+only forward steering input. Passing a large snapshot would duplicate it into that
+history and increase serialization and transfer costs. Pass its immutable storage
+reference; the winning turn reads and uses the snapshot inside its first execution
+step.
 
 ```ts
 interface TurnWorkflowInput {
