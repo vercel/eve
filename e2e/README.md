@@ -131,7 +131,18 @@ the current producer must choose the old consumer's wire version, and the real
 old consumer must decode and buffer it. The eval then cancels the deliberately
 blocked turn and verifies that the old session runs the buffered follow-up.
 
-The eval redeploys from inside its test body: it mutates the agent source,
+`agent-inbox-upgrade/evals/inbox-upgrade.redeploy.eval.ts` uses published
+`eve@0.49.0`, whose parent dispatches later turns to the accepting deployment.
+It checks idle follow-up, a pending blocking-tool answer, cancellation, a
+background task after its initiating turn completes, and stream resumption.
+Execution markers record the deployment and workflow run: pending bodies must
+finish on their original deployment, while later turns use the checkout with
+the original session ID. A third deployment rolls back agent code while keeping
+the current runtime. Session expiry is disabled throughout the probe. This is
+the compatibility baseline for the unified inbox refactor; it does not exercise
+the proposed new owner topology or self-hosted executable retention.
+
+These evals redeploy from inside their test bodies: they mutate agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
 Because immutable deployment URLs never change what they serve, the eval
