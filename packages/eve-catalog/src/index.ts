@@ -327,13 +327,6 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "upstash-agentkit",
-    name: "Upstash AgentKit",
-    kind: "extension",
-    tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
-    surfaces: { scaffoldable: false, registry: true, gallery: true },
-  },
-  {
     slug: "file",
     name: "File memory",
     kind: "memory",
@@ -347,6 +340,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "memory",
     tagline:
       "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "upstash-agentkit",
+    name: "Upstash AgentKit",
+    kind: "memory",
+    tagline:
+      "Give your agents ranked recall and automatic capture on Upstash Redis, or a Redis backend for file memory.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {

@@ -256,6 +256,53 @@ describe("mcpChannel", () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized UTF-8 messages and input responses before starting work", async () => {
+    const createSession = vi.fn();
+    const channel = mcpChannel({ auth: none() });
+    const route = channel.routes[1]!;
+    if (route.transport === "websocket") throw new Error("expected HTTP route");
+
+    const oversizedStart = await route.handler(
+      mcpRequest({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          // 3 bytes per char: well under 64 Ki characters, over 64 KiB.
+          arguments: { message: "日".repeat(24 * 1_024) },
+          name: "agent_start",
+        },
+      }),
+      routeArgs(createSession),
+    );
+    await expect(jsonRpcResponse(oversizedStart)).resolves.toMatchObject({
+      result: {
+        content: [{ text: expect.stringContaining("Input validation error"), type: "text" }],
+        isError: true,
+      },
+    });
+
+    const oversizedUpdate = await route.handler(
+      mcpRequest({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: {
+            invocationId: "inv",
+            responses: [{ requestId: "r", text: "日".repeat(6 * 1_024) }],
+          },
+          name: "agent_update",
+        },
+      }),
+      routeArgs(createSession),
+    );
+    await expect(jsonRpcResponse(oversizedUpdate)).resolves.toMatchObject({
+      result: { isError: true },
+    });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("mounts OAuth resource metadata and augments auth failures", async () => {
     const channel = mcpChannel({
       auth: oauthResource(

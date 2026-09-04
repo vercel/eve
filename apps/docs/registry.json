@@ -169,24 +169,6 @@
       ]
     },
     {
-      "name": "extension/upstash-agentkit",
-      "type": "registry:item",
-      "title": "Upstash AgentKit",
-      "description": "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
-      "dependencies": ["@upstash/agentkit-eve-extension"],
-      "envVars": {
-        "UPSTASH_REDIS_REST_URL": "",
-        "UPSTASH_REDIS_REST_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/extensions/upstash-agentkit.ts",
-          "type": "registry:file",
-          "target": "agent/extensions/agentkit.ts"
-        }
-      ]
-    },
-    {
       "name": "memory/file",
       "type": "registry:item",
       "title": "File memory",
@@ -229,6 +211,29 @@
           "path": "registry/memory/supermemory.ts",
           "type": "registry:file",
           "target": "agent/memory/supermemory.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/upstash-agentkit",
+      "type": "registry:item",
+      "title": "Upstash AgentKit",
+      "description": "Give your agents ranked recall and automatic capture on Upstash Redis, or a Redis backend for file memory.",
+      "dependencies": ["@upstash/agentkit-eve", "@upstash/redis"],
+      "envVars": {
+        "UPSTASH_REDIS_REST_URL": "",
+        "UPSTASH_REDIS_REST_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.45.2"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/upstash-agentkit.ts",
+          "type": "registry:file",
+          "target": "agent/memory/upstash-agentkit.ts"
         }
       ]
     },
