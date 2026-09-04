@@ -51,7 +51,7 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-A project containing only several independently addressed root agents can use eve's hostless workspace layout:
+A project containing several independently addressed root agents can use eve's hostless multi-agent layout. Read [Project Structure](../../project-structure) first for the project model, CLI selection, ownership, and route topology:
 
 ```text
 my-project/
@@ -92,11 +92,18 @@ Vercel uses the generated output to configure these services:
 
 ## Verify the deployment
 
-Check the health route and connect the development TUI:
+For a standalone agent, check the health route and connect the development TUI at the deployment origin:
 
 ```bash
-curl https://your_agent.vercel.app/support/eve/v1/health
-eve dev https://your_agent.vercel.app/support
+curl https://your-agent.vercel.app/eve/v1/health
+eve dev https://your-agent.vercel.app
+```
+
+For a hostless multi-agent project, include the member name:
+
+```bash
+curl https://your-project.vercel.app/support/eve/v1/health
+eve dev https://your-project.vercel.app/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.

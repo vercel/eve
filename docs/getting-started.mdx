@@ -42,6 +42,14 @@ To initialize the agent with a different AI Gateway model or reasoning effort, p
 npx eve@latest init my-agent --model openai/gpt-5.6-terra --reasoning high
 ```
 
+To create several independently addressed root agents in one project, pass their names with `--agents`:
+
+```bash
+npx eve@latest init my-project --agents support,billing
+```
+
+This creates `agents/support/agent/` and `agents/billing/agent/` under one project root. See [Project Structure](./project-structure) for agent selection, ownership, routes, and deployment.
+
 ## Run the agent
 
 Choose **Start eve dev** after scaffolding, or run this from the project root:
@@ -54,7 +62,7 @@ This starts an interactive session where you can send messages to your agent.
 
 ## Project layout
 
-eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
+eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it. In a multi-agent project, each peer has the same authored shape under `agents/<name>/agent/`; see [Project Structure](./project-structure) for the project-level layout.
 
 ### Naming from paths
 
