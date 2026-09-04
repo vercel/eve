@@ -138,7 +138,20 @@ export default defineEval({
       await pendingBackground.respond([
         { requestId: backgroundRequest.requestId, optionId: "continue" },
       ]);
-      await requireTaskCompletion(t, pendingBackground, receipt.taskId, backgroundExecution);
+      const completedBackground = await requireTaskCompletion(
+        t,
+        pendingBackground,
+        receipt.taskId,
+        backgroundExecution,
+      );
+      const afterTask = await followCodeDeployment(
+        t,
+        completedBackground,
+        "aftertask",
+        NEW_MARKER,
+        [oldExecution],
+      );
+      await requireExecution(t, afterTask.execution, NEW_MARKER, newExecution.deploymentId);
 
       const fresh = await createSessionOnDeployment(t, sessions, newExecution, oldExecution);
 
@@ -364,7 +377,7 @@ async function requireTaskCompletion(
       const start = message.indexOf("{");
       if (start === -1) throw new Error("Completed task notification has no result.");
       await requireGateResult(t, JSON.parse(message.slice(start)), "background", expected);
-      return;
+      return session;
     }
     const live = t.target.watchTurn(session.sessionId!, {
       startIndex: requireStreamIndex(session),
