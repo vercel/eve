@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WORKFLOW_CLEANUP_STREAM_NAMESPACE } from "#execution/workflow-lifecycle-contract.js";
 
 import { cancelOwnedTask, executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
@@ -34,7 +35,21 @@ describe("task cancellation", () => {
     vi.resetAllMocks();
     vi.useFakeTimers();
     vi.mocked(sendTaskCommand).mockResolvedValue("delivered");
-    getRun.mockReturnValue({ status: Promise.resolve("completed") });
+    getRun.mockReturnValue({
+      getReadable: (options: { namespace?: string }) =>
+        new ReadableStream({
+          async start(controller) {
+            if (options.namespace === WORKFLOW_CLEANUP_STREAM_NAMESPACE) {
+              controller.enqueue({ released: true });
+            } else {
+              controller.enqueue(
+                await vi.mocked(readLatestTaskView)({ taskRunId: entry.taskRunId }),
+              );
+            }
+            controller.close();
+          },
+        }),
+    });
   });
 
   afterEach(() => {
@@ -82,7 +97,18 @@ describe("task cancellation", () => {
       status: "cancelled",
       taskId: entry.taskId,
     });
-    getRun.mockReturnValue({ status: Promise.resolve("running") });
+    getRun.mockReturnValue({
+      getReadable: (options: { namespace?: string }) =>
+        new ReadableStream({
+          async start(controller) {
+            if (options.namespace !== WORKFLOW_CLEANUP_STREAM_NAMESPACE) {
+              controller.enqueue(
+                await vi.mocked(readLatestTaskView)({ taskRunId: entry.taskRunId }),
+              );
+            }
+          },
+        }),
+    });
 
     const cancelled = cancelOwnedTask({ entry });
     await vi.runAllTimersAsync();

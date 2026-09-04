@@ -1,4 +1,5 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { publishWorkflowCleanupStep } from "#execution/workflow-lifecycle-step.js";
 
 import {
   createSessionCommandInbox,
@@ -35,6 +36,7 @@ export async function sessionCommandInboxWorkflow(input: {
     }
   } finally {
     await inbox.dispose();
+    await publishWorkflowCleanupStep();
   }
 }
 

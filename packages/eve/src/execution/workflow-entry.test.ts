@@ -30,6 +30,15 @@ import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import {
+  publishWorkflowCleanupStep,
+  publishWorkflowOwnershipStep,
+} from "#execution/workflow-lifecycle-step.js";
+
+vi.mock("#execution/workflow-lifecycle-step.js", () => ({
+  publishWorkflowOwnershipStep: vi.fn(),
+  publishWorkflowCleanupStep: vi.fn(),
+}));
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -234,7 +243,7 @@ describe("workflowEntry", () => {
     });
   });
 
-  it("claims command hooks while session creation is still pending", async () => {
+  it("acknowledges hook ownership while session creation is still pending", async () => {
     const sessionState = createBaseSessionState();
     let resolveSessionCreation:
       | ((result: ReturnType<typeof createSessionStepResultForMock>) => void)
@@ -255,6 +264,7 @@ describe("workflowEntry", () => {
     });
 
     const result = workflowEntry({
+      acknowledgeOwnership: true,
       input: { message: "hello there" },
       serializedContext: createSerializedContext(),
     });
@@ -264,6 +274,10 @@ describe("workflowEntry", () => {
     expect(authorizationGetConflict).toHaveBeenCalledOnce();
     expect(continuationGetConflict).toHaveBeenCalledOnce();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
+
+    await vi.waitFor(() =>
+      expect(publishWorkflowOwnershipStep).toHaveBeenCalledWith({ runId: "wrun_test_123" }),
+    );
 
     resolveSessionCreation?.(createSessionStepResultForMock(sessionState));
     await expect(result).resolves.toEqual({ output: "ok" });
@@ -384,12 +398,14 @@ describe("workflowEntry", () => {
 
   it("completes a parked session when reset retires it", async () => {
     const sessionState = createBaseSessionState();
+    const dispose = vi.fn();
     const serializedContext = {
       ...createSerializedContext(),
       "eve.sessionId": "wrun_test_123",
     };
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
+      stableHook: { dispose },
       deliveryHooks: [
         {
           token: "http:test",
@@ -423,6 +439,42 @@ describe("workflowEntry", () => {
     });
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+    expect(publishWorkflowCleanupStep).toHaveBeenCalledOnce();
+    expect(dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(publishWorkflowCleanupStep).mock.invocationCallOrder[0]!,
+    );
+    expect(vi.mocked(emitTerminalSessionCompletionStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(publishWorkflowCleanupStep).mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not signal completed cleanup when inbox disposal fails", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      stableHook: {
+        dispose: () => {
+          throw new Error("hook disposal failed");
+        },
+      },
+      deliveryHooks: [{ token: "http:test" }],
+      turnControls: [
+        turnResult({
+          action: "done",
+          output: "ok",
+          serializedContext: { ...createSerializedContext(), "eve.sessionId": "wrun_test_123" },
+          sessionState,
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toThrow();
+    expect(publishWorkflowCleanupStep).not.toHaveBeenCalled();
   });
 
   it("exits a conflicting initial continuation before dispatching the first turn", async () => {
@@ -442,6 +494,7 @@ describe("workflowEntry", () => {
 
     await expect(
       workflowEntry({
+        acknowledgeOwnership: true,
         activityCollectorRunId: "wrun_collector",
         continuationConflictCommand: {
           auth: null,
@@ -454,6 +507,7 @@ describe("workflowEntry", () => {
     ).resolves.toEqual({ output: "" });
 
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
+    expect(publishWorkflowOwnershipStep).toHaveBeenCalledWith({ runId: "wrun_owner" });
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
     expect(settleContinuationConflictStep).toHaveBeenCalledWith({

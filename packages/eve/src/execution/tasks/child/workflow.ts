@@ -1,4 +1,8 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import {
+  publishWorkflowCleanupStep,
+  publishWorkflowOwnershipStep,
+} from "#execution/workflow-lifecycle-step.js";
 
 import type { ActivityObserverConfig } from "#channel/types.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
@@ -107,10 +111,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       await claimHookOwnership(commands);
       ownsHook = true;
     } catch (error) {
-      if (isHookConflictError(error)) return;
+      if (isHookConflictError(error) && typeof error.conflictingRunId === "string") {
+        await publishWorkflowOwnershipStep({ runId: error.conflictingRunId });
+        return;
+      }
       throw error;
     }
 
+    await publishWorkflowOwnershipStep({ runId: getWorkflowMetadata().workflowRunId });
     await appendTaskViewStep({ activityObserver: input.activityObserver, view });
     while (true) {
       // Hook persistence does not mean the owner has consumed every report yet.
@@ -177,6 +185,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (ownsHook) {
       await workflowToolRunChannels.dispose();
       await disposeHook(commands);
+      await publishWorkflowCleanupStep();
     }
   }
 

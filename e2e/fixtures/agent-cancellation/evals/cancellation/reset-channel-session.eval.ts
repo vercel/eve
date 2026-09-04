@@ -37,7 +37,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
  * for a different workflow session.
  */
 export default defineEval({
-  tags: ["real-model"],
+  tags: ["session-inbox"],
   description: "Reset a custom-channel session without creating a model turn for /new.",
   timeoutMs: 240_000,
 

@@ -13,7 +13,6 @@ import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  waitForCommandHookOwner,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   startWorkflowOnCurrentDeployment,
@@ -293,12 +292,18 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).rejects.toBe(failure);
   });
 
-  it("waits for reset to release the stable command inbox", async () => {
-    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+  it("waits for reset completion without reading hook ownership", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
-    getRawHookByTokenMock.mockRejectedValue(
-      new HookNotFoundError(sessionCommandHookToken("session-1")),
+    const getReadable = vi.fn(
+      () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue({ released: true });
+            controller.close();
+          },
+        }),
     );
+    getRunMock.mockReturnValue({ getReadable });
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -311,7 +316,9 @@ describe("createWorkflowRuntime command dispatch", () => {
       reason: "User requested /new",
       version: 1,
     });
-    expect(getRawHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(getRawHookByTokenMock).not.toHaveBeenCalled();
+    expect(getRunMock).toHaveBeenCalledWith("session-1");
+    expect(getReadable).toHaveBeenCalledOnce();
   });
 });
 
@@ -350,28 +357,6 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     getRawHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
-  });
-});
-
-describe("waitForCommandHookOwner", () => {
-  it("resolves the winning run without hydrating hook metadata", async () => {
-    getRawHookByTokenMock.mockResolvedValue({
-      get metadata() {
-        throw new Error("Ownership must not read encrypted metadata.");
-      },
-      runId: "winning-run",
-    });
-
-    await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-  });
-
-  it("does not turn storage failures into missing ownership", async () => {
-    const failure = new Error("backing store unavailable");
-    getRawHookByTokenMock.mockRejectedValue(failure);
-
-    await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
-    expect(getRawHookByTokenMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -683,6 +668,52 @@ describe("createWorkflowRuntime#createSession", () => {
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
     expect(cancelRunMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the acknowledged owner for a local child's identity and event stream", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "candidate-run" });
+    const ownershipReadable = vi.fn(
+      () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue({ runId: "winning-run" });
+            controller.close();
+          },
+        }),
+    );
+    const eventReadable = vi.fn(
+      () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+    );
+    getRunMock.mockImplementation((runId) => ({
+      getReadable: runId === "candidate-run" ? ownershipReadable : eventReadable,
+    }));
+
+    const handle = await createWorkflowRuntime({
+      acknowledgeOwnership: true,
+      compiledArtifactsSource,
+    }).createSession({
+      adapter: { kind: "http" },
+      auth: null,
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    expect(handle.sessionId).toBe("winning-run");
+    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({ acknowledgeOwnership: true });
+    expect(ownershipReadable).toHaveBeenCalledOnce();
+    expect(eventReadable).not.toHaveBeenCalled();
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(getRawHookByTokenMock).not.toHaveBeenCalled();
+    await handle.events.getReader().read();
+    expect(getRunMock).toHaveBeenLastCalledWith("winning-run");
+    expect(eventReadable).toHaveBeenCalledOnce();
   });
 
   it("serializes the selected dynamic subagent config for the child workflow", async () => {
