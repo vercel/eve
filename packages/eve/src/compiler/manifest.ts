@@ -21,6 +21,7 @@ import type {
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
+import type { SlackAppManifestMetadata } from "#public/channels/slack/app-manifest.js";
 import type {
   InternalAgentDefinition,
   InternalAgentModelDefinition,
@@ -89,6 +90,7 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+  readonly slackAppManifest?: SlackAppManifestMetadata;
   readonly vercelConnect?: VercelConnectMetadata;
 }
 
@@ -504,6 +506,18 @@ const compiledVercelConnectMetadataSchema = z
   })
   .strict() satisfies z.ZodType<VercelConnectMetadata>;
 
+const compiledSlackAppManifestMetadataSchema = z
+  .object({
+    alwaysOnline: z.boolean().optional(),
+    backgroundColor: z.string().optional(),
+    botEvents: z.array(z.string()).readonly().optional(),
+    botScopes: z.array(z.string()).readonly().optional(),
+    description: z.string().optional(),
+    displayName: z.string().optional(),
+    longDescription: z.string().optional(),
+  })
+  .strict() satisfies z.ZodType<SlackAppManifestMetadata>;
+
 const compiledChannelDefinitionSchema = z
   .object({
     kind: z.literal("channel"),
@@ -516,6 +530,7 @@ const compiledChannelDefinitionSchema = z
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
     cors: compiledChannelCorsSchema.optional(),
+    slackAppManifest: compiledSlackAppManifestMetadataSchema.optional(),
     vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();

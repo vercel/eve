@@ -7,14 +7,19 @@ export const VERCEL_CONNECT_MANIFEST_SCHEMA_VERSION = 1;
 export const SLACK_APP_MANIFEST_FORMAT = "slack-app-manifest";
 
 export interface SlackAppManifest {
-  readonly display_information: { readonly name: string };
+  readonly display_information: {
+    readonly background_color?: string;
+    readonly description?: string;
+    readonly long_description?: string;
+    readonly name: string;
+  };
   readonly features: {
     readonly app_home: {
       readonly home_tab_enabled: false;
       readonly messages_tab_enabled: true;
       readonly messages_tab_read_only_enabled: false;
     };
-    readonly bot_user: { readonly display_name: string; readonly always_online: false };
+    readonly bot_user: { readonly display_name: string; readonly always_online: boolean };
   };
   readonly oauth_config: { readonly scopes: { readonly bot: readonly string[] } };
   readonly settings: {
@@ -153,27 +158,49 @@ export function buildSlackAppManifests(manifest: {
   readonly channelRoutes: {
     readonly effective: readonly Pick<
       CompiledAgentManifest["channelRoutes"]["effective"][number],
-      "adapterKind" | "logicalPath" | "name"
+      "adapterKind" | "logicalPath" | "name" | "slackAppManifest"
     >[];
   };
 }): ReadonlyMap<string, SlackAppManifest> {
   const manifests = new Map<string, SlackAppManifest>();
   for (const channel of manifest.channelRoutes.effective) {
     if (channel.adapterKind !== "slack") continue;
-    const name = channel.name.slice(0, 35);
+    const configuration = channel.slackAppManifest;
+    const name = (configuration?.displayName ?? channel.name).slice(0, 35);
+    const displayInformation: {
+      background_color?: string;
+      description?: string;
+      long_description?: string;
+      name: string;
+    } = { name };
+    if (configuration?.backgroundColor !== undefined) {
+      displayInformation.background_color = configuration.backgroundColor;
+    }
+    if (configuration?.description !== undefined) {
+      displayInformation.description = configuration.description;
+    }
+    if (configuration?.longDescription !== undefined) {
+      displayInformation.long_description = configuration.longDescription;
+    }
     manifests.set(slackAppManifestPath(channel.logicalPath), {
-      display_information: { name },
+      display_information: displayInformation,
       features: {
         app_home: {
           home_tab_enabled: false,
           messages_tab_enabled: true,
           messages_tab_read_only_enabled: false,
         },
-        bot_user: { display_name: name, always_online: false },
+        bot_user: { display_name: name, always_online: configuration?.alwaysOnline ?? false },
       },
-      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+      oauth_config: {
+        scopes: {
+          bot: unique(["app_mentions:read", "chat:write"], configuration?.botScopes),
+        },
+      },
       settings: {
-        event_subscriptions: { bot_events: ["app_mention"] },
+        event_subscriptions: {
+          bot_events: unique(["app_mention"], configuration?.botEvents),
+        },
         interactivity: { is_enabled: true },
         org_deploy_enabled: false,
         socket_mode_enabled: false,
@@ -186,6 +213,13 @@ export function buildSlackAppManifests(manifest: {
 
 export function slackAppManifestPath(logicalPath: string): string {
   return `${logicalPath.replace(/\.[^/.]+$/, "")}.slack-app-manifest.json`;
+}
+
+function unique(
+  baseline: readonly string[],
+  additional: readonly string[] = [],
+): readonly string[] {
+  return [...new Set([...baseline, ...additional])];
 }
 
 export function createVercelConnectManifest(input: {

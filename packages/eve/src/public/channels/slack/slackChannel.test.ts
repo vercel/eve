@@ -392,6 +392,32 @@ describe("slackChannel()", () => {
     expect(slackChannel({ credentials })).toMatchObject({ vercelConnect });
   });
 
+  it("preserves Slack bot configuration for compilation", () => {
+    expect(
+      slackChannel({
+        bot: {
+          alwaysOnline: true,
+          backgroundColor: "#000000",
+          description: "Answers support questions.",
+          longDescription: "Answers support questions using the team's knowledge base.",
+          name: "Support agent",
+        },
+        eventSubscriptions: ["message.channels"],
+        scopes: ["channels:history"],
+      }),
+    ).toMatchObject({
+      slackAppManifest: {
+        alwaysOnline: true,
+        backgroundColor: "#000000",
+        botEvents: ["message.channels"],
+        botScopes: ["channels:history"],
+        description: "Answers support questions.",
+        displayName: "Support agent",
+        longDescription: "Answers support questions using the team's knowledge base.",
+      },
+    });
+  });
+
   it("projects the durable audience into instrumentation metadata", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 

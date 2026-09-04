@@ -16,6 +16,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -652,6 +653,42 @@ describe("compileAgentManifest source graph", () => {
       expect.objectContaining({ code: "compile/channel-route-shadowed", severity: "warning" }),
     );
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
+  });
+
+  it("preserves Slack bot configuration on compiled channel routes", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/support.ts",
+        loadNamespace: async () => ({
+          default: slackChannel({
+            bot: {
+              alwaysOnline: true,
+              backgroundColor: "#000000",
+              description: "Answers support questions.",
+              longDescription: "Answers support questions using the team's knowledge base.",
+              name: "Support agent",
+            },
+            eventSubscriptions: ["message.channels"],
+            scopes: ["channels:history"],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    const support = compiled.channelRoutes.effective.find(
+      (channel) => channel.logicalPath === "channels/support.ts",
+    );
+    expect(support?.slackAppManifest).toEqual({
+      alwaysOnline: true,
+      backgroundColor: "#000000",
+      botEvents: ["message.channels"],
+      botScopes: ["channels:history"],
+      description: "Answers support questions.",
+      displayName: "Support agent",
+      longDescription: "Answers support questions using the team's knowledge base.",
+    });
   });
 
   it("rejects duplicate routes emitted by one selected channel", async () => {

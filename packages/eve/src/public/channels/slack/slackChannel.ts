@@ -603,9 +603,27 @@ export interface SlackChannelInternalEvents extends Omit<
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
 }
 
+export interface SlackBotConfig {
+  /** Whether the Slack bot always appears online. Defaults to `false`. */
+  readonly alwaysOnline?: boolean;
+  /** Hex color used behind the Slack app's information hovercard. */
+  readonly backgroundColor?: string;
+  /** Short Slack app description, up to 140 characters. */
+  readonly description?: string;
+  /** Longer Slack app description, up to 4,000 characters. */
+  readonly longDescription?: string;
+  /** Display name used for the Slack app and bot. */
+  readonly name?: string;
+}
+
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
-  readonly botName?: string;
+  /** Slack bot identity and presentation. */
+  readonly bot?: SlackBotConfig;
+  /** Additional Slack Events API bot events delivered to this channel. */
+  readonly eventSubscriptions?: readonly string[];
+  /** Additional Slack bot OAuth scopes required by this channel. */
+  readonly scopes?: readonly string[];
 
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
@@ -993,8 +1011,33 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     renderers: activityRenderers,
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
+  const slackAppManifest: {
+    alwaysOnline?: boolean;
+    backgroundColor?: string;
+    botEvents?: readonly string[];
+    botScopes?: readonly string[];
+    description?: string;
+    displayName?: string;
+    longDescription?: string;
+  } = {};
+  if (config.bot?.alwaysOnline !== undefined) {
+    slackAppManifest.alwaysOnline = config.bot.alwaysOnline;
+  }
+  if (config.bot?.backgroundColor !== undefined) {
+    slackAppManifest.backgroundColor = config.bot.backgroundColor;
+  }
+  if (config.bot?.description !== undefined) slackAppManifest.description = config.bot.description;
+  if (config.eventSubscriptions !== undefined) {
+    slackAppManifest.botEvents = config.eventSubscriptions;
+  }
+  if (config.bot?.longDescription !== undefined) {
+    slackAppManifest.longDescription = config.bot.longDescription;
+  }
+  if (config.bot?.name !== undefined) slackAppManifest.displayName = config.bot.name;
+  if (config.scopes !== undefined) slackAppManifest.botScopes = config.scopes;
   return Object.assign(channel, {
     vercelConnect: credentials?.vercelConnect,
+    slackAppManifest,
   });
 }
 
