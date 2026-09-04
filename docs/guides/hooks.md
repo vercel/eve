@@ -26,7 +26,43 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Stream-event handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+
+## Gate terminal response release
+
+Use `beforeResponseRelease` when application policy must inspect a completed response before eve
+releases its terminal completion to the channel:
+
+```ts title="agent/hooks/review.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  beforeResponseRelease(candidate) {
+    const questionIndex = candidate.history.messages.findLastIndex(
+      (message) => message.role === "user",
+    );
+    if (questionIndex < 0) return;
+    const attempt = candidate.history.messages.slice(questionIndex);
+
+    if (containsSensitiveData(attempt) && !containsRequiredApproval(attempt)) {
+      candidate.history.restoreTo(questionIndex);
+    }
+  },
+});
+```
+
+The hook receives candidate model history, terminal output, and `turnId`. Calling
+`candidate.history.restoreTo(index)` retains the exact history prefix before `index` and suppresses
+the withheld terminal `message.completed` event. If several hooks request restoration, eve retains
+the shortest requested prefix. If no hook requests restoration, eve keeps the candidate history and
+releases the terminal event.
+
+This is a logical history-restoration boundary, not a private execution environment. Earlier events
+have already run through channel handlers, the durable stream, memory, instrumentation, and ordinary
+hooks. Model providers, tools, external systems, sandboxes, subagents, and background tasks may also
+retain or continue acting on candidate content. The hook itself cannot durably pause for HITL; use a
+tool or workflow for durable human input, then inspect its model-visible record before response
+release.
 
 ## Scope side effects to a channel
 

@@ -70,6 +70,9 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly beforeResponseRelease?: Parameters<
+    typeof createToolLoopHarness
+  >[0]["beforeResponseRelease"];
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -107,6 +110,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     restoreHistoryTo: input.restoreHistoryTo,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
+    beforeResponseRelease: input.beforeResponseRelease,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,

@@ -6,7 +6,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { ContextContainer, contextStorage } from "./container.js";
-import { dispatchStreamEventHooks } from "./hook-lifecycle.js";
+import { dispatchBeforeResponseReleaseHooks, dispatchStreamEventHooks } from "./hook-lifecycle.js";
 import {
   BundleKey,
   ChannelKey,
@@ -51,6 +51,7 @@ function buildCtx(): ContextContainer {
 
 function hook(slug: string, hooks: Partial<ResolvedHookDefinition>): ResolvedHookDefinition {
   return {
+    beforeResponseRelease: hooks.beforeResponseRelease,
     events: hooks.events ?? {},
     exportName: undefined,
     logicalPath: `hooks/${slug}.ts`,
@@ -59,6 +60,31 @@ function hook(slug: string, hooks: Partial<ResolvedHookDefinition>): ResolvedHoo
     sourceKind: "module",
   };
 }
+
+describe("dispatchBeforeResponseReleaseHooks", () => {
+  it("runs every pre-release hook in order", async () => {
+    const calls: string[] = [];
+    const registry = createRuntimeHookRegistry([
+      hook("first", { beforeResponseRelease: async () => void calls.push("first") }),
+      hook("second", { beforeResponseRelease: async () => void calls.push("second") }),
+    ]);
+    const ctx = buildCtx();
+
+    await contextStorage.run(ctx, () =>
+      dispatchBeforeResponseReleaseHooks({
+        candidate: {
+          history: { messages: [], restoreTo: () => {} },
+          output: "candidate",
+          turnId: "turn_0",
+        },
+        ctx,
+        registry,
+      }),
+    );
+
+    expect(calls).toEqual(["first", "second"]);
+  });
+});
 
 describe("dispatchStreamEventHooks", () => {
   it("invokes typed then wildcard subscribers and propagates errors", async () => {

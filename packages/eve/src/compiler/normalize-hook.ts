@@ -21,6 +21,13 @@ export async function compileHookEntry(
     }),
     `Expected the hook export "${source.exportName ?? "default"}" from "${source.logicalPath}" to return an object.`,
   );
+  const beforeResponseRelease = loaded.beforeResponseRelease;
+  if (beforeResponseRelease !== undefined) {
+    expectFunction(
+      beforeResponseRelease,
+      `Expected the hook export "${source.exportName ?? "default"}" from "${source.logicalPath}" to provide a function for beforeResponseRelease.`,
+    );
+  }
   const events =
     loaded.events === undefined
       ? {}
