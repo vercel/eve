@@ -6,6 +6,7 @@ import {
   type ChannelResolveSession,
   type InternalChannelSource,
 } from "#channel/channel-operations.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -129,6 +130,8 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Appends the message to the chat's session as history without running a turn. Dropped when the chat has no session yet. */
+  readonly observe?: boolean;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -580,7 +583,12 @@ async function dispatchMessage(input: {
 
   try {
     const source = input.from(telegramContinuationTokenFromState(state));
-    if (replyInputResponses === undefined) {
+    if (result.observe === true) {
+      await (source as InternalChannelSource<TelegramChannelState>)[INTERNAL_CHANNEL_DELIVER](
+        { context: [contextBlock, ...channelContext], message: turnMessage, observe: true },
+        { auth: result.auth, state },
+      );
+    } else if (replyInputResponses === undefined) {
       await source.send(turnMessage, {
         auth: result.auth,
         context: [contextBlock, ...channelContext],
@@ -598,6 +606,10 @@ async function dispatchMessage(input: {
       );
     }
   } catch (error) {
+    if (result.observe === true && isRuntimeNoActiveSessionError(error)) {
+      log.debug("observed message dropped: chat has no session yet", { chatId: state.chatId });
+      return;
+    }
     log.error("message delivery failed", { error });
   }
 }

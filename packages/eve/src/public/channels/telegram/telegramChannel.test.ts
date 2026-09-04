@@ -323,6 +323,48 @@ describe("telegramChannel() inbound route", () => {
     expect(callback.send).toHaveBeenCalledWith("-1001::", expect.anything());
   });
 
+  it("delivers observed group messages as history without a turn", async () => {
+    const channel = telegramChannel({
+      api: { fetch: fakeTelegramFetch() },
+      botUsername: "testbot",
+      credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+      onMessage: (_ctx, message) => ({
+        auth: null,
+        observe: !isTelegramBotMentioned(message, "testbot"),
+      }),
+    });
+
+    const aside = await firePost(channel, {
+      message: {
+        message_id: 20,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "had a rough week",
+      },
+    });
+    expect(aside.send).toHaveBeenCalledTimes(1);
+    expect(aside.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(aside.send.mock.calls[0]![1]).toMatchObject({
+      message: "had a rough week",
+      observe: true,
+      state: { chatId: "-1001", conversationId: null },
+    });
+    expect((aside.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
+      "is_mentioned: false",
+    );
+
+    const mention = await firePost(channel, {
+      message: {
+        message_id: 21,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "@testbot what do you think?",
+      },
+    });
+    expect(mention.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(mention.send.mock.calls[0]![1]).not.toHaveProperty("observe");
+  });
+
   it("delivers Telegram callback queries as compact HITL input responses", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },

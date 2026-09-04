@@ -96,6 +96,13 @@ function messageRead(message: string): ScriptedRead {
   };
 }
 
+function observedRead(message: string): ScriptedRead {
+  return {
+    result: { done: false, value: { kind: "send", payload: { message, observe: true } } },
+    source: "session",
+  };
+}
+
 // Routing never runs in these tests: scripted reads stop at authorization
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
@@ -182,6 +189,79 @@ describe("nextTurnDelivery", () => {
     expect(bufferedDeliveries).toMatchObject([
       { kind: "deliver", payloads: [{ message: "deferred" }] },
     ]);
+  });
+
+  it("stays parked on observed deliveries until an addressed one arrives", async () => {
+    const inbox = createMockInbox([
+      observedRead("U1: had a rough week"),
+      observedRead("U2: same here"),
+      messageRead("@bot what do you think?"),
+    ]);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext: {},
+      sessionState,
+    }));
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      awaitAuthorizationCallbacks: false,
+      bufferedDeliveries,
+    });
+
+    expect(next.kind).toBe("turn");
+    if (next.kind !== "turn") throw new Error("unreachable");
+    expect(next.delivery.payloads).toEqual([
+      { message: "U1: had a rough week", observe: true },
+      { message: "U2: same here", observe: true },
+      { message: "@bot what do you think?" },
+    ]);
+    expect(bufferedDeliveries).toEqual([]);
+  });
+
+  it("does not wake a parked session for buffered observed deliveries alone", async () => {
+    const inbox = createMockInbox([authorizationRead()]);
+    const bufferedDeliveries: DeliverHookPayload[] = [
+      { kind: "deliver", payloads: [{ message: "aside", observe: true }] },
+    ];
+
+    const next = await nextTurnDelivery({ ...waitInput(inbox), bufferedDeliveries });
+
+    expect(next.kind).toBe("authorization");
+    expect(bufferedDeliveries).toHaveLength(1);
+  });
+
+  it("leaves observed history behind when a task delivery runs the turn", async () => {
+    const inbox = createMockInbox([]);
+    const observed: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "aside", observe: true }],
+    };
+    const task: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ task: { views: [] } }],
+      taskDeliveryId: "task-1:done",
+    };
+    const bufferedDeliveries: DeliverHookPayload[] = [observed, task];
+    vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext: {},
+      sessionState,
+    }));
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      awaitAuthorizationCallbacks: false,
+      bufferedDeliveries,
+    });
+
+    expect(next.kind).toBe("turn");
+    if (next.kind !== "turn") throw new Error("unreachable");
+    expect(next.delivery.taskDeliveryId).toBe("task-1:done");
+    expect(bufferedDeliveries).toEqual([observed]);
   });
 
   it("reports a closed authorization hook", async () => {

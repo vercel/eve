@@ -49,6 +49,27 @@ To pin a proactive session to a specific thread instead, pass `conversationId` o
 
 To customize auth or filtering, override `onMessage`. Return `title` alongside `auth` to set the title when the dispatch starts a run. Group privacy mode itself lives in BotFather, not here.
 
+Return `observe: true` to keep a group message as session history without answering it. The next mention then runs with the conversation that happened in between. Observed messages need a session to attach to, so the chat's first mention still starts one and earlier messages are dropped. Telegram delivers unaddressed group messages to the bot only when privacy mode is off in BotFather (`/setprivacy`) or the bot is a group admin.
+
+```ts
+import {
+  defaultTelegramAuth,
+  isTelegramBotMentioned,
+  telegramChannel,
+} from "eve/channels/telegram";
+
+telegramChannel({
+  botUsername: "my_bot",
+  onMessage: (ctx, message) => {
+    if (message.chat.type === "private") return { auth: defaultTelegramAuth(message) };
+    const addressed =
+      isTelegramBotMentioned(message, ctx.telegram.botUsername) ||
+      message.replyToMessage?.from?.isBot === true;
+    return { auth: defaultTelegramAuth(message), observe: !addressed };
+  },
+});
+```
+
 ### Delivery
 
 The default `message.completed` handler sends plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit are split across messages. Custom handlers use `channel.telegram`.

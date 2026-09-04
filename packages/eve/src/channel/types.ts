@@ -179,6 +179,8 @@ export interface DeliverPayload {
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  /** History-only delivery; see `SendPayload.observe`. */
+  readonly observe?: boolean;
   /** Framework-only task envelopes consumed before adapter/model delivery. */
   readonly task?: {
     /** Task HITL input-request batches for the parent's pre-model router. */

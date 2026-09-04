@@ -9,6 +9,11 @@ import {
   SessionInboxWireError,
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
+import {
+  bufferObservedDelivery,
+  hasAddressedDelivery,
+  isObserveOnlyDelivery,
+} from "#execution/deliver-payloads.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -154,16 +159,14 @@ async function waitForNextSessionAction(input: {
     return { kind: pendingSessionControl };
   }
 
-  while (
-    input.bufferedDeliveries[0] !== undefined &&
-    isCancelledTaskDelivery(input.bufferedDeliveries[0], input.cancelledTaskIds)
-  ) {
-    input.bufferedDeliveries.shift();
-  }
+  const live = input.bufferedDeliveries.filter(
+    (delivery) => !isCancelledTaskDelivery(delivery, input.cancelledTaskIds),
+  );
+  input.bufferedDeliveries.splice(0, input.bufferedDeliveries.length, ...live);
   if (
     input.deferDeliveries !== true &&
     !input.commandInbox.hasReadyAuthorization() &&
-    input.bufferedDeliveries.length > 0
+    hasAddressedDelivery(input.bufferedDeliveries)
   ) {
     return {
       delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
@@ -242,9 +245,15 @@ async function waitForNextSessionAction(input: {
       input.seenTaskDeliveries.add(deliveryId);
     }
 
+    // Observed deliveries only ever ride along with the next addressed one.
+    if (bufferObservedDelivery(input.bufferedDeliveries, decoded)) continue;
     if (input.deferDeliveries === true) {
       input.bufferedDeliveries.push(decoded);
       continue;
+    }
+    if (input.bufferedDeliveries.length > 0) {
+      input.bufferedDeliveries.push(decoded);
+      return { delivery: takeBufferedTurnDelivery(input.bufferedDeliveries), kind: "delivery" };
     }
     return { delivery: decoded, kind: "delivery" };
   }
@@ -268,12 +277,22 @@ function isCancelledTaskDeliveryId(
 }
 
 function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
+  const observed: DeliverHookPayload[] = [];
+  while (bufferedDeliveries[0] !== undefined && isObserveOnlyDelivery(bufferedDeliveries[0])) {
+    observed.push(bufferedDeliveries.shift()!);
+  }
   const first = bufferedDeliveries.shift();
   if (first === undefined) {
+    bufferedDeliveries.unshift(...observed);
     throw new Error("Cannot take a turn delivery from an empty buffer.");
   }
+  // Task deliveries settle on their own; observed history waits for a channel turn.
+  if (first.taskDeliveryId !== undefined) {
+    bufferedDeliveries.unshift(...observed);
+    return coalesceDeliveries([first]);
+  }
 
-  const turnDeliveries = [first];
+  const turnDeliveries = [...observed, first];
   let caller = first.caller;
   while (bufferedDeliveries.length > 0) {
     const next = bufferedDeliveries[0];

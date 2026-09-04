@@ -49,6 +49,14 @@ export interface SendPayload {
    * schema in conversation and task mode; mode only decides failure behavior.
    */
   readonly outputSchema?: JsonObject;
+  /**
+   * Appends `message` and `context` to the session as history without running
+   * a turn. eve buffers observed deliveries on the session and folds them, in
+   * arrival order, into the next delivery that does run a turn. Requires a
+   * session that already owns the address: an observed delivery never starts
+   * one and never steers an active turn.
+   */
+  readonly observe?: boolean;
 }
 
 /** Attaches an I/O-free handle to one exact durable session ID. */
