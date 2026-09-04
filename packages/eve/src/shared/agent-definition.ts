@@ -205,6 +205,16 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Maximum turn-model calls eve may run inside one durable Workflow step.
+   *
+   * Values greater than one reduce Workflow checkpoint overhead but widen the
+   * replay unit: if the Workflow step is interrupted, earlier model calls and
+   * inline tool executions in the same step may run again.
+   *
+   * @default 1
+   */
+  readonly maxModelCallsPerWorkflowStep?: number;
+  /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.
    *

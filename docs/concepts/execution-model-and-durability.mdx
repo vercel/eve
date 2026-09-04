@@ -11,9 +11,15 @@ Work nests in three levels:
 
 - **session**: the whole durable conversation or task. It's long-lived and can span many requests over days or weeks without losing context.
 - **turn**: one user message and all the work it triggers (model calls, tool calls, reasoning) until the agent produces its response.
-- **step**: a durable checkpoint inside a turn (one model call and the tool calls it makes).
+- **step**: a durable checkpoint inside a turn. By default, it contains one model call and the inline tool calls that follow it.
 
 Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
+
+The experimental
+[`maxModelCallsPerWorkflowStep`](../agent-config#workflow-checkpoint-batching)
+agent setting can group several sequential model-and-tool cycles into one
+Workflow step. This reduces checkpoint overhead but makes the entire group one
+replay unit.
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
@@ -58,7 +64,15 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
 
-There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
+With `experimental.maxModelCallsPerWorkflowStep` greater than `1`, an
+interrupted Workflow step can also repeat earlier model calls and inline tool
+executions from the same batch. Approval, input, blocking coordination, and
+background-task boundaries still force a checkpoint before eve waits or
+acknowledges the work.
+
+Durability itself needs no configuration. eve owns the workflow lifecycle, and
+sessions are durable by default; checkpoint batching is an explicit
+experimental opt-in.
 
 You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
 
