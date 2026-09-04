@@ -163,7 +163,7 @@ export default defineEval({
 
       const fresh = await createSessionOnDeployment(t, sessions, newExecution, oldExecution);
 
-      // Roll back authored code while retaining the runtime that understands both cohorts.
+      // Roll back authored code while retaining the current runtime.
       await writeMarker(OLD_MARKER);
       await fixture.deploy(fixture.currentPackage, "inbox-upgrade-code-rollback");
       let rollbackDeploymentId: string | undefined;

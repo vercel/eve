@@ -145,6 +145,14 @@ During alias propagation, bounded read-only turns may still reach a prior
 deployment. Every turn must keep the session usable; the probe then requires
 the new deployment and marker before accepting the code transition.
 
+The probe currently reproduces a real compatibility failure: after a published
+0.49.0 background task completes, the next user turn fails because the current
+runtime rejects its unversioned `eve.tasks` index. It retains that failure while
+checking rollback on independent sessions, then fails the eval. See the
+[spike findings](../research/discriminated-workflow-inboxes.md#published-consumer-compatibility-spike).
+Do not replace the assertion with an expected error or reset the session to make
+the upgrade pass.
+
 The historical workflow fixture stages a copy of the published package with
 its unusable `eve-source` conditions removed from `package.json`; those point
 to source files absent from npm and otherwise leave `eve/workflow` unresolved

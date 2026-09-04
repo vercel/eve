@@ -660,10 +660,50 @@ IDs to distinguish a resumed old body from a child using upgraded agent code.
 It covers idle follow-up and stream resumption, pending blocking and background
 answers, cancellation, new sessions, and agent-code rollback with the current
 runtime retained. Session expiry is disabled. Hosted execution belongs to the
-CI redeploy suite; adding this test does not establish a passing result.
+CI redeploy suite.
 
-This freezes behavior the legacy runner must preserve. It does not implement
-the unified topology or prove arbitrary state projections. Authorization
+The [2026-09-04 hosted run at `617b68328`](https://github.com/vercel/eve/actions/runs/33898147026/job/101106035153)
+found a baseline upgrade blocker before the unified topology is implemented:
+
+| Transition from published `0.49.0`                             | Observed result                                                                                                                                    |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Idle follow-up and saved stream cursor through current ingress | Same session ID; child executes current agent code on the accepting deployment; stream resumes.                                                    |
+| Answer a parked blocking workflow, then send another message   | Original body finishes on its original run/deployment; the later turn executes current code.                                                       |
+| Cancel a parked workflow, then send another message            | Cancellation is accepted; the next turn executes current code without a duplicate terminal boundary.                                               |
+| Answer a background task after its initiating turn ends        | Original body completes on its original run/deployment and its result reaches the session.                                                         |
+| Send the next user message to that task-owning session         | **Fails:** `turnStep` exhausts three retries and emits `session.failed` because `eve.tasks` has no version; the current reader requires version 2. |
+| Create a fresh session after the upgrade                       | Parent and first turn execute on the new deployment.                                                                                               |
+| Roll back authored code while retaining the current runtime    | Independent old and new task-free sessions preserve their IDs and execute the rolled-back code on a third deployment.                              |
+
+The eval fails overall. It preserves the background-session failure while
+finishing the independent rollback checks; 44 other assertions passed in this run.
+
+The published parent stores an unversioned task index. The
+[current reader](../packages/eve/src/tasks/session-index.ts) rejects it while
+[building turn context](../packages/eve/src/tasks/delivery-context.ts), before
+the requested tool runs. The outer turn-input version does not negotiate or
+migrate this state. Task completion is therefore insufficient evidence of an
+acceptable upgrade: the next ordinary message must also succeed, even when all
+tasks have already settled.
+
+This cannot be fixed by stamping `version: 2` alone. The
+[published reader](https://github.com/vercel/eve/blob/eve%400.49.0/packages/eve/src/tasks/session-index.ts)
+uses a strict unversioned schema and would reject that returned state. The
+compatibility boundary must preserve both parent-readable state and old task
+protocols, or execute this cohort on retained compatible code. Silently deleting
+the task index or requiring a reset is not acceptable. Keep the failing hosted
+probe as the first compatibility implementation gate; do not start replacing
+the owner topology while this baseline remains broken.
+
+The probe also established that alias propagation can route separate requests
+to different deployments after `/info` first reaches the new one. Each code
+transition uses bounded read-only turns and verifies actual execution provenance;
+every accepted turn must preserve the session. The historical build stages the
+published package with unusable source-only export conditions removed, without
+changing runtime code. Retained production artifacts remain necessary.
+
+This records behavior the legacy runner must preserve and a failure it must
+fix. It does not implement the unified topology or prove arbitrary state projections. Authorization
 callbacks, mixed-ingress conversation claims, remaining published cohorts, and
 self-hosted executable retention remain release gates. The existing dev-server
 generation scenarios cover live reload; their crash/restart case is skipped
