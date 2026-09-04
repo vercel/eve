@@ -1,6 +1,5 @@
 import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
-import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type {
   WorkflowToolRunOutcome,
   WorkflowToolRunOutcomeMessage,
@@ -18,45 +17,32 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   "use workflow";
 
   const control = openWorkflowToolRunControlInbox(input.hookToken);
-  let ownsInbox = false;
+  const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
+  const from = createWorkflowBodyRef(bodyInput);
+  const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
+    if (outcome.status === "completed") return outcome.output;
+    if (outcome.status === "failed") throw outcome.error;
+    throw control.signal.reason ?? new Error(outcome.reason ?? "Workflow tool run cancelled.");
+  });
+  const settled = body.catch(() => {});
+  let outcome: WorkflowToolRunOutcome;
   try {
-    try {
-      await claimHookOwnership(control.hook);
-      ownsInbox = true;
-    } catch (error) {
-      if (isHookConflictError(error)) return;
-      throw error;
+    outcome = { output: await Promise.race([body, control.cancelled]), status: "completed" };
+  } catch (error) {
+    if (!control.signal.aborted) {
+      outcome = { error: normalizeSerializableError(error), status: "failed" };
+    } else {
+      await Promise.race([settled, workflowSleep(CANCEL_GRACE)]);
+      outcome = { reason: control.reason(), status: "cancelled" };
     }
-
-    const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
-    const from = createWorkflowBodyRef(bodyInput);
-    const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
-      if (outcome.status === "completed") return outcome.output;
-      if (outcome.status === "failed") throw outcome.error;
-      throw control.signal.reason ?? new Error(outcome.reason ?? "Workflow tool run cancelled.");
-    });
-    const settled = body.catch(() => {});
-    let outcome: WorkflowToolRunOutcome;
-    try {
-      outcome = { output: await Promise.race([body, control.cancelled]), status: "completed" };
-    } catch (error) {
-      if (!control.signal.aborted) {
-        outcome = { error: normalizeSerializableError(error), status: "failed" };
-      } else {
-        await Promise.race([settled, workflowSleep(CANCEL_GRACE)]);
-        outcome = { reason: control.reason(), status: "cancelled" };
-      }
-    }
-
-    const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
-    await resumeHookStep(
-      input.owner.inbox,
-      { kind: "outcome", ...message },
-      {
-        ifPresent: outcome.status === "cancelled",
-      },
-    );
-  } finally {
-    if (ownsInbox) await disposeHook(control.hook);
   }
+
+  const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
+  await resumeHookStep(
+    input.owner.inbox,
+    { kind: "outcome", ...message },
+    {
+      ifPresent: outcome.status === "cancelled",
+    },
+  );
 }

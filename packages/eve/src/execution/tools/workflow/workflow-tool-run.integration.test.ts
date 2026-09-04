@@ -393,6 +393,7 @@ describe("workflow tools", () => {
 
         try {
           const workflowToolRunId = await waitForNewWorkflowToolRun(before);
+          await waitForHook({ runId: workflowToolRunId });
           const commandToken = sessionCommandHookToken(run.runId);
           await waitForHook(run, { token: commandToken });
           await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });

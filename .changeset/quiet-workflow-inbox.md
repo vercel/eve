@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Inline turns now handle workflow tools on the parent without starting an extra turn workflow. Workflow progress, input requests, and outcomes share one ordered inbox across inline turns, child turns, and background tasks.
+Inline turns now handle workflow tools on the parent through one ordered inbox for progress, input requests, and outcomes. Waiting workflow tools use a fresh cancellation token per dispatch attempt; a retried dispatch can start another run, so side effects need application idempotency.
