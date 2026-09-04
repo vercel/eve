@@ -4,9 +4,9 @@ import { lowerSkillMarkdown } from "#internal/helpers/markdown.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import {
-  classifySkillPackageEntry,
   classifySkillsDirectoryEntry,
   getDirectoryEntryType,
+  type DirectoryEntryType,
   getSupportedModuleBaseName,
   normalizeLogicalPath,
 } from "#discover/filesystem.js";
@@ -17,7 +17,11 @@ import {
   createSkillPackageSourceRef,
   type SkillSourceRef,
 } from "#discover/manifest.js";
-import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
+import {
+  createDiskProjectSource,
+  type ProjectSource,
+  type ProjectSourceEntry,
+} from "#discover/project-source.js";
 
 /**
  * Diagnostics emitted by skill discovery.
@@ -98,7 +102,7 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
   for (const entry of entries) {
     const discoveredSkill = await discoverOneSkill({
       entryName: entry.name,
-      entryType: getDirectoryEntryType(entry),
+      entryType: await getResolvedDirectoryEntryType(source, skillsDirectoryPath, entry),
       skillsDirectoryPath,
       skillsLogicalPath,
       source,
@@ -210,9 +214,13 @@ async function discoverPackagedSkill(input: {
   skillId: string | null;
 }> {
   const entries = await readSortedDirectoryEntries(input.source, input.skillRootPath);
-  const skillFileName = entries.find(
-    (entry) => entry.isFile() && entry.name.toLowerCase() === "skill.md",
-  )?.name;
+  const skillFileEntry = entries.find((entry) => entry.name.toLowerCase() === "skill.md");
+  const skillFileName =
+    skillFileEntry !== undefined &&
+    (await getResolvedDirectoryEntryType(input.source, input.skillRootPath, skillFileEntry)) ===
+      "file"
+      ? skillFileEntry.name
+      : undefined;
   const skillFilePath = join(input.skillRootPath, skillFileName ?? "SKILL.md");
   const logicalPath = normalizeLogicalPath(
     join(input.logicalSkillsPath, input.skillId, skillFileName ?? "SKILL.md"),
@@ -392,34 +400,48 @@ async function discoverSkillPackagePaths(
   referencesPath?: string;
   scriptsPath?: string;
 }> {
-  const entries = await source.readDirectory(skillRootPath);
+  const [assetsType, referencesType, scriptsType] = await Promise.all([
+    source.stat(join(skillRootPath, "assets")),
+    source.stat(join(skillRootPath, "references")),
+    source.stat(join(skillRootPath, "scripts")),
+  ]);
   const packagePaths: {
     assetsPath?: string;
     referencesPath?: string;
     scriptsPath?: string;
   } = {};
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
+  if (assetsType === "directory") {
+    packagePaths.assetsPath = join(skillRootPath, "assets");
+  }
 
-    switch (classifySkillPackageEntry(entry.name, getDirectoryEntryType(entry))) {
-      case "skill-assets-directory":
-        packagePaths.assetsPath = join(skillRootPath, entry.name);
-        break;
-      case "skill-references-directory":
-        packagePaths.referencesPath = join(skillRootPath, entry.name);
-        break;
-      case "skill-scripts-directory":
-        packagePaths.scriptsPath = join(skillRootPath, entry.name);
-        break;
-      default:
-        break;
-    }
+  if (referencesType === "directory") {
+    packagePaths.referencesPath = join(skillRootPath, "references");
+  }
+
+  if (scriptsType === "directory") {
+    packagePaths.scriptsPath = join(skillRootPath, "scripts");
   }
 
   return packagePaths;
+}
+
+async function getResolvedDirectoryEntryType(
+  source: ProjectSource,
+  directoryPath: string,
+  entry: ProjectSourceEntry,
+): Promise<DirectoryEntryType> {
+  const entryType = getDirectoryEntryType(entry);
+
+  if (entryType !== "other") {
+    return entryType;
+  }
+
+  const resolvedEntryType = await source.stat(join(directoryPath, entry.name));
+
+  return resolvedEntryType === "directory" || resolvedEntryType === "file"
+    ? resolvedEntryType
+    : "other";
 }
 
 function formatSkillDiscoveryError(skillFilePath: string, error: unknown): string {
