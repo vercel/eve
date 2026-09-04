@@ -201,7 +201,7 @@ For fully custom state machines, `authorization.required` and `authorization.com
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:
+`clientContext` adds client/page context to session history. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response and persists across tool steps and later turns, until compaction summarizes it or clear removes it. New context appends to the conversation without replacing earlier context. It does not dispatch a turn on its own. Pass it in the second argument to `send()` or `respond()`:
 
 ```tsx
 await agent.send("What should I do on this screen?", {

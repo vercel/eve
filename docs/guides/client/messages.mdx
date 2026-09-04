@@ -59,7 +59,7 @@ const { session, response } = await client.sessions.create({
 await response.result();
 ```
 
-`clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
+`clientContext` adds context before the delivery message. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. These messages persist in session history across tool steps and later turns, until compaction summarizes them or clear removes them. New client context appends to the conversation; it does not replace earlier context or dispatch a turn by itself.
 
 ## Send attachments
 

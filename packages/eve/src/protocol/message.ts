@@ -140,8 +140,8 @@ export interface RuntimeTraceContext {
  * `message` is either a plain text string or an AI SDK `UserContent`
  * array (mixing `text`, `image`, and `file` parts). Clients pass
  * multimodal attachments with the same shape AI SDK's `useChat`
- * `sendMessage({ files })` produces. `clientContext` is one-turn
- * client/page context; the channel converts it into internal model context.
+ * `sendMessage({ files })` produces. `clientContext` is
+ * client/page context appended to durable conversation history as user messages.
  */
 export type HandleMessageRequestBody =
   | {

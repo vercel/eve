@@ -5,21 +5,28 @@ const SECOND_CLIENT_CONTEXT_TOKEN = "clientctx-second-P9K4";
 const CLIENT_CONTEXT_TOKEN_PATTERN = /\bclientctx-[A-Za-z0-9-]+\b/g;
 
 /**
- * Core session-route runtime behavior: per-turn client context delivery.
+ * Core session-route runtime behavior: durable client context delivery.
  *
  * The first reply omits its context token. The second turn then asks the model
- * to enumerate the token currently visible, proving that only fresh context
- * reaches the model while ordinary session history remains durable.
+ * to enumerate the visible tokens, proving that earlier client context survives
+ * even when the assistant never repeated it in its reply.
  */
 export default defineEval({
   tags: ["real-model"],
-  description: "Session runtime smoke: client context stays turn-local.",
+  description: "Session runtime smoke: client context persists across turns.",
 
   async test(t) {
     const first = await t.send('Acknowledge this context with exactly "READY".', {
       clientContext: [`The client context token is ${FIRST_CLIENT_CONTEXT_TOKEN}.`],
     });
     first.messageIncludes("READY");
+    await t.require(
+      first.message ?? "",
+      satisfies<string>(
+        (message) => !message.includes(FIRST_CLIENT_CONTEXT_TOKEN),
+        "does not repeat the client context token in assistant history",
+      ),
+    );
 
     const second = await t.send(
       "Reply with every token beginning with clientctx- that is visible anywhere in your model input, one per line, and nothing else.",
@@ -41,8 +48,8 @@ export default defineEval({
     await t.require(
       tokens,
       satisfies<readonly string[]>(
-        (observed) => !observed.includes(FIRST_CLIENT_CONTEXT_TOKEN),
-        "does not contain the first turn's client context token",
+        (observed) => observed.filter((token) => token === FIRST_CLIENT_CONTEXT_TOKEN).length === 1,
+        "contains the first turn's client context token exactly once",
       ),
     );
   },

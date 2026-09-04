@@ -18,10 +18,26 @@ function makeObjectModel(provider: string, modelId = "test-model"): LanguageMode
 }
 
 describe("detectPromptCachePath", () => {
-  it("returns gateway-auto for any string model id", () => {
+  it("returns gateway-anthropic for Claude gateway model ids", () => {
     expect(detectPromptCachePath("anthropic/claude-sonnet-4-5")).toEqual({
+      kind: "gateway-anthropic",
+    });
+  });
+
+  it("recognizes resolved gateway models", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("gateway", "anthropic/claude-sonnet-4.6")),
+    ).toEqual({
+      kind: "gateway-anthropic",
+    });
+    expect(
+      detectPromptCachePath(makeObjectModel("gateway.language-model", "openai/gpt-5")),
+    ).toEqual({
       kind: "gateway-auto",
     });
+  });
+
+  it("returns gateway-auto for other string model ids", () => {
     expect(detectPromptCachePath("bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")).toEqual({
       kind: "gateway-auto",
     });
@@ -29,6 +45,23 @@ describe("detectPromptCachePath", () => {
       kind: "gateway-auto",
     });
     expect(detectPromptCachePath("openai/gpt-5")).toEqual({ kind: "gateway-auto" });
+  });
+
+  it.each([false, "auto"])("respects explicit gateway caching %j", (caching) => {
+    for (const model of [
+      "anthropic/claude-sonnet-4.6",
+      makeObjectModel("gateway", "anthropic/claude-sonnet-4.6"),
+    ]) {
+      expect(detectPromptCachePath(model, { gateway: { caching } })).toEqual({
+        kind: "gateway-auto",
+      });
+    }
+  });
+
+  it("does not infer Anthropic from another provider's model name", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("openai-compatible", "anthropic/claude-sonnet-4.6")),
+    ).toEqual({ kind: "none" });
   });
 
   it("returns anthropic-direct for a direct Anthropic provider instance", () => {

@@ -59,7 +59,7 @@ export interface EveAgentStoreSnapshot<TData> {
  *
  * `onEvent`, `onError`, `onFinish`, and `onSessionChange` are observe-only.
  * `prepareSend` runs before each turn is sent and may return a modified
- * {@link SendTurnPayload} (for example to attach one-turn client context).
+ * {@link SendTurnPayload} (for example to attach client context).
  */
 export interface EveAgentStoreCallbacks<TData> {
   readonly onError?: (error: Error) => void;

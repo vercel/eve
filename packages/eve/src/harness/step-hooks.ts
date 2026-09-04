@@ -174,7 +174,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       );
     }
 
-    if (input.cachePath.kind === "anthropic-direct" && input.marker) {
+    if (input.marker) {
       processed = applyConversationCacheControl([...messages], input.marker);
     }
 

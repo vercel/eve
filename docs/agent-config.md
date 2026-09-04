@@ -112,6 +112,21 @@ The `session.started` runtime identity does not include a model id for a
 dynamic agent. Each public `step.started` event reports the concrete `modelId`
 selected for that model call.
 
+## Prompt caching
+
+For `anthropic/claude-*` models through AI Gateway, eve adds explicit cache
+breakpoints to the tools, system prompt, and conversation. Direct Anthropic
+models use the same breakpoints. Dynamic skill announcements stay in system
+context across steps and turns; changing the announcement still changes that
+prefix.
+
+Other Gateway models use `gateway.caching: "auto"` by default. An explicit
+`modelOptions.providerOptions.gateway.caching` value takes precedence for
+Gateway models: `"auto"` delegates marker placement to Gateway, and `false`
+disables eve's injected markers and automatic caching. Cache hits still depend
+on the provider's minimum prompt length, cache lifetime, and unchanged prompt
+prefixes.
+
 ## Reasoning effort
 
 Set `reasoning` to control the model's reasoning effort through AI SDK's

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -1166,7 +1167,7 @@ describe("createToolLoopHarness", () => {
     const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
     // The volatile listing stays out of the system prompt (prompt cache) and
     // rides history as a labeled, framework-injected user message.
-    expect(instructions).toBe("You are a test assistant.");
+    expect(instructions).toMatchObject({ role: "system", content: "You are a test assistant." });
     expect(messages).toContainEqual({
       content: expect.stringContaining(
         '<agent id="ag_research:123456789012" name="research">waiting</agent>',
@@ -5054,7 +5055,9 @@ describe("createToolLoopHarness", () => {
     it("retries with the offending tool dropped and a one-shot system note", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         runtimeContext: {
-          "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
+          "test.attempt": JSON.stringify(input.modelInput.instructions).includes("has been removed")
+            ? "retry"
+            : "original",
         },
       }));
       declareTelemetry(
@@ -5671,7 +5674,7 @@ describe("createToolLoopHarness", () => {
       model: null,
       context: undefined,
     });
-    expect(stepResult.providerOptions).toEqual({ gateway: { caching: "auto" } });
+    expect(stepResult.providerOptions).toBeUndefined();
   });
 
   it("emits assistant/tool events in response order when a step completes after tool work", async () => {
@@ -8710,7 +8713,7 @@ describe("createToolLoopHarness", () => {
       },
       role: "user",
     });
-    expect(secondResult.session.history).not.toContainEqual({
+    expect(secondResult.session.history).toContainEqual({
       content: ephemeralContext,
       role: "user",
     });
@@ -10143,7 +10146,7 @@ describe("createToolLoopHarness", () => {
 
         return {
           instructions: structuredClone(settings.instructions),
-          messages: structuredClone(prepared.messages ?? call.messages),
+          messages: structuredClone(call.messages),
           providerOptions: structuredClone(prepared.providerOptions),
           tools: Object.entries(settings.tools ?? {}).map(([name, tool]) => ({
             description: structuredClone(tool.description),
@@ -10254,14 +10257,23 @@ describe("createToolLoopHarness", () => {
           ],
         },
       });
-      const runStep = createToolLoopHarness(config);
+      const ctx = new ContextContainer();
+      const announcement = "Available skills\n- receipts: Process receipts.";
+      ctx.setVirtualContext(PendingSkillAnnouncementKey, announcement);
+      const runStep = (
+        session: HarnessSession,
+        input?: Parameters<ReturnType<typeof createToolLoopHarness>>[1],
+      ) => contextStorage.run(ctx, () => createToolLoopHarness(config)(session, input));
 
       setupMockAgent(modelResults[0]!);
-      const firstStep = await runStep(session, { message: "Add 1 and 2." });
-      expect(firstStep.next).toBe(runStep);
+      const firstStep = await runStep(
+        session,
+        attachClientContext({ message: "Add 1 and 2." }, ["Client context:\nselected numbers"]),
+      );
+      expect(typeof firstStep.next).toBe("function");
 
       setupMockAgent(modelResults[1]!);
-      const secondStep = await runStep(firstStep.session);
+      const secondStep = await runStep(JSON.parse(JSON.stringify(firstStep.session)));
       expect(secondStep.next).toBeNull();
 
       setupMockAgent(modelResults[2]!);
@@ -10280,11 +10292,16 @@ describe("createToolLoopHarness", () => {
       expect(nextTurnPrompt.messages.slice(0, secondPrompt.messages.length)).toEqual(
         secondPrompt.messages,
       );
-      expect(modelCalls.map((call) => call.instructions)).toEqual([
-        "You are a test assistant.",
-        "You are a test assistant.",
-        "You are a test assistant.",
-      ]);
+      expect(modelCalls.map((call) => call.instructions)).toEqual(
+        Array.from({ length: 3 }, () => ({
+          role: "system",
+          content: `You are a test assistant.\n\n${announcement}`,
+          providerOptions: {
+            anthropic: { cacheControl: { type: "ephemeral" } },
+            bedrock: { cachePoint: { type: "default" } },
+          },
+        })),
+      );
       expect(firstPrompt.tools).toEqual([
         {
           description: "Adds numbers",
@@ -10296,7 +10313,10 @@ describe("createToolLoopHarness", () => {
           description: "Looks up a saved result",
           inputSchema: { type: "object" },
           name: "lookup",
-          providerOptions: undefined,
+          providerOptions: {
+            anthropic: { cacheControl: { type: "ephemeral" } },
+            bedrock: { cachePoint: { type: "default" } },
+          },
         },
       ]);
       expect(modelCalls.map((call) => call.tools)).toEqual([
@@ -10305,14 +10325,23 @@ describe("createToolLoopHarness", () => {
         firstPrompt.tools,
       ]);
       expect(modelCalls.map((call) => call.providerOptions)).toEqual([
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
+        undefined,
+        undefined,
+        undefined,
       ]);
       expect(modelCalls.map((call) => call.messages)).toEqual([
-        [{ content: "Add 1 and 2.", role: "user" }],
-        [{ content: "Add 1 and 2.", role: "user" }, toolCallMessage, toolResultMessage],
         [
+          { content: "Client context:\nselected numbers", role: "user" },
+          { content: "Add 1 and 2.", role: "user" },
+        ],
+        [
+          { content: "Client context:\nselected numbers", role: "user" },
+          { content: "Add 1 and 2.", role: "user" },
+          toolCallMessage,
+          toolResultMessage,
+        ],
+        [
+          { content: "Client context:\nselected numbers", role: "user" },
           { content: "Add 1 and 2.", role: "user" },
           toolCallMessage,
           toolResultMessage,
@@ -10381,11 +10410,11 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {
+    it("gateway-auto path: merges gateway.caching='auto' into providerOptions for other model ids", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
         mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+        resolveModel: vi.fn().mockResolvedValue("openai/gpt-5"),
         tools: new Map([
           [
             "add",
@@ -10461,66 +10490,73 @@ describe("createToolLoopHarness", () => {
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { order: ["anthropic", "bedrock"], caching: "auto" },
+        gateway: { order: ["anthropic", "bedrock"] },
       });
     });
 
-    it("gateway-auto path: respects author override of gateway.caching", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: {
-            id: "anthropic/claude-sonnet-4-5",
-            providerOptions: { gateway: { caching: false } },
-          },
-          system: "",
-          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
-        tools: new Map([
-          [
-            "add",
-            {
-              description: "Adds numbers",
-              execute: vi.fn(),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "add",
+    it.each([false, "auto"])(
+      "gateway-auto path: respects author override of gateway.caching=%j",
+      async (caching) => {
+        setupStopResult();
+        const session = createTestSession({
+          agent: {
+            modelReference: {
+              id: "anthropic/claude-sonnet-4-5",
+              providerOptions: { gateway: { caching } },
             },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
+            system: "",
+            tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+          },
+        });
+        const config: ToolLoopHarnessConfig = {
+          mode: "conversation",
+          resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+          tools: new Map([
+            [
+              "add",
+              {
+                description: "Adds numbers",
+                execute: vi.fn(),
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "add",
+              },
+            ],
+          ]),
+        };
+        const runStep = createToolLoopHarness(config);
+        await runStep(session, { message: "hi" });
 
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      // providerOptions is now returned by prepareStep, not set on the constructor
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: false },
-      });
-    });
+        const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+        // providerOptions is now returned by prepareStep, not set on the constructor
+        const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
+          agentCall?.prepareStep,
+        );
+        const stepResult = await prepareStep({
+          messages: [],
+          stepNumber: 0,
+          steps: [],
+          model: null,
+          context: undefined,
+        });
+        expect(stepResult.providerOptions).toEqual({
+          gateway: { caching },
+        });
+        expect(agentCall?.instructions).toBe("");
+        expect(
+          Object.values(agentCall?.tools ?? {}).every((tool) => tool.providerOptions === undefined),
+        ).toBe(true);
+      },
+    );
 
-    it("anthropic-direct path: adds prepareStep and marks the last tool", async () => {
+    it.each([
+      "anthropic/claude-sonnet-4-5",
+      { provider: "gateway", modelId: "anthropic/claude-sonnet-4-5", specificationVersion: "v3" },
+      { provider: "anthropic.messages", modelId: "claude-sonnet-4-5", specificationVersion: "v3" },
+    ])("marks system, tools, and conversation for %j", async (model) => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
         mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue({
-          provider: "anthropic.messages",
-          modelId: "claude-sonnet-4-5",
-          specificationVersion: "v3",
-        } as unknown as LanguageModel),
+        resolveModel: vi.fn().mockResolvedValue(model),
         tools: new Map([
           [
             "add",
@@ -10549,6 +10585,41 @@ describe("createToolLoopHarness", () => {
         anthropic: { cacheControl: { type: "ephemeral" } },
         bedrock: { cachePoint: { type: "default" } },
       });
+      expect(agentCall?.instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.",
+        providerOptions: lastTool?.providerOptions,
+      });
+      const prepareStep = getPrepareStep<
+        ModelMessage[],
+        { messages: ModelMessage[]; providerOptions?: unknown }
+      >(agentCall?.prepareStep);
+      const messages: ModelMessage[] = [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "working" },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call-1",
+              toolName: "add",
+              output: { type: "text", value: "42" },
+            },
+          ],
+        },
+      ];
+      const prepared = await prepareStep({
+        messages,
+        stepNumber: 0,
+        steps: [],
+        model: null,
+        context: undefined,
+      });
+      expect(prepared.messages[0]?.providerOptions).toBeUndefined();
+      expect(prepared.messages[1]?.providerOptions).toEqual(lastTool?.providerOptions);
+      expect(prepared.messages[2]?.providerOptions).toEqual(lastTool?.providerOptions);
+      expect(prepared.providerOptions).toBeUndefined();
     });
 
     it("anthropic-direct path: prepareStep marks last user and last assistant messages", async () => {
@@ -12130,6 +12201,36 @@ describe("createToolLoopHarness", () => {
       expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
     });
 
+    it.each([0, 1])(
+      "keeps dynamic skill announcements in system context throughout turn %i",
+      async (sequence) => {
+        setupMockAgent(defaultModelResult());
+        const config = createTestConfig("conversation");
+        const ctx = new ContextContainer();
+        const announcement = "Available skills\n- receipts: Process receipts.";
+        ctx.setVirtualContext(PendingSkillAnnouncementKey, announcement);
+        let session = setHarnessEmissionState(createTestSession(), {
+          sequence,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: `turn_${sequence}`,
+        });
+
+        for (const input of [{ message: "Hi" }, undefined, { message: "Again" }]) {
+          const result = await contextStorage.run(ctx, () =>
+            createToolLoopHarness(config)(session, input),
+          );
+          const { instructions, messages } = getLastAgentSettings();
+          expect(instructions).toEqual({
+            role: "system",
+            content: `You are a test assistant.\n\n${announcement}`,
+          });
+          expect(messages).not.toContainEqual({ role: "user", content: announcement });
+          session = result.session;
+        }
+      },
+    );
+
     it("persists context strings in session history as user messages", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
@@ -12147,11 +12248,12 @@ describe("createToolLoopHarness", () => {
       ]);
     });
 
-    it("does not replay ephemeral client context on later turns", async () => {
+    it("retains client context in the conversation prefix on later turns", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       let session = createTestSession();
 
+      const expectedContext: ModelMessage[] = [];
       for (const token of ["CTX-A", "CTX-B", "CTX-C"]) {
         const clientContext = `Client context:\n${token}`;
         const result = await runStep(
@@ -12163,8 +12265,9 @@ describe("createToolLoopHarness", () => {
             typeof message.content === "string" && message.content.startsWith("Client context:"),
         );
 
-        expect(visibleClientContext).toEqual([{ content: clientContext, role: "user" }]);
-        expect(result.session.history).not.toContainEqual({
+        expectedContext.push({ content: clientContext, role: "user" });
+        expect(visibleClientContext).toEqual(expectedContext);
+        expect(result.session.history).toContainEqual({
           content: clientContext,
           role: "user",
         });
@@ -12172,7 +12275,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("keeps ephemeral client context out of compaction and its token baseline", async () => {
+    it("includes client context in compaction and its token baseline", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
       vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);
       setupMockAgent({
@@ -12199,14 +12302,17 @@ describe("createToolLoopHarness", () => {
       );
       expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
         { content: "earlier", role: "user" },
+        { content: "Client context:\ncurrent", role: "user" },
         { content: "Hi", role: "user" },
       ]);
-      expect(result.session.history).not.toContainEqual({
+      expect(result.session.history).toContainEqual({
         content: "Client context:\ncurrent",
         role: "user",
       });
-      expect(result.session.compaction).not.toHaveProperty("lastKnownInputTokens");
-      expect(result.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
+      expect(result.session.compaction).toMatchObject({
+        lastKnownInputTokens: 321,
+        lastKnownPromptMessageCount: 3,
+      });
     });
 
     it("leaves instructions unchanged when no context is provided", async () => {

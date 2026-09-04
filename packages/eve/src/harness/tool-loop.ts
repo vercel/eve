@@ -934,11 +934,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // --- Turn preamble ------------------------------------------------------
 
     const clientContext = readClientContext(effectiveStepInput);
-    const ephemeralContextMessages: ModelMessage[] =
+    const preparedTurnInput: ModelMessage[] =
       clientContext === undefined || pending.deferredContext === true
         ? []
         : clientContext.map((content) => ({ content, role: "user" }));
-    const preparedTurnInput: ModelMessage[] = [];
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
         preparedTurnInput.push({ content: entry, role: "user" });
@@ -963,7 +962,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
         prepareMemoryPreamble(store, {
           history: pending.messages,
-          input: [...ephemeralContextMessages, ...preparedTurnInput],
+          input: preparedTurnInput,
           state: pending.session.state,
         });
       }
@@ -1061,17 +1060,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     messages = [...messages, ...preparedTurnInput];
 
-    const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
-      if (ephemeralContextMessages.length === 0) return [...durableMessages];
-
-      const insertionIndex = Math.max(0, durableMessages.length - preparedTurnInput.length);
-      return [
-        ...durableMessages.slice(0, insertionIndex),
-        ...ephemeralContextMessages,
-        ...durableMessages.slice(insertionIndex),
-      ];
-    };
-    let projectedMessages = projectHistory(createModelMessages(messages), session.state);
+    let projectedMessages = projectHistory(messages, session.state);
 
     // --- Model + tools ------------------------------------------------------
 
@@ -1104,8 +1093,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = resolvedModel.session;
     const model = resolvedModel.model;
 
-    const cachePath = detectPromptCachePath(model);
-    const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
+    const cachePath = detectPromptCachePath(
+      model,
+      requireSessionModelReference(session).providerOptions,
+    );
+    const marker =
+      cachePath.kind === "anthropic-direct" || cachePath.kind === "gateway-anthropic"
+        ? getAnthropicCacheMarker()
+        : undefined;
 
     // --- Compaction ---------------------------------------------------------
     //
@@ -1122,7 +1117,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages: [...messages],
       model,
       onCompaction: config.onCompaction,
-      promptMessages: createModelMessages(messages),
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
@@ -1132,9 +1126,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (compaction.compacted) {
       messages = compaction.messages;
     }
-    projectedMessages = normalizeModelMessages(
-      projectHistory(createModelMessages(messages), session.state),
-    );
+    projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
 
     if (emit) {
       await emitStepStarted(
@@ -1174,7 +1166,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(emissionState.sequence, skillAnnouncement);
+        currentMessages.addSystem({ role: "system", content: skillAnnouncement });
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
@@ -1203,7 +1195,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? [{ role: "system" as const, content: session.agent.system }]
         : [];
       const rawInstructions =
-        currentMessages.systemMessages.length > 0 || extraSystemEntry.length > 0
+        marker !== undefined ||
+        currentMessages.systemMessages.length > 0 ||
+        extraSystemEntry.length > 0
           ? [...extraSystemEntry, ...baseSystemEntry, ...currentMessages.systemMessages]
           : undefined;
       const markedInstructions =
@@ -1778,8 +1772,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
-      durableModelPromptMessageCount:
-        ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
+      durableModelPromptMessageCount: projectedMessages.length,
       promptMessages: messages,
       result,
       runStep,
@@ -3069,8 +3062,6 @@ async function maybeCompact(input: {
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
-  /** Model-visible prompt used only to decide whether durable history needs compaction. */
-  readonly promptMessages?: readonly ModelMessage[];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
@@ -3083,9 +3074,8 @@ async function maybeCompact(input: {
   const { emit, emissionState } = input;
   let messages = input.messages;
   let session = input.session;
-  const promptMessages = input.promptMessages ?? messages;
   const projectedPromptMessages =
-    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages;
+    input.historyProjector?.({ messages, state: session.state }) ?? messages;
   const needsSummary =
     input.force === true || shouldCompact(projectedPromptMessages, session.compaction);
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
