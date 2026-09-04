@@ -233,6 +233,27 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
   return tools;
 }
 
+export function getDynamicSubagentSelectionByName(
+  input: ContextReader,
+  name: string,
+): Exclude<DurableDynamicSubagentSelection, null> | undefined {
+  const effective = {
+    ...input.get(SessionDynamicSubagentSelectionsKey),
+    ...input.get(TurnDynamicSubagentSelectionsKey),
+  };
+  for (const resolverSelection of Object.values(effective)) {
+    const selections =
+      resolverSelection !== null && isDynamicSubagentMapSelection(resolverSelection)
+        ? Object.values(resolverSelection)
+        : [resolverSelection];
+    const match = selections.find(
+      (selection) => selection !== null && selection.prepared.name === name,
+    );
+    if (match !== undefined && match !== null) return match;
+  }
+  return undefined;
+}
+
 export function getDynamicSubagentSelection(
   input: ContextReader,
   nodeId: string,

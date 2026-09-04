@@ -330,19 +330,11 @@ describe("dynamic subagent lifecycle", () => {
     expect(buildDynamicSubagentTools(ctx)).toMatchObject([
       {
         name: "researcher__review",
-        runtimeAction: {
-          kind: "remote-agent-call",
-          nodeId: "subagents/researcher#review",
-          remoteAgentName: "researcher__review",
-        },
+        nodeId: "subagents/researcher#review",
       },
       {
         name: "researcher__triage",
-        runtimeAction: {
-          kind: "remote-agent-call",
-          nodeId: "subagents/researcher#triage",
-          remoteAgentName: "researcher__triage",
-        },
+        nodeId: "subagents/researcher#triage",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, "subagents/researcher#triage")).toMatchObject({
@@ -371,17 +363,13 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
 
     expect(buildDynamicSubagentTools(ctx)).toMatchObject([
       {
         name: "researcher__kind",
-        runtimeAction: {
-          nodeId: "subagents/researcher#kind",
-          remoteAgentName: "researcher__kind",
-        },
+        nodeId: "subagents/researcher#kind",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, "subagents/researcher#kind")).toMatchObject({
