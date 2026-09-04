@@ -317,7 +317,7 @@ export async function resolvePendingCoordination(input: {
     nextSession = removeWorkflowToolRun(
       clearProxyInputRequestsWhere(
         nextSession,
-        (route) => route.answerHook?.runId === record.runId,
+        (route) => route.inboxResponse?.address.ownerRunId === record.runId,
       ),
       record.callId,
     );

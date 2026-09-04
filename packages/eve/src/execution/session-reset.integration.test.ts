@@ -4,13 +4,13 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { clearActiveSandboxHandlesForTest } from "#execution/sandbox/active-handles.js";
-import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { startTestSession } from "#internal/testing/session.js";
+import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { captureTurnEvents } from "#internal/testing/events.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { start } from "#internal/workflow/runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
@@ -19,45 +19,68 @@ describe("session reset integration", () => {
   it("releases a parked continuation token and initializes a fresh sandbox", async () => {
     const continuationToken = "http:session-reset-immediate-reuse";
     const runtime = createWorkflowRuntime({
-      compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
     const sandboxes = createSessionSandboxHarness();
-    const first = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
-
-    try {
-      await waitForHook(first, { token: continuationToken });
-      await expect(sandboxes.open(first.runId)).resolves.toMatchObject({ id: "sandbox-1" });
-
-      await expect(
-        runtime.dispatchContinuation({
-          command: { kind: "reset", reason: "User requested /new" },
-          continuationToken,
-        }),
-      ).resolves.toEqual({ previousSessionId: first.runId, status: "reset" });
-
-      await expect(first.returnValue).resolves.toEqual([]);
-      await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
-
-      const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
+    const app = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "sandbox.ts",
+          loadNamespace: async () => ({
+            default: defineSandbox({
+              backend: sandboxes.definition.backend,
+              onSession: sandboxes.definition.onSession,
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const seed = {
+        input: { message: "hello" },
+        serializedContext: {
+          "eve.auth": null,
+          "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+          "eve.channel": { kind: "http", state: {} },
+          "eve.continuationToken": continuationToken,
+          "eve.mode": "conversation",
+        },
+      };
+      const first = await startTestSession(seed);
+      const firstEvents = captureTurnEvents(first);
       try {
-        await expect(waitForHook(second, { token: continuationToken })).resolves.toMatchObject({
-          runId: second.runId,
-        });
-        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: second.runId,
-        });
-        await expect(sandboxes.open(second.runId)).resolves.toMatchObject({ id: "sandbox-2" });
-        expect(sandboxes.initializedSessionIds).toEqual([first.runId, second.runId]);
-        expect(sandboxes.sessionKeys).toHaveLength(2);
-        expect(sandboxes.sessionKeys[0]).not.toBe(sandboxes.sessionKeys[1]);
+        await firstEvents.nextTurn();
+        await expect(sandboxes.open(first.sessionId)).resolves.toMatchObject({ id: "sandbox-1" });
+        await expect(
+          runtime.dispatchContinuation({
+            command: { kind: "reset", reason: "User requested /new" },
+            continuationToken,
+          }),
+        ).resolves.toEqual({ previousSessionId: first.sessionId, status: "reset" });
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+
+        const second = await startTestSession(seed);
+        const secondEvents = captureTurnEvents(second);
+        try {
+          await secondEvents.nextTurn();
+          await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
+            sessionId: second.sessionId,
+          });
+          await expect(sandboxes.open(second.sessionId)).resolves.toMatchObject({
+            id: "sandbox-2",
+          });
+          expect(sandboxes.initializedSessionIds).toEqual([first.sessionId, second.sessionId]);
+          expect(sandboxes.sessionKeys).toHaveLength(2);
+          expect(sandboxes.sessionKeys[0]).not.toBe(sandboxes.sessionKeys[1]);
+        } finally {
+          secondEvents.dispose();
+          await second.cancel();
+        }
       } finally {
-        await second.cancel();
+        firstEvents.dispose();
+        clearActiveSandboxHandlesForTest();
       }
-    } finally {
-      const status = await first.status;
-      if (status === "pending" || status === "running") await first.cancel();
-      clearActiveSandboxHandlesForTest();
-    }
+    });
   });
 });
 
@@ -103,6 +126,7 @@ function createSessionSandboxHarness() {
   };
 
   return {
+    definition,
     initializedSessionIds,
     sessionKeys,
     async open(sessionId: string) {

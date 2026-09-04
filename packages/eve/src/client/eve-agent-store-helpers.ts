@@ -1,6 +1,17 @@
 import type { SendTurnPayload } from "#client/types.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
+
+export function replaceProjectionEvent(
+  events: readonly EveAgentReducerEvent[],
+  predicate: (event: EveAgentReducerEvent) => boolean,
+  replacement: EveAgentReducerEvent,
+): readonly EveAgentReducerEvent[] {
+  const index = events.findIndex(predicate);
+  if (index === -1) return [...events, replacement];
+  return [...events.slice(0, index), replacement, ...events.slice(index + 1)];
+}
 
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
@@ -30,6 +41,19 @@ export function assertExclusiveTurnInput(input: SendTurnPayload): void {
   const hasResponses = input.inputResponses !== undefined;
   if (hasMessage === hasResponses) {
     throw new Error("A turn requires exactly one of message or inputResponses.");
+  }
+}
+
+export function assertActiveTurnInput(input: SendTurnPayload): void {
+  assertExclusiveTurnInput(input);
+  if (
+    input.inputResponses === undefined &&
+    input.turnPolicy !== "steer" &&
+    input.turnPolicy !== "interrupt"
+  ) {
+    throw new Error(
+      'An in-flight follow-up requires input responses or a message with turnPolicy: "steer" or "interrupt".',
+    );
   }
 }
 

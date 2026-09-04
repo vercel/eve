@@ -1,3 +1,4 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type { ActivityObserverConfig } from "#channel/types.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
@@ -44,7 +45,7 @@ export async function startSubagent(input: {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
-  readonly parentContinuationToken: string | undefined;
+  readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
@@ -92,7 +93,7 @@ export async function startSubagent(input: {
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
-        parentContinuationToken: input.parentContinuationToken,
+        parentReplyTo: input.parentReplyTo,
         parentTraceContext,
         activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
@@ -111,7 +112,7 @@ export async function startSubagent(input: {
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
+        parentReplyTo: input.parentReplyTo,
         parentTraceContext,
         activityObserver: input.activityObserver,
         session: input.session,

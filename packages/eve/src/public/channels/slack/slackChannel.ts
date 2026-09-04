@@ -1,3 +1,7 @@
+import {
+  slackSessionAnchor,
+  resolveSlackSessionAnchor,
+} from "#public/channels/slack/session-anchor.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { UserContent } from "ai";
@@ -194,6 +198,8 @@ export interface SlackPendingApprovalCard {
 }
 
 export interface SlackChannelState {
+  /** Initial proactive card, published only after its session alias is owned. */
+  initialMessage?: SlackInitialMessage;
   /** Audience classification captured before the session is dispatched. */
   audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */
@@ -575,6 +581,7 @@ export interface SlackChannelEvents {
   readonly "turn.failed"?: SlackEventHandler<"turn.failed">;
   readonly "turn.completed"?: SlackEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: SlackEventHandler<"turn.cancelled">;
+  readonly "turn.interrupted"?: SlackEventHandler<"turn.interrupted">;
   readonly "session.failed"?: SlackSessionFailedHandler;
   readonly "session.completed"?: SlackEventHandler<"session.completed">;
   readonly "session.waiting"?: SlackEventHandler<"session.waiting">;
@@ -789,6 +796,10 @@ function rebuildSlackContext(
     botToken: credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
+    sessionAnchor:
+      session.continuation === undefined
+        ? undefined
+        : slackSessionAnchor(state.channelId ?? "", session.continuation.token),
     installationTeamId: state.installationTeamId ?? undefined,
     teamId: state.teamId ?? undefined,
     onThreadTsChanged(ts) {
@@ -867,6 +878,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       }
     },
     async "turn.started"(data, channel, ctx) {
+      const initialMessage = channel.state.initialMessage;
+      if (initialMessage !== undefined) {
+        await channel.thread.post(initialMessage);
+        delete channel.state.initialMessage;
+      }
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
       if (triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
@@ -1037,24 +1053,7 @@ async function receiveOnSlack(
     );
   }
 
-  let threadTs = requestedThreadTs;
-  if (initialMessage) {
-    const { thread } = buildSlackBinding({
-      botToken: deps.credentials?.botToken,
-      channelId,
-      threadTs: "",
-      installationTeamId,
-      teamId: deps.teamId,
-    });
-    const postInput: { card: CardElement; fallbackText?: string } = {
-      card: initialMessage.card,
-    };
-    if (initialMessage.fallbackText !== undefined) {
-      postInput.fallbackText = initialMessage.fallbackText;
-    }
-    const posted = await thread.post(postInput);
-    threadTs = posted.id;
-  }
+  const threadTs = requestedThreadTs;
 
   // Threadless proactive runs need distinct identities until their first
   // Slack post supplies the real thread timestamp and re-keys the session.
@@ -1070,6 +1069,7 @@ async function receiveOnSlack(
     teamId: string | null;
     triggeringUserId: string | null;
     audience?: ChannelAudience;
+    initialMessage?: SlackInitialMessage;
   } = {
     channelId,
     installationTeamId: installationTeamId ?? null,
@@ -1080,6 +1080,7 @@ async function receiveOnSlack(
   if (audience !== undefined) {
     state.audience = audience;
   }
+  if (initialMessage !== undefined) state.initialMessage = initialMessage;
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
@@ -1317,6 +1318,17 @@ async function dispatchSlackMessage(input: {
   };
   const sessionOperations = bindSlackSessionOperations({
     address: continuationToken,
+    recoverSession:
+      input.message.raw.thread_ts === undefined
+        ? undefined
+        : () =>
+            resolveSlackSessionAnchor({
+              appId: input.appId,
+              channelId: input.message.channelId,
+              threadTs: input.message.threadTs,
+              request: slack.request,
+              resolveSession: input.resolveSession,
+            }).then((anchor) => anchor?.session),
     defaultAuth:
       author === undefined
         ? null
@@ -1398,20 +1410,59 @@ async function dispatchSlackEvent(input: {
         ? input.envelope.team_id
         : undefined;
   const waitUntilTasks: Promise<unknown>[] = [];
-  const sourceFor = (target: SlackSessionTarget) =>
-    input.from(slackContinuationToken(target.channelId, target.threadTs));
+  const slack = buildSlackWorkspaceHandle({
+    botToken: input.credentials?.botToken,
+    installationTeamId: input.installationTeamId,
+    teamId,
+  });
+  const operationsFor = (
+    target: SlackSessionTarget & Pick<SlackReceiveTarget, "installationTeamId" | "audience">,
+  ) =>
+    bindSlackSessionOperations({
+      address: slackContinuationToken(target.channelId, target.threadTs),
+      from: input.from,
+      resolveSession: input.resolveSession,
+      recoverSession: async () =>
+        (
+          await resolveSlackSessionAnchor({
+            appId:
+              typeof input.envelope.api_app_id === "string" ? input.envelope.api_app_id : undefined,
+            channelId: target.channelId,
+            threadTs: target.threadTs,
+            request: slack.request,
+            resolveSession: input.resolveSession,
+          })
+        )?.session,
+      defaultAuth: null,
+      state: {
+        channelId: target.channelId,
+        threadTs: target.threadTs,
+        installationTeamId: target.installationTeamId ?? input.installationTeamId ?? null,
+        ...(target.audience === undefined
+          ? {}
+          : { audience: normalizeChannelAudience(target.audience) }),
+        teamId: teamId ?? null,
+        triggeringUserId:
+          typeof input.envelope.event.user === "string" ? input.envelope.event.user : null,
+      },
+    });
   const ctx: SlackInboundEventContext = {
-    cancel: ({ target, turnId }) => sourceFor(target).cancel({ turnId }),
-    clear: ({ target }) => sourceFor(target).clear(),
-    compact: ({ target }) => sourceFor(target).compact(),
+    cancel: async ({ target, turnId }) => operationsFor(target).cancel({ turnId }),
+    clear: async ({ target }) => operationsFor(target).clear(),
+    compact: async ({ target }) => operationsFor(target).compact(),
     envelope: input.envelope,
-    reset: ({ reason, target }) => sourceFor(target).reset({ reason }),
-    resolveSession: ({ target }) =>
-      input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
-    respond: (inputResponses, { auth, target }) =>
-      sourceFor(target).respond(inputResponses, { auth }),
-    send: (message, { auth, target, title }) =>
-      receiveOnSlack(
+    reset: async ({ reason, target }) => operationsFor(target).reset({ reason }),
+    resolveSession: ({ target }) => operationsFor(target).resolveSession(),
+    respond: async (inputResponses, { auth, target }) =>
+      operationsFor(target).respond(inputResponses, { auth }),
+    send: async (message, { auth, target, title }) => {
+      if (target.threadTs !== undefined) {
+        return await operationsFor({ ...target, threadTs: target.threadTs }).send(message, {
+          auth,
+          title,
+        });
+      }
+      return await receiveOnSlack(
         { auth, message, target, title },
         {
           from: input.from,
@@ -1422,12 +1473,9 @@ async function dispatchSlackEvent(input: {
             ? { triggeringUserId: input.envelope.event.user }
             : {}),
         },
-      ),
-    slack: buildSlackWorkspaceHandle({
-      botToken: input.credentials?.botToken,
-      installationTeamId: input.installationTeamId,
-      teamId,
-    }),
+      );
+    },
+    slack,
     waitUntil(task) {
       waitUntilTasks.push(task);
     },

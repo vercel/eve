@@ -1,10 +1,7 @@
 import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
-import {
-  handleConnectionCallbackRequest,
-  handleLegacyConnectionCallbackRequest,
-} from "#execution/connections/callback-route.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
@@ -31,7 +28,6 @@ import {
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
-  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
@@ -121,8 +117,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
-      GET(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
-      POST(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
       POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),

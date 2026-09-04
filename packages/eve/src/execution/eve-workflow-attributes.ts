@@ -50,7 +50,7 @@ import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
- * `createSessionStep` so workflow bodies don't have to load the bundle
+ * `createSessionState` so workflow bodies don't have to load the bundle
  * themselves. Equal to the framework root sentinel (`"__root__"`) for
  * the root agent; equal to the subagent's compiled node id for
  * delegated child runs. Tag emitters use this to populate
@@ -253,7 +253,7 @@ function collectMessageText(message: unknown): string | undefined {
 
 /**
  * Builds the `$eve.*` attribute payload for a top-level session run
- * (`workflowEntry` invoked without an `eve.parentSession`).
+ * without a delegated parent session.
  *
  * `$eve.root` is intentionally omitted — the session row IS the root,
  * so its own `workflowRunId` already identifies the chain root.
@@ -278,7 +278,7 @@ export function buildSessionAttributes(input: {
 
 /**
  * Builds the `$eve.*` attribute payload for a delegated subagent root
- * run (`workflowEntry` invoked with an `eve.parentSession`).
+ * run with a delegated parent session.
  *
  * `$eve.root` carries the **root** session id so the dashboard can
  * group every descendant under one query: `search($eve.root=<root>)`

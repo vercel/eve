@@ -56,7 +56,13 @@ import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
-import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
+import type {
+  HandleSettlementFn,
+  HarnessEmitFn,
+  HarnessToolMap,
+  StepInput,
+} from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 export {
   getHarnessEmissionState,
@@ -80,7 +86,7 @@ export async function emitTurnPreamble(
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
-  const turnId = `turn_${state.sequence}`;
+  const turnId = state.nextTurnId ?? `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
@@ -137,26 +143,23 @@ interface FailedStepPayload {
  * `turn.failed`. Both terminal and recoverable paths diverge only on
  * the third event (`session.failed` vs. `session.waiting`).
  */
-async function emitStepAndTurnFailed(
-  emitFn: HarnessEmitFn,
+function failedStepEvents(
   state: HarnessEmissionState,
   input: FailedStepPayload,
-): Promise<void> {
-  await emitFn(
+): UnstampedMessageStreamEvent[] {
+  return [
     createStepFailedEvent({
       ...input,
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,
     }),
-  );
-  await emitFn(
     createTurnFailedEvent({
       ...input,
       sequence: state.sequence,
       turnId: state.turnId,
     }),
-  );
+  ];
 }
 
 /**
@@ -172,9 +175,14 @@ export async function emitFailedStep(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly sessionId: string },
+  handleSettlement?: HandleSettlementFn,
 ): Promise<void> {
-  await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionFailedEvent(input));
+  await settleEmission(
+    emitFn,
+    state,
+    [...failedStepEvents(state, input), createSessionFailedEvent(input)],
+    handleSettlement,
+  );
 }
 
 /**
@@ -185,16 +193,14 @@ export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly continuationToken: string },
+  handleSettlement?: HandleSettlementFn,
 ): Promise<HarnessEmissionState> {
-  await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent());
-
-  return {
-    sessionStarted: state.sessionStarted,
-    sequence: state.sequence + 1,
-    stepIndex: 0,
-    turnId: "",
-  };
+  return settleEmission(
+    emitFn,
+    state,
+    [...failedStepEvents(state, input), createSessionWaitingEvent()],
+    handleSettlement,
+  );
 }
 
 /**
@@ -215,26 +221,42 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  handleSettlement?: HandleSettlementFn,
+  precedingEvents: readonly UnstampedMessageStreamEvent[] = [],
 ): Promise<HarnessEmissionState> {
-  await emitFn(
-    createTurnCompletedEvent({
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
+  return settleEmission(
+    emitFn,
+    state,
+    [
+      ...precedingEvents,
+      createTurnCompletedEvent({
+        sequence: state.sequence,
+        turnId: state.turnId,
+      }),
+      mode === "conversation" ? createSessionWaitingEvent() : createSessionCompletedEvent(),
+    ],
+    handleSettlement,
   );
+}
 
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
-
-  return {
-    sessionStarted: state.sessionStarted,
-    sequence: state.sequence + 1,
+async function settleEmission(
+  emit: HarnessEmitFn,
+  before: HarnessEmissionState,
+  events: readonly UnstampedMessageStreamEvent[],
+  handleSettlement?: HandleSettlementFn,
+): Promise<HarnessEmissionState> {
+  const emissionAfter: HarnessEmissionState = {
+    sessionStarted: before.sessionStarted,
+    sequence: before.sequence + 1,
     stepIndex: 0,
     turnId: "",
   };
+  if (handleSettlement !== undefined) {
+    await handleSettlement({ events, emissionAfter });
+    return before;
+  }
+  for (const event of events) await emit(event);
+  return emissionAfter;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { activeTurnId } from "#harness/active-turn-id.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
@@ -10,6 +11,6 @@ export async function prepareWorkflowPreambleTrace(input: {
   return await input.instrumentation?.preparePreamble({
     sequence: input.emissionState.sequence,
     sessionStarted: input.emissionState.sessionStarted,
-    turnId: `turn_${input.emissionState.sequence}`,
+    turnId: activeTurnId(input.emissionState),
   });
 }

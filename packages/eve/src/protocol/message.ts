@@ -588,6 +588,15 @@ export interface TurnCancelledStreamEvent {
   type: "turn.cancelled";
 }
 
+/** Ends an interrupted turn before its replacement starts, without an idle boundary. */
+export interface TurnInterruptedStreamEvent {
+  data: {
+    sequence: number;
+    turnId: string;
+  };
+  type: "turn.interrupted";
+}
+
 /**
  * Stream event emitted after the durable model-message history is cleared.
  * The session itself and its non-message state remain active.
@@ -761,6 +770,7 @@ export type UnstampedMessageStreamEvent =
   | StepFailedStreamEvent
   | StepStartedStreamEvent
   | TurnCancelledStreamEvent
+  | TurnInterruptedStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
   | TurnStartedStreamEvent;
@@ -1582,6 +1592,14 @@ export function createTurnCancelledEvent(input: {
     },
     type: "turn.cancelled",
   };
+}
+
+/** Creates the settlement event for a turn replaced by an interrupting submission. */
+export function createTurnInterruptedEvent(input: {
+  readonly sequence: number;
+  readonly turnId: string;
+}): TurnInterruptedStreamEvent {
+  return { data: { sequence: input.sequence, turnId: input.turnId }, type: "turn.interrupted" };
 }
 
 /** Creates the `context.cleared` event for one manual history clear. */

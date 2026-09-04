@@ -1,4 +1,5 @@
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { sendSubagentReply } from "#subagents/reply.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
@@ -56,7 +57,7 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
 
     await forwardSubagentInputRequestStep({
       hookPayload,
-      parentContinuationToken: state.parentContinuationToken,
+      parentReplyTo: state.parentReplyTo,
     });
   },
 };
@@ -79,19 +80,19 @@ async function forwardSubagentAuthorizationEvent(
       kind: "subagent-authorization-event",
       subagentName: state.subagentName,
     },
-    parentContinuationToken: state.parentContinuationToken,
+    parentReplyTo: state.parentReplyTo,
   });
 }
 
 /** Forwards one child authorization event to its active parent turn. */
 async function forwardSubagentAuthorizationEventStep(input: {
   readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly parentContinuationToken: string;
+  readonly parentReplyTo: ReplyTarget;
 }): Promise<void> {
   "use step";
 
   try {
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    await sendSubagentReply(input.parentReplyTo, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();
     log.warn("failed to forward subagent authorization event to parent", {
@@ -99,7 +100,6 @@ async function forwardSubagentAuthorizationEventStep(input: {
       childSessionId: input.hookPayload.childSessionId,
       errorId,
       eventType: input.hookPayload.event.type,
-      parentContinuationToken: input.parentContinuationToken,
       subagentName: input.hookPayload.subagentName,
       error,
     });
@@ -113,12 +113,12 @@ async function forwardSubagentAuthorizationEventStep(input: {
  */
 async function forwardSubagentInputRequestStep(input: {
   readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly parentContinuationToken: string;
+  readonly parentReplyTo: ReplyTarget;
 }): Promise<void> {
   "use step";
 
   try {
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    await sendSubagentReply(input.parentReplyTo, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();
     log.warn("failed to forward proxied HITL batch to parent", {
@@ -126,7 +126,6 @@ async function forwardSubagentInputRequestStep(input: {
       childContinuationToken: input.hookPayload.childContinuationToken,
       childSessionId: input.hookPayload.childSessionId,
       errorId,
-      parentContinuationToken: input.parentContinuationToken,
       subagentName: input.hookPayload.subagentName,
       error,
     });

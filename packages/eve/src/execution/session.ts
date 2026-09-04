@@ -1,4 +1,4 @@
-import type { DurableSession } from "#execution/durable-session-store.js";
+import type { DurableSession } from "#execution/session/state.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type {
   HarnessSession,

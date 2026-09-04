@@ -9,7 +9,7 @@ import {
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/background.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/workflow-tool/background.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";

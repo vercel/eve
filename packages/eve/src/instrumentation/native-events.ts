@@ -63,6 +63,7 @@ export function createInstrumentationHandleEvent(
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
     if (
       event.type === "turn.cancelled" ||
+      event.type === "turn.interrupted" ||
       event.type === "turn.completed" ||
       event.type === "turn.failed" ||
       event.type === "session.completed" ||
@@ -83,12 +84,13 @@ export function createInstrumentationHandleEvent(
           hooks,
           includeTurn:
             event.type === "turn.cancelled" ||
+            event.type === "turn.interrupted" ||
             event.type === "turn.completed" ||
             event.type === "turn.failed",
           outcome:
             event.type === "turn.failed" || event.type === "session.failed"
               ? "failed"
-              : event.type === "turn.cancelled"
+              : event.type === "turn.cancelled" || event.type === "turn.interrupted"
                 ? "cancelled"
                 : "completed",
         });
@@ -336,6 +338,7 @@ function toLifecycleEvent(
       };
     case "turn.completed":
     case "turn.cancelled":
+    case "turn.interrupted":
       return {
         idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
         sessionId: input.sessionId,

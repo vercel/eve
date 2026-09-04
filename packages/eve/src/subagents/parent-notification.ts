@@ -21,27 +21,25 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { sendSubagentReply } from "#subagents/reply.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
 /**
- * Resumes the parent driver's hook with a delegated subagent result.
+ * Delivers a delegated subagent result to its recorded parent address.
  * No-op for root sessions.
  *
  * `usage` — the completed child's session-total token spend — is
  * attached to success results so the caller can attribute the
  * subagent's tokens. Error results never carry usage.
  */
-export async function notifyDelegatedParentStep(input: {
+export async function notifyDelegatedParent(input: {
   readonly result: RuntimeSubagentChildResult | undefined;
   readonly serializedContext: Record<string, unknown>;
   readonly usage?: TokenUsage;
 }): Promise<void> {
-  "use step";
-
   if (input.result === undefined) {
     return;
   }
@@ -53,8 +51,7 @@ export async function notifyDelegatedParentStep(input: {
     return;
   }
 
-  const parentContinuationToken = String(adapter.state?.parentContinuationToken ?? "");
-  if (parentContinuationToken === "") {
+  if (!isSubagentAdapterState(adapter.state)) {
     return;
   }
 
@@ -70,13 +67,13 @@ export async function notifyDelegatedParentStep(input: {
           usage: input.usage,
         };
 
-  await resumeHook(parentContinuationToken, {
+  await sendSubagentReply(adapter.state.parentReplyTo, {
     kind: "runtime-action-result",
     results: [result],
   });
 }
 
-/** Settled turn payload forwarded from the driver to the caller. */
+/** Settled turn payload delivered by its owning finalizer. */
 export interface SettledTurnNotification {
   readonly output: unknown;
   readonly isError?: boolean;
@@ -100,14 +97,12 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
  * an {@link AgentTurnOutcome} so the caller never infers lifecycle from
  * success or error codes.
  */
-export async function notifyTurnCallerStep(input: {
+export async function notifyTurnCaller(input: {
   readonly caller: TurnCaller | undefined;
   readonly lifecycle: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
 }): Promise<void> {
-  "use step";
-
   if (input.caller === undefined) {
     return;
   }
@@ -128,17 +123,16 @@ export async function notifyTurnCallerStep(input: {
     return;
   }
 
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await sendSettledTurnReply(input.caller.replyTo, result);
 }
 
 /** Settles a workflow-owned caller after the child turn is cooperatively cancelled. */
-export async function notifyCancelledTaskCallerStep(input: {
+export async function notifyCancelledTaskCaller(input: {
   readonly caller: TurnCaller | undefined;
+  readonly lifecycle?: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly usage?: TokenUsage;
 }): Promise<void> {
-  "use step";
-
   if (input.caller === undefined) return;
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
   const error = {
@@ -151,7 +145,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     kind: "subagent-result",
     origin: "child",
     outcome: {
-      kind: "parked",
+      kind: input.lifecycle ?? "parked",
       result: { kind: "cancelled" },
       usageDelta,
     },
@@ -167,7 +161,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     });
     return;
   }
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await sendSettledTurnReply(input.caller.replyTo, result);
 }
 
 function createSettledTurnResult(input: {
@@ -217,11 +211,9 @@ function createSettledTurnResult(input: {
 }
 
 /** Resolves the caller that created a delegated conversation session. */
-export async function resolveInitialTurnCallerStep(input: {
+export async function resolveInitialTurnCaller(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Promise<TurnCaller | undefined> {
-  "use step";
-
   const callbackValue = input.serializedContext[SessionCallbackKey.name];
   if (callbackValue !== undefined) {
     const parsed = parseSessionCallback(callbackValue);
@@ -238,7 +230,7 @@ export async function resolveInitialTurnCallerStep(input: {
         url: parsed.callback.url,
       },
       subagentName: parsed.callback.subagentName,
-      taskId: parsed.callback.taskId ?? readTaskIdFromInboxToken(parsed.callback.token),
+      taskId: parsed.callback.taskId,
     };
   }
 
@@ -250,19 +242,17 @@ export async function resolveInitialTurnCallerStep(input: {
 
   return {
     callId: adapter.state.callId,
-    replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
+    replyTo: adapter.state.parentReplyTo,
     subagentName: adapter.state.subagentName,
-    taskId: adapter.state.taskId ?? readTaskIdFromInboxToken(adapter.state.parentContinuationToken),
+    taskId: adapter.state.taskId,
   };
 }
 
 /** Rebinds child event forwarding to the caller that owns the next accepted turn. */
-export async function bindTurnCallerContextStep(input: {
+export async function bindTurnCallerContext(input: {
   readonly caller: TurnCaller | undefined;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {
-  "use step";
-
   const caller = input.caller;
   if (caller === undefined) return input.serializedContext;
   const withActivity =
@@ -297,7 +287,7 @@ export async function bindTurnCallerContextStep(input: {
   const nextState: Record<string, unknown> = {
     ...stateWithoutTaskId,
     callId: caller.callId,
-    parentContinuationToken: caller.replyTo.token,
+    parentReplyTo: caller.replyTo,
     subagentName: caller.subagentName,
   };
   if (caller.taskId !== undefined) nextState.taskId = caller.taskId;
@@ -359,12 +349,12 @@ async function postCallbackPayload(input: {
   }
 }
 
-async function resumeSettledTurnHook(
-  token: string,
+async function sendSettledTurnReply(
+  target: ReplyTarget,
   result: RuntimeSubagentChildResult,
 ): Promise<void> {
   try {
-    await resumeHook(token, {
+    await sendSubagentReply(target, {
       kind: "runtime-action-result",
       results: [result],
     });
@@ -375,7 +365,6 @@ async function resumeSettledTurnHook(
 
     log.warn("turn caller hook no longer exists", {
       callId: result.callId,
-      callerToken: token,
     });
   }
 }

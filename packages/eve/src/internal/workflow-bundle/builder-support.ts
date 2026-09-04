@@ -227,7 +227,7 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
 }
 
 /**
- * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * `workflow` resolves to the compiled SDK workflow entry. A `workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
  * build here rather than the driver later.
  */
@@ -251,10 +251,7 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         return undefined;
       }
 
-      return resolveFirstExistingPath([
-        join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-        join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
-      ]);
+      return resolveCompiledPath(workingDir, "@workflow/core-body/index.js");
     },
   };
 }
@@ -269,17 +266,11 @@ export function createEvePackageImportsPlugin(
       const compiledSubpath = source.match(/^#compiled\/(.+)$/)?.[1];
 
       if (compiledSubpath !== undefined) {
-        if (options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js") {
-          return resolveFirstExistingPath([
-            join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-            join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
-          ]);
-        }
-
-        return resolveFirstExistingPath([
-          join(workingDir, ".generated", "compiled", compiledSubpath),
-          join(workingDir, "dist", "src", "compiled", compiledSubpath),
-        ]);
+        const subpath =
+          options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js"
+            ? "@workflow/core-body/index.js"
+            : compiledSubpath;
+        return resolveCompiledPath(workingDir, subpath);
       }
 
       const sourceSubpath = source.match(/^#(.+)\.js$/)?.[1];
@@ -296,6 +287,13 @@ export function createEvePackageImportsPlugin(
       );
     },
   };
+}
+
+function resolveCompiledPath(workingDir: string, subpath: string) {
+  return resolveFirstExistingPath([
+    join(workingDir, ".generated", "compiled", subpath),
+    join(workingDir, "dist", "src", "compiled", subpath),
+  ]);
 }
 
 export function createWorkflowTransformPlugin(input: {

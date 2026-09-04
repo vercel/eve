@@ -167,6 +167,7 @@ export interface TwilioChannelEvents {
   readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
   readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;
+  readonly "turn.interrupted"?: TwilioEventHandler<"turn.interrupted">;
   readonly "session.failed"?: TwilioSessionFailedHandler;
   readonly "session.completed"?: TwilioEventHandler<"session.completed">;
   readonly "session.waiting"?: TwilioEventHandler<"session.waiting">;

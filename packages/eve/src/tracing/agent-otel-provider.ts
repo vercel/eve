@@ -1,3 +1,4 @@
+import { readGatewayCost } from "#tracing/gateway-cost.js";
 import {
   ROOT_CONTEXT,
   SpanKind,
@@ -270,7 +271,11 @@ export function createAgentOtelInstrumentation(
   };
 
   const onTurnTerminal = async (event: InstrumentationTurnTerminalEvent): Promise<void> => {
-    if (event.type === "turn.cancelled" || event.type === "turn.failed") {
+    if (
+      event.type === "turn.cancelled" ||
+      event.type === "turn.interrupted" ||
+      event.type === "turn.failed"
+    ) {
       await actions.deleteForTurn(event.sessionId, event.turnId);
     }
     await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
@@ -531,6 +536,7 @@ export function createAgentOtelInstrumentation(
         "session.waiting": onSessionTransition,
         ...tools.events,
         "turn.cancelled": onTurnTerminal,
+        "turn.interrupted": onTurnTerminal,
         "turn.completed": onTurnTerminal,
         "turn.failed": onTurnTerminal,
         "turn.started": onTurnStarted,
@@ -630,43 +636,6 @@ function takeSpanState<T>(
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
-}
-
-/**
- * Extracts cost data from a step result's provider metadata. Only Vercel AI
- * Gateway reports it (`providerMetadata.gateway`): raw inference cost, the
- * gateway's surcharged total, the input/output split, and the generation id
- * for dashboard reconciliation. Values arrive as USD strings; anything
- * missing or non-numeric is skipped, so non-gateway providers get nothing.
- */
-function readGatewayCost(
-  providerMetadata: Readonly<Record<string, unknown>>,
-): Record<string, string | number> | undefined {
-  const gateway = providerMetadata.gateway;
-  if (!isRecord(gateway)) return undefined;
-  const attributes: Record<string, string | number> = {};
-  const cost = readUsd(gateway.cost);
-  if (cost !== undefined) attributes["gen_ai.usage.cost"] = cost;
-  const gatewayCost = readUsd(gateway.gatewayCost);
-  if (gatewayCost !== undefined) attributes["gen_ai.usage.gateway_cost"] = gatewayCost;
-  const inputCost = readUsd(gateway.inputInferenceCost);
-  if (inputCost !== undefined) attributes["gen_ai.usage.input_cost"] = inputCost;
-  const outputCost = readUsd(gateway.outputInferenceCost);
-  if (outputCost !== undefined) attributes["gen_ai.usage.output_cost"] = outputCost;
-  if (typeof gateway.generationId === "string" && gateway.generationId.length > 0) {
-    attributes["gen_ai.generation.id"] = gateway.generationId;
-  }
-  return Object.keys(attributes).length === 0 ? undefined : attributes;
-}
-
-function readUsd(value: unknown): number | undefined {
-  if (typeof value !== "string") return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function modelSpanName(modelId: string): string {

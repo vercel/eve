@@ -8,7 +8,7 @@ import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
-import { bindTurnCallerContextStep } from "#subagents/parent-notification.js";
+import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
@@ -24,10 +24,10 @@ if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its authorization.completed handler.");
 }
 
-const resumeHookMock = vi.fn();
+const sendSubagentReplyMock = vi.fn();
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
+vi.mock("#subagents/reply.js", () => ({
+  sendSubagentReply: (...args: unknown[]) => sendSubagentReplyMock(...args),
 }));
 
 function makeContext(): ChannelAdapterContext {
@@ -36,7 +36,7 @@ function makeContext(): ChannelAdapterContext {
   ctx.set(SessionIdKey, "child-session");
   const state: SubagentAdapterState = {
     callId: "call-123",
-    parentContinuationToken: "parent-token",
+    parentReplyTo: { kind: "session", token: "parent-token" },
     parentSessionId: "parent-session",
     subagentName: "linear",
   };
@@ -73,7 +73,7 @@ const authorization = {
 
 describe("SUBAGENT_ADAPTER authorization handlers", () => {
   it("forwards a required event through each nested subagent adapter hop", async () => {
-    resumeHookMock.mockClear();
+    sendSubagentReplyMock.mockClear();
     const data = {
       authorization,
       description: "Authorization required for linear",
@@ -90,17 +90,20 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       makeContext(),
     );
 
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
-      callId: "call-123",
-      childSessionId: "child-session",
-      event: { data, type: "authorization.required" },
-      kind: "subagent-authorization-event",
-      subagentName: "linear",
-    });
+    expect(sendSubagentReplyMock).toHaveBeenCalledWith(
+      { kind: "session", token: "parent-token" },
+      {
+        callId: "call-123",
+        childSessionId: "child-session",
+        event: { data, type: "authorization.required" },
+        kind: "subagent-authorization-event",
+        subagentName: "linear",
+      },
+    );
   });
 
-  it("forwards authorization.completed unchanged via resumeHook", async () => {
-    resumeHookMock.mockClear();
+  it("forwards authorization.completed unchanged via sendSubagentReply", async () => {
+    sendSubagentReplyMock.mockClear();
     const data = {
       authorization,
       name: "linear",
@@ -112,17 +115,20 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
 
     await SUBAGENT_AUTHORIZATION_COMPLETED(data, makeContext());
 
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
-      callId: "call-123",
-      childSessionId: "child-session",
-      event: { data, type: "authorization.completed" },
-      kind: "subagent-authorization-event",
-      subagentName: "linear",
-    });
+    expect(sendSubagentReplyMock).toHaveBeenCalledWith(
+      { kind: "session", token: "parent-token" },
+      {
+        callId: "call-123",
+        childSessionId: "child-session",
+        event: { data, type: "authorization.completed" },
+        kind: "subagent-authorization-event",
+        subagentName: "linear",
+      },
+    );
   });
 
   it("skips forwarding when the adapter state is invalid", async () => {
-    resumeHookMock.mockClear();
+    sendSubagentReplyMock.mockClear();
     const base = makeContext();
 
     await SUBAGENT_AUTHORIZATION_REQUIRED(
@@ -136,17 +142,17 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       { ctx: base.ctx, state: {}, session: base.session },
     );
 
-    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(sendSubagentReplyMock).not.toHaveBeenCalled();
   });
 });
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
   it("forwards continuation HITL to the newly bound parent turn", async () => {
-    resumeHookMock.mockClear();
-    const rebound = await bindTurnCallerContextStep({
+    sendSubagentReplyMock.mockClear();
+    const rebound = await bindTurnCallerContext({
       caller: {
         callId: "call-continued",
-        replyTo: { kind: "hook", token: "parent-token-current" },
+        replyTo: { kind: "session", token: "parent-token-current" },
         subagentName: "linear",
       },
       serializedContext: {
@@ -169,8 +175,8 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
       { ...base, state: channel.state },
     );
 
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      "parent-token-current",
+    expect(sendSubagentReplyMock).toHaveBeenCalledWith(
+      { kind: "session", token: "parent-token-current" },
       expect.objectContaining({
         callId: "call-continued",
         kind: "subagent-input-request",
@@ -178,8 +184,8 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
     );
   });
 
-  it("forwards the child's HITL batch via resumeHook", async () => {
-    resumeHookMock.mockClear();
+  it("forwards the child's HITL batch via sendSubagentReply", async () => {
+    sendSubagentReplyMock.mockClear();
     const ctx = makeContext();
 
     await SUBAGENT_INPUT_REQUESTED(
@@ -192,24 +198,27 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
       ctx,
     );
 
-    expect(resumeHookMock).toHaveBeenCalledTimes(1);
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
-      callId: "call-123",
-      childContinuationToken: "child-token",
-      childSessionId: "child-session",
-      event: {
-        requests: [sampleRequest()],
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "turn-0",
+    expect(sendSubagentReplyMock).toHaveBeenCalledTimes(1);
+    expect(sendSubagentReplyMock).toHaveBeenCalledWith(
+      { kind: "session", token: "parent-token" },
+      {
+        callId: "call-123",
+        childContinuationToken: "child-token",
+        childSessionId: "child-session",
+        event: {
+          requests: [sampleRequest()],
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn-0",
+        },
+        kind: "subagent-input-request",
+        subagentName: "linear",
       },
-      kind: "subagent-input-request",
-      subagentName: "linear",
-    });
+    );
   });
 
   it("skips forwarding when the adapter state is missing a parent continuation token", async () => {
-    resumeHookMock.mockClear();
+    sendSubagentReplyMock.mockClear();
     const base = makeContext();
     const ctx: ChannelAdapterContext = {
       ctx: base.ctx,
@@ -227,7 +236,7 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
       ctx,
     );
 
-    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(sendSubagentReplyMock).not.toHaveBeenCalled();
   });
 });
 
@@ -248,11 +257,11 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
     errorSpy.mockRestore();
   });
 
-  it("warn-logs a structured breadcrumb and rethrows when the parent resumeHook fails", async () => {
+  it("warn-logs a structured breadcrumb and rethrows when the parent sendSubagentReply fails", async () => {
     // callAdapterEventHandler swallows the throw to keep the event stream
     // flowing, so the forward site logs the HITL-specific context first.
-    resumeHookMock.mockClear();
-    resumeHookMock.mockImplementationOnce(async () => {
+    sendSubagentReplyMock.mockClear();
+    sendSubagentReplyMock.mockImplementationOnce(async () => {
       throw new Error("parent gone");
     });
 
@@ -280,7 +289,6 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
       childContinuationToken: "child-token",
       childSessionId: "child-session",
       errorId: expect.any(String),
-      parentContinuationToken: "parent-token",
       subagentName: "linear",
       error: expect.objectContaining({
         message: expect.stringContaining("parent gone"),
@@ -289,8 +297,8 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
   });
 
   it("includes the authorization event type when auth forwarding fails", async () => {
-    resumeHookMock.mockClear();
-    resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
+    sendSubagentReplyMock.mockClear();
+    sendSubagentReplyMock.mockRejectedValueOnce(new Error("parent gone"));
 
     await expect(
       SUBAGENT_AUTHORIZATION_REQUIRED(
@@ -315,7 +323,6 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
       childSessionId: "child-session",
       errorId: expect.any(String),
       eventType: "authorization.required",
-      parentContinuationToken: "parent-token",
       subagentName: "linear",
       error: expect.objectContaining({ message: expect.stringContaining("parent gone") }),
     });

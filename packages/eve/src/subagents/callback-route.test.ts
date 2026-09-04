@@ -1,576 +1,148 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { RouteContext } from "#public/definitions/channel.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
+import { createCallbackCapability } from "#subagents/callback-capability.js";
+import type { InboxReplyTarget } from "#execution/inbox/types.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 
-const resumeHookMock = vi.fn();
-const TASK_ID = "task_1";
-const TASK_TOKEN = `task:${TASK_ID}:0123456789abcdef0123456789abcdef`;
-
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
+const sendReply = vi.fn();
+vi.mock("#subagents/reply.js", () => ({
+  sendSubagentReply: (...args: unknown[]) => sendReply(...args),
 }));
-
-describe("session callback route", () => {
-  beforeEach(() => {
-    resumeHookMock.mockReset();
+const target: InboxReplyTarget = {
+  kind: "inbox",
+  address: { token: "private-owner-token", ownerRunId: "owner-run" },
+  requestId: "call-1",
+};
+const token = createCallbackCapability(target);
+const usage = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 4, outputTokens: 2 };
+const completed = {
+  kind: "turn.completed",
+  callId: "call-1",
+  subagentName: "researcher",
+  output: "done",
+  outcome: { kind: "parked", result: { kind: "succeeded", output: "done" }, usageDelta: usage },
+};
+function context(capability = token): RouteContext {
+  return { params: { token: capability }, requestIp: null, waitUntil() {} };
+}
+function request(body: unknown) {
+  return new Request("https://eve.example/callback", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
-
-  it("rejects removed direct task turn-start callbacks", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const response = await handleSessionCallbackRequest(
-      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
-        body: JSON.stringify({
-          callId: "call-task",
-          kind: "turn.started",
-          sessionId: "child-session",
-          subagentName: "research",
-          taskId: TASK_ID,
-          turnId: "turn_child_7",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: TASK_TOKEN }),
-    );
-
-    expect(response.status).toBe(410);
-    expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects removed direct task input callbacks", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
-      requests: [
-        {
-          action: {
-            callId: "release-call",
-            input: { marker: "RELEASE" },
-            kind: "tool-call",
-            toolName: "release",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "reject", label: "Reject" },
-          ],
-          requestId: "req-1",
-          prompt: "Approve release",
-        },
-      ],
-      sequence: 3,
-      stepIndex: 2,
-      turnId: "turn-child",
-    };
-    const response = await handleSessionCallbackRequest(
-      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
-        body: JSON.stringify({
-          callId: "call-task",
-          childContinuationToken: "remote-child-token",
-          childSessionId: "child-session",
-          event,
-          kind: "task.input-requested",
-          subagentName: "research",
-          taskId: TASK_ID,
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: TASK_TOKEN }),
-    );
-
-    expect(response.status).toBe(410);
-    expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("routes remote task input through an invocation reply hook", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
-      requests: [
-        {
-          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "ask" },
-          kind: "question",
-          prompt: "Continue?",
-          requestId: "request-1",
-        },
-      ],
-      sequence: 3,
-      stepIndex: 2,
-      turnId: "turn-child",
-    };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/invocation-reply", {
-        body: JSON.stringify({
-          callId: "call-task",
-          childContinuationToken: "remote-child-token",
-          childSessionId: "child-session",
-          event,
-          kind: "task.input-requested",
-          subagentName: "research",
-          taskId: TASK_ID,
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "invocation-reply" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("invocation-reply", {
-      callId: "call-task",
-      childContinuationToken: "remote-child-token",
-      childSessionId: "child-session",
-      event,
-      kind: "subagent-input-request",
-      subagentName: "research",
-    });
-  });
-
-  it("routes remote task authorization through an invocation reply hook", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
-      data: {
-        description: "Authorize Linear",
-        name: "linear",
-        sequence: 3,
-        stepIndex: 2,
-        turnId: "turn-child",
-        url: "https://linear.example/authorize",
-      },
-      type: "authorization.required",
-    };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/invocation-reply", {
-        body: JSON.stringify({
-          callId: "call-task",
-          childContinuationToken: "remote-child-token",
-          childSessionId: "child-session",
-          event,
-          kind: "task.authorization",
-          subagentName: "research",
-          taskId: TASK_ID,
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "invocation-reply" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("invocation-reply", {
-      callId: "call-task",
-      childSessionId: "child-session",
-      event,
-      kind: "subagent-authorization-event",
-      subagentName: "research",
-    });
-  });
-
-  it("retains the generic task progress callback", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const response = await handleSessionCallbackRequest(
-      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
-        body: JSON.stringify({
-          callId: "update-call",
-          updateIndex: 2,
-          updateEpoch: "turn-child",
-          kind: "task.update",
-          message: "Found three matching records.",
-          taskId: TASK_ID,
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: TASK_TOKEN }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      kind: "task-update",
-      message: "Found three matching records.",
-    });
-  });
-
-  it.each([
-    ["parent turn token", "turn-inbox", TASK_ID],
-    ["different task token", TASK_TOKEN, "task_other"],
-  ])("rejects task events carried by a %s", async (_label, token, taskId) => {
-    const response = await handleSessionCallbackRequest(
-      new Request(`https://app.example.com/eve/v1/callback/${token}`, {
-        body: JSON.stringify({
-          kind: "turn.started",
-          sessionId: "child-session",
-          taskId,
-          turnId: "turn-child",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token }),
-    );
-
-    expect(response.status).toBe(403);
-    expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("synthesizes a terminal outcome envelope for session.completed", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          kind: "session.completed",
-          output: "done",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
-          output: "done",
-          subagentName: "research",
-        },
-      ],
-    });
-  });
-
-  it("accepts a sessionId-less callback from an older eve deployment", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          kind: "session.completed",
-          output: "done",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
-          output: "done",
-          subagentName: "research",
-        },
-      ],
-    });
-  });
-
-  it("synthesizes a terminal failed outcome for session.failed", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const error = { code: "REMOTE_AGENT_FAILED", message: "remote crashed" };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          error,
-          kind: "session.failed",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { error, kind: "failed" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
-          output: error,
-          subagentName: "research",
-        },
-      ],
-    });
-  });
-
-  it("projects reported usage onto the resumed result and its outcome delta", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const usage = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          kind: "session.completed",
-          output: "done",
-          sessionId: "remote-session",
-          subagentName: "research",
-          usage,
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: usage,
-          },
-          output: "done",
-          subagentName: "research",
-          usage,
-        },
-      ],
-    });
-  });
-
-  it("strips unknown usage keys from a newer callee", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          kind: "session.completed",
-          output: "done",
-          sessionId: "remote-session",
-          subagentName: "research",
-          usage: {
-            cacheReadTokens: 10,
-            cacheWriteTokens: 5,
-            inputTokens: 100,
-            outputTokens: 50,
-            reasoningOutputTokens: 7,
-          },
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    const payload = resumeHookMock.mock.calls[0]?.[1] as {
-      results: readonly { usage?: unknown }[];
-    };
-    expect(payload.results[0]?.usage).toEqual({
-      cacheReadTokens: 10,
-      cacheWriteTokens: 5,
-      inputTokens: 100,
-      outputTokens: 50,
-    });
-  });
-
-  it("drops malformed usage but still resumes the result", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-1",
-          kind: "session.completed",
-          output: "done",
-          sessionId: "remote-session",
-          subagentName: "research",
-          usage: {
-            cacheReadTokens: 10,
-            cacheWriteTokens: 5,
-            inputTokens: "lots",
-            outputTokens: 50,
-          },
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
-          output: "done",
-          subagentName: "research",
-        },
-      ],
-    });
-  });
-
-  it("resumes a completed conversation turn with its outcome envelope", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const outcome = {
-      kind: "parked",
-      result: { kind: "succeeded", output: "next result" },
-      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 25, outputTokens: 10 },
-    };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-2",
-          kind: "turn.completed",
-          outcome,
-          output: "next result",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-2",
-          kind: "subagent-result",
-          origin: "child",
-          outcome,
-          output: "next result",
-          subagentName: "research",
-          usage: outcome.usageDelta,
-        },
-      ],
-    });
-  });
-
-  it("rejects a turn callback without an outcome envelope", async () => {
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-2",
-          kind: "turn.completed",
-          output: "next result",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(400);
-    expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("resumes a failed conversation turn as an error result carrying its outcome", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
-    const error = {
-      code: "SUBAGENT_EXECUTION_FAILED",
-      message: "remote failed",
-    };
-    const outcome = {
-      kind: "terminal",
-      result: { error, kind: "failed" },
-      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
-    };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify({
-          callId: "call-2",
-          error,
-          kind: "turn.failed",
-          outcome,
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-2",
-          isError: true,
-          kind: "subagent-result",
-          origin: "child",
-          outcome,
-          output: error,
-          subagentName: "research",
-        },
-      ],
-    });
-  });
+}
+beforeEach(() => {
+  sendReply.mockReset();
+  sendReply.mockResolvedValue("delivered");
 });
 
-function createRouteContext(params: Record<string, string>): RouteContext {
-  return {
-    params,
-    requestIp: null,
-    waitUntil() {},
-  };
-}
+describe("invocation callback routing", () => {
+  it("routes the result to the exact owner and request carried by the capability", async () => {
+    expect((await handleSessionCallbackRequest(request(completed), context())).status).toBe(202);
+    expect(sendReply).toHaveBeenCalledWith(target, {
+      kind: "runtime-action-result",
+      results: [
+        expect.objectContaining({
+          callId: "call-1",
+          kind: "subagent-result",
+          outcome: completed.outcome,
+          output: "done",
+          usage,
+        }),
+      ],
+    });
+  });
+  it("rejects a result addressed to a different invocation", async () => {
+    expect(
+      (await handleSessionCallbackRequest(request({ ...completed, callId: "call-2" }), context()))
+        .status,
+    ).toBe(403);
+    expect(sendReply).not.toHaveBeenCalled();
+  });
+  it("rejects a session address or unstructured hook token", async () => {
+    for (const invalid of ["eve:session:known:inbox", "private-owner-token", "eve:callback:bad"]) {
+      expect(
+        (await handleSessionCallbackRequest(request(completed), context(invalid))).status,
+      ).toBe(403);
+    }
+    expect(sendReply).not.toHaveBeenCalled();
+  });
+  it("reports an owner that ended as no longer pending", async () => {
+    sendReply.mockResolvedValueOnce("gone");
+    expect((await handleSessionCallbackRequest(request(completed), context())).status).toBe(404);
+  });
+  it("requires an explicit turn outcome", async () => {
+    expect(
+      (await handleSessionCallbackRequest(request({ ...completed, outcome: undefined }), context()))
+        .status,
+    ).toBe(400);
+    expect(sendReply).not.toHaveBeenCalled();
+  });
+  it("routes failure outcomes without converting them to session failure", async () => {
+    const error = { code: "MODEL_FAILED", message: "Failed" };
+    const body = {
+      ...completed,
+      kind: "turn.failed",
+      error,
+      outcome: { kind: "parked", result: { kind: "failed", error }, usageDelta: usage },
+    };
+    expect((await handleSessionCallbackRequest(request(body), context())).status).toBe(202);
+    expect(sendReply).toHaveBeenCalledWith(target, {
+      kind: "runtime-action-result",
+      results: [expect.objectContaining({ isError: true, output: error, outcome: body.outcome })],
+    });
+  });
+  it.each(["private-owner-token", `task:task_1:${"a".repeat(32)}`])(
+    "routes child input requests to the owning invocation at %s",
+    async (ownerToken) => {
+      const owner = { ...target, address: { ...target.address, token: ownerToken } };
+      const body = {
+        kind: "task.input-requested",
+        callId: "call-1",
+        childContinuationToken: "child-alias",
+        childSessionId: "child",
+        taskId: "task_1",
+        subagentName: "researcher",
+        event: {
+          turnId: "turn-1",
+          stepIndex: 0,
+          sequence: 1,
+          requests: [
+            {
+              kind: "tool-approval",
+              requestId: "question",
+              prompt: "Continue?",
+              options: [{ id: "approve", label: "Approve" }],
+              action: { kind: "tool-call", callId: "tool-1", toolName: "write", input: {} },
+            },
+          ],
+        },
+      };
+      const response = await handleSessionCallbackRequest(
+        request(body),
+        context(createCallbackCapability(owner)),
+      );
+      expect(response.status).toBe(202);
+      expect(sendReply).toHaveBeenCalledWith(
+        owner,
+        expect.objectContaining({
+          kind: "subagent-input-request",
+          callId: "call-1",
+          childContinuationToken: "child-alias",
+        }),
+      );
+    },
+  );
+  it("bounds callback bodies before parsing", async () => {
+    expect(
+      (
+        await handleSessionCallbackRequest(
+          request({ ...completed, output: "x".repeat(1024 * 1024) }),
+          context(),
+        )
+      ).status,
+    ).toBe(400);
+    expect(sendReply).not.toHaveBeenCalled();
+  });
+});

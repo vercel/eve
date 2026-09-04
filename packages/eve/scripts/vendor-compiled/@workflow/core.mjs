@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { transformWorkflowSdk } from "./transform.mjs";
 
 import {
   buildOpaqueTypesStub,
@@ -9,15 +10,10 @@ import {
 
 async function discoverDeclarationFiles({ distDir }) {
   const files = await collectFilesRecursively(distDir, [".d.ts"]);
-  return (
-    files
-      .map((file) => relative(distDir, file).replaceAll("\\", "/"))
-      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
-      // is owned by the shim entry below instead of upstream's VM-runner file.
-      .filter((file) => file !== "workflow.d.ts")
-      .sort()
-      .map((file) => ({ source: file, output: file }))
-  );
+  return files
+    .map((file) => relative(distDir, file).replaceAll("\\", "/"))
+    .sort()
+    .map((file) => ({ source: file, output: file }));
 }
 
 function buildMsStub(names, moduleName) {
@@ -171,15 +167,10 @@ export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), transformWorkflowSdk("step")],
   entries: [
     {
       outputPath: "index",
-    },
-    {
-      entry: "dist/workflow/index.js",
-      outputPath: "workflow",
-      declaration: `export * from "./workflow/index.js";\n`,
     },
     {
       input: "@workflow/core/runtime",

@@ -1,20 +1,15 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
+import { sendInboxStep } from "#execution/inbox/send.js";
+import type { InboxReplyTarget } from "#execution/inbox/types.js";
 
 import type {
   RuntimeActionResultHookPayload,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  readWorkflowToolRunAdmission,
-  readWorkflowToolRunOwner,
-  readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { readWorkflowToolRunContext } from "#execution/workflow-tool/ask.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
@@ -53,12 +48,9 @@ export interface AgentSettlementRequest {
   readonly result: RuntimeSubagentChildResult;
 }
 
-export type AgentInvocationEvent =
+type AgentInvocationReply =
   | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
-
-export type AgentInvocationReply =
-  | AgentInvocationEvent
+  | SubagentInputRequestHookPayload
   | RuntimeActionResultHookPayload
   | TaskInboundUpdate;
 
@@ -96,113 +88,103 @@ export async function invokeAgent(
   options: { readonly invocationId: string; readonly returnResult?: boolean },
 ): Promise<JsonValue | RuntimeSubagentResult> {
   validateAgentInput(input, false);
-  const run = readWorkflowToolRunRef(ctx);
-  const owner = readWorkflowToolRunOwner(ctx);
-  const admission = readWorkflowToolRunAdmission(ctx);
+  const { from: run, owner, inbox } = readWorkflowToolRunContext(ctx);
   claimInvocationId(ctx, options.invocationId);
-  const replies = createHook<AgentInvocationReply>();
-  let ownsReplies = false;
-  try {
-    await claimHookOwnership(replies);
-    ownsReplies = true;
-    if (admission !== undefined) {
-      const admitted = await admission;
-      if (admitted.status === "rejected") throw new Error(admitted.reason);
-    }
-    await resumeHookStep(owner.request, {
-      from: run,
-      replyTo: replies.token,
-      request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
-    });
-
-    const iterator = replies[Symbol.asyncIterator]();
-    while (true) {
-      const next = await nextAgentReply(iterator, ctx.abortSignal);
-      if (next.done) break;
-      const reply = next.value;
-      if (reply.kind === "runtime-action-result") {
-        const result = reply.results.find(
-          (candidate): candidate is RuntimeSubagentResult =>
-            candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
-        );
-        if (result !== undefined) {
-          if (result.origin === "child") {
-            await resumeHookStep(owner.request, {
-              from: run,
-              replyTo: replies.token,
-              request: { kind: "agent-settled", result },
-            });
-          }
-          if (options.returnResult === true && run.execution === "blocking") return result;
-          if (result.isError === true) throw result.output;
-          return result.output;
-        }
-        continue;
-      }
-      if (reply.kind === "subagent-input-request") {
-        await resumeHookStep(owner.request, {
-          from: run,
-          replyTo: reply.childContinuationToken,
-          request: {
-            kind: "input-batch",
-            requests: reply.event.requests,
-          },
-          requestCoordinates: {
-            sequence: reply.event.sequence,
-            stepIndex: reply.event.stepIndex,
-            turnId: reply.event.turnId,
-          },
-        });
-        continue;
-      }
-      if (reply.kind === "task-update") {
-        await resumeHookStep(owner.report, {
-          from: run,
-          update: reply.message,
-        });
-        continue;
-      }
-      await resumeHookStep(owner.request, {
-        from: run,
-        replyTo: replies.token,
-        request: { event: reply, kind: "authorization-request" },
-      });
-    }
-  } finally {
-    if (ownsReplies) {
-      try {
-        await disposeHook(replies);
-      } catch {
-        // A result or invocation error is authoritative; reply-hook cleanup is best effort.
-      }
-    }
-  }
-  throw new Error(`Agent "${input.target}" closed without a result.`);
-}
-
-async function nextAgentReply(
-  iterator: AsyncIterator<AgentInvocationReply>,
-  signal: AbortSignal | undefined,
-): Promise<IteratorResult<AgentInvocationReply>> {
-  if (signal === undefined) return await iterator.next();
-  if (signal.aborted) throw signal.reason;
-  let rejectAbort: ((reason: unknown) => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject;
+  const replyTo: InboxReplyTarget = {
+    kind: "inbox",
+    address: inbox.address,
+    requestId: options.invocationId,
+  };
+  let messageIndex = 0;
+  await sendRequest({
+    from: run,
+    replyTo,
+    request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
   });
-  const abort = (): void => rejectAbort?.(signal.reason);
-  signal.addEventListener("abort", abort, { once: true });
-  try {
-    return await Promise.race([iterator.next(), aborted]);
-  } finally {
-    signal.removeEventListener("abort", abort);
+
+  while (true) {
+    const reply = (await inbox.response(options.invocationId, ctx.abortSignal))
+      .payload as AgentInvocationReply;
+    if (reply.kind === "runtime-action-result") {
+      const result = reply.results.find(
+        (candidate): candidate is RuntimeSubagentResult =>
+          candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
+      );
+      if (result !== undefined) {
+        if (result.origin === "child") {
+          await sendRequest({
+            from: run,
+            replyTo,
+            request: { kind: "agent-settled", result },
+          });
+        }
+        if (options.returnResult === true && run.execution === "blocking") return result;
+        if (result.isError === true) throw result.output;
+        return result.output;
+      }
+      continue;
+    }
+    if (reply.kind === "subagent-input-request") {
+      await sendRequest({
+        from: run,
+        replyTo: { kind: "session", token: reply.childContinuationToken },
+        request: {
+          kind: "input-batch",
+          requests: reply.event.requests,
+        },
+        requestCoordinates: {
+          sequence: reply.event.sequence,
+          stepIndex: reply.event.stepIndex,
+          turnId: reply.event.turnId,
+        },
+      });
+      continue;
+    }
+    if (reply.kind === "task-update") {
+      await sendReport({
+        from: run,
+        update: reply.message,
+      });
+      continue;
+    }
+    await sendRequest({
+      from: run,
+      replyTo,
+      request: { event: reply, kind: "authorization-request" },
+    });
+  }
+
+  async function sendRequest(
+    payload: import("#execution/workflow-tool/messages.js").WorkflowToolRunRequestMessage,
+  ): Promise<void> {
+    const kind = payload.request.kind;
+    const suffix =
+      kind === "agent-invoke"
+        ? "invoke"
+        : kind === "agent-settled"
+          ? "settled"
+          : `${kind}:${messageIndex++}`;
+    const delivered = await sendInboxStep(owner, {
+      eventId: `${options.invocationId}:${suffix}`,
+      kind: "tool.request",
+      payload,
+    });
+    if (delivered === "gone")
+      throw new Error("The workflow tool owner ended during agent invocation.");
+  }
+
+  async function sendReport(
+    payload: import("#execution/workflow-tool/messages.js").WorkflowToolRunReport,
+  ): Promise<void> {
+    await sendInboxStep(owner, {
+      eventId: `${options.invocationId}:report:${messageIndex++}`,
+      kind: "tool.report",
+      payload,
+    });
   }
 }
 
-export function validateAgentInput(
-  input: InternalAgentInput | AgentInput,
-  requireKey: boolean,
-): void {
+function validateAgentInput(input: InternalAgentInput | AgentInput, requireKey: boolean): void {
   if (
     requireKey &&
     (typeof (input as AgentInput).key !== "string" || (input as AgentInput).key.trim() === "")

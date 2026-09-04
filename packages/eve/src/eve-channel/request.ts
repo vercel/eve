@@ -377,9 +377,9 @@ function parseModeField(value: unknown): RunMode | Response | undefined {
 
 function parseTurnPolicyField(value: unknown): TurnPolicy | Response | undefined {
   if (value === undefined) return undefined;
-  if (value === "queue" || value === "steer") return value;
+  if (value === "queue" || value === "steer" || value === "interrupt") return value;
   return Response.json(
-    { error: "Expected 'turnPolicy' to be either 'queue' or 'steer'.", ok: false },
+    { error: "Expected 'turnPolicy' to be 'queue', 'steer', or 'interrupt'.", ok: false },
     { status: 400 },
   );
 }

@@ -88,7 +88,7 @@ export function buildRunContext(input: {
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride
-  // the typed workflow-entry payload into `createSessionStep` and live on the
+  // the initial turn seed into `createSessionState` and live on the
   // session from then on.
 
   return ctx;

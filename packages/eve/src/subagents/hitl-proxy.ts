@@ -1,68 +1,13 @@
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import {
-  emitTurnEpilogue,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
-import {
-  getProxyInputRequests,
-  toProxyInputRequestEntries,
-} from "#harness/proxy-input-requests.js";
-import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
-import { createInputRequestedEvent } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
+import type { DeliverPayload } from "#channel/types.js";
+import { getProxyInputRequests, proxyInputRouteKey } from "#harness/proxy-input-requests.js";
+import type { InboxResponseRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import type { SessionStateMap } from "#harness/types.js";
 import type { InputResponse } from "#shared/input.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 
-// ---------------------------------------------------------------------------
-// Upward proxy emission
-// ---------------------------------------------------------------------------
-
-/**
- * Runs the parent-side work for a `subagent-input-request`. Conversation
- * mode emits a waiting boundary on the parent stream; the returned proxy
- * entries route the eventual response back down to the child.
- */
-export async function emitProxiedInputRequest(input: {
-  readonly emit: HarnessEmitFn;
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly mode: RunMode;
-  readonly session: HarnessSession;
-}): Promise<{
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly session: HarnessSession;
-}> {
-  await input.emit(
-    createInputRequestedEvent({
-      requests: input.hookPayload.event.requests,
-      sequence: input.hookPayload.event.sequence,
-      stepIndex: input.hookPayload.event.stepIndex,
-      turnId: input.hookPayload.event.turnId,
-    }),
-  );
-
-  let nextSession = input.session;
-
-  if (input.mode === "conversation") {
-    const state = getHarnessEmissionState(input.session.state);
-    const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
-    nextSession = setHarnessEmissionState(input.session, nextState);
-  }
-
-  return {
-    entries: toProxyInputRequestEntries(input.hookPayload),
-    session: nextSession,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Downward deliver routing
-// ---------------------------------------------------------------------------
-
 /** One proxied-child bucket of a routed deliver payload. */
 export interface RoutedChildDelivery {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
@@ -85,7 +30,7 @@ export interface RoutedDeliverPayload {
 
 /** In-progress accumulation for one `forChildren` bucket. */
 interface ChildResponseBucket {
-  readonly answerHook?: AnswerHookRoute;
+  readonly inboxResponse?: InboxResponseRoute;
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   /** Parent-visible request IDs answered in this bucket. */
@@ -120,10 +65,7 @@ export function routeDeliverPayload(input: {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const bucketKey =
-      route.taskId === undefined
-        ? route.childContinuationToken
-        : `${route.childContinuationToken}\0${route.childResponseUrl ?? "local"}\0${route.taskId}`;
+    const bucketKey = proxyInputRouteKey(route);
     const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
@@ -132,7 +74,7 @@ export function routeDeliverPayload(input: {
         parentRequestIds: [response.requestId],
         responses: [toChildInputResponse(response, route)],
         routes: [route],
-        ...(route.answerHook !== undefined && { answerHook: route.answerHook }),
+        ...(route.inboxResponse !== undefined && { inboxResponse: route.inboxResponse }),
         ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
         ...(route.taskId !== undefined && { taskId: route.taskId }),
       });
@@ -145,7 +87,7 @@ export function routeDeliverPayload(input: {
 
   const forChildren = [...responsesByChild.values()].map(
     ({
-      answerHook,
+      inboxResponse,
       childContinuationToken,
       childResponseUrl,
       parentRequestIds,
@@ -172,7 +114,7 @@ export function routeDeliverPayload(input: {
         childContinuationToken,
         payload: { inputResponses: responses },
         retireRequestIds: [...retireRequestIds],
-        ...(answerHook !== undefined && { answerHook }),
+        ...(inboxResponse !== undefined && { inboxResponse }),
         ...(childResponseUrl !== undefined && { childResponseUrl }),
         ...(taskId !== undefined && { taskId }),
       };

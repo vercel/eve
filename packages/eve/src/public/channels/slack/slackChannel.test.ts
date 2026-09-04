@@ -9,7 +9,6 @@ import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js"
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -355,8 +354,31 @@ async function firePost(
 
   const response = await post.handler(request, {
     from,
-    resolveSession: (address) =>
-      (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" })) as never,
+    resolveSession: async (address) => {
+      const resolved = await (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" }));
+      if (resolved === undefined) return undefined;
+      return {
+        ...(resolved as object),
+        send: async (message: unknown, options: unknown) => {
+          await (observeSend as (address: string, input: unknown) => unknown)(address, {
+            ...(options as object),
+            message,
+          });
+          return { sessionId: "s1", status: "accepted" };
+        },
+        respond: async (inputResponses: unknown, options: unknown) => {
+          await (observeSend as (address: string, input: unknown) => unknown)(address, {
+            ...(options as object),
+            inputResponses,
+          });
+          return { sessionId: "s1", status: "accepted" };
+        },
+        cancel: from(address).cancel,
+        clear: from(address).clear,
+        compact: from(address).compact,
+        reset: from(address).reset,
+      } as never;
+    },
     waitUntil,
     attachSession: vi.fn() as any,
     to: vi.fn() as any,
@@ -1614,14 +1636,6 @@ describe("slackChannel() inbound mention pipeline", () => {
         principalId: "slack:T01:U01",
       }),
       message: "Imperative follow-up",
-      state: {
-        audience: "unknown",
-        channelId: "C_BOUND",
-        installationTeamId: null,
-        teamId: "T01",
-        threadTs: "1700000000.000300",
-        triggeringUserId: "U01",
-      },
     });
   });
 
@@ -2373,7 +2387,10 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
 
     const body = buildEventBody({ type: "reaction_added", user: "U01" }, { teamId: "T_WORKSPACE" });
-    await firePost(channel, buildSignedRequest({ body }), { send });
+    await firePost(channel, buildSignedRequest({ body }), {
+      send,
+      resolveSession: async () => undefined,
+    });
 
     expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
       auth: null,
@@ -2410,6 +2427,12 @@ describe("slackChannel() generic Events API pipeline", () => {
   });
 
   it("can start multiple turns through ctx.send", async () => {
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ok: true, messages: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
     const auth = {
       attributes: { source: "reaction" },
       authenticator: "test",
@@ -2437,7 +2460,9 @@ describe("slackChannel() generic Events API pipeline", () => {
       { teamId: "T_WORKSPACE" },
     );
 
-    const { send } = await firePost(channel, buildSignedRequest({ body }));
+    const { send } = await firePost(channel, buildSignedRequest({ body }), {
+      resolveSession: async () => undefined,
+    });
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls.map(([, input]) => input.message)).toEqual([
@@ -3001,7 +3026,6 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
     expect(send.mock.calls[0]?.[1]).toMatchObject({
       auth: { principalId: "slack:T_ACTOR:U01" },
-      state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
     });
   });
 
@@ -3095,16 +3119,6 @@ describe("slackChannel() HITL interaction pipeline", () => {
       state: {
         approvalResponderUsers: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
       },
-    });
-    expect(
-      sessionInboxWire.encode(
-        { kind: "send", payload: { inputResponses: input.inputResponses } },
-        { version: 1 },
-      ),
-    ).toMatchObject({
-      kind: "deliver",
-      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }] }],
-      version: 1,
     });
   });
 
@@ -3826,7 +3840,7 @@ describe("slackChannel().receive", () => {
       mockChannelContext(send),
     );
 
-    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(botToken).not.toHaveBeenCalled();
     expect(send.mock.calls[0]?.[1].state).toMatchObject({
       installationTeamId: "T_INSTALLATION",
       teamId: null,
@@ -3869,44 +3883,46 @@ describe("slackChannel().receive", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("posts the initial card before send and threads under its ts", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true, ts: "1800000000.000900" }), {
-        headers: { "content-type": "application/json" },
-      }),
-    );
+  it("persists the initial card before publishing it with the owned session alias", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const compiled = asCompiled(channel);
     const send = vi.fn().mockResolvedValue({ id: "s" });
-
     const { Card, CardText } = await import("#compiled/chat/index.js");
-    await buildReceive()(
+    await compiled.receive!(
       {
         message: "start the investigation",
         target: {
           channelId: "C123",
           initialMessage: {
-            card: Card({ children: [CardText("Investigation Thread for INC-1")] }),
-            fallbackText: "Investigation INC-1",
+            card: Card({ children: [CardText("Investigation")] }),
+            fallbackText: "Investigation",
           },
         },
         auth: null,
       },
       mockChannelContext(send),
     );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toContain("chat.postMessage");
-    const body = parseSlackRequestBody(init as RequestInit) as {
-      channel: string;
-      blocks: unknown[];
-    };
-    expect(body.channel).toBe("C123");
-    expect(Array.isArray(body.blocks)).toBe(true);
-
-    expect(send).toHaveBeenCalledTimes(1);
-    const [continuationToken, input] = send.mock.calls[0]!;
-    expect(continuationToken).toBe("C123:1800000000.000900");
-    expect(input.state.threadTs).toBe("1800000000.000900");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const [token, delivered] = send.mock.calls[0]!;
+    expect(token).toMatch(/^C123:/);
+    expect(delivered.state.threadTs).toBeNull();
+    expect(delivered.state.initialMessage).toBeDefined();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, ts: "1800000000.000900" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const adapter = withState(getAdapter(channel), delivered.state);
+    const { accessor, writes } = captureAccessor(`slack:${token}`);
+    const context = buildAdapterContext(adapter, accessor);
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "turn_0" }), context);
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1]);
+    expect(body.metadata).toEqual({
+      event_type: "eve_session",
+      event_payload: { channel_id: "C123", continuation_token: token },
+    });
+    expect(writes).toContainEqual(["eve.continuationToken", "slack:C123:1800000000.000900"]);
+    expect(context.state.initialMessage).toBeUndefined();
   });
 
   it("rejects passing both threadTs and initialMessage", async () => {
@@ -3929,111 +3945,25 @@ describe("slackChannel().receive", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("surfaces a Slack post failure as a thrown error and does not call send", async () => {
+  it("retains the initial card when provider publication fails", async () => {
+    const { Card, CardText } = await import("#compiled/chat/index.js");
+    const initialMessage = {
+      card: Card({ children: [CardText("anchor")] }),
+      fallbackText: "anchor",
+    };
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      { channelId: "C1", threadTs: null, initialMessage },
+    );
+    const { accessor } = captureAccessor("slack:C1:initial");
+    const context = buildAdapterContext(adapter, accessor);
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, error: "not_in_channel" }), {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn();
-    const { Card, CardText } = await import("#compiled/chat/index.js");
-    await expect(
-      buildReceive()(
-        {
-          message: "x",
-          target: {
-            channelId: "C1",
-            initialMessage: {
-              card: Card({ children: [CardText("anchor")] }),
-              fallbackText: "anchor",
-            },
-          },
-          auth: null,
-        },
-        mockChannelContext(send),
-      ),
-    ).rejects.toThrow(/not_in_channel/);
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  // Pins the resumability guarantee: the continuation token minted by
-  // `receive({ initialMessage })` is byte-equal to the token an inbound
-  // @-mention reply in that same thread computes. Without this, a
-  // schedule's anchor card would orphan the parked session and the
-  // first human follow-up would silently start a fresh one.
-  it("uses the same continuation token on receive and on a follow-up inbound mention", async () => {
-    const initialMessageTs = "1800000000.001234";
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true, ts: initialMessageTs }), {
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const send = vi.fn().mockResolvedValue({ id: "s" });
-    const { Card, CardText } = await import("#compiled/chat/index.js");
-
-    await buildReceive()(
-      {
-        message: "Start the digest.",
-        target: {
-          channelId: "C123",
-          initialMessage: {
-            card: Card({ children: [CardText("Daily Deploy Digest")] }),
-            fallbackText: "Daily Deploy Digest",
-          },
-        },
-        auth: null,
-      },
-      mockChannelContext(send),
-    );
-    const receiveToken = send.mock.calls[0]![0] as string;
-    expect(receiveToken).toBe(`C123:${initialMessageTs}`);
-
-    // Now simulate Slack delivering an `app_mention` reply threaded
-    // under the anchor card. The inbound dispatch path builds the
-    // token from `event.thread_ts` so it matches the one receive()
-    // used, and the parked session resumes via runtime.deliver.
-    const inboundSend = vi.fn().mockResolvedValue({ id: "s" });
-    const mentionBody = JSON.stringify({
-      type: "event_callback",
-      team_id: "T01",
-      event_id: "Ev_threaded_reply",
-      event: {
-        type: "app_mention",
-        user: "U999",
-        text: "<@U_BOT> any progress?",
-        channel: "C123",
-        ts: "1800000000.005000",
-        thread_ts: initialMessageTs,
-        event_ts: "1800000000.005000",
-      },
-    });
-    const req = buildSignedRequest({ body: mentionBody });
-    const channel = slackChannel({
-      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
-    });
-    const compiled = asCompiled(channel);
-    const post = compiled.routes.find((r) => r.method === "POST");
-    if (!post) throw new Error("expected POST route");
-    const waitUntil = vi.fn();
-    await post.handler(req, {
-      attachSession: vi.fn() as any,
-      ...mockChannelContext(inboundSend),
-      waitUntil,
-      to: vi.fn() as any,
-      params: {},
-      requestIp: null,
-    });
-
-    let drained = 0;
-    while (drained < waitUntil.mock.calls.length) {
-      const pending = waitUntil.mock.calls.slice(drained).map(([task]) => task as Promise<unknown>);
-      drained = waitUntil.mock.calls.length;
-      await Promise.allSettled(pending);
-    }
-
-    expect(inboundSend).toHaveBeenCalledTimes(1);
-    const inboundToken = inboundSend.mock.calls[0]![0] as string;
-    expect(inboundToken).toBe(receiveToken);
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "turn_0" }), context);
+    expect(context.state.initialMessage).toEqual(initialMessage);
   });
 });
 

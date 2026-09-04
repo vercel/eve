@@ -33,6 +33,7 @@ import vercelSandboxDelete from "./@vercel/sandbox-delete.mjs";
 import vercelSandboxStable from "./@vercel/sandbox-stable.mjs";
 import workflowBuilders from "./@workflow/builders.mjs";
 import workflowCore from "./@workflow/core.mjs";
+import workflowCoreBody from "./@workflow/core-body.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
 import workflowWorld from "./@workflow/world.mjs";
@@ -99,6 +100,7 @@ export const MODULES = [
   vercelSandboxStable,
   workflowBuilders,
   workflowCore,
+  workflowCoreBody,
   workflowErrors,
   workflowSerde,
   workflowWorld,

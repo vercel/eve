@@ -1,6 +1,6 @@
 ---
 issue: none
-status: proposed
+status: in-progress
 last_updated: "2026-09-04"
 ---
 
@@ -21,7 +21,8 @@ For the first version, the holder stays pinned for the session's lifetime. Its
 only command is additive `rekey`. There is no holder replacement protocol,
 generation negotiation, or upgrade coordinator in the main design. New turns run
 on the deployment that accepted their input; the holder does not interpret their
-state. A small migration extension for existing sessions appears near the bottom.
+state. Migration of existing sessions is deferred until the new-session design lands;
+the final section records the extension point without adding an active code path.
 
 This proposal covers the inbox, steering, finalization, tool, task, and delivery
 contracts together. **Implementation means deleting the superseded workflow
@@ -47,11 +48,11 @@ local experiments below do not prove the complete runtime.
 
 | Resource                      | Holder's responsibility                                                                      | Who uses or interprets it afterward                                                                                   |
 | ----------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Provider and callback hooks   | Retain an array/map of claimed hook handles; add another on `rekey`.                         | Ingress looks up a token to find this holder and resolve the session. These hooks do not receive ordinary turn input. |
+| Provider aliases              | Retain an array/map of claimed hook handles; add another on `rekey`.                         | Ingress looks up a token to find this holder and resolve the session. These hooks do not receive ordinary turn input. |
 | One control hook              | Read the frozen `rekey` command and return its claim result.                                 | Turn workflows request registration through this address.                                                             |
-| Primary event stream          | Create it once, or keep the supplied existing stream reference.                              | Turn steps append events; clients read and resume with a cursor.                                                      |
-| Snapshot stream               | Create it once, or keep the supplied existing snapshot reference.                            | Turn steps append committed snapshots and restore them at subsequent starts.                                          |
-| Immutable resource descriptor | Publish the session, holder, stream, and control references once.                            | Ingress, readers, and turn workflows resolve identifiers without assuming they are equal.                             |
+| Primary event stream          | Create it once.                                                                              | Turn steps append events; clients read and resume with a cursor.                                                      |
+| Snapshot stream               | Create it once.                                                                              | Turn steps append committed snapshots and restore them at subsequent starts.                                          |
+| Immutable resource descriptor | Create the references; the first owner publishes them after committing initial state.        | Ingress, readers, and turn workflows resolve identifiers without assuming they are equal.                             |
 | Initial dispatch input        | Retain the accepted first input in durable workflow input and start it after initialization. | The first candidate takes over delivery and execution responsibility.                                                 |
 
 The last two are the additions to the basic hooks-plus-two-streams picture. The
@@ -91,17 +92,15 @@ type SnapshotRecordRef = Readonly<{ id: SnapshotRecordId }>;
 interface InboxAddress {
   readonly token: string;
   readonly ownerRunId: WorkflowRunId;
-  readonly protocol: { readonly family: "eve-inbox"; readonly version: number };
 }
 
 interface SessionResources {
-  readonly version: 1;
   readonly sessionId: SessionId;
   readonly holderRunId: WorkflowRunId;
   readonly events: EventStreamRef;
   readonly snapshots: SnapshotStreamRef;
   readonly control: InboxAddress;
-  readonly initialEvent?: EventKey;
+  readonly initialEventId: EventKey;
 }
 ```
 
@@ -170,7 +169,6 @@ interface SessionSnapshots {
 }
 
 interface SessionCheckpoint {
-  readonly version: number;
   readonly revision: number;
   readonly writeId: string;
   readonly writerRunId: WorkflowRunId;
@@ -207,7 +205,7 @@ separately records whether the turn has settled and adopted its proposed result.
 `latest()` is a bounded read of the current committed checkpoint. It returns
 `undefined` for initialized storage with no checkpoint; it must not wait for a
 future append while the caller holds execution ownership. A read failure is not
-an empty session. Only the descriptor's designated `initialEvent` may initialize
+an empty session. Only the descriptor's designated `initialEventId` may initialize
 an empty session from its seed. An early follow-up releases its claim before
 waiting and competing again, so it cannot block the initial turn. The latest read
 bypasses caches; a checkpoint with unfinished work still requires reconciliation
@@ -242,43 +240,37 @@ through the channel adapter, including its current numeric `startIndex` API.
 
 ```ts
 interface AcceptedSubmission {
-  readonly version: 1;
-  readonly envelope: Omit<InboxEnvelope, "target">;
+  readonly eventId: string;
+  readonly command:
+    | SessionCommand
+    | { readonly kind: "session-timeout" }
+    | { readonly kind: "runtime"; readonly payload: HookPayload };
   readonly acceptedDeploymentId?: string;
   readonly initial?: InitialSessionSeed;
 }
 
 interface HoldingWorkflowInput {
-  readonly initialAddresses: readonly string[];
-  readonly firstTurn?: AcceptedSubmission;
-  readonly existing?: {
-    readonly sessionId?: SessionId;
-    readonly events?: EventStreamRef;
-    readonly snapshots?: SnapshotStreamRef;
-  };
+  readonly initialToken?: string;
+  readonly firstTurn: AcceptedSubmission;
 }
 
-type HolderCommand = {
-  readonly kind: "rekey";
-  readonly requestId: string;
+type RekeyCommand = {
   readonly token: string;
   readonly replyTo: InboxAddress;
 };
 
 type RekeyResult = {
-  readonly kind: "rekey.result";
-  readonly requestId: string;
   readonly token: string;
-  readonly status: "claimed" | "conflict" | "limit";
+  readonly status: "claimed" | "conflict" | "limit" | "invalid";
 };
 ```
 
 `AcceptedSubmission` retains the stable event identity, normalized content or
 command, turn policy, and server-validated authorization, delivery, and caller
-context in its envelope. Forward the complete submission. The trusted dispatch
+context in its command. Forward the complete submission. The trusted dispatch
 adapter binds the target from `SessionResources`; clients do not supply it.
 Session-admission encoding also preserves the accepting deployment and initial seed
-alongside the normalized envelope; forwarding only the message would lose them.
+alongside the normalized command; forwarding only the message would lose them.
 `InitialSessionSeed` is new-session configuration and initial context, never an
 existing session snapshot. Its domain fields come from current channel and
 session initialization types.
@@ -291,30 +283,29 @@ when deferred work executes. An unavailable accepting deployment follows visible
 failure/recovery handling without silently changing code versions.
 
 The holder passes the submission through without interpreting agent state.
-Ordinary creation requires `firstTurn`; omitting it is reserved for migration with
-existing resources and imported state. Initialization creates only missing streams
-and never truncates supplied ones. The descriptor's `initialEvent` is derived from
-the first submission and enforces first-input precedence.
+Creation requires `firstTurn` and creates fresh streams. The descriptor's
+`initialEventId` comes from the first submission and enforces first-input precedence.
+Existing-resource adoption is deferred to the migration section.
 
 The holder's durable body should read like this sequence:
 
 ```text
 allocate session/resource references
 create the control hook and claim initial aliases
-create missing streams after the address claims succeed
-publish the immutable resource descriptor
-start firstTurn on its accepting deployment in a durable step, when supplied
+create streams after the address claims succeed
+start firstTurn on its accepting deployment in a durable step
+  first owner commits initial state and publishes the immutable descriptor
 for each rekey command:
   claim and retain the additional alias
   reply with claimed / conflict / limit through replyTo
 on holder teardown: release hooks; do not emit or close session streams
 ```
 
-Claims and resource publication must complete before the first start. This is an
-ordering requirement, not a requirement for a separate step per initialization
-operation. Hooks are claimed in workflow context; combine compatible storage work
-inside a step, and start the first turn only after readiness is durable. Retrying
-that start preserves the submission identity. The holder never awaits the turn's
+Claims and stream creation complete before the first start. The first owner
+publishes the descriptor after committing initial state; ingress awaits that closed
+record before returning a new session. This prevents follow-ups from overtaking
+initialization without an extra handshake or polling. Retrying the first start
+preserves the submission identity. The holder never awaits the turn's
 result and does not receive a settlement callback.
 
 Repeated rekey to an already held token succeeds without allocating another hook.
@@ -322,13 +313,14 @@ A conflicting or over-limit claim replies with that result and leaves the holder
 and all existing aliases intact. Infrastructure errors follow durable retry/failure
 handling. A reply uses the requesting owner's existing inbox; it adds no reply
 hook. Reply identities derive from the request ID, and claim success is established
-before the acknowledgement. The tiny command/result contract is frozen in v1;
-new turn code must remain able to speak it.
+before the acknowledgement. The tiny command/result contract stays fixed for the
+holder’s lifetime; new turn code must remain able to speak it.
 If the requesting inbox is already gone, keep the successful alias claim and
 continue the holder loop. A missing reply recipient must not fail the holder or
 undo a rekey. The requester can confirm ownership by lookup when its reply is lost.
-Commands and results use the shared inbox envelope at frozen version 1; its
-framework-owned event identity and target are not duplicated in these payloads.
+Commands and results use `rekey` and `rekey.response` envelopes. Their event identity,
+request correlation, and target are not duplicated in the payloads. There is no
+wire-version field or version negotiation.
 
 ## Turn execution interfaces
 
@@ -348,7 +340,6 @@ step.
 
 ```ts
 interface TurnWorkflowInput {
-  readonly version: 1;
   readonly session: SessionResources;
   readonly submission: AcceptedSubmission;
 }
@@ -504,13 +495,13 @@ active-turn ownership claim.
 | Latest snapshot and admission state | First execution step, after claim  | History, pending input, and terminal state can change before ownership is acquired.  |
 | Event stream for an HTTP response   | HTTP streaming adapter             | Reuse the resolved `events` reference; opening a reader does not hydrate turn state. |
 
-For a new session, the holder already has `SessionResources` after publishing the
-descriptor and passes it directly into its first start. There is no discovery read
+For a new session, the holder already has `SessionResources` after creating the
+streams and passes it directly into its first start. There is no discovery read
 on that dispatch path. For an existing Slack conversation, the sequence is:
 
 ```text
 continuation lookup -> holder ID -> cached descriptor or one descriptor read
-  -> start({ version: 1, session: resources, submission })
+  -> start({ session: resources, submission })
   -> claim active-turn(sessionId)
      owned: first execution step reads snapshot, admits input, and executes work
      conflict: forward and account for input; skip snapshot/model work
@@ -595,18 +586,18 @@ Additional hooks reserve distinct addresses or address independent executions;
 message kinds and request IDs do not create hooks. All eve-owned hooks are
 server-only (`isWebhook: false`) and omit `HookOptions.metadata`.
 
-| Owner/address          | Proposed token or scope                    | Purpose                                                                   |
-| ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------- |
-| Holder control         | `eve:session-control:v1:<sessionId>`       | Additive rekey and its acknowledgement                                    |
-| Provider alias         | `eve:continuation:v1:<provider-address>`   | Lookup of the current holder and stable session reference                 |
-| Authorization alias    | `eve:auth-callback:v1:<random-capability>` | Authorized callback lookup independent of the active turn                 |
-| Active turn            | `eve:turn-inbox:v1:<sessionId>`            | Session-wide exclusion and active-owner input, reports, requests, replies |
-| Blocking workflow tool | `eve:workflow-tool-inbox:v1:<operationId>` | One independently executing authored body                                 |
-| Background task        | `eve:task-inbox:v1:<taskId>`               | Work and requests that can outlive the initiating turn                    |
-| Activity collector     | Existing random callback capability        | Independent batch reduction, debounce, and expiry                         |
+| Owner/address          | Address or scope                      | Purpose                                                                   |
+| ---------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| Holder control         | `eve:holder:<holderRunId>`            | Additive rekey and its acknowledgement                                    |
+| Provider alias         | Provider continuation token           | Lookup of the holder and stable session reference                         |
+| Active turn            | `eve:turn:<sessionId>`                | Session-wide exclusion and active-owner input, reports, requests, replies |
+| Blocking workflow tool | `eve:workflow-tool-run:<operationId>` | One independently executing authored body                                 |
+| Background task        | Task-owned inbox                      | Work and requests that can outlive the initiating turn                    |
+| Activity collector     | Existing random callback capability   | Independent batch reduction, debounce, and expiry                         |
 
-Provider and authorization hooks are **lookup-only aliases**. Only receiving
-hooks feed an inbox; an alias's job is to reserve an address.
+Provider hooks are **lookup-only aliases**. Only receiving hooks feed an inbox;
+an alias reserves an address. Authorization callbacks resolve the stable session
+or use the addressed owner's existing inbox capability; they do not claim aliases.
 Holder control requests use correlated results or confirming reads without creating
 per-request reply hooks.
 
@@ -666,8 +657,8 @@ Flush output and publish the complete checkpoint before ordinary ownership relea
 Revisions and retry identities must reject stale commits. Hard cancellation needs
 fencing or reconciliation that prevents a new owner from proceeding while an old
 step can still write. An append-only stream by itself supplies neither transactional
-commit nor exactly-once external effects. Turn code performs checkpoint migration;
-the holder treats the contents as opaque.
+commit nor exactly-once external effects. The holder treats checkpoint contents as
+opaque. Snapshot migration is outside this implementation.
 
 Every owner awaiting another execution's outcome needs durable supervision that
 runs independently of new input and session expiry. Workflow sleep and bounded
@@ -686,12 +677,26 @@ acknowledgement cost. Supervision remains enabled when `sessionTimeoutMs: false`
 ## Wire protocol and inbox pump
 
 Internal senders receive an `InboxAddress` bound to one `ownerRunId`, or a stable
-session destination for traffic that may outlive a turn. The envelope contains
-`version`, identity `(producer.id, eventId)`, target, and a discriminated event with
-its domain payload. Token `:v1:` identifies the topology; envelope versions evolve
-independently. This implementation uses envelope v1. Future turn versions must
-retain the v1 session-admission contract while older owners can receive input;
-the holder's v1 rekey contract remains frozen for its lifetime.
+session destination for traffic that may outlive a turn. The envelope is unversioned:
+
+```ts
+interface InboxEnvelope<T = unknown> {
+  readonly eventId: string;
+  readonly kind: string;
+  readonly payload: T;
+  readonly requestId?: string;
+  readonly target?: {
+    readonly ownerRunId: string;
+    readonly turnId?: string;
+    readonly operationId?: string;
+  };
+}
+```
+
+`eventId` identifies a logical delivery across retries. `kind` discriminates the
+domain payload; `requestId` correlates replies. The sender binds `target.ownerRunId`
+from the trusted address. Tokens do not encode wire versions, and the runtime does
+not negotiate versions or inspect hook metadata.
 
 Direct sends target the addressed owner run, including replies through `replyTo`.
 Receivers check that target before applying an event. An old reply delivered to a
@@ -708,7 +713,7 @@ or answer to unrelated work. None of these checks uses hook metadata.
 | `input.response`, `authorization.response`, `runtime.result`           | Matching live request, connection/attempt, or invocation                        |
 | `workflow.report`, `workflow.request`, `workflow.outcome`              | Active turn or task inbox, with operation/request identity                      |
 | `activity.batch`                                                       | Collector, with batch identity                                                  |
-| `rekey`, `rekey.result`                                                | Holder control and requesting owner inbox, with request identity                |
+| `rekey`, `rekey.response`                                              | Holder control and requesting owner inbox, with request identity                |
 
 There is no parent `turn.settled` exchange. Committed state and event dispositions
 replace parent adoption. Framework encoders own identity, targets, and capabilities;
@@ -725,11 +730,9 @@ protected across ownership release. Bound address count, bytes, buffers, waiters
 dedupe state, retries, and supervision reads; overflow fails visibly without
 evicting input or releasing previous addresses.
 
-Use frozen, append-only wire modules with server/step encoders and dependency-free
-workflow decoders, following [wire schemas](./session-inbox-wire-schema.md).
-Unsupported versions, kinds, or owner/target combinations fail explicitly; stale
-valid events follow domain rules. This plan supersedes that document's routing
-and pre-cut compatibility policy where they conflict.
+Use one dependency-free inbox contract and shared send/receive helpers. Domain
+reducers validate the kinds and payloads they accept; stale valid events follow
+domain rules. Do not retain versioned wire adapters or compatibility paths.
 
 One background pump merges receiving hook iterators while foreground work awaits
 steps, tools, sleep, claims, or authored bodies. It decodes, deduplicates, buffers,
@@ -909,43 +912,24 @@ A small holder does not by itself solve those execution responsibilities.
 
 ## Migration and upgrades after the first version
 
-The first version assumes the holder is never upgraded. Turn code can evolve while
-continuing to read the supported resource descriptor and speak the frozen rekey
-contract. Snapshot migrations run in the accepting turn, not in the holder. This
-keeps normal deployment changes out of long-lived workflow code.
+Migration is deferred. This implementation creates new sessions and keeps each
+holder pinned for its lifetime. It does not import old snapshots, migrate them on
+turn admission, or accept existing-resource inputs.
 
-Keep the optional existing-resource input as the starting point for moving older
-eve sessions onto this topology:
+A later extension can let a new holder reference an existing event stream instead
+of creating one. Snapshot storage can be adopted independently after a compatible
+snapshot is available. Keeping the event reference preserves its history and
+cursors; preserving a public session ID also requires the directory mapping.
 
-```ts
-const input: HoldingWorkflowInput = {
-  initialAddresses: knownAddresses,
-  existing: {
-    sessionId: previousSessionId,
-    events: previousEventStream,
-    snapshots: importedSnapshotStream,
-  },
-};
-```
+An event reference alone is not a complete migration design. Older `entryWorkflow`
+versions hold state in step results. Moving those sessions requires extracting valid
+state, stopping the old executor before a new writer proceeds, and transferring
+provider aliases safely. Stream retention and encryption material must remain
+available. Decide supported source versions and recovery behavior after the clean
+new-session design lands.
 
-Supplying an event stream means use that reference and do not create another event
-stream. Snapshot storage is independent: reuse a compatible snapshot stream or
-create one and import state. A migration-only holder omits `firstTurn`, so adopting
-storage does not replay the initial user request. Subsequent turns use the normal
-admission path. Keeping the original event reference preserves its history and
-cursors; preserving a public session ID additionally requires the directory mapping.
-
-This is an extension point, not a complete live-migration design. Older
-`entryWorkflow` versions hold state in step results, so a migration must extract a
-valid snapshot and safely stop the old executor before new turns write. Existing
-provider claims also need a deliberate handoff; releasing one hook and claiming it
-in another run are not atomic. Source-stream retention and encryption material must
-remain available. An event reference alone does not solve these issues.
-
-Work through supported legacy versions, public-ID mapping, address transfer, and
-recovery after the clean new-session design lands. Do not add holder generations,
-automatic replacement, adopt/retire commands, or an upgrade router to v1 to anticipate
-that work. Live holder replacement remains outside the first implementation.
+Do not add holder generations, automatic replacement, adopt/retire commands, wire
+negotiation, or an upgrade router to anticipate that work.
 
 ## Implementation gates
 
@@ -988,12 +972,14 @@ hosted performance result for this topology yet.
 Runtime implementation must update session/storage documentation, steering and
 `turn.interrupted` semantics, additive rekey, recovery behavior, and the Promise-based
 `ask()` API. Include the public API changes' minor changeset and fixture coverage.
-This research-only proposal does not change published behavior.
+The replacement runtime and accompanying public documentation are implemented.
+Full stream and end-to-end validation remain gated on the SDK update that enables
+writes to another workflow's stream by stable identifier.
 
-Source inventory: [session inbox](../packages/eve/src/execution/session-command-inbox.ts),
-[turn workflow](../packages/eve/src/execution/turn-workflow.ts),
-[tool owner](../packages/eve/src/execution/tools/workflow/owner.ts),
-[task workflow](../packages/eve/src/execution/tasks/child/workflow.ts),
-[inline turn](../packages/eve/src/execution/inline-turn.ts),
+Source inventory: [holding workflow](../packages/eve/src/execution/session/holding-workflow.ts),
+[turn workflow](../packages/eve/src/execution/turn/workflow.ts),
+[tool owner](../packages/eve/src/execution/workflow-tool/workflow.ts),
+[task workflow](../packages/eve/src/execution/tasks/workflow.ts),
+[turn model execution](../packages/eve/src/execution/turn/model.ts),
 [harness emission](../packages/eve/src/harness/emission.ts), and
 [Slack anchoring](../packages/eve/src/public/channels/slack/slackChannel.ts).

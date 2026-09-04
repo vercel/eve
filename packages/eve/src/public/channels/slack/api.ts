@@ -1,3 +1,4 @@
+import { parseThreadMessage } from "#public/channels/slack/thread-message.js";
 /**
  * Native Slack Web API surface used by the channel.
  *
@@ -31,9 +32,7 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
-import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
-import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
@@ -401,6 +400,7 @@ export function buildSlackBinding(input: {
   /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
+  readonly sessionAnchor?: unknown;
 }): SlackBinding {
   const context = { teamId: input.installationTeamId };
   const request = createSlackRequester(input.botToken, context);
@@ -483,7 +483,10 @@ export function buildSlackBinding(input: {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];
       const hasStructured = "blocks" in message || "card" in message;
-      const shouldPostBeforeFiles = hasStructured || "markdown" in message;
+      const shouldPostBeforeFiles =
+        hasStructured ||
+        "markdown" in message ||
+        (!currentThreadTs && input.sessionAnchor !== undefined);
 
       // text + files: single Slack message with files attached via
       // files.completeUploadExternal's mrkdwn-only initial_comment.
@@ -497,9 +500,20 @@ export function buildSlackBinding(input: {
         return { id, raw: result.raw };
       }
 
-      const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken, context),
-      );
+      const postMessage =
+        files.length > 0 && "text" in message && (message.text?.length ?? 0) === 0
+          ? { ...message, text: "Attachments" }
+          : message;
+      const response = await postSlackMessage({
+        ...buildPostMessageOptions(
+          postMessage,
+          input.channelId,
+          currentThreadTs,
+          input.botToken,
+          context,
+        ),
+        metadata: currentThreadTs ? undefined : input.sessionAnchor,
+      });
       const id = response.id;
       handleMessageTs(id);
 
@@ -663,34 +677,4 @@ function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
     return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   }
   return data;
-}
-
-function parseThreadMessage(
-  raw: Record<string, unknown>,
-  threadRootTs: string,
-  identity: {
-    readonly appId: string | undefined;
-    readonly botUserId: string | undefined;
-  },
-): SlackThreadMessage {
-  const topLevelText = typeof raw.text === "string" ? raw.text : "";
-  const text = resolveSlackInboundMrkdwn(topLevelText, raw);
-  const ts = typeof raw.ts === "string" ? raw.ts : "";
-  const threadTs = typeof raw.thread_ts === "string" ? raw.thread_ts : threadRootTs;
-  const user = typeof raw.user === "string" ? raw.user : undefined;
-  const botId = typeof raw.bot_id === "string" ? raw.bot_id : undefined;
-  const appId = typeof raw.app_id === "string" ? raw.app_id : undefined;
-  const isMe =
-    (identity.botUserId !== undefined && user === identity.botUserId) ||
-    (identity.appId !== undefined && appId === identity.appId);
-  return {
-    text,
-    markdown: slackMrkdwnToGfm(text),
-    user,
-    botId,
-    ts,
-    threadTs,
-    isMe,
-    raw,
-  };
 }

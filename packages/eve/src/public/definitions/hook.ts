@@ -46,6 +46,7 @@ export interface HookEventMap {
   readonly "subagent.event": ProtocolEvent<"subagent.event">;
   readonly "subagent.started": ProtocolEvent<"subagent.started">;
   readonly "turn.cancelled": ProtocolEvent<"turn.cancelled">;
+  readonly "turn.interrupted": ProtocolEvent<"turn.interrupted">;
   readonly "turn.completed": ProtocolEvent<"turn.completed">;
   readonly "turn.failed": ProtocolEvent<"turn.failed">;
   readonly "turn.started": ProtocolEvent<"turn.started">;

@@ -1,3 +1,4 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import type {
@@ -93,8 +94,8 @@ export function buildSubagentRunInput(input: {
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
-  /** Hook token owned by the workflow currently waiting for this child. */
-  readonly parentContinuationToken?: string;
+  /** Destination for replies to the workflow currently waiting for this child. */
+  readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext?: SessionTraceContext;
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
@@ -131,7 +132,7 @@ export function buildSubagentRunInput(input: {
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
-    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentReplyTo: input.parentReplyTo,
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };

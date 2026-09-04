@@ -109,9 +109,9 @@ const answer = await ask(ctx, {
 ```
 
 `ask` publishes an `input.requested` event on the session — rendered the way channels render
-`ask_question` and tool approvals — and returns the hook the answer resumes, the way `createHook`
-returns one. Awaiting it suspends the run until a response arrives. Because it is a hook, it composes
-with the SDK's own constructs; race it against a deadline:
+`ask_question` and tool approvals — and returns a `Promise<ToolInputResponse>`. Awaiting it suspends
+the run until a response arrives. Each question has its own request identity, so several questions
+can share the run's inbox. Race the promise against a deadline:
 
 ```ts
 const pending = ask(ctx, { prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });

@@ -1,11 +1,5 @@
 import { createHook, sleep } from "#compiled/@workflow/core/index.js";
 
-import {
-  claimHookOwnership,
-  closeHookIterator,
-  disposeHook,
-  isHookConflictError,
-} from "#execution/hook-ownership.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivityBatchV1, ActivitySnapshotV1 } from "#protocol/activity.js";
 import {
@@ -34,13 +28,8 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   let rendererStates: Readonly<Record<string, unknown>> = {};
 
   try {
-    try {
-      await claimHookOwnership(batches);
-      ownsHook = true;
-    } catch (error) {
-      if (isHookConflictError(error)) return;
-      throw error;
-    }
+    if ((await batches.getConflict()) !== null) return;
+    ownsHook = true;
 
     while (true) {
       pendingRead ??= iterator.next();
@@ -77,9 +66,9 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       rendererStates = rendered.rendererStates;
     }
   } finally {
+    batches.dispose();
     if (ownsHook) {
-      await closeHookIterator(iterator).catch(() => {});
-      await disposeHook(batches).catch(() => {});
+      await iterator.return?.().catch(() => {});
       await disposeSessionActivityStep({
         rendererStates,
         serializedContext: input.serializedContext,

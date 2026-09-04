@@ -8,7 +8,7 @@
 
 import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
-import { ask } from "#execution/tools/workflow/ask.js";
+import { ask } from "#execution/workflow-tool/ask.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface DeployInput {

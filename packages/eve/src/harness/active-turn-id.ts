@@ -10,5 +10,5 @@ import type { HarnessEmissionState } from "#harness/emission.js";
  * bundle.
  */
 export function activeTurnId(state: HarnessEmissionState): string {
-  return state.turnId === "" ? `turn_${state.sequence}` : state.turnId;
+  return state.turnId === "" ? (state.nextTurnId ?? `turn_${state.sequence}`) : state.turnId;
 }

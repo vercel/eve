@@ -1,35 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import {
-  emitRecordedTaskInputRequestStep,
-  runProxySubagentEventStep,
-} from "#subagents/event-proxy-step.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
-import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
-import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invoke-step.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { emitRecordedTaskInputRequest, runProxySubagentEvent } from "#subagents/event-proxy.js";
+import { recordTaskInputRequest } from "#execution/tasks/input.js";
+import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event.js";
+import { routeProxiedDelivery } from "#execution/turn/proxy-delivery.js";
+import type { DurableSessionState } from "#execution/session/state.js";
+import { dispatchTaskAgentInvocation } from "#execution/tools/subagent/invoke.js";
+import { sendInbox } from "#execution/inbox/send.js";
 
-vi.mock("#subagents/event-proxy-step.js", () => ({
-  emitRecordedTaskInputRequestStep: vi.fn(),
-  runProxySubagentEventStep: vi.fn(),
+vi.mock("#subagents/event-proxy.js", () => ({
+  emitRecordedTaskInputRequest: vi.fn(),
+  runProxySubagentEvent: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
-  recordTaskInputRequestStep: vi.fn(),
+vi.mock("#execution/tasks/input.js", () => ({
+  recordTaskInputRequest: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/accept-event-step.js", () => ({
-  acceptTaskAuthorizationEventStep: vi.fn(),
+vi.mock("#execution/tools/subagent/accept-event.js", () => ({
+  acceptTaskAuthorizationEvent: vi.fn(),
 }));
-vi.mock("#execution/proxied-deliver-step.js", () => ({
-  routeProxiedDeliverStep: vi.fn(),
+vi.mock("#execution/turn/proxy-delivery.js", () => ({
+  routeProxiedDelivery: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
-  dispatchTaskAgentInvocationStep: vi.fn(),
+vi.mock("#execution/tools/subagent/invoke.js", () => ({
+  dispatchTaskAgentInvocation: vi.fn(),
 }));
-vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
-  resumeHookStep: vi.fn(),
+vi.mock("#execution/inbox/send.js", () => ({
+  sendInbox: vi.fn(),
 }));
 
 const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
@@ -37,11 +34,19 @@ const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
   emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
   hasProxyInputRequests,
   sessionId: "parent-session",
-  version: 1,
+  snapshot: {
+    session: {
+      agent: { system: "" },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+      state: {},
+    },
+  },
 });
 
 const taskRequest = {
-  replyTo: "eve:workflow-tool-run-answer:run-1:0",
+  replyTo: { kind: "session" as const, token: "eve:workflow-tool-run-answer:run-1:0" },
   request: {
     action: { callId: "call-q", input: {}, kind: "tool-call" as const, toolName: "ask" },
     kind: "question" as const,
@@ -58,16 +63,16 @@ describe("task HITL delivery routing", () => {
 
   it("commits the task route before emitting and consumes the framework-only delivery", async () => {
     const recordedState = state(true);
-    vi.mocked(recordTaskInputRequestStep).mockResolvedValue({
+    vi.mocked(recordTaskInputRequest).mockResolvedValue({
       accepted: true,
       request: taskRequest,
       sessionState: recordedState,
     });
-    vi.mocked(emitRecordedTaskInputRequestStep).mockResolvedValue({
+    vi.mocked(emitRecordedTaskInputRequest).mockResolvedValue({
       serializedContext: { adapter: "updated" },
       sessionState: recordedState,
     });
-    vi.mocked(routeProxiedDeliverStep).mockResolvedValue({
+    vi.mocked(routeProxiedDelivery).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
       serializedContext: { adapter: "updated" },
@@ -85,21 +90,21 @@ describe("task HITL delivery routing", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(recordTaskInputRequestStep).toHaveBeenCalledOnce();
-    expect(recordTaskInputRequestStep).toHaveBeenCalledWith(
+    expect(recordTaskInputRequest).toHaveBeenCalledOnce();
+    expect(recordTaskInputRequest).toHaveBeenCalledWith(
       expect.objectContaining({ request: taskRequest }),
     );
-    expect(emitRecordedTaskInputRequestStep).toHaveBeenCalledOnce();
-    expect(emitRecordedTaskInputRequestStep).toHaveBeenCalledWith(
+    expect(emitRecordedTaskInputRequest).toHaveBeenCalledOnce();
+    expect(emitRecordedTaskInputRequest).toHaveBeenCalledWith(
       expect.objectContaining({ request: taskRequest }),
     );
-    expect(vi.mocked(recordTaskInputRequestStep).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(emitRecordedTaskInputRequestStep).mock.invocationCallOrder[0] ?? 0,
+    expect(vi.mocked(recordTaskInputRequest).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(emitRecordedTaskInputRequest).mock.invocationCallOrder[0] ?? 0,
     );
   });
 
   it("drops an unowned task envelope before it can reach the parent model", async () => {
-    vi.mocked(recordTaskInputRequestStep).mockResolvedValue({
+    vi.mocked(recordTaskInputRequest).mockResolvedValue({
       accepted: false,
       sessionState: state(false),
     });
@@ -115,8 +120,8 @@ describe("task HITL delivery routing", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(emitRecordedTaskInputRequestStep).not.toHaveBeenCalled();
-    expect(routeProxiedDeliverStep).not.toHaveBeenCalled();
+    expect(emitRecordedTaskInputRequest).not.toHaveBeenCalled();
+    expect(routeProxiedDelivery).not.toHaveBeenCalled();
   });
 
   it("proxies a task-owned agent authorization event through the parent channel", async () => {
@@ -137,11 +142,11 @@ describe("task HITL delivery routing", () => {
       kind: "subagent-authorization-event" as const,
       subagentName: "research",
     };
-    vi.mocked(runProxySubagentEventStep).mockResolvedValue({
+    vi.mocked(runProxySubagentEvent).mockResolvedValue({
       serializedContext: { adapter: "updated" },
       sessionState: nextState,
     });
-    vi.mocked(acceptTaskAuthorizationEventStep).mockResolvedValue(true);
+    vi.mocked(acceptTaskAuthorizationEvent).mockResolvedValue(true);
 
     const result = await routeDeliverToChildren({
       delivery: {
@@ -159,12 +164,12 @@ describe("task HITL delivery routing", () => {
       sessionState: state(false),
     });
 
-    expect(acceptTaskAuthorizationEventStep).toHaveBeenCalledWith(
+    expect(acceptTaskAuthorizationEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         delivery: { hookPayload: event, taskId: "task-1" },
       }),
     );
-    expect(runProxySubagentEventStep).toHaveBeenCalledWith(
+    expect(runProxySubagentEvent).toHaveBeenCalledWith(
       expect.objectContaining({ hookPayload: event }),
     );
     expect(result).toMatchObject({
@@ -184,7 +189,7 @@ describe("task HITL delivery routing", () => {
       output: { code: "AGENT_UNREACHABLE", message: "gone" },
       subagentName: "research",
     };
-    vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
+    vi.mocked(dispatchTaskAgentInvocation).mockResolvedValue({
       kind: "failed",
       result,
       sessionState: nextState,
@@ -198,7 +203,11 @@ describe("task HITL delivery routing", () => {
             task: {
               agentRequests: [
                 {
-                  replyTo: "agent-reply",
+                  replyTo: {
+                    kind: "inbox" as const,
+                    address: { ownerRunId: "tool-run", token: "agent-reply" },
+                    requestId: "invocation",
+                  },
                   request: {
                     input: { message: "Find it", target: "research" },
                     invocationId: "call-1:research",
@@ -216,9 +225,13 @@ describe("task HITL delivery routing", () => {
       sessionState: state(false),
     });
 
-    expect(dispatchTaskAgentInvocationStep).toHaveBeenCalledWith({
+    expect(dispatchTaskAgentInvocation).toHaveBeenCalledWith({
       ownerId: "task-1",
-      replyTo: "agent-reply",
+      replyTo: {
+        kind: "inbox" as const,
+        address: { ownerRunId: "tool-run", token: "agent-reply" },
+        requestId: "invocation",
+      },
       request: {
         input: { message: "Find it", target: "research" },
         invocationId: "call-1:research",
@@ -228,17 +241,22 @@ describe("task HITL delivery routing", () => {
       sessionState: state(false),
       taskId: "task-1",
     });
-    expect(resumeHookStep).toHaveBeenCalledWith("agent-reply", {
-      kind: "runtime-action-result",
-      results: [result],
-    });
-    expect(acceptTaskAuthorizationEventStep).not.toHaveBeenCalled();
+    expect(sendInbox).toHaveBeenCalledWith(
+      { ownerRunId: "tool-run", token: "agent-reply" },
+      {
+        eventId: "invocation:failed",
+        kind: "agent.response",
+        requestId: "invocation",
+        payload: { kind: "runtime-action-result", results: [result] },
+      },
+    );
+    expect(acceptTaskAuthorizationEvent).not.toHaveBeenCalled();
     expect(routed).toMatchObject({ sessionState: nextState });
   });
 
   it("reindexes ordinary metadata after consuming task-only payloads", async () => {
     const routedState = state(true);
-    vi.mocked(routeProxiedDeliverStep).mockResolvedValue({
+    vi.mocked(routeProxiedDelivery).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
       serializedContext: {},
@@ -246,7 +264,7 @@ describe("task HITL delivery routing", () => {
     });
     const caller = {
       callId: "call-parent",
-      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      replyTo: { kind: "session" as const, token: "parent-turn" },
       subagentName: "research",
     };
 
@@ -268,7 +286,7 @@ describe("task HITL delivery routing", () => {
       sessionState: routedState,
     });
 
-    expect(routeProxiedDeliverStep).toHaveBeenCalledWith(
+    expect(routeProxiedDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
         delivery: {
           caller,
