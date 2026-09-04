@@ -329,7 +329,10 @@ export async function deliverTaskInputResponsesStep(input: {
         command.payload.inputResponses,
       );
     } else {
-      await resumeSessionInbox(input.answer.childContinuationToken, command);
+      await resumeSessionInbox(
+        input.answer.childSessionInbox ?? input.answer.childContinuationToken,
+        command,
+      );
     }
     return "delivered";
   } catch (error) {

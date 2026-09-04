@@ -341,6 +341,7 @@ export interface SubagentInputRequestHookPayload {
   readonly callId: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;
+  readonly childSessionInbox?: import("#execution/wire/session-inbox-contract.js").SessionInboxAddress;
   readonly event: SubagentInputRequestEvent;
   readonly kind: "subagent-input-request";
   readonly subagentName: string;

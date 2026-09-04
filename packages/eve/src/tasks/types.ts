@@ -171,6 +171,7 @@ export interface TaskInboundInputRequest {
 export interface TaskInboundAnswerInput {
   readonly auth?: unknown;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: import("#execution/wire/session-inbox-contract.js").SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly inputResponses: readonly {
     readonly optionId?: string;

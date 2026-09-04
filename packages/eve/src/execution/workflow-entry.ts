@@ -45,6 +45,10 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import {
+  SESSION_INBOX_CONTEXT_KEY,
+  SESSION_INBOX_WIRE_VERSION,
+} from "#execution/wire/session-inbox-contract.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -160,6 +164,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   // Seed `eve.sessionId` so the terminal failure emitter can stamp it
   // onto `session.failed` even if `createSessionStep` itself throws.
   input.serializedContext["eve.sessionId"] = sessionId;
+  // The driver stays pinned while turn steps can move to newer deployments.
+  input.serializedContext[SESSION_INBOX_CONTEXT_KEY] = {
+    sessionId,
+    version: SESSION_INBOX_WIRE_VERSION,
+  };
 
   const driverWritable = getWritable<Uint8Array>();
   const crashCleanupState: CrashCleanupState = {

@@ -16,7 +16,7 @@ type SessionCursor = Pick<
  * Parking is server-side.
  */
 export default defineEval({
-  tags: ["real-model"],
+  tags: ["session-inbox"],
   description: "Subagent tool approval proxied through the parent session.",
   timeoutMs: 90_000,
 

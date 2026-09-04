@@ -10,6 +10,28 @@ export const SESSION_INBOX_WIRE_VERSION =
 /** Hook metadata field advertising the consumer's inbox wire capability. */
 export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";
 
+export const SESSION_INBOX_CONTEXT_KEY = "eve.sessionInbox";
+
+/** Immutable inbox coordinates advertised by the receiving session's driver. */
+export interface SessionInboxAddress {
+  readonly sessionId: string;
+  readonly version: number;
+}
+
+export function isSessionInboxAddress(value: unknown): value is SessionInboxAddress {
+  if (value === null || typeof value !== "object") return false;
+  return (
+    "sessionId" in value &&
+    typeof value.sessionId === "string" &&
+    value.sessionId.length > 0 &&
+    !value.sessionId.includes(":") &&
+    "version" in value &&
+    typeof value.version === "number" &&
+    Number.isSafeInteger(value.version) &&
+    value.version > 0
+  );
+}
+
 /**
  * The consumer wire selected before a producer persists a payload.
  *

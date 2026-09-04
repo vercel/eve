@@ -307,106 +307,110 @@ describe("background agent invocation routing", () => {
     );
   });
 
-  it("preserves each child HITL event's coordinates when relaying repeated requests", async () => {
-    const childRequest = (input: {
-      readonly requestId: string;
-      readonly stepIndex: number;
-    }): AgentInvocationReply => ({
-      callId: "call-1",
-      childContinuationToken: "child-continuation",
-      childSessionId: "child-1",
-      event: {
-        requests: [
-          {
-            action: {
-              callId: input.requestId,
-              input: {},
-              kind: "tool-call",
-              toolName: "approval_gate",
+  it.each([false, true])(
+    "preserves child HITL coordinates and routes advertised inboxes: %s",
+    async (advertiseInbox) => {
+      const childRequest = (input: {
+        readonly requestId: string;
+        readonly stepIndex: number;
+      }): AgentInvocationReply => ({
+        callId: "call-1",
+        childContinuationToken: "child-continuation",
+        childSessionId: "child-1",
+        childSessionInbox: advertiseInbox ? { sessionId: "child-1", version: 1 } : undefined,
+        event: {
+          requests: [
+            {
+              action: {
+                callId: input.requestId,
+                input: {},
+                kind: "tool-call",
+                toolName: "approval_gate",
+              },
+              kind: "tool-approval",
+              prompt: "Approve?",
+              requestId: input.requestId,
             },
-            kind: "tool-approval",
-            prompt: "Approve?",
-            requestId: input.requestId,
-          },
-        ],
-        sequence: 3,
-        stepIndex: input.stepIndex,
-        turnId: "turn-child",
-      },
-      kind: "subagent-input-request",
-      subagentName: "research",
-    });
-    const replies: AgentInvocationReply[] = [
-      childRequest({ requestId: "approval-1", stepIndex: 1 }),
-      childRequest({ requestId: "approval-2", stepIndex: 2 }),
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1:research",
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "research",
-          } as never,
-        ],
-      },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const from: WorkflowToolRunRef = {
-      callId: "call-1",
-      execution: "background",
-      input: { message: "Find it" },
-      runId: "run-1",
-      sequence: 0,
-      stepIndex: 0,
-      toolName: "research",
-      turnId: "turn-parent",
-    };
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
-      from,
-      owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
-      },
-    });
+          ],
+          sequence: 3,
+          stepIndex: input.stepIndex,
+          turnId: "turn-child",
+        },
+        kind: "subagent-input-request",
+        subagentName: "research",
+      });
+      const replies: AgentInvocationReply[] = [
+        childRequest({ requestId: "approval-1", stepIndex: 1 }),
+        childRequest({ requestId: "approval-2", stepIndex: 2 }),
+        {
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-1:research",
+              kind: "subagent-result",
+              origin: "child",
+              output: "done",
+              subagentName: "research",
+            } as never,
+          ],
+        },
+      ];
+      mocks.createHook.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: async () =>
+            replies.length > 0
+              ? { done: false as const, value: replies.shift()! }
+              : { done: true as const, value: undefined },
+        }),
+        token: "agent-reply",
+      });
+      mocks.resumeHook.mockImplementation(async () => undefined);
+      const from: WorkflowToolRunRef = {
+        callId: "call-1",
+        execution: "background",
+        input: { message: "Find it" },
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-parent",
+      };
+      const ctx = { callId: "call-1" } as ToolContext;
+      attachWorkflowToolRunContext(ctx, {
+        admission: Promise.resolve({ status: "accepted" }),
+        from,
+        owner: {
+          admission: "owner-admission",
+          outcome: "owner-outcome",
+          report: "owner-report",
+          request: "owner-request",
+        },
+      });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("done");
+      await expect(
+        agent(ctx, { key: "research", message: "Find it", target: "research" }),
+      ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-request", {
-      from,
-      replyTo: "child-continuation",
-      request: {
-        kind: "input-batch",
-        requests: [expect.objectContaining({ requestId: "approval-1" })],
-      },
-      requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
-    });
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-request", {
-      from,
-      replyTo: "child-continuation",
-      request: {
-        kind: "input-batch",
-        requests: [expect.objectContaining({ requestId: "approval-2" })],
-      },
-      requestCoordinates: { sequence: 3, stepIndex: 2, turnId: "turn-child" },
-    });
-  });
+      expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-request", {
+        from,
+        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        request: {
+          kind: "input-batch",
+          requests: [expect.objectContaining({ requestId: "approval-1" })],
+        },
+        requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
+      });
+      expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-request", {
+        from,
+        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        request: {
+          kind: "input-batch",
+          requests: [expect.objectContaining({ requestId: "approval-2" })],
+        },
+        requestCoordinates: { sequence: 3, stepIndex: 2, turnId: "turn-child" },
+      });
+    },
+  );
 
   it("forwards background authorization as an owner authorization request", async () => {
     const replies: AgentInvocationReply[] = [

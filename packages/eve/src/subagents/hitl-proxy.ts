@@ -1,3 +1,4 @@
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import {
   emitTurnEpilogue,
@@ -64,6 +65,7 @@ export async function emitProxiedInputRequest(input: {
 export interface RoutedChildDelivery {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** Parent-visible request IDs safe to retire once this bucket is forwarded. */
@@ -87,6 +89,7 @@ export interface RoutedDeliverPayload {
 interface ChildResponseBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
@@ -120,10 +123,12 @@ export function routeDeliverPayload(input: {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const bucketKey =
-      route.taskId === undefined
-        ? route.childContinuationToken
-        : `${route.childContinuationToken}\0${route.childResponseUrl ?? "local"}\0${route.taskId}`;
+    const bucketKey = [
+      route.childContinuationToken,
+      route.childSessionInbox?.sessionId ?? "",
+      route.childResponseUrl ?? "local",
+      route.taskId ?? "",
+    ].join("\0");
     const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
@@ -132,6 +137,9 @@ export function routeDeliverPayload(input: {
         parentRequestIds: [response.requestId],
         responses: [toChildInputResponse(response, route)],
         routes: [route],
+        ...(route.childSessionInbox !== undefined && {
+          childSessionInbox: route.childSessionInbox,
+        }),
         ...(route.answerHook !== undefined && { answerHook: route.answerHook }),
         ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
         ...(route.taskId !== undefined && { taskId: route.taskId }),
@@ -147,6 +155,7 @@ export function routeDeliverPayload(input: {
     ({
       answerHook,
       childContinuationToken,
+      childSessionInbox,
       childResponseUrl,
       parentRequestIds,
       responses,
@@ -172,6 +181,7 @@ export function routeDeliverPayload(input: {
         childContinuationToken,
         payload: { inputResponses: responses },
         retireRequestIds: [...retireRequestIds],
+        ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(answerHook !== undefined && { answerHook }),
         ...(childResponseUrl !== undefined && { childResponseUrl }),
         ...(taskId !== undefined && { taskId }),
