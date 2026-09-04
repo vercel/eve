@@ -5,20 +5,24 @@ import type {
   CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 
 const runProgram = vi.fn<(...args: any[]) => Promise<CodeModeProgramOutcome>>();
-const executeTool = vi.fn<(...args: any[]) => Promise<{ isError: boolean; output: unknown }>>();
+const executeTool = vi.fn<(...args: any[]) => Promise<CodeModeCallResolution>>();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
   CODE_MODE_CALL_INTERRUPT_KIND: "eve.code-mode-call",
-  executeCodeModeToolStep: (...args: unknown[]) => executeTool(...args),
   runCodeModeProgramStep: (...args: unknown[]) => runProgram(...args),
+}));
+vi.mock("#execution/code-mode/authorization.js", () => ({
+  executeCodeModeTool: (_ctx: unknown, ...args: unknown[]) => executeTool(...args),
 }));
 vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({
   invokeAgent: (...args: unknown[]) => invokeAgent(...args),
 }));
 vi.mock("#execution/tools/workflow/ask.js", () => ({
+  readWorkflowToolRunRef: () => ({ sequence: 1, stepIndex: 2, turnId: "turn" }),
   readCodeModeRunContext: () => ({
     serializedContext: { ctx: true },
     sessionState: { sessionId: "s1" },
@@ -75,7 +79,7 @@ describe("codeModeWorkflow", () => {
     runProgram
       .mockResolvedValueOnce(parked(call("tool", "add", { a: 1, b: 2 })))
       .mockResolvedValueOnce(completed(3));
-    executeTool.mockResolvedValueOnce({ isError: false, output: 3 });
+    executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
 
     await expect(codeModeWorkflow(program, context())).resolves.toBe(3);
     expect(executeTool).toHaveBeenCalledWith(
@@ -86,7 +90,7 @@ describe("codeModeWorkflow", () => {
       }),
     );
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ interrupt: { marker: "add" }, resolution: 3 }],
+      resume: [{ interrupt: { marker: "add" }, resolution: { status: "completed", output: 3 } }],
     });
     expect(invokeAgent).not.toHaveBeenCalled();
   });
@@ -104,7 +108,7 @@ describe("codeModeWorkflow", () => {
       { invocationId: "outer:0" },
     );
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ resolution: "findings" }],
+      resume: [{ resolution: { status: "completed", output: "findings" } }],
     });
     expect(executeTool).not.toHaveBeenCalled();
   });
@@ -137,7 +141,7 @@ describe("codeModeWorkflow", () => {
         started++;
         check();
         await gate;
-        return { isError: false, output: 2 };
+        return { status: "completed", output: 2 };
       });
     });
 
@@ -150,9 +154,9 @@ describe("codeModeWorkflow", () => {
     expect(runProgram).toHaveBeenCalledTimes(2);
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
       resume: [
-        { interrupt: { marker: "a" }, resolution: "a-result" },
-        { interrupt: { marker: "b" }, resolution: "b-result" },
-        { interrupt: { marker: "add" }, resolution: 2 },
+        { interrupt: { marker: "a" }, resolution: { status: "completed", output: "a-result" } },
+        { interrupt: { marker: "b" }, resolution: { status: "completed", output: "b-result" } },
+        { interrupt: { marker: "add" }, resolution: { status: "completed", output: 2 } },
       ],
     });
   });
@@ -178,11 +182,11 @@ describe("codeModeWorkflow", () => {
     runProgram
       .mockResolvedValueOnce(parked(call("tool", "add", {})))
       .mockResolvedValueOnce(completed("recovered"));
-    executeTool.mockResolvedValueOnce({ isError: true, output: "boom" });
+    executeTool.mockResolvedValueOnce({ status: "failed", error: "boom" });
 
     await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ resolution: { error: "boom" } }],
+      resume: [{ resolution: { status: "failed", error: "boom" } }],
     });
   });
 
@@ -190,6 +194,37 @@ describe("codeModeWorkflow", () => {
     runProgram.mockResolvedValueOnce(parked(call("tool", "add", {})));
     await expect(codeModeWorkflow(program, context(true))).rejects.toThrow("stop");
     expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it("resumes a mixed batch with a subagent failure and its successful siblings", async () => {
+    runProgram
+      .mockResolvedValueOnce(
+        parked(call("agent", "researcher", { message: "dig" }), call("tool", "add", {})),
+      )
+      .mockResolvedValueOnce(completed("recovered"));
+    invokeAgent.mockRejectedValueOnce({ message: "child failed" });
+    executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
+
+    await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+    expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+      resume: [
+        { resolution: { status: "failed", error: "child failed" } },
+        { resolution: { status: "completed", output: 3 } },
+      ],
+    });
+  });
+
+  it("does not turn cancellation into a catchable nested failure", async () => {
+    const controller = new AbortController();
+    runProgram.mockResolvedValueOnce(parked(call("agent", "researcher", { message: "dig" })));
+    invokeAgent.mockImplementationOnce(async () => {
+      controller.abort(new Error("cancelled"));
+      throw controller.signal.reason;
+    });
+    await expect(
+      codeModeWorkflow(program, { ...context(), abortSignal: controller.signal }),
+    ).rejects.toThrow("cancelled");
+    expect(runProgram).toHaveBeenCalledOnce();
   });
 
   it("rejects malformed durable input before touching the sandbox", async () => {

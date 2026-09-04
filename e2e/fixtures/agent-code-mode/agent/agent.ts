@@ -36,6 +36,31 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       "]);",
       "return { a, b, c };",
     ].join("\n");
+  } else if (message.includes("CODEMODE-DYNAMIC-START")) {
+    directive = "CODEMODE-DYNAMIC";
+    js = "return { shared: await tools.shared({}), discovered: await tools.discovered({}) };";
+  } else if (message.includes("CODEMODE-CONNECTIONS-START")) {
+    directive = "CODEMODE-CONNECTIONS";
+    if (!request.toolResults.some((entry) => entry.name === "connection_search")) {
+      return { toolCalls: [{ name: "connection_search", input: { keywords: "status" } }] };
+    }
+    if (request.tools.some((tool) => tool.name === "catalog__getStatus")) {
+      throw new Error("Discovered never-approved connection tool stayed direct.");
+    }
+    // The inline spec tests discovery without making an external API request.
+    js =
+      'return { discovered: typeof tools.catalog__getStatus, echo: await tools.echo({ value: "catalog-ready" }) };';
+  } else if (message.includes("CODEMODE-AUTH-START")) {
+    directive = "CODEMODE-AUTH";
+    js =
+      'const first = await tools.echo({ value: "before-auth" }); return { first, auth: await tools.authorize({}) };';
+  } else if (message.includes("CODEMODE-FAILURE-START")) {
+    directive = "CODEMODE-FAILURE";
+    js = [
+      'const results = await Promise.allSettled([tools.marker({ message: "FAIL-CHILD" }), tools.echo({ value: "sibling" })]);',
+      'const retry = await tools.marker({ message: "retry-ok" });',
+      "return { statuses: results.map(r => r.status), sibling: results[1].value, retry };",
+    ].join("\n");
   } else if (message.includes("CODEMODE-SURFACE-START")) {
     const names = request.tools.map((tool) => tool.name).sort();
     return `CODEMODE-SURFACE-RESULT [${names.join(",")}]`;

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `experimental.codeMode` (`"eager"` or `"lazy"`) to the agent config. Eligible tools move behind one framework `code_mode` tool that runs the model's JavaScript program as a durable workflow: each nested tool call gets its own step and replay boundary, and subagent calls inside the program go through the same owner channel as any workflow tool, so a program can launch and await subagents.
+Add `experimental.codeMode` (`"eager"` or `"lazy"`) to run JavaScript programs that call eligible static and dynamic tools, await subagents, and catch individual call failures. Each nested call has its own durable boundary and can wait for authorization; approval-gated tools and ordinary background tools stay available as direct calls.

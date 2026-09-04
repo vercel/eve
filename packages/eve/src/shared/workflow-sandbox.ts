@@ -10,6 +10,7 @@ const WORKFLOW_SANDBOX_MODULE_SPECIFIER = ["#compiled", "@ai-sdk", "code-mode", 
 );
 
 type WorkflowSandboxModule = {
+  readonly CodeModeToolError: typeof CodeModeModule.CodeModeToolError;
   readonly continueCodeModeInterrupt: typeof CodeModeModule.experimental_continueCodeModeInterrupt;
   readonly createCodeModeTool: typeof CodeModeModule.experimental_createCodeModeTool;
   readonly getCodeModeInterrupt: typeof CodeModeModule.experimental_getCodeModeInterrupt;
@@ -51,6 +52,12 @@ export async function requestWorkflowSandboxInterrupt(input: {
 }): Promise<unknown> {
   const { requestCodeModeInterrupt } = await loadWorkflowSandboxModule();
   return requestCodeModeInterrupt(input);
+}
+
+/** Preserves a nested tool's failure message across the sandbox bridge. */
+export async function rejectWorkflowSandboxToolCall(message: string): Promise<never> {
+  const { CodeModeToolError } = await loadWorkflowSandboxModule();
+  throw new CodeModeToolError(message);
 }
 
 export async function getWorkflowSandboxInterrupt(
@@ -148,6 +155,7 @@ async function loadWorkflowSandboxModule(): Promise<WorkflowSandboxModule> {
 async function importWorkflowSandboxModule(specifier: string): Promise<WorkflowSandboxModule> {
   const module = (await import(specifier)) as typeof CodeModeModule;
   return {
+    CodeModeToolError: module.CodeModeToolError,
     continueCodeModeInterrupt: module.experimental_continueCodeModeInterrupt,
     createCodeModeTool: module.experimental_createCodeModeTool,
     getCodeModeInterrupt: module.experimental_getCodeModeInterrupt,

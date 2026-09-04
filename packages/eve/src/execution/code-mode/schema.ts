@@ -1,12 +1,16 @@
 import { z } from "#compiled/zod/index.js";
 
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const codeModeInputSchema = z.strictObject({
   js: z.string().describe("Complete JavaScript program to execute over the available tools."),
 });
 
 export type CodeModeMode = "eager" | "lazy";
+
+export type CodeModeCallResolution =
+  | { readonly status: "completed"; readonly output: JsonValue }
+  | { readonly status: "failed"; readonly error: string };
 
 /**
  * Durable input of one `code_mode` workflow run. The harness resolves the
