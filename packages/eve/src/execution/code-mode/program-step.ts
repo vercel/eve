@@ -2,14 +2,39 @@ import { asSchema, type ToolSet } from "ai";
 
 import { deserializeContext } from "#context/serialize.js";
 import { withContextScope } from "#context/run-step.js";
-import { buildDynamicTools } from "#context/build-dynamic-tools.js";
+import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
-import { createNodeHarnessTools } from "#execution/node-step.js";
+import { restoreDynamicToolCallbacks } from "#context/dynamic-tool-lifecycle.js";
+import {
+  SessionDynamicToolMetadataKey,
+  TurnDynamicToolMetadataKey,
+  StepDynamicToolMetadataKey,
+} from "#context/keys.js";
+import { isCurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import { hasUnregisteredDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
+import { buildRuntimeIdentity, createNodeHarnessTools } from "#execution/node-step.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { requireSessionModelReference } from "#harness/types.js";
+import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
+import {
+  createSessionStartedEvent,
+  createTurnStartedEvent,
+  createStepStartedEvent,
+} from "#protocol/message.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
-import type { CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import type { CodeModeCallResolution, CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import type { MatchedAuthorizationCallback } from "#execution/authorization-callback-match.js";
+import {
+  AuthorizationHookTokenKey,
+  PendingAuthorizationResultKey,
+  resolveActiveAuthorizationChallenges,
+  type AuthorizationChallenge,
+} from "#harness/authorization.js";
+import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import {
   CODE_MODE_BRIDGE_REQUEST_LIMIT,
   claimsForCodeMode,
@@ -23,11 +48,13 @@ import { getWorkflowContinuationSecurity } from "#harness/workflow-continuation-
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   continueWorkflowSandboxInterrupt,
   createWorkflowSandboxTool,
   getWorkflowSandboxPendingInterrupts,
   readWorkflowSandboxResolution,
+  rejectWorkflowSandboxToolCall,
   requestWorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
   type WorkflowSandboxInterrupt,
@@ -55,8 +82,16 @@ export type CodeModeProgramOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
 
+export type CodeModeToolOutcome =
+  | CodeModeCallResolution
+  | {
+      readonly status: "authorization-required";
+      readonly challenges: readonly AuthorizationChallenge[];
+    };
+
 interface CodeModeProgramInput {
   readonly callId: string;
+  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly program: CodeModeWorkflowInput;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -79,7 +114,7 @@ export async function runCodeModeProgramStep(
   input: CodeModeProgramInput & {
     readonly resume?: readonly {
       readonly interrupt: WorkflowSandboxInterrupt;
-      readonly resolution: unknown;
+      readonly resolution: CodeModeCallResolution;
     }[];
   },
 ): Promise<CodeModeProgramOutcome> {
@@ -156,16 +191,23 @@ export async function runCodeModeProgramStep(
  * dispatching, so this step only reconnects to it.
  */
 export async function executeCodeModeToolStep(input: {
+  readonly authorizationHookToken: string;
+  readonly authorizationResults?: readonly MatchedAuthorizationCallback["result"][];
   readonly callId: string;
+  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly toolCallId: string;
   readonly toolInput: unknown;
   readonly toolName: string;
-}): Promise<{ readonly isError: boolean; readonly output: JsonValue }> {
+}): Promise<CodeModeToolOutcome> {
   "use step";
 
-  const { ctx, harnessTools, session } = await hydrateTurnTools(input);
+  const { ctx, harnessTools, session, rehydrateConnections } = await hydrateTurnTools(input);
+  ctx.set(AuthorizationHookTokenKey, input.authorizationHookToken);
+  if (input.authorizationResults !== undefined) {
+    ctx.set(PendingAuthorizationResultKey, input.authorizationResults);
+  }
   const definition = harnessTools.get(input.toolName);
   if (
     definition === undefined ||
@@ -173,13 +215,13 @@ export async function executeCodeModeToolStep(input: {
     !claimsForCodeMode(input.toolName, harnessTools)
   ) {
     return {
-      isError: true,
-      output: `Tool "${input.toolName}" is not available to code_mode in this session.`,
+      status: "failed",
+      error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
     };
   }
   const execute = wrapToolExecute(definition);
   if (execute === undefined) {
-    return { isError: true, output: `Tool "${input.toolName}" has no executor.` };
+    return { status: "failed", error: `Tool "${input.toolName}" has no executor.` };
   }
   // The turn's history as of dispatch: the same view a direct call would see.
   const options: ToolExecuteOptions = {
@@ -188,13 +230,21 @@ export async function executeCodeModeToolStep(input: {
   } as ToolExecuteOptions;
   try {
     const scoped = await withContextScope(ctx, session, async (enriched) => {
+      await rehydrateConnections();
       const result = await execute(input.toolInput, options);
       const output = isAsyncIterable(result) ? await lastOf(result) : result;
       return { result: output, session: enriched };
     });
-    return { isError: false, output: parseJsonValue(scoped.result ?? null) };
+    const authorization = readToolInterrupt(ctx, input.toolCallId);
+    if (authorization !== undefined) {
+      return {
+        status: "authorization-required",
+        challenges: resolveActiveAuthorizationChallenges(authorization.challenges),
+      };
+    }
+    return { status: "completed", output: parseJsonValue(scoped.result ?? null) };
   } catch (error) {
-    return { isError: true, output: error instanceof Error ? error.message : String(error) };
+    return { status: "failed", error: toErrorMessage(error) };
   }
 }
 
@@ -207,23 +257,7 @@ async function buildProgramHost(input: CodeModeProgramInput): Promise<{
   for (const name of input.program.toolNames) {
     const definition = harnessTools.get(name);
     if (definition === undefined || !claimsForCodeMode(name, harnessTools)) continue;
-    const target = isCodeModeAgentTool(definition) ? "agent" : "tool";
-    hostTools[name] = {
-      ...describeClaimedTool(definition),
-      // On resume the sandbox replays the program and re-invokes this stub
-      // with the settled value attached; returning it is what lets the
-      // program advance past the park point.
-      execute: async (toolInput: unknown, options: unknown) => {
-        const resolution = readWorkflowSandboxResolution(options);
-        if (resolution !== undefined) return resolution;
-        return requestWorkflowSandboxInterrupt({
-          kind: CODE_MODE_CALL_INTERRUPT_KIND,
-          target,
-          toolInput,
-          toolName: name,
-        } satisfies CodeModeCallInterrupt);
-      },
-    } as ToolSet[string];
+    hostTools[name] = createCodeModeToolStub(name, definition);
   }
   if (input.program.mode === "lazy") {
     const catalog = Object.fromEntries(
@@ -237,7 +271,30 @@ async function buildProgramHost(input: CodeModeProgramInput): Promise<{
   return { hostTools: hostTools as ToolSet, security: getWorkflowContinuationSecurity(session) };
 }
 
+export function createCodeModeToolStub(
+  name: string,
+  definition: HarnessToolDefinition,
+): ToolSet[string] {
+  return {
+    ...describeClaimedTool(definition),
+    execute: async (toolInput: unknown, options: unknown) => {
+      const resolution = readWorkflowSandboxResolution(options) as
+        | CodeModeCallResolution
+        | undefined;
+      if (resolution?.status === "failed") return rejectWorkflowSandboxToolCall(resolution.error);
+      if (resolution?.status === "completed") return resolution.output;
+      return requestWorkflowSandboxInterrupt({
+        kind: CODE_MODE_CALL_INTERRUPT_KIND,
+        target: isCodeModeAgentTool(definition) ? "agent" : "tool",
+        toolInput,
+        toolName: name,
+      } satisfies CodeModeCallInterrupt);
+    },
+  } as ToolSet[string];
+}
+
 async function hydrateTurnTools(input: {
+  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }) {
@@ -252,14 +309,49 @@ async function hydrateTurnTools(input: {
     durable,
     turnAgent: effective.turnAgent,
   });
+  const emission = getHarnessEmissionState(session.state);
+  const runtime = buildRuntimeIdentity(node);
+  const connections = bindDynamicConnections(ctx, bundle.resolvedAgent);
+  const rehydrateConnections = () => connections.rehydrate(emission, runtime, false);
+  const metadata = [
+    SessionDynamicToolMetadataKey,
+    TurnDynamicToolMetadataKey,
+    StepDynamicToolMetadataKey,
+  ].flatMap((key) => ctx.get(key) ?? []);
+  if (
+    metadata.some(
+      (entry) =>
+        !isCurrentDynamicToolMetadata(entry) || hasUnregisteredDurableDynamicCallbacks([entry]),
+    )
+  ) {
+    await withContextScope(ctx, session, async (enriched) => {
+      await rehydrateConnections();
+      await restoreDynamicToolCallbacks({
+        ctx,
+        resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
+        events: [
+          createSessionStartedEvent({ runtime }),
+          createTurnStartedEvent(input.event),
+          createStepStartedEvent({
+            ...input.event,
+            modelId: requireSessionModelReference(session).id,
+          }),
+        ],
+        messages: createExecutionHistoryView(session).initial.messages,
+      });
+      return { result: undefined, session: enriched };
+    });
+  }
   const harnessTools = new Map<string, HarnessToolDefinition>(createNodeHarnessTools({ node }));
   for (const dynamicSubagent of buildDynamicSubagentTools(ctx)) {
     harnessTools.set(dynamicSubagent.name, dynamicSubagent);
   }
-  for (const dynamic of buildDynamicTools(ctx)) {
-    harnessTools.set(dynamic.name, dynamic);
-  }
-  return { ctx, harnessTools, session };
+  return {
+    ctx,
+    harnessTools: buildResponseAuthorizationTools({ authoredTools: harnessTools, context: ctx }),
+    session,
+    rehydrateConnections,
+  };
 }
 
 function readCallInterrupt(interrupt: WorkflowSandboxInterrupt): CodeModeCallInterrupt {

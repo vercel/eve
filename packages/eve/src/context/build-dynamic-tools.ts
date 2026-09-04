@@ -22,6 +22,7 @@ import type {
 import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
+  stampDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
@@ -58,6 +59,12 @@ function buildReplayedApproval(
             requestReference.closure,
             context,
           )) as ApprovalStatus;
+  if (request !== undefined) {
+    stampDurableDynamicCallback(requestPolicy, {
+      callback: request,
+      closure: requestReference.closure,
+    });
+  }
 
   const responseReference = metadata.callbacks.approvalResponse;
   if (responseReference === undefined) return requestPolicy;

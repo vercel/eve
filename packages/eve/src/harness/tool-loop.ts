@@ -1306,7 +1306,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : [...modelMessages];
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
-      const advertisedHarnessTools = getAdvertisedTools({
+      let advertisedHarnessTools = getAdvertisedTools({
         session,
         tools: harnessTools,
       });
@@ -1343,6 +1343,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           flatTools[name] = toolDefinition;
         }
+        advertisedHarnessTools = getAdvertisedTools({
+          session,
+          tools: buildResponseAuthorizationTools({
+            authoredTools: advertisedHarnessTools,
+            context: ctx,
+          }),
+        });
       }
 
       if (session.outputSchema !== undefined) {

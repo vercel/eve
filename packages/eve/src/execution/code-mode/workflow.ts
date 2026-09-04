@@ -1,14 +1,16 @@
 import type { ToolContext } from "#tools/definition.js";
 import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
-import { readCodeModeRunContext } from "#execution/tools/workflow/ask.js";
+import { readCodeModeRunContext, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
+import { executeCodeModeTool } from "#execution/code-mode/authorization.js";
 import {
-  executeCodeModeToolStep,
   runCodeModeProgramStep,
   type CodeModePendingCall,
   type CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 /**
  * Durable body behind the framework `code_mode` tool.
@@ -24,8 +26,10 @@ export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Pro
 
   const program = parseCodeModeWorkflowInput(rawInput);
   const run = readCodeModeRunContext(ctx);
+  const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
   const base = {
     callId: ctx.callId,
+    event: { sequence, stepIndex, turnId },
     program,
     serializedContext: run.serializedContext,
     sessionState: run.sessionState,
@@ -54,26 +58,36 @@ async function settleNestedCall(
   run: ReturnType<typeof readCodeModeRunContext>,
   pending: CodeModePendingCall,
   invocationId: string,
-): Promise<{ readonly interrupt: CodeModePendingCall["interrupt"]; readonly resolution: unknown }> {
+): Promise<{
+  readonly interrupt: CodeModePendingCall["interrupt"];
+  readonly resolution: CodeModeCallResolution;
+}> {
   const { call, interrupt, toolCallId } = pending;
-  if (call.target === "agent") {
-    const agentInput = readAgentInput(call.toolInput);
-    const resolution = await invokeAgent(
-      ctx,
-      { ...agentInput, target: call.toolName },
-      { invocationId },
-    );
+  const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
+  try {
+    if (call.target === "agent") {
+      const agentInput = readAgentInput(call.toolInput);
+      const output = await invokeAgent(
+        ctx,
+        { ...agentInput, target: call.toolName },
+        { invocationId },
+      );
+      return { interrupt, resolution: { status: "completed", output } };
+    }
+    const resolution = await executeCodeModeTool(ctx, {
+      callId: ctx.callId,
+      event: { sequence, stepIndex, turnId },
+      serializedContext: run.serializedContext,
+      sessionState: run.sessionState,
+      toolCallId,
+      toolInput: call.toolInput,
+      toolName: call.toolName,
+    });
     return { interrupt, resolution };
+  } catch (error) {
+    ctx.abortSignal.throwIfAborted();
+    return { interrupt, resolution: { status: "failed", error: toErrorMessage(error) } };
   }
-  const result = await executeCodeModeToolStep({
-    callId: ctx.callId,
-    serializedContext: run.serializedContext,
-    sessionState: run.sessionState,
-    toolCallId,
-    toolInput: call.toolInput,
-    toolName: call.toolName,
-  });
-  return { interrupt, resolution: result.isError ? { error: result.output } : result.output };
 }
 
 interface CodeModeAgentInput {

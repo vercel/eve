@@ -198,7 +198,7 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
-  const token = authHookToken(sessionId);
+  const token = ctx.get(AuthorizationHookTokenKey) ?? authHookToken(sessionId);
   return createWorkflowCallbackUrl(
     baseUrl,
     createEveConnectionCallbackRoutePath(name, attemptId, token),
@@ -294,6 +294,9 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
  * metadata.
  */
 export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
+
+/** A workflow tool can own callbacks while retaining its parent session identity. */
+export const AuthorizationHookTokenKey = new ContextKey<string>("eve.authorizationHookToken");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

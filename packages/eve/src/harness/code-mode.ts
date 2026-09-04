@@ -96,17 +96,17 @@ export async function applyCodeModeTool(input: {
 }
 
 /**
- * A tool enters the program catalog when the durable body can settle it
- * without parking on a human: ordinary executable tools with no approval
- * gate, and subagents, which the body reaches through the owner's
- * `agent-invoke` channel. Framework controls and authored workflow tools
- * stay direct.
+ * Subagents are awaited through the owner; other background tools, approval
+ * gates, framework controls, and authored workflow tools stay direct.
  */
 export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean {
   if (name === CODE_MODE_TOOL_NAME) return false;
+  // Discovery updates the parent context for the next model step's catalog.
+  if (name === "connection_search") return false;
   const definition = tools.get(name);
   if (definition === undefined) return false;
   if (isCodeModeAgentTool(definition)) return true;
+  if (definition.execution === "background") return false;
   if (definition.execute === undefined) return false;
   if (definition.behavior?.presentation === "load-skill") return false;
   if (definition.workflowId !== undefined || definition.runtimeAction !== undefined) return false;

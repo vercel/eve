@@ -10,7 +10,11 @@ import {
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
 import { CODE_MODE_BRIDGE_REQUEST_LIMIT } from "#harness/code-mode.js";
-import { CODE_MODE_CALL_INTERRUPT_KIND } from "#execution/code-mode/program-step.js";
+import {
+  CODE_MODE_CALL_INTERRUPT_KIND,
+  createCodeModeToolStub,
+} from "#execution/code-mode/program-step.js";
+import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 
 const security = { signingKey: "code-mode-program-step-test" };
 
@@ -22,6 +26,75 @@ const security = { signingKey: "code-mode-program-step-test" };
  * settle would silently serialize or misroute, so this test fails first.
  */
 describe("code-mode sandbox continuation contract", () => {
+  it("makes a failed call catchable and retryable without repeating a completed sibling", async () => {
+    const hostTools = Object.fromEntries(
+      ["child", "sibling"].map((name) => [
+        name,
+        createCodeModeToolStub(name, {
+          name,
+          description: name,
+          inputSchema: jsonSchema({ type: "object" }),
+          resultKind: name === "child" ? "subagent" : undefined,
+        }),
+      ]),
+    ) as ToolSet;
+    const tool = await createWorkflowSandboxTool({
+      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      continuationSecurity: security,
+      hostTools,
+    });
+    const first = await unwrapWorkflowSandboxResult(
+      await tool.execute!(
+        {
+          js: [
+            "const results = await Promise.allSettled([tools.child({}), tools.sibling({})]);",
+            "let caught;",
+            "try { await tools.child({ retry: true }); } catch (error) { caught = error.message; }",
+            "return { statuses: results.map(r => r.status), error: results[0].reason.message, sibling: results[1].value, caught };",
+          ].join("\n"),
+        } as never,
+        { toolCallId: "outer" } as never,
+      ),
+      security,
+    );
+    if (first.status !== "interrupted") throw new Error("expected park");
+    let current = first.interrupt;
+    const resolutions: CodeModeCallResolution[] = [
+      { status: "failed", error: "Child failed" },
+      { status: "completed", output: { error: "ordinary output" } },
+      { status: "failed", error: "Retry failed" },
+    ];
+    for (const [index, resolution] of resolutions.entries()) {
+      const resumed = await unwrapWorkflowSandboxResult(
+        await continueWorkflowSandboxInterrupt({
+          bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+          continuationSecurity: security,
+          interrupt: current,
+          resolution,
+          tools: hostTools,
+        }),
+        security,
+      );
+      if (index < 2) {
+        if (resumed.status !== "interrupted") throw new Error("expected remaining call");
+        const pending = getWorkflowSandboxPendingInterrupts(resumed.interrupt);
+        expect(pending.map((p) => p.toolName)).toEqual(index === 0 ? ["sibling"] : ["child"]);
+        if (index === 1) expect(pending[0]?.input).toEqual({ retry: true });
+        current = pending[0]!;
+      } else {
+        expect(resumed).toEqual({
+          status: "completed",
+          output: {
+            statuses: ["rejected", "fulfilled"],
+            error: "Child failed",
+            sibling: { error: "ordinary output" },
+            caught: "Retry failed",
+          },
+        });
+      }
+    }
+  });
+
   it("parks a Promise.all batch together and resumes once with all values", async () => {
     let hostCalls = 0;
     const stub = (name: string): ToolSet[string] =>

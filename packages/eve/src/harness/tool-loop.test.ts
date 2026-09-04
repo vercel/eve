@@ -46,7 +46,11 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
-import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  registerDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
+import { never, always } from "#tools/approval/policies.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -2390,6 +2394,59 @@ describe("createToolLoopHarness", () => {
         toolName: "tfl__getLineStatus",
       }),
     );
+  });
+
+  it("advertises dynamic never-approved tools through code mode and keeps approval gates direct", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    const metadata = [
+      { name: "discovered", approval: never() },
+      { name: "gated_dynamic", approval: always() },
+    ].map(({ name, approval }) => {
+      const descriptor = readDurableDynamicCallback(approval)!;
+      registerDurableDynamicCallback({ toolName: name, phase: "execute", callback: () => "ok" });
+      registerDurableDynamicCallback({
+        toolName: name,
+        phase: "approvalRequest",
+        callback: descriptor.callback,
+      });
+      return {
+        name,
+        description: name,
+        resolverSlug: "dynamic",
+        entryKey: name,
+        inputSchema: { type: "object" },
+        callbacks: { execute: { closure: {} }, approvalRequest: { closure: descriptor.closure } },
+      };
+    });
+    ctx.set(StepDynamicToolMetadataKey, metadata);
+    const base = createTestConfig();
+    const runStep = createToolLoopHarness({
+      ...base,
+      codeMode: "eager",
+      tools: new Map([
+        ...base.tools,
+        [
+          "code_mode",
+          {
+            name: "code_mode",
+            description: "Run a program",
+            workflowId: "workflow//eve//codeModeWorkflow",
+            inputSchema: jsonSchema({ type: "object" }),
+          },
+        ],
+      ]),
+    });
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
+    const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
+    expect(Object.keys(advertised ?? {}).sort()).toEqual(["code_mode", "gated_dynamic"]);
+    expect(advertised?.code_mode?.description).toContain("discovered");
   });
 
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {

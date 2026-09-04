@@ -56,12 +56,13 @@ function subagent(name: string): HarnessToolDefinition {
 }
 
 describe("claimsForCodeMode", () => {
-  it("claims executable, ungated tools and every subagent", () => {
+  it("claims blocking ungated tools and subagents while keeping other background tools direct", () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["add", tool("add")],
       ["gated", tool("gated", { approval: always() })],
       ["skill", tool("skill", { behavior: { availability: [], presentation: "load-skill" } })],
       ["provider", tool("provider", { execute: undefined })],
+      ["background", tool("background", { execution: "background" })],
       ["researcher", subagent("researcher")],
       ["agent", { ...subagent("agent"), execution: "background" }],
       ["authored_wf", tool("authored_wf", { workflowId: "workflow//app//authored" })],
