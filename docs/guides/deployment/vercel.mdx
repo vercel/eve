@@ -67,7 +67,58 @@ In an eve workspace, eve discovers direct `agents/<name>/` children that contain
 
 Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
 
-With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
+For an agent-only workspace, run `eve build`. eve owns the Vercel Build Output and generates one independently built service and a `/<name>/eve/v1/*` transport route for each workspace member.
+
+### Compose agents with other Vercel services
+
+Use Vercel's programmatic configuration when a workspace also deploys a frontend, private API, or another non-eve service. Replace `vercel.json` with a root `vercel.ts` and compose the authored graph with `withEve`:
+
+```typescript title="vercel.ts"
+import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: {
+      framework: "nextjs",
+      root: "apps/web",
+    },
+  },
+  routes: [
+    {
+      src: "^(.*)$",
+      destination: { type: "service", service: "web" },
+    },
+  ],
+});
+```
+
+Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` discovers direct workspace members, adds their services and transport routes, and returns a plain Vercel configuration. Vercel can then build `web` and every eve agent independently. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
+
+Generated transport routes are inserted before a filesystem handler or an authored catch-all route. eve reserves each generated `eve-<agent>` service name and exact `/<agent>/eve/v1/*` transport route; other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
+
+Custom agent channel endpoints are not published automatically. Expose one explicitly by routing it to the generated service:
+
+```typescript title="vercel.ts"
+import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: { framework: "nextjs", root: "apps/web" },
+  },
+  routes: [
+    {
+      src: "^/webhooks/github$",
+      destination: { type: "service", service: "eve-triage" },
+    },
+    {
+      src: "^(.*)$",
+      destination: { type: "service", service: "web" },
+    },
+  ],
+});
+```
+
+A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel` while evaluating the configuration. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when `vercel.ts` is evaluated from somewhere other than the workspace root.
 
 An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
 
