@@ -1,5 +1,15 @@
 # eve
 
+## 0.52.1
+
+### Patch Changes
+
+- 6967e25: Read registry configuration from the shared project package when `eve add` targets an agent in a top-level `agents/` workspace. Registry files still install into the selected agent.
+- 0b980ab: Upgrade Nitro to 3.0.260903-beta for upstream fixes and dependency updates.
+- c48969f: Persist the receiving session's inbox address and wire version with local subagent input requests. Replies can resume the original child directly without reading hook metadata, including after the child's continuation address changes.
+- 09cb57e: Failed session and task callback attempts now emit error-level logs with HTTP status or transport failure, a token-redacted destination, and available call, task, and session identifiers. Workflow retries are unchanged; best-effort activity failures keep their single warning.
+- 468f1b2: Reject `eve add channel/web` before it writes files when the selected agent belongs to a top-level `agents/` workspace. The error directs users to configure a root Next.js app with `withEve({ agents })` instead.
+
 ## 0.52.0
 
 ### Minor Changes
