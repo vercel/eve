@@ -61,8 +61,10 @@ supplied JavaScript:
   results when one source fails.
 
 The fixture records actual tool calls independently of the model's answer.
-Assertions check the result, complete data access, membership in one completed
-program, and overlapping balance reads. Separate discovery programs are
+Assertions check complete data access, the values submitted to `save_report`,
+membership in one completed program, and overlapping balance reads. Requiring
+the reads and report submission in the same program prevents fetching raw data
+for the model to aggregate in a later step. Separate discovery programs are
 allowed. A bounded barrier makes concurrency observable without comparing
 wall-clock speed across machines. Data varies by session, and the eval checks
 the recorded model id against the configured matrix model.

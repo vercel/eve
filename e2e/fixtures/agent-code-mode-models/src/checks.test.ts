@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Call } from "./audit.ts";
-import { concurrentBalances, inOneProgram, parseAnswer, readEveryPage } from "./checks.ts";
+import { concurrentBalances, inOneProgram, readEveryPage } from "./checks.ts";
 
 function call(index: number, overrides: Partial<Call> = {}): Call {
   return {
@@ -76,9 +76,20 @@ test("fanout requires actual overlap and the expected per-source outcomes", () =
   assert.equal(concurrentBalances(calls.slice(0, 2), ids, "archive"), false);
 });
 
-test("JSON answers accept a code fence without requiring exact prose", () => {
-  assert.deepEqual(parseAnswer('```json\n{"totalAvailableCents":123}\n```'), {
-    totalAvailableCents: 123,
-  });
-  assert.equal(parseAnswer("I checked everything"), undefined);
+test("saving a report after returning the data to the model cannot pass", () => {
+  const reads = [call(1), call(2)];
+  assert.equal(inOneProgram([...reads, call(3, { tool: "save_report" })], ["program"]), true);
+  assert.equal(
+    inOneProgram(
+      [
+        ...reads,
+        call(3, {
+          tool: "save_report",
+          callId: "save-later:tool-0",
+        }),
+      ],
+      ["program", "save-later"],
+    ),
+    false,
+  );
 });
