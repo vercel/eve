@@ -138,6 +138,7 @@ export function readRetainedBackgroundToolResult(
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
+  private readonly steeringAgents = new Set<string>();
   private agentHandleSession: HarnessSession;
   private agentHandlesChanged = false;
   private retained = false;
@@ -497,6 +498,8 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     if (claim.kind !== "busy" || claim.handle.phase !== "claimed") return claim;
 
     const handle = claim.handle;
+    if (this.steeringAgents.has(handle.identity.id)) return claim;
+
     const entry = findSessionTaskEntry(this.agentHandleSession.state, handle.ownerId);
     if (
       entry?.metadata.kind !== "subagent" ||
@@ -506,16 +509,21 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       return claim;
     }
 
-    await cancelOwnedTask({
-      cancelOwnedWork: cancelBackgroundAgentTask,
-      entry,
-      serializedContext: serializeContext(ctx),
-      session: this.agentHandleSession,
-    });
-    // Other calls in this batch may have changed the store while cancellation
-    // was pending. Release only the old owner, then claim the current handle.
-    this.applyAgentHandleCommand({ kind: "release-owner", ownerId: handle.ownerId });
-    return this.applyAgentHandleCommand(command);
+    this.steeringAgents.add(handle.identity.id);
+    try {
+      await cancelOwnedTask({
+        cancelOwnedWork: cancelBackgroundAgentTask,
+        entry,
+        serializedContext: serializeContext(ctx),
+        session: this.agentHandleSession,
+      });
+      // Other calls in this batch may have changed the store while cancellation
+      // was pending. Release only the old owner, then claim the current handle.
+      this.applyAgentHandleCommand({ kind: "release-owner", ownerId: handle.ownerId });
+      return this.applyAgentHandleCommand(command);
+    } finally {
+      this.steeringAgents.delete(handle.identity.id);
+    }
   }
 
   private applyAgentHandleCommand(command: AgentHandleStoreCommand): AgentHandleStoreCommandResult {

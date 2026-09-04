@@ -246,18 +246,48 @@ describe("background subagent steering", () => {
     ]);
   });
 
-  it("admits only one of two simultaneous steering calls to the same child", async () => {
+  it("rejects competing steering before it can send a delayed child cancellation", async () => {
     const scope = await createScope();
     const cancellation = Promise.withResolvers<typeof cancelledView>();
-    vi.mocked(cancelOwnedTask).mockReturnValue(cancellation.promise);
+    const delayedCancellation = Promise.withResolvers<typeof cancelledView>();
+    vi.mocked(cancelOwnedTask).mockImplementation(() =>
+      vi.mocked(cancelOwnedTask).mock.calls.length === 1
+        ? cancellation.promise
+        : delayedCancellation.promise,
+    );
     const first = scope.execute("first-call");
     const second = scope.execute("second-call");
-    cancellation.resolve(cancelledView);
-    const results = await Promise.allSettled([first, second]);
+    const settled = Promise.allSettled([first, second]);
+    try {
+      expect(cancelOwnedTask).toHaveBeenCalledTimes(1);
+      await expect(second).rejects.toThrow("AGENT_BUSY");
+      expect(startTaskRun).not.toHaveBeenCalled();
+    } finally {
+      cancellation.resolve(cancelledView);
+      delayedCancellation.resolve(cancelledView);
+      await settled;
+    }
+    const results = await settled;
     expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
     expect(startTaskRun).toHaveBeenCalledTimes(1);
     expect(getAgentHandleStore((await scope.commit()).state)?.handles[0]).toMatchObject({
       callId: "first-call",
+    });
+  });
+
+  it("allows another steering attempt after cancellation fails", async () => {
+    const scope = await createScope();
+    vi.mocked(cancelOwnedTask).mockRejectedValueOnce(new Error("Child cancellation failed"));
+    await expect(scope.execute("first-call")).rejects.toThrow("Child cancellation failed");
+
+    await expect(scope.execute("retry-call")).resolves.toMatchObject({
+      agentId: identity.id,
+      status: "working",
+    });
+    expect(cancelOwnedTask).toHaveBeenCalledTimes(2);
+    expect(startTaskRun).toHaveBeenCalledTimes(1);
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles[0]).toMatchObject({
+      callId: "retry-call",
     });
   });
 
