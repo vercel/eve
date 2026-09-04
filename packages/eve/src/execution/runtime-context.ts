@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
@@ -18,7 +18,6 @@ import {
   SessionCallbackKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
-import type { InternalRunInput } from "#execution/internal-run-input.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
@@ -28,7 +27,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 export function buildRunContext(input: {
   readonly bundle: CompiledBundle;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly run: InternalRunInput;
+  readonly run: RunInput;
 }): ContextContainer {
   const { bundle, run } = input;
   const ctx = new ContextContainer();

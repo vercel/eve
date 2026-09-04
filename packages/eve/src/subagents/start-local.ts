@@ -8,7 +8,6 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { readAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -72,7 +71,7 @@ export async function startLocalSubagent(input: {
       new ContextContainer({ localDevRequest: input.localDevRequest }),
       () => childRuntime.createSession(runInput),
     );
-    confirmedTraceId = readAcceptedTraceCoordinates(created)?.traceId;
+    confirmedTraceId = created.trace?.traceId;
     childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
     if (created.sessionId !== childSessionId) confirmedTraceId = undefined;
   } catch (error) {

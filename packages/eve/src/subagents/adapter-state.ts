@@ -1,3 +1,5 @@
+import { isTraceId } from "#protocol/agent-invocation-trace.js";
+
 /**
  * Durable state for the subagent adapter, split from the adapter itself so
  * harness code can identify a delegated child run without reaching the
@@ -58,7 +60,6 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0 &&
     (state.taskId === undefined || (typeof state.taskId === "string" && state.taskId.length > 0)) &&
-    (state.traceId === undefined ||
-      (/^[0-9a-f]{32}$/u.test(state.traceId) && !/^0+$/u.test(state.traceId)))
+    (state.traceId === undefined || isTraceId(state.traceId))
   );
 }

@@ -1,5 +1,20 @@
+import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
+
+export function agentLineageAttributes(
+  turn: AgentTurnTraceState,
+): Record<string, SpanAttributeValue> {
+  const attributes: Record<string, SpanAttributeValue> = {
+    "agent.root_run.id": turn.rootSessionId,
+  };
+  if (turn.parentLineage !== undefined) {
+    attributes["agent.parent_run.id"] = turn.parentLineage.sessionId;
+    attributes["agent.parent_call.id"] = turn.parentLineage.callId;
+  }
+  return attributes;
+}
 
 /** Flattens merged runtime context into AI SDK-compatible span attributes. */
 export function runtimeContextAttributes(

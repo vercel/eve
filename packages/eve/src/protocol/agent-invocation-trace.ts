@@ -1,28 +1,13 @@
-import type { SessionParent, SessionTraceContext } from "#channel/types.js";
+import type {
+  SessionParent,
+  SessionTraceContext,
+  SessionTraceCoordinates,
+} from "#channel/types.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
-export const AGENT_TRACE_SCHEMA_VERSION = 4 as const;
 export const AGENT_INVOCATION_TRACE_WIRE_VERSION = 1 as const;
-export const AGENT_INVOCATION_ROLES = {
-  caller: "caller",
-  execution: "execution",
-} as const;
-export const AGENT_SESSION_KINDS = {
-  delegated: "delegated",
-  root: "root",
-} as const;
-export const AGENT_TRACE_ATTRIBUTES = {
-  childTraceId: "agent.child.trace.id",
-  invocationRole: "agent.invocation.role",
-  schemaVersion: "agent.trace.schema.version",
-  sessionKind: "agent.session.kind",
-} as const;
 
-export type TraceCoordinates = {
-  readonly spanId: string;
-  readonly traceFlags: number;
-  readonly traceId: string;
-};
+export type TraceCoordinates = SessionTraceCoordinates;
 
 export type AgentInvocationTrace = {
   readonly forwardedTracePolicy?: ForwardedTraceAssertion;
@@ -114,6 +99,7 @@ export function isSpanId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{16}$/u.test(value) && !/^0+$/u.test(value);
 }
 
+/** Validates durable workflow metadata without pulling Zod into the workflow bundle. */
 export function isTraceCoordinates(value: unknown): value is TraceCoordinates {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value);

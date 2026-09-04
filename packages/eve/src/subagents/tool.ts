@@ -6,6 +6,7 @@ import type {
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  RunInput,
   SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -13,7 +14,6 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
-import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 /**
  * Pending task batch event metadata needed for child run lineage.
@@ -43,7 +43,7 @@ export type SubagentInputSource =
  */
 export interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
-  readonly runInput: InternalRunInput;
+  readonly runInput: RunInput;
 }
 
 /**
@@ -149,7 +149,7 @@ export function buildSubagentRunInput(input: {
   }
 
   const runInput: {
-    -readonly [K in keyof InternalRunInput]: InternalRunInput[K];
+    -readonly [K in keyof RunInput]: RunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,

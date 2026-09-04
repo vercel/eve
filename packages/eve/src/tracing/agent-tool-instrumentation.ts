@@ -23,16 +23,14 @@ import type { AgentActionContext } from "#tracing/agent-action-instrumentation.j
 interface ToolSpanState {
   readonly actionKey: string;
   readonly attemptId: string;
-  context: Context;
+  readonly context: Context;
   readonly event: InstrumentationToolCallStartedEvent;
   readonly fallbackParent: Context;
   readonly idempotencyKey: string;
   readonly spanId: string;
   readonly startTimeMs: number;
-  contextConsumed?: true;
   finished?: true;
   span?: Span;
-  suppressed?: true;
   terminal?: InstrumentationToolCallTerminalEvent;
 }
 
@@ -78,10 +76,6 @@ export function createAgentToolInstrumentation(input: {
       if (actionParent === undefined) return;
       state = reserve(event, actionKey, actionParent);
     }
-    if (actionParent !== undefined && isAgentInvocation(actionParent)) {
-      suppress(state, actionParent);
-      return;
-    }
     if (actionParent !== undefined) startSpan(state, actionParent.context);
   };
 
@@ -96,11 +90,7 @@ export function createAgentToolInstrumentation(input: {
         state.event.scope.turnId,
         state.event.callId,
       );
-      if (actionParent !== undefined && isAgentInvocation(actionParent)) {
-        suppress(state, actionParent);
-      } else if (actionParent !== undefined) {
-        startSpan(state, actionParent.context);
-      }
+      if (actionParent !== undefined) startSpan(state, actionParent.context);
     }
     finishIfReady(state);
   };
@@ -115,24 +105,16 @@ export function createAgentToolInstrumentation(input: {
         event.callId,
       );
       if (actionParent === undefined) return;
-      if (isAgentInvocation(actionParent)) suppress(state, actionParent);
-      else startSpan(state, actionParent.context);
+      startSpan(state, actionParent.context);
       finishIfReady(state);
     },
-    contextFor(attemptId, idempotencyKey) {
-      const state = byAttempt.get(attemptId)?.get(idempotencyKey);
-      if (state !== undefined) state.contextConsumed = true;
-      return state?.context;
-    },
+    contextFor: (attemptId, idempotencyKey) =>
+      byAttempt.get(attemptId)?.get(idempotencyKey)?.context,
     drain(attemptId, failure) {
       const states = byAttempt.get(attemptId);
       if (states === undefined) return;
       for (const state of states.values()) {
         if (state.finished === true) continue;
-        if (state.suppressed === true) {
-          finish(state);
-          continue;
-        }
         if (state.span === undefined) startSpan(state, state.fallbackParent);
         finish(state, failure);
       }
@@ -184,7 +166,7 @@ export function createAgentToolInstrumentation(input: {
   }
 
   function startSpan(state: ToolSpanState, parent: Context): void {
-    if (state.span !== undefined || state.finished === true || state.suppressed === true) return;
+    if (state.span !== undefined || state.finished === true) return;
     state.span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
         `execute_tool ${state.event.toolName}`,
@@ -203,21 +185,15 @@ export function createAgentToolInstrumentation(input: {
   }
 
   function finishIfReady(state: ToolSpanState): void {
-    if ((state.span === undefined && state.suppressed !== true) || state.terminal === undefined) {
-      return;
-    }
+    if (state.span === undefined || state.terminal === undefined) return;
     finish(state);
   }
 
   function finish(state: ToolSpanState, failure?: { readonly error: unknown }): void {
     const span = state.span;
-    if ((span === undefined && state.suppressed !== true) || state.finished === true) return;
+    if (span === undefined || state.finished === true) return;
     state.finished = true;
     const terminal = state.terminal;
-    if (span === undefined) {
-      cleanup(state);
-      return;
-    }
     if (failure !== undefined) {
       recordError(span, failure.error);
     } else if (terminal?.type === "tool.call.failed") {
@@ -229,28 +205,11 @@ export function createAgentToolInstrumentation(input: {
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
     span.end();
-    cleanup(state);
-  }
-
-  function suppress(state: ToolSpanState, action: AgentActionContext): void {
-    if (state.contextConsumed === true || state.span !== undefined) {
-      startSpan(state, action.context);
-      return;
-    }
-    state.context = action.context;
-    state.suppressed = true;
-  }
-
-  function cleanup(state: ToolSpanState): void {
     byAction.delete(state.actionKey);
     const states = byAttempt.get(state.attemptId);
     states?.delete(state.idempotencyKey);
     if (states?.size === 0) byAttempt.delete(state.attemptId);
   }
-}
-
-function isAgentInvocation(action: AgentActionContext): boolean {
-  return action.kind === "subagent-call" || action.kind === "remote-agent-call";
 }
 
 function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<string, string> {

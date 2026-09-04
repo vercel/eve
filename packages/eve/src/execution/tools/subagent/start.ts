@@ -113,16 +113,10 @@ export async function startSubagent(input: {
                   ceiling,
                   originAudience: forwardedTracePolicy?.originAudience ?? liveAudience ?? "unknown",
                 },
-          parentTraceContext,
           sessionId: input.session.sessionId,
           turnId: input.batchEvent.turnId,
         });
-  const callerTraceContext =
-    actionCallId === undefined
-      ? parentTraceContext
-      : actionTraceContext === undefined
-        ? undefined
-        : parentTraceContext;
+  const callerTraceContext = actionCallId === undefined ? parentTraceContext : actionTraceContext;
 
   switch (input.target.kind) {
     case "local":

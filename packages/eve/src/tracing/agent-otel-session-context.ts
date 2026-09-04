@@ -18,11 +18,6 @@ import {
 } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
-import {
-  AGENT_SESSION_KINDS,
-  AGENT_TRACE_ATTRIBUTES,
-  AGENT_TRACE_SCHEMA_VERSION,
-} from "#protocol/agent-invocation-trace.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -75,11 +70,7 @@ export function createAgentOtelSessionContext(
             "agent.channel.audience": session.channelAudience,
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
-            [AGENT_TRACE_ATTRIBUTES.sessionKind]:
-              session.parentLineage === undefined
-                ? AGENT_SESSION_KINDS.root
-                : AGENT_SESSION_KINDS.delegated,
-            [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
+            "agent.trace.schema.version": 3,
           },
           links:
             session.parentTraceContext === undefined
@@ -115,11 +106,7 @@ export function createAgentOtelSessionContext(
         "agent.channel.audience": session.channelAudience,
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
-        [AGENT_TRACE_ATTRIBUTES.sessionKind]:
-          session.parentLineage === undefined
-            ? AGENT_SESSION_KINDS.root
-            : AGENT_SESSION_KINDS.delegated,
-        [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
+        "agent.trace.schema.version": 3,
       },
       links:
         session.parentTraceContext === undefined

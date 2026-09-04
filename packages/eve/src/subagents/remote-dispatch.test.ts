@@ -263,14 +263,13 @@ describe("startRemoteAgentSession", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("traceparent");
   });
 
-  it("falls back for a strict older receiver without joining the parent trace", async () => {
+  it("does not retry an unrelated bad request", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }))
-      .mockResolvedValueOnce(
+      .mockResolvedValue(
         Response.json(
-          { ok: true, sessionId: "remote-session", status: "accepted" },
-          { status: 202 },
+          { error: "Invocation trace context does not match traceparent.", ok: false },
+          { status: 400 },
         ),
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -305,16 +304,11 @@ describe("startRemoteAgentSession", () => {
           traceId: "3".repeat(32),
         },
       }),
-    ).resolves.toEqual({ sessionId: "remote-session" });
+    ).rejects.toThrow("HTTP 400");
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toHaveProperty("trace");
-    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty("trace");
-    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty(
-      "invocation",
-    );
     expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("traceparent");
-    expect(fetchMock.mock.calls[1]?.[1]?.headers).not.toHaveProperty("traceparent");
   });
 
   it("falls back to a capped root when the receiver does not trust delegated lineage", async () => {
