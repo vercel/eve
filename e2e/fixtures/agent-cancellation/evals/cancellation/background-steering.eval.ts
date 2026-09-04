@@ -41,37 +41,23 @@ export default cases.map(({ parentActive, correction, description }) =>
           "Call steering-worker exactly once in the background with this exact message:",
           `ASSIGNMENT ${memo}`,
           "Acknowledge the receipt without reporting a result. Relay its final result verbatim when it completes.",
-          ...(parentActive
-            ? ["After the receipt, call wait-for-cancellation yourself and wait for cancellation."]
-            : ["End this turn after acknowledging the receipt; the worker will keep running."]),
+          "End this turn after acknowledging the receipt; the worker will keep running.",
         ].join("\n"),
       );
 
       try {
         const parent = t.target.watchTurn(sessionId);
-        const parentTurns: EveEvalTurn[] = [];
+        const acknowledged = await parent.result();
+        acknowledged.expectOk();
+        const parentTurns: EveEvalTurn[] = [acknowledged];
+        let parentSession = parent.session;
         let pendingParent: EveEvalLiveTurn | undefined;
-        if (parentActive) {
-          await parent.waitForEvent("actions.requested", {
-            data: {
-              actions: (actions) =>
-                actions.some(
-                  (action) =>
-                    action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
-                ),
-            },
+        // Admission can acknowledge before the child starts. Keep observing
+        // from the cursor instead of assuming subagent.called precedes it.
+        if (!parent.events.some((event) => event.type === "subagent.called")) {
+          pendingParent = t.target.watchTurn(sessionId, {
+            startIndex: streamIndex(parentSession),
           });
-        } else {
-          const acknowledged = await parent.result();
-          acknowledged.expectOk();
-          parentTurns.push(acknowledged);
-          // Admission can acknowledge before the child starts. Keep observing
-          // from the cursor instead of assuming subagent.called precedes it.
-          if (!parent.events.some((event) => event.type === "subagent.called")) {
-            pendingParent = t.target.watchTurn(sessionId, {
-              startIndex: streamIndex(parent.session),
-            });
-          }
         }
         const called = await (pendingParent ?? parent).waitForEvent("subagent.called", {
           data: { name: "steering-worker" },
@@ -90,6 +76,28 @@ export default cases.map(({ parentActive, correction, description }) =>
               ),
           },
         });
+
+        let activeParent: EveEvalLiveTurn | undefined;
+        if (parentActive) {
+          // Establish a running child before holding another parent turn;
+          // holding the launch turn can delay dispatch until its wait ends.
+          await postMessage(t, threadId, "Please wait for cancellation.", "queue");
+          activeParent =
+            pendingParent ??
+            t.target.watchTurn(sessionId, {
+              startIndex: streamIndex(parentSession),
+            });
+          pendingParent = undefined;
+          await activeParent.waitForEvent("actions.requested", {
+            data: {
+              actions: (actions) =>
+                actions.some(
+                  (action) =>
+                    action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
+                ),
+            },
+          });
+        }
 
         await t.require(
           child.events,
@@ -113,13 +121,13 @@ export default cases.map(({ parentActive, correction, description }) =>
         );
         await t.require(followUpSessionId, equals(sessionId));
 
-        if (parentActive) {
-          const cancelled = await parent.result();
+        if (activeParent !== undefined) {
+          const cancelled = await activeParent.result();
           cancelled.notEvent("turn.failed");
           cancelled.event("turn.cancelled", { count: 1 });
           parentTurns.push(cancelled);
+          parentSession = activeParent.session;
         }
-        let parentSession = parent.session;
         // Observe through the result-bearing task wake, not just the parent's
         // acknowledgment of the correction or an AGENT_BUSY failure wake.
         for (let attempt = 0; attempt < 6; attempt++) {
