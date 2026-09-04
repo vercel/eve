@@ -69,6 +69,8 @@ Create this layout with `eve init my-project --agents support,research`, or add 
 
 With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
 
+An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
+
 Deploy the linked project to production:
 
 ```bash
