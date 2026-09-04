@@ -88,9 +88,9 @@ export default defineEval({
       await writeMarker(NEW_MARKER);
       await fixture.deploy(fixture.currentPackage, "inbox-upgrade-checkout");
 
-      const next = await idle.send("UPGRADE-read-next");
-      const newExecution = readExecution(next);
-      await requireExecution(t, newExecution, NEW_MARKER);
+      const upgraded = await followCodeDeployment(t, idle, "next", NEW_MARKER, [oldExecution]);
+      const next = upgraded.turn;
+      const newExecution = upgraded.execution;
       await t.require(
         { sessionId: next.sessionId, execution: newExecution },
         satisfies(
@@ -101,10 +101,15 @@ export default defineEval({
           "the published parent starts a child turn on the accepting deployment and retains its session ID",
         ),
       );
-      const replayed = await t.target.watchTurn(sessionId, { startIndex: streamIndex }).result();
-      replayed.expectOk();
-      replayed.messageIncludes(NEW_MARKER);
-      replayed.event("turn.completed", { count: 1 });
+      let replayIndex = streamIndex;
+      for (let attempt = 0; attempt < upgraded.attempts; attempt++) {
+        const replay = t.target.watchTurn(sessionId, { startIndex: replayIndex });
+        const replayed = await replay.result();
+        replayed.expectOk();
+        replayed.event("turn.completed", { count: 1 });
+        if (attempt === upgraded.attempts - 1) replayed.messageIncludes(NEW_MARKER);
+        replayIndex = requireStreamIndex(replay.session);
+      }
 
       const answered = await blocking.respond([
         { requestId: blockingRequest.requestId, optionId: "continue" },
@@ -144,18 +149,14 @@ export default defineEval({
       // Roll back authored code while retaining the runtime that understands both cohorts.
       await writeMarker(OLD_MARKER);
       await fixture.deploy(fixture.currentPackage, "inbox-upgrade-code-rollback");
+      let rollbackDeploymentId: string | undefined;
       for (const session of [idle, fresh]) {
-        const beforeId = session.sessionId;
-        const rollback = await session.send("UPGRADE-read-rollback");
-        const execution = readExecution(rollback);
-        await requireExecution(t, execution, OLD_MARKER);
-        await t.require(
-          rollback.sessionId === beforeId && execution.deploymentId !== newExecution.deploymentId,
-          satisfies(
-            (value: boolean) => value,
-            "code rollback preserves existing session IDs and selects the rollback deployment",
-          ),
-        );
+        const rollback = await followCodeDeployment(t, session, "rollback", OLD_MARKER, [
+          oldExecution,
+          newExecution,
+        ]);
+        rollbackDeploymentId ??= rollback.execution.deploymentId;
+        await requireExecution(t, rollback.execution, OLD_MARKER, rollbackDeploymentId);
       }
     } finally {
       // These isolated fixture sessions have finished the probe; retire their durable resources.
@@ -184,6 +185,41 @@ async function writeMarker(marker: string, legacy = false): Promise<void> {
     `export const UPGRADE_MARKER = ${JSON.stringify(marker)};\n` +
       `export const UPGRADE_LEGACY_CONFIG = ${JSON.stringify(config)};\n`,
   );
+}
+
+async function followCodeDeployment(
+  t: EveEvalContext,
+  session: EveEvalSession,
+  key: string,
+  marker: string,
+  previous: readonly Execution[],
+) {
+  const sessionId = session.sessionId;
+  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60_000)]);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    // An alias can serve old ingress after an info request reached the new deployment.
+    // Probe with read-only turns; every accepted turn must preserve the session.
+    const turn = await session.send(`UPGRADE-read-${key}${attempt}`, { signal });
+    const execution = readExecution(turn);
+    await t.require(
+      turn.sessionId === sessionId,
+      satisfies(
+        (same: boolean) => same,
+        "code changes preserve the session ID during alias propagation",
+      ),
+    );
+    const prior = previous.find((entry) => entry.deploymentId === execution.deploymentId);
+    if (prior === undefined) {
+      await requireExecution(t, execution, marker);
+      return { turn, execution, attempts: attempt + 1 };
+    }
+    await requireExecution(t, execution, prior.marker, prior.deploymentId);
+    t.log(
+      `${key}: prior deployment still accepted a read-only turn; waiting for alias propagation`,
+    );
+    await t.sleep(1_000);
+  }
+  throw new Error(`Alias did not select ${marker} on a new deployment within ten read-only turns.`);
 }
 
 function requireStreamIndex(session: EveEvalSession): number {

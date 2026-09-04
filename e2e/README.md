@@ -141,6 +141,9 @@ the original session ID. A third deployment rolls back agent code while keeping
 the current runtime. Session expiry is disabled throughout the probe. This is
 the compatibility baseline for the unified inbox refactor; it does not exercise
 the proposed new owner topology or self-hosted executable retention.
+During alias propagation, bounded read-only turns may still reach a prior
+deployment. Every turn must keep the session usable; the probe then requires
+the new deployment and marker before accepting the code transition.
 
 The historical workflow fixture stages a copy of the published package with
 its unusable `eve-source` conditions removed from `package.json`; those point
