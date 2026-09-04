@@ -41,6 +41,12 @@ The model-visible `<telegram_context>` includes `bot_username` and `is_mentioned
 
 Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread.
 
+### Group sessions
+
+Each group chat keeps one continuous session keyed to the chat, the same way private chats do. Mentions, replies to the bot, callback queries, and outbound sends all resume that session, so the bot remembers what it said earlier in the chat. Forum topics get one session per topic; the `message_thread_id` that non-forum supergroups stamp on replies is a reply chain, not a topic, and does not split the session.
+
+To pin a proactive session to a specific thread instead, pass `conversationId` on the `receive` target.
+
 To customize auth or filtering, override `onMessage`. Return `title` alongside `auth` to set the title when the dispatch starts a run. Group privacy mode itself lives in BotFather, not here.
 
 ### Delivery
@@ -55,7 +61,7 @@ Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and 
 
 Start a session without an inbound message through `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.
 
-Private proactive chats stay keyed to the chat, or to the chat plus `messageThreadId` when you target a topic. Group and supergroup proactive sends anchor to the bot message id returned by Telegram, so replies to different bot messages can resume different sessions in the same chat. If Telegram does not return a recognized chat type for an outbound send, eve keeps the session unanchored instead of guessing.
+Proactive chats stay keyed to the chat, or to the chat plus `messageThreadId` when you target a topic, for private and group chats alike. Pass `conversationId` to resume a specific thread instead.
 
 ### Attachments
 

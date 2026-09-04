@@ -16,7 +16,6 @@ import {
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
-  telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramApiResponse,
   type TelegramCredentials,
@@ -96,7 +95,7 @@ export interface TelegramChannelState extends TelegramHitlState {
   chatId: string | null;
   /** Telegram chat type, when known from an inbound update. */
   chatType: TelegramChatType | null;
-  /** Group/supergroup conversation anchor message id. */
+  /** Group/supergroup conversation id, when a proactive target pins one. */
   conversationId: string | null;
   /** Forum topic id, when known. */
   messageThreadId: number | null;
@@ -368,20 +367,8 @@ function buildTelegramHandle(input: {
   const credentials = input.config.credentials;
 
   function anchor(posted: TelegramMessageResult): void {
-    const chatType = state.chatType ?? posted.chatType ?? null;
     if (state.chatType === null && posted.chatType !== undefined) {
       state.chatType = posted.chatType;
-    }
-    if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
-    state.conversationId = posted.id;
-    if (state.chatId) {
-      input.session?.continuation?.rekey(
-        telegramContinuationToken({
-          chatId: state.chatId,
-          conversationId: posted.id,
-          messageThreadId: state.messageThreadId ?? undefined,
-        }),
-      );
     }
   }
 
@@ -495,10 +482,6 @@ function buildTelegramHandle(input: {
       }
     },
   };
-}
-
-function shouldAnchorTelegramConversation(chatType: TelegramChatType | null): boolean {
-  return chatType === "group" || chatType === "supergroup";
 }
 
 async function postTelegramMessage(

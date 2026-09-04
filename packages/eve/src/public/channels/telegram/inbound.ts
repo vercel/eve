@@ -47,6 +47,8 @@ export interface TelegramAttachment {
 export interface TelegramMessageReference {
   readonly chat: TelegramChat;
   readonly from?: TelegramUser;
+  /** `true` when the message was sent to a forum topic. */
+  readonly isTopicMessage?: boolean;
   readonly messageId: string;
   readonly messageThreadId?: number;
 }
@@ -61,6 +63,8 @@ export interface TelegramMessage {
   readonly caption: string;
   readonly chat: TelegramChat;
   readonly from?: TelegramUser;
+  /** `true` when the message was sent to a forum topic. */
+  readonly isTopicMessage?: boolean;
   readonly messageId: string;
   readonly messageThreadId?: number;
   readonly raw: Record<string, unknown>;
@@ -155,6 +159,7 @@ function parseTelegramMessage(value: unknown): TelegramMessage | null {
     caption: typeof value.caption === "string" ? value.caption : "",
     chat,
     from: parseTelegramUser(value.from),
+    isTopicMessage: value.is_topic_message === true ? true : undefined,
     messageId,
     messageThreadId:
       typeof value.message_thread_id === "number" ? value.message_thread_id : undefined,
@@ -185,6 +190,7 @@ function parseMessageReference(value: unknown): TelegramMessageReference | undef
   return {
     chat,
     from: parseTelegramUser(value.from),
+    isTopicMessage: value.is_topic_message === true ? true : undefined,
     messageId,
     messageThreadId:
       typeof value.message_thread_id === "number" ? value.message_thread_id : undefined,
