@@ -5,7 +5,6 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
@@ -68,14 +67,14 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession({ rootSessionId: "root-session" }),
       tools,
-      workflow: {},
+      codeMode: { mode: "eager" },
     });
 
     expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
+    expect(advertisedTools.modelTools["Workflow"]).toBeUndefined();
   });
 
-  it("adds Workflow in root sessions", async () => {
+  it("does not add the removed Workflow wrapper in root sessions", async () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
@@ -85,11 +84,11 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession(),
       tools,
-      workflow: {},
+      codeMode: { mode: "eager" },
     });
 
     expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeDefined();
+    expect(advertisedTools.modelTools["Workflow"]).toBeUndefined();
   });
 });
 

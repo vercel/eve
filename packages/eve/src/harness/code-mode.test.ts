@@ -5,6 +5,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   CODE_MODE_TOOL_NAME,
   applyCodeModeTool,
+  codeModeBridgeRequestLimit,
   claimsForCodeMode,
   DESCRIBE_TOOLS_NAME,
   SEARCH_TOOLS_NAME,
@@ -78,6 +79,28 @@ describe("claimsForCodeMode", () => {
 });
 
 describe("applyCodeModeTool", () => {
+  it.each(["eager", "lazy"] as const)(
+    "pins the configured subagent budget in %s mode",
+    async (mode) => {
+      const harnessTools = new Map([[CODE_MODE_TOOL_NAME, codeModeDefinition()]]);
+      const applied = await applyCodeModeTool({
+        continuationSecurity,
+        harnessTools,
+        mode,
+        maxSubagents: 300,
+        tools: buildToolSet({ tools: harnessTools }),
+      });
+      const input = applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({
+        js: "return null;",
+      });
+      expect(parseCodeModeWorkflowInput(JSON.parse(JSON.stringify(input))).maxSubagents).toBe(300);
+      expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain(
+        "at most 300 subagents",
+      );
+      expect(codeModeBridgeRequestLimit(300)).toBeGreaterThan(300);
+    },
+  );
+
   it("moves claimed tools behind code_mode and pins the catalog into executeInput", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["add", tool("add")],

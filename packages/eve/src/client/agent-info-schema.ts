@@ -273,11 +273,6 @@ const compositionDiagnostic = z
   })
   .strict();
 
-const workflow = z.discriminatedUnion("enabled", [
-  z.object({ enabled: z.literal(false), toolName: z.string() }).strict(),
-  z.object({ enabled: z.literal(true), source, toolName: z.string() }).strict(),
-]);
-
 /** Runtime contract for the authoritative `/eve/v1/info` v4 response. */
 export const AgentInfoResultSchema = z
   .object({
@@ -321,7 +316,6 @@ export const AgentInfoResultSchema = z
     subagents: z.object({ local: z.array(subagent), total: z.number() }).strict(),
     tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }).strict(),
     version: z.literal(4),
-    workflow,
     workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }).strict(),
   })
   .strict()
@@ -418,9 +412,6 @@ export const AgentInfoResultSchema = z
       ),
       ...value.tools.dynamic.map((entry, index) => [entry, ["tools", "dynamic", index]] as const),
       ...value.tools.static.map((entry, index) => [entry, ["tools", "static", index]] as const),
-      ...(value.workflow.enabled
-        ? ([[value.workflow.source, ["workflow", "source"]]] as const)
-        : []),
       [value.sandbox, ["sandbox"]],
     ];
     for (const [entry, path] of boundSources) {

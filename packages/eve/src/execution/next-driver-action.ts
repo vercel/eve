@@ -44,10 +44,6 @@ export type DurableStepResult = (
       readonly pendingCoordinationCallIds?: readonly string[];
       readonly settled?: SettledTurn;
     }
-  | {
-      readonly action: "dispatch-workflow-tasks";
-      readonly pendingTaskCallIds: readonly string[];
-    }
 ) &
   DurableStepResultFields;
 
@@ -89,12 +85,6 @@ export type NextDriverAction =
     }
   | {
       readonly kind: "dispatch-coordination";
-      readonly pendingCallIds: readonly string[];
-      readonly sessionState: DurableSessionState;
-      readonly serializedContext: Record<string, unknown>;
-    }
-  | {
-      readonly kind: "dispatch-workflow-tasks";
       readonly pendingCallIds: readonly string[];
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;

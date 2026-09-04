@@ -12,7 +12,7 @@ import {
 import {
   applyCodeModeTool,
   createDiscoveryTools,
-  CODE_MODE_BRIDGE_REQUEST_LIMIT,
+  codeModeBridgeRequestLimit,
 } from "#harness/code-mode.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -119,7 +119,7 @@ describe("code-mode sandbox continuation contract", () => {
         ...createDiscoveryTools(program.toolCatalog),
       };
       const tool = await createWorkflowSandboxTool({
-        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
         continuationSecurity: security,
         hostTools,
       });
@@ -133,7 +133,7 @@ describe("code-mode sandbox continuation contract", () => {
       );
       const resumed = await unwrapWorkflowSandboxResult(
         await continueWorkflowSandboxInterrupt({
-          bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+          bridgeRequestLimit: codeModeBridgeRequestLimit(100),
           continuationSecurity: security,
           interrupt: parked.interrupt,
           resolution: { status: "completed", output: "done" },
@@ -176,7 +176,7 @@ describe("code-mode sandbox continuation contract", () => {
       ]),
     ) as ToolSet;
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(100),
       continuationSecurity: security,
       hostTools,
     });
@@ -204,7 +204,7 @@ describe("code-mode sandbox continuation contract", () => {
     for (const [index, resolution] of resolutions.entries()) {
       const resumed = await unwrapWorkflowSandboxResult(
         await continueWorkflowSandboxInterrupt({
-          bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+          bridgeRequestLimit: codeModeBridgeRequestLimit(100),
           continuationSecurity: security,
           interrupt: current,
           resolution,
@@ -253,7 +253,7 @@ describe("code-mode sandbox continuation contract", () => {
     const hostTools = { a: stub("a"), b: stub("b"), c: stub("c") } as ToolSet;
 
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(100),
       continuationSecurity: security,
       hostTools,
     });
@@ -286,7 +286,7 @@ describe("code-mode sandbox continuation contract", () => {
     const resolutions = [10, 20, 30];
     for (const [index, resolution] of resolutions.entries()) {
       raw = await continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
         continuationSecurity: security,
         interrupt: current,
         resolution,
@@ -326,7 +326,7 @@ describe("code-mode sandbox continuation contract", () => {
       }) as ToolSet[string];
     const hostTools = { a: stub("a"), b: stub("b") } as ToolSet;
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(100),
       continuationSecurity: security,
       hostTools,
     });
@@ -342,7 +342,7 @@ describe("code-mode sandbox continuation contract", () => {
 
     await expect(
       continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
         continuationSecurity: security,
         interrupt: second!,
         resolution: 1,
@@ -365,7 +365,7 @@ describe("code-mode sandbox continuation contract", () => {
           }),
       }) as ToolSet[string];
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+      bridgeRequestLimit: codeModeBridgeRequestLimit(100),
       continuationSecurity: security,
       hostTools: { a: stub("a") } as ToolSet,
     });
@@ -382,7 +382,7 @@ describe("code-mode sandbox continuation contract", () => {
 
     await expect(
       continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
         continuationSecurity: security,
         interrupt: getWorkflowSandboxPendingInterrupts(first.interrupt)[0]!,
         resolution: 1,

@@ -92,7 +92,6 @@ export async function createSessionStep(input: {
     systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
     taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
-    workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 
   return { state: createDurableSessionState({ session }) };

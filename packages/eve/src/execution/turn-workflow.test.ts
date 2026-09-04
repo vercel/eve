@@ -710,7 +710,7 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
+  it("keeps workflow-tool child dispatch and immediate remote failures in the same turn", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
     const pendingState = createSessionState();
     const completedState = createSessionState();
@@ -731,8 +731,10 @@ describe("turnWorkflow", () => {
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
-        action: "dispatch-workflow-tasks",
-        pendingTaskCallIds: ["call-1"],
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["call-1"],
         serializedContext: { state: "pending" },
         sessionState: pendingState,
       })
@@ -751,7 +753,7 @@ describe("turnWorkflow", () => {
     await turnWorkflow(input);
 
     expect(dispatchCoordinationStep).toHaveBeenCalledWith({
-      action: "dispatch-workflow-tasks",
+      action: "park",
       callbackBaseUrl: "https://eve.example.com",
       workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable,

@@ -26,7 +26,6 @@ import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
-import { experimental_workflow } from "#tools/workflow.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -92,7 +91,10 @@ interface WaitToolFixture {
   toolStarts(): number;
 }
 
-async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture> {
+async function createWaitToolRuntime(
+  agentName: string,
+  codeMode = false,
+): Promise<WaitToolFixture> {
   let aborts = 0;
   let starts = 0;
   let resolveStarted: (() => void) | undefined;
@@ -109,13 +111,7 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     },
   );
   const runtime = await createTestRuntime({
-    agent: { name: agentName },
-    modules: [
-      {
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-        logicalPath: "tools/workflow.ts",
-      },
-    ],
+    agent: { name: agentName, experimental: { codeMode: codeMode ? { mode: "eager" } : false } },
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -757,14 +753,14 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cascades cancellation to an in-flight subagent and does not re-dispatch it", async () => {
-    const fixture = await createWaitToolRuntime("turn-cancel-subagent");
+    const fixture = await createWaitToolRuntime("turn-cancel-subagent", true);
     const continuationToken = "http:turn-cancel-subagent";
 
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
           input: {
-            message: `Delegate through Workflow to a subagent: use the ${WAIT_TOOL_NAME} tool.`,
+            message: `Delegate through code_mode to a subagent: use the ${WAIT_TOOL_NAME} tool.`,
           },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -777,7 +773,7 @@ describe("turn cancellation integration", () => {
 
       try {
         // The child (a fresh copy of the same agent) hangs on the wait
-        // tool, holding the parent in `waitForRuntimeActionResults`.
+        // tool, holding the code_mode program until cancellation.
         await fixture.toolStarted;
 
         const cancelToken = sessionCommandHookToken(run.runId);
@@ -826,13 +822,7 @@ describe("turn cancellation integration", () => {
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
     const runtime = await createTestRuntime({
-      agent: { name: "turn-cancel-hitl" },
-      modules: [
-        {
-          loadNamespace: async () => ({ default: experimental_workflow() }),
-          logicalPath: "tools/workflow.ts",
-        },
-      ],
+      agent: { name: "turn-cancel-hitl", experimental: { codeMode: { mode: "eager" } } },
     });
     const continuationToken = "http:turn-cancel-hitl";
 
@@ -841,7 +831,7 @@ describe("turn cancellation integration", () => {
         {
           input: {
             message:
-              "Delegate through Workflow to a subagent: Use the ask_question tool exactly once.",
+              "Delegate through code_mode to a subagent: Use the ask_question tool exactly once.",
           },
           serializedContext: {
             ...buildSerializedContext({

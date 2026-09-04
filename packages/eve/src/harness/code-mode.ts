@@ -5,6 +5,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { isNeverApproval } from "#tools/approval/policies.js";
 import {
+  DEFAULT_CODE_MODE_MAX_SUBAGENTS,
   serializeCodeModeWorkflowInput,
   type CodeModeMode,
   type CodeModeToolCatalogEntry,
@@ -17,7 +18,10 @@ import { parseJsonObject } from "#shared/json.js";
 export const CODE_MODE_TOOL_NAME = "code_mode";
 export const SEARCH_TOOLS_NAME = "search_tools";
 export const DESCRIBE_TOOLS_NAME = "describe_tools";
-export const CODE_MODE_BRIDGE_REQUEST_LIMIT = 256;
+export function codeModeBridgeRequestLimit(maxSubagents: number): number {
+  // Leave room for the first excess call to receive the framework budget error.
+  return Math.max(256, maxSubagents + 1);
+}
 
 const ORCHESTRATION_INSTRUCTION =
   "Call code_mode at most once per response. Put dependent calls, loops, retries, and parallel work in one program.";
@@ -39,6 +43,7 @@ export async function applyCodeModeTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
   readonly mode: CodeModeMode;
+  readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<{
   readonly claimedToolNames: readonly string[];
@@ -51,6 +56,7 @@ export async function applyCodeModeTool(input: {
     return { claimedToolNames: [], harnessTools: input.harnessTools, modelTools: input.tools };
   }
 
+  const maxSubagents = input.maxSubagents ?? DEFAULT_CODE_MODE_MAX_SUBAGENTS;
   const hostTools: Record<string, ToolSet[string]> = {};
   const modelTools: Record<string, ToolSet[string]> = {};
   for (const [name, tool] of Object.entries(input.tools)) {
@@ -75,14 +81,15 @@ export async function applyCodeModeTool(input: {
 
   Object.assign(hostTools, createDiscoveryTools(toolCatalog));
   const generated = await createWorkflowSandboxTool({
-    bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+    bridgeRequestLimit: codeModeBridgeRequestLimit(maxSubagents),
     continuationSecurity: input.continuationSecurity,
     hostTools: hostTools as ToolSet,
   });
-  const description =
+  const generatedDescription =
     input.mode === "lazy"
       ? lazyDescription(generated, toolCatalog)
       : `${ORCHESTRATION_INSTRUCTION}\n\n${DISCOVERY_INSTRUCTION}\n\n${generated.description ?? ""}`;
+  const description = `${generatedDescription}\n\nA program may invoke at most ${maxSubagents} subagents in total, including retries and continuations. Excess calls reject with CODE_MODE_SUBAGENT_LIMIT_REACHED.`;
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeModelTool,
     description,
@@ -101,6 +108,7 @@ export async function applyCodeModeTool(input: {
       serializeCodeModeWorkflowInput({
         js: readProgram(toolInput),
         mode,
+        maxSubagents,
         toolNames: claimedToolNames,
         toolCatalog,
       } satisfies CodeModeWorkflowInput),

@@ -22,11 +22,7 @@ export const PUBLIC_SURFACES = [
   { path: "src/public/schedules/index.ts", capabilities: ["schedule"] },
   { path: "src/public/index.ts", capabilities: ["subagent"] },
   {
-    paths: [
-      "src/public/tools/index.ts",
-      "src/public/tools/workflow.ts",
-      "src/public/tools/web-search.ts",
-    ],
+    paths: ["src/public/tools/index.ts", "src/public/tools/web-search.ts"],
     capabilities: ["tool", "dynamicTool"],
   },
   { path: "src/public/connections/index.ts", capabilities: ["connection"] },
