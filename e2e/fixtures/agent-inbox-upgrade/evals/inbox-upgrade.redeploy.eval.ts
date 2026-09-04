@@ -36,15 +36,8 @@ export default defineEval({
       throw new Error(`Expected published eve@${OLD_VERSION}.`);
     }
     const originalMarker = await readFile(MARKER_PATH, "utf8");
-    const sessions = [
-      t.newSession(),
-      t.newSession(),
-      t.newSession(),
-      t.newSession(),
-      t.newSession(),
-    ];
-    const [idle, blocking, cancellable, background, fresh] = sessions as [
-      EveEvalSession,
+    const sessions = [t.newSession(), t.newSession(), t.newSession(), t.newSession()];
+    const [idle, blocking, cancellable, background] = sessions as [
       EveEvalSession,
       EveEvalSession,
       EveEvalSession,
@@ -121,8 +114,10 @@ export default defineEval({
         "blocking",
         blockingExecution,
       );
-      const afterAnswer = await blocking.send("UPGRADE-read-afteranswer");
-      await requireExecution(t, readExecution(afterAnswer), NEW_MARKER, newExecution.deploymentId);
+      const afterAnswer = await followCodeDeployment(t, blocking, "afteranswer", NEW_MARKER, [
+        oldExecution,
+      ]);
+      await requireExecution(t, afterAnswer.execution, NEW_MARKER, newExecution.deploymentId);
 
       const cancellation = await cancellable.cancel();
       await t.require(
@@ -133,18 +128,19 @@ export default defineEval({
         ),
       );
       // The parked turn already emitted its boundary; cancellation must not invent another.
-      const afterCancel = await cancellable.send("UPGRADE-read-aftercancel");
-      await requireExecution(t, readExecution(afterCancel), NEW_MARKER, newExecution.deploymentId);
-      afterCancel.notEvent("turn.cancelled");
-      afterCancel.notEvent("input.requested");
+      const afterCancel = await followCodeDeployment(t, cancellable, "aftercancel", NEW_MARKER, [
+        oldExecution,
+      ]);
+      await requireExecution(t, afterCancel.execution, NEW_MARKER, newExecution.deploymentId);
+      afterCancel.turn.notEvent("turn.cancelled");
+      afterCancel.turn.notEvent("input.requested");
 
       await pendingBackground.respond([
         { requestId: backgroundRequest.requestId, optionId: "continue" },
       ]);
       await requireTaskCompletion(t, pendingBackground, receipt.taskId, backgroundExecution);
 
-      const newSession = await fresh.send("UPGRADE-read-fresh");
-      await requireExecution(t, readExecution(newSession), NEW_MARKER, newExecution.deploymentId);
+      const fresh = await createSessionOnDeployment(t, sessions, newExecution, oldExecution);
 
       // Roll back authored code while retaining the runtime that understands both cohorts.
       await writeMarker(OLD_MARKER);
@@ -220,6 +216,38 @@ async function followCodeDeployment(
     await t.sleep(1_000);
   }
   throw new Error(`Alias did not select ${marker} on a new deployment within ten read-only turns.`);
+}
+
+async function createSessionOnDeployment(
+  t: EveEvalContext,
+  sessions: EveEvalSession[],
+  expected: Execution,
+  previous: Execution,
+): Promise<EveEvalSession> {
+  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60_000)]);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const session = t.newSession();
+    sessions.push(session);
+    const first = await session.send("UPGRADE-read-fresh", { signal });
+    const execution = readExecution(first);
+    if (execution.deploymentId === expected.deploymentId) {
+      await requireExecution(t, execution, expected.marker, expected.deploymentId);
+      await t.require(
+        execution.runId === first.sessionId,
+        satisfies(
+          (same: boolean) => same,
+          "the fresh cohort starts its parent on the new deployment",
+        ),
+      );
+      return session;
+    }
+    await requireExecution(t, execution, previous.marker, previous.deploymentId);
+    t.log(
+      "A prior ingress created another legacy session during alias propagation; retaining it for cleanup",
+    );
+    await t.sleep(1_000);
+  }
+  throw new Error("Alias did not create a session on the new deployment within ten attempts.");
 }
 
 function requireStreamIndex(session: EveEvalSession): number {
