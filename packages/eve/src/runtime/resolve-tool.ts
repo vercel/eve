@@ -131,6 +131,20 @@ function extractOptionalHooks(
       describe(definition, "to provide a valid label definition"),
     );
     optional.label = {
+      complete:
+        label.complete === undefined
+          ? undefined
+          : (expectFunction(
+              label.complete,
+              describe(definition, "to provide an label complete function"),
+            ) as NonNullable<ResolvedToolDefinition["label"]>["complete"]),
+      delta:
+        label.delta === undefined
+          ? undefined
+          : (expectFunction(
+              label.delta,
+              describe(definition, "to provide an label delta function"),
+            ) as NonNullable<ResolvedToolDefinition["label"]>["delta"]),
       start: expectFunction(
         label.start,
         describe(definition, "to provide a label start callback function"),

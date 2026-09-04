@@ -1476,7 +1476,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays a label start callback", () => {
+  it("replays label callbacks", () => {
     const ctx = createCtx();
     registerTestCallback("deploy", "execute", () => ({ ok: true }));
     registerTestCallback(
@@ -1484,10 +1484,22 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       "labelStart",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
     );
+    registerTestCallback(
+      "deploy",
+      "labelComplete",
+      (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+    );
+    registerTestCallback("deploy", "labelDelta", (_closure, _input, partial) =>
+      String((partial as { phase: unknown }).phase),
+    );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          label: { start: { closure: {} } },
+          label: {
+            complete: { closure: {} },
+            delta: { closure: {} },
+            start: { closure: {} },
+          },
           execute: { closure: {} },
         },
         description: "Deploy.",
@@ -1498,8 +1510,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       },
     ]);
 
-    expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
-      "Deploy to preview",
+    const tool = buildDynamicTools(ctx)[0];
+    expect(tool?.label?.start?.({ environment: "preview" })).toBe("Deploy to preview");
+    expect(
+      tool?.label?.complete?.({ environment: "preview" }, { url: "preview.example.com" }),
+    ).toBe("Deployed to preview.example.com");
+    expect(tool?.label?.delta?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
+      "Uploading",
     );
     getDynamicCallbackRegistry().delete("deploy");
   });

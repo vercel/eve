@@ -3,6 +3,8 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
+  | "labelComplete"
+  | "labelDelta"
   | "labelStart"
   | "approvalRequest"
   | "approvalResponse"
@@ -24,6 +26,8 @@ export interface DurableDynamicCallbackReference {
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
   readonly label?: {
+    readonly complete?: DurableDynamicCallbackReference;
+    readonly delta?: DurableDynamicCallbackReference;
     readonly start?: DurableDynamicCallbackReference;
   };
   readonly approvalRequest?: DurableDynamicCallbackReference;
@@ -40,6 +44,8 @@ export interface StampedDurableDynamicCallback {
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
   label: {
+    readonly complete?: StampedDurableDynamicCallback;
+    readonly delta?: StampedDurableDynamicCallback;
     readonly start?: StampedDurableDynamicCallback;
   };
   approvalRequest: StampedDurableDynamicCallback;
@@ -103,10 +109,28 @@ export function hasUnregisteredDurableDynamicCallbacks(
   metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
 ): boolean {
   return metadata.some((entry) =>
-    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
+    durableCallbackPhases(entry.callbacks).some(
       (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
     ),
   );
+}
+
+function durableCallbackPhases(
+  callbacks: DurableDynamicToolCallbacks,
+): DurableDynamicCallbackPhase[] {
+  const entries: readonly (readonly [
+    DurableDynamicCallbackPhase,
+    DurableDynamicCallbackReference | undefined,
+  ])[] = [
+    ["execute", callbacks.execute],
+    ["labelComplete", callbacks.label?.complete],
+    ["labelDelta", callbacks.label?.delta],
+    ["labelStart", callbacks.label?.start],
+    ["approvalRequest", callbacks.approvalRequest],
+    ["approvalResponse", callbacks.approvalResponse],
+    ["toModelOutput", callbacks.toModelOutput],
+  ];
+  return entries.flatMap(([phase, reference]) => (reference === undefined ? [] : [phase]));
 }
 
 /** Marks a live callback with the descriptor needed to register it at resolve time. */
@@ -141,12 +165,16 @@ export function stampDurableDynamicToolCallbacks(
 
 export function collectDurableDynamicToolCallbacks(input: {
   readonly label?: {
+    readonly complete?: (...args: never[]) => unknown;
+    readonly delta?: (...args: never[]) => unknown;
     readonly start?: (...args: never[]) => unknown;
   };
   readonly approval?: Approval<never>;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
+  const labelComplete = readDurableDynamicCallback(input.label?.complete);
+  const labelDelta = readDurableDynamicCallback(input.label?.delta);
   const labelStart = readDurableDynamicCallback(input.label?.start);
   const approvalRequest =
     input.approval === undefined
@@ -161,7 +189,13 @@ export function collectDurableDynamicToolCallbacks(input: {
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
-  if (labelStart !== undefined) callbacks.label = { start: labelStart };
+  if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+    callbacks.label = {
+      complete: labelComplete,
+      delta: labelDelta,
+      start: labelStart,
+    };
+  }
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

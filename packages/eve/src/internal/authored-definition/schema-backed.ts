@@ -179,8 +179,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    */
   if (record.label !== undefined) {
     const label = expectObjectRecord(record.label, message);
-    expectOnlyKnownKeys(label, ["start"], message);
+    expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
     expectFunction(label.start, message);
+    if (label.complete !== undefined) expectFunction(label.complete, message);
+    if (label.delta !== undefined) expectFunction(label.delta, message);
   }
 
   if (record.approval !== undefined) {

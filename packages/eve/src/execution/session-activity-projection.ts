@@ -55,6 +55,7 @@ export function projectSessionActivity(input: {
     ...projectActivityEvents({
       at: input.event.meta.at,
       event: input.event,
+      eventId: input.event.meta.id,
       lineage: work,
     }),
   );

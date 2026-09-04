@@ -92,6 +92,12 @@ export function replayDynamicTools(
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
+    const labelComplete = bindDynamicCallback(
+      entry,
+      "labelComplete",
+      entry.callbacks.label?.complete,
+    );
+    const labelDelta = bindDynamicCallback(entry, "labelDelta", entry.callbacks.label?.delta);
     const labelStart = bindDynamicCallback(entry, "labelStart", entry.callbacks.label?.start);
     const toModelOutput = bindDynamicCallback(
       entry,
@@ -141,8 +147,12 @@ export function replayDynamicTools(
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (labelStart !== undefined) {
-      replayed.label = { start: (input: unknown) => labelStart(input) as string };
+    if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+      replayed.label = {
+        complete: labelComplete,
+        delta: labelDelta,
+        start: labelStart,
+      };
     }
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
     return replayed;
@@ -153,7 +163,7 @@ function bindDynamicCallback(
   entry: CurrentDynamicToolMetadata,
   phase: DurableDynamicCallbackPhase,
   reference: DurableDynamicCallbackReference | undefined,
-): ((...args: unknown[]) => unknown) | undefined {
+): ((...args: unknown[]) => any) | undefined {
   if (reference === undefined) return undefined;
   const callback = lookupDurableDynamicCallback(entry.name, phase);
   return (...args) => {

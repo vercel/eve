@@ -10,7 +10,7 @@ interface PlanState {
       string,
       {
         readonly ts: string;
-        readonly seen: Readonly<Record<string, Phase>>;
+        readonly seen: Readonly<Record<string, string>>;
         readonly stopped: boolean;
       }
     >
@@ -40,7 +40,7 @@ export function createSlackPlanRenderer(
       const previous = isState(state) ? state.streams : {};
       const streams: Record<
         string,
-        { ts: string; seen: Readonly<Record<string, Phase>>; stopped: boolean }
+        { ts: string; seen: Readonly<Record<string, string>>; stopped: boolean }
       > = { ...previous };
       for (const rootTurnId of new Set(
         Object.values(snapshot.work).map((work) => work.rootTurnId),
@@ -84,9 +84,10 @@ export function createSlackPlanRenderer(
             botToken,
             installation,
           );
-        const seen = Object.fromEntries(
-          [...view.parents, ...view.entities].map((entity) => [entity.id, entity.phase]),
-        );
+        const seen = Object.fromEntries([
+          ...view.parents.map((parent) => [parent.id, parent.phase]),
+          ...view.entities.map((entity) => [entity.id, entityVersion(entity)]),
+        ]);
         if (view.settled) {
           await checked("chat.stopStream", { channel, ts: current.ts }, botToken, installation);
           const blocks = [
@@ -179,12 +180,12 @@ function project(snapshot: ActivitySnapshotV1, rootTurnId: string): View {
   ].every((e) => e.phase !== "running" && e.phase !== "blocked");
   return { parents, entities, settled };
 }
-function detailUpdates(view: View, seen: Readonly<Record<string, Phase>>) {
+function detailUpdates(view: View, seen: Readonly<Record<string, string>>) {
   const parentUpdates = view.parents
     .filter((parent) => seen[parent.id] !== parent.phase)
     .map(taskChunk);
   const descendantUpdates = view.entities
-    .filter((entity) => seen[entity.id] !== entity.phase)
+    .filter((entity) => seen[entity.id] !== entityVersion(entity))
     .map((entity) => ({
       type: "task_update",
       id: safeId(entity.parent),
@@ -195,6 +196,9 @@ function detailUpdates(view: View, seen: Readonly<Record<string, Phase>>) {
       details: `${icon(entity.phase)} ${entity.name}\n`,
     }));
   return [...parentUpdates, ...descendantUpdates];
+}
+function entityVersion(entity: Entity): string {
+  return `${entity.phase}:${entity.name}`;
 }
 function taskChunk(work: ActivityWorkStateV1) {
   return {

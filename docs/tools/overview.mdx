@@ -66,10 +66,15 @@ yield is the normal tool result the model receives:
 export default defineTool({
   description: "Build a project report.",
   inputSchema: z.object({ project: z.string() }),
+  label: {
+    start: ({ project }) => `Build report for ${project}`,
+    delta: (_input, partial) => partial.phase,
+    complete: (_input, output) => `Report ready with ${output.report.sections.length} sections`,
+  },
   async *execute({ project }) {
-    yield { phase: "collecting", report: null };
+    yield { phase: "Collecting sources", report: null };
     const report = await buildReport(project);
-    yield { phase: "complete", report };
+    yield { phase: "Complete", report };
   },
 });
 ```
@@ -81,6 +86,19 @@ last-write-wins by tool call id, not append-only progress. The durable runtime
 can retry a step and replay overlapping snapshots. A generator `return` value is not used as
 the result in this mode; yield the final output. Workflow and background generators have
 different result rules, described under [yield and return](#yield-and-return).
+
+Use `label.delta(input, partial)` to project preliminary snapshots into
+user-facing activity, and `label.complete(input, output)` to describe successful
+settlement differently. Both callbacks receive the validated input first and the typed value yielded by
+`execute` second. Each non-empty update replaces the previous activity label; the
+result projection replaces the latest update immediately before eve marks the
+action complete.
+
+eve normalizes and bounds projected text before rendering it. If either
+callback throws or returns an empty string, eve keeps the existing activity
+label. `label.complete` does not run for failed or rejected tool calls. The
+full values remain available in `action.partial` and `action.result`; renderers
+receive only the projected text.
 
 ### Background execution
 

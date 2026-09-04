@@ -14,6 +14,8 @@ import {
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 type CallbackPhase =
+  | "labelComplete"
+  | "labelDelta"
   | "labelStart"
   | "approvalRequest"
   | "approvalResponse"
@@ -26,6 +28,8 @@ type CallbackPropertyName =
   | "start"
   | "request"
   | "response"
+  | "complete"
+  | "delta"
   | "toModelOutput";
 
 interface CallbackInfo {
@@ -191,6 +195,22 @@ function collectToolCallbacks(
       findProperty(labelValue, "start"),
       "labelStart",
       "start",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "complete"),
+      "labelComplete",
+      "complete",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "delta"),
+      "labelDelta",
+      "delta",
       results,
       nestedScopes,
     );
