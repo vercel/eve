@@ -65,5 +65,10 @@ minimumReleaseAgeExclude:
   - "@vercel/*"
   - "@workflow/*"
   - nitro
+  # Required by nitro@3.0.260903-beta, published September 3.
+  - db0@0.4.1
+  - h3@2.0.1-rc.31
+  - srvx@1.0.3
+  - unstorage@2.0.0-alpha.10
   - run
   - workflow
