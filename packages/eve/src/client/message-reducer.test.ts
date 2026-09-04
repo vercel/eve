@@ -497,8 +497,10 @@ describe("defaultMessageReducer", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createActionResultEvent({
+        rejected: true,
         result: {
           callId: "call_1",
+          isError: true,
           kind: "tool-result",
           output: JSON.stringify({
             code: "TOOL_EXECUTION_DENIED",
