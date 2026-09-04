@@ -1,6 +1,7 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
+  asSchema,
   jsonSchema,
   type LanguageModelCallEndEvent,
   type LanguageModel,
@@ -102,18 +103,22 @@ import {
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
-vi.mock("ai", () => ({
-  ToolLoopAgent: vi.fn(),
-  gateway: {
-    tools: {
-      exaSearch: vi.fn(() => ({})),
-      parallelSearch: vi.fn(() => ({})),
+vi.mock("ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("ai")>();
+  return {
+    ToolLoopAgent: vi.fn(),
+    gateway: {
+      tools: {
+        exaSearch: vi.fn(() => ({})),
+        parallelSearch: vi.fn(() => ({})),
+      },
     },
-  },
-  jsonSchema: vi.fn((s: unknown) => s),
-  isStepCount: vi.fn((n: number) => n),
-  tool: vi.fn((t: unknown) => t),
-}));
+    jsonSchema: actual.jsonSchema,
+    asSchema: actual.asSchema,
+    isStepCount: vi.fn((n: number) => n),
+    tool: vi.fn((t: unknown) => t),
+  };
+});
 
 const {
   mockCreateAiSdkHookBridge,
@@ -10204,7 +10209,7 @@ describe("createToolLoopHarness", () => {
           providerOptions: structuredClone(prepared.providerOptions),
           tools: Object.entries(settings.tools ?? {}).map(([name, tool]) => ({
             description: structuredClone(tool.description),
-            inputSchema: structuredClone(tool.inputSchema),
+            inputSchema: structuredClone(asSchema(tool.inputSchema as never).jsonSchema),
             name,
             providerOptions: structuredClone(tool.providerOptions),
           })),

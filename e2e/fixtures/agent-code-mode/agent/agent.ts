@@ -39,6 +39,16 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   } else if (message.includes("CODEMODE-DYNAMIC-START")) {
     directive = "CODEMODE-DYNAMIC";
     js = "return { shared: await tools.shared({}), discovered: await tools.discovered({}) };";
+  } else if (message.includes("CODEMODE-DISCOVERY-START")) {
+    directive = "CODEMODE-DISCOVERY";
+    const direct = request.tools.map((tool) => tool.name).sort();
+    js = [
+      "const catalog = await tools.search_tools({});",
+      "const direct = catalog.filter(tool => tool.requiresDirectCall).map(tool => tool.name).sort();",
+      `const complete = JSON.stringify(direct) === JSON.stringify(${JSON.stringify(direct)});`,
+      'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
+      'return { complete, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
+    ].join("\n");
   } else if (message.includes("CODEMODE-CONNECTIONS-START")) {
     directive = "CODEMODE-CONNECTIONS";
     if (!request.toolResults.some((entry) => entry.name === "connection_search")) {
@@ -49,7 +59,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }
     // The inline spec tests discovery without making an external API request.
     js =
-      'return { discovered: typeof tools.catalog__getStatus, echo: await tools.echo({ value: "catalog-ready" }) };';
+      'const [discovered] = await tools.describe_tools({ names: ["catalog__getStatus"] }); return { discovered: discovered.name, requiresDirectCall: discovered.requiresDirectCall, echo: await tools.echo({ value: "catalog-ready" }) };';
   } else if (message.includes("CODEMODE-AUTH-START")) {
     directive = "CODEMODE-AUTH";
     js =

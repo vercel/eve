@@ -1,5 +1,5 @@
 import { jsonSchema, type ToolSet } from "ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   continueWorkflowSandboxInterrupt,
@@ -9,7 +9,18 @@ import {
   requestWorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
-import { CODE_MODE_BRIDGE_REQUEST_LIMIT } from "#harness/code-mode.js";
+import {
+  applyCodeModeTool,
+  createDiscoveryTools,
+  CODE_MODE_BRIDGE_REQUEST_LIMIT,
+} from "#harness/code-mode.js";
+import { buildToolSet } from "#harness/tools.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { always } from "#tools/approval/policies.js";
+import {
+  parseCodeModeWorkflowInput,
+  serializeCodeModeWorkflowInput,
+} from "#execution/code-mode/schema.js";
 import {
   CODE_MODE_CALL_INTERRUPT_KIND,
   createCodeModeToolStub,
@@ -26,6 +37,132 @@ const security = { signingKey: "code-mode-program-step-test" };
  * settle would silently serialize or misroute, so this test fails first.
  */
 describe("code-mode sandbox continuation contract", () => {
+  it.each(["eager", "lazy"] as const)(
+    "discovers every direct tool across a %s program resume",
+    async (mode) => {
+      const execute = vi.fn(async () => "must stay direct");
+      const definitions = new Map<string, HarnessToolDefinition>([
+        [
+          "echo",
+          {
+            name: "echo",
+            description: "Echo",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute,
+          },
+        ],
+        [
+          "gated",
+          {
+            name: "gated",
+            description: "Needs approval",
+            inputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
+            approval: always(),
+            execute,
+          },
+        ],
+        [
+          "background",
+          {
+            name: "background",
+            description: "Background task",
+            inputSchema: jsonSchema({ type: "object" }),
+            execution: "background",
+            execute,
+          },
+        ],
+        [
+          "provider",
+          {
+            name: "provider",
+            description: "Provider tool",
+            inputSchema: jsonSchema({ type: "object" }),
+          },
+        ],
+        [
+          "connection_search",
+          {
+            name: "connection_search",
+            description: "Discover connection tools",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute,
+          },
+        ],
+        [
+          "code_mode",
+          {
+            name: "code_mode",
+            description: "Run a program",
+            inputSchema: jsonSchema({ type: "object" }),
+            workflowId: "workflow//eve//codeModeWorkflow",
+          },
+        ],
+      ]);
+      const applied = await applyCodeModeTool({
+        continuationSecurity: security,
+        harnessTools: definitions,
+        mode,
+        tools: buildToolSet({ tools: definitions }),
+      });
+      const program = parseCodeModeWorkflowInput(
+        applied.harnessTools.get("code_mode")!.executeInput!({
+          js: [
+            "const before = await tools.search_tools({});",
+            'const schemas = await tools.describe_tools({ names: ["gated", "provider", "unknown"] });',
+            "const result = await tools.echo({});",
+            "return { before, schemas, result, after: await tools.search_tools({}) };",
+          ].join("\n"),
+        }),
+      );
+      const hostTools = {
+        echo: createCodeModeToolStub("echo", definitions.get("echo")!),
+        ...createDiscoveryTools(program.toolCatalog),
+      };
+      const tool = await createWorkflowSandboxTool({
+        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        continuationSecurity: security,
+        hostTools,
+      });
+      const parked = await unwrapWorkflowSandboxResult(
+        await tool.execute!({ js: program.js } as never, { toolCallId: "discovery" } as never),
+        security,
+      );
+      if (parked.status !== "interrupted") throw new Error("Expected echo to park");
+      const restored = parseCodeModeWorkflowInput(
+        JSON.parse(JSON.stringify(serializeCodeModeWorkflowInput(program))),
+      );
+      const resumed = await unwrapWorkflowSandboxResult(
+        await continueWorkflowSandboxInterrupt({
+          bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+          continuationSecurity: security,
+          interrupt: parked.interrupt,
+          resolution: { status: "completed", output: "done" },
+          tools: { echo: hostTools.echo, ...createDiscoveryTools(restored.toolCatalog) },
+        }),
+        security,
+      );
+      const names = program.toolCatalog.map(({ name, description, requiresDirectCall }) => ({
+        name,
+        description,
+        requiresDirectCall,
+      }));
+      expect(resumed).toEqual({
+        status: "completed",
+        output: {
+          before: names,
+          after: names,
+          result: "done",
+          schemas: [
+            program.toolCatalog.find((entry) => entry.name === "gated"),
+            program.toolCatalog.find((entry) => entry.name === "provider"),
+            { error: "unknown tool", name: "unknown" },
+          ],
+        },
+      });
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it("makes a failed call catchable and retryable without repeating a completed sibling", async () => {
     const hostTools = Object.fromEntries(
       ["child", "sibling"].map((name) => [

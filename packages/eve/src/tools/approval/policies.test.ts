@@ -1,9 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { always, never, once } from "#tools/approval/policies.js";
+import { always, isNeverApproval, never, once } from "#tools/approval/policies.js";
 import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 describe("dynamic tool approval helpers", () => {
+  it("recognizes never across separately loaded copies of eve", async () => {
+    const original = never();
+    vi.resetModules();
+    const separate = await import("#tools/approval/policies.js");
+    expect(separate.isNeverApproval(original)).toBe(true);
+    expect(isNeverApproval(separate.never())).toBe(true);
+    expect(isNeverApproval(separate.always())).toBe(false);
+    expect(isNeverApproval(() => "not-applicable")).toBe(false);
+  });
+
   it.each([
     ["always", always(), "user-approval"],
     ["never", never(), "not-applicable"],

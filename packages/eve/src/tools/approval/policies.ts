@@ -10,6 +10,8 @@ import {
   stampDurableDynamicCallback,
 } from "#tools/durable-callbacks.js";
 
+const NEVER_APPROVAL = Symbol.for("eve:approval-policy:never");
+
 function alwaysApproval(_closure: JsonObject): "user-approval" {
   return "user-approval";
 }
@@ -17,6 +19,9 @@ function alwaysApproval(_closure: JsonObject): "user-approval" {
 function neverApproval(_closure: JsonObject): "not-applicable" {
   return "not-applicable";
 }
+
+// Authored modules and the harness can load separate copies of eve.
+Object.defineProperty(neverApproval, NEVER_APPROVAL, { value: true });
 
 function onceApproval(
   _closure: JsonObject,
@@ -48,7 +53,8 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
 }
 
 export function isNeverApproval(approval: Approval<any>): boolean {
-  return readDurableDynamicCallback(resolveApprovalPolicy(approval))?.callback === neverApproval;
+  const callback = readDurableDynamicCallback(resolveApprovalPolicy(approval))?.callback;
+  return callback !== undefined && Reflect.get(callback, NEVER_APPROVAL) === true;
 }
 
 /**

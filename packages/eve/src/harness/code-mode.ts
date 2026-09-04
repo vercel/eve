@@ -7,10 +7,12 @@ import { isNeverApproval } from "#tools/approval/policies.js";
 import {
   serializeCodeModeWorkflowInput,
   type CodeModeMode,
+  type CodeModeToolCatalogEntry,
   type CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
 import { createWorkflowSandboxTool } from "#shared/workflow-sandbox.js";
 import type { WorkflowSandboxContinuationSecurity } from "#shared/workflow-sandbox.js";
+import { parseJsonObject } from "#shared/json.js";
 
 export const CODE_MODE_TOOL_NAME = "code_mode";
 export const SEARCH_TOOLS_NAME = "search_tools";
@@ -20,13 +22,17 @@ export const CODE_MODE_BRIDGE_REQUEST_LIMIT = 256;
 const ORCHESTRATION_INSTRUCTION =
   "Call code_mode at most once per response. Put dependent calls, loops, retries, and parallel work in one program.";
 
+const DISCOVERY_INSTRUCTION =
+  "Use tools.search_tools and tools.describe_tools to discover every available tool. " +
+  "Tools marked requiresDirectCall must be called directly outside this program.";
+
 export type { CodeModeMode };
 
 /**
  * Moves eligible tools behind the framework `code_mode` workflow tool.
  *
- * The claimed catalog is pinned into the tool's `executeInput`, so the durable
- * body replays against exactly the names the model was shown. Nothing here
+ * The discovery catalog and callable names are pinned into `executeInput`, so
+ * the durable body sees the same names and schemas after a resume. Nothing here
  * executes: the sandbox tool is built only to borrow its generated description.
  */
 export async function applyCodeModeTool(input: {
@@ -55,13 +61,19 @@ export async function applyCodeModeTool(input: {
     }
   }
   const claimedToolNames = Object.keys(hostTools).sort();
-  if (claimedToolNames.length === 0) {
-    const harnessTools = new Map(input.harnessTools);
-    harnessTools.delete(CODE_MODE_TOOL_NAME);
-    return { claimedToolNames, harnessTools, modelTools: modelTools as ToolSet };
-  }
+  const toolCatalog: CodeModeToolCatalogEntry[] = Object.keys(input.tools)
+    .sort()
+    .map((name) => {
+      const tool = input.tools[name]!;
+      return {
+        name,
+        description: typeof tool.description === "string" ? tool.description : "",
+        inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
+        requiresDirectCall: !Object.hasOwn(hostTools, name),
+      };
+    });
 
-  if (input.mode === "lazy") Object.assign(hostTools, createDiscoveryTools(hostTools));
+  Object.assign(hostTools, createDiscoveryTools(toolCatalog));
   const generated = await createWorkflowSandboxTool({
     bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
     continuationSecurity: input.continuationSecurity,
@@ -69,8 +81,8 @@ export async function applyCodeModeTool(input: {
   });
   const description =
     input.mode === "lazy"
-      ? lazyDescription(generated, hostTools as ToolSet)
-      : `${ORCHESTRATION_INSTRUCTION}\n\n${generated.description ?? ""}`;
+      ? lazyDescription(generated, toolCatalog)
+      : `${ORCHESTRATION_INSTRUCTION}\n\n${DISCOVERY_INSTRUCTION}\n\n${generated.description ?? ""}`;
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeModelTool,
     description,
@@ -90,6 +102,7 @@ export async function applyCodeModeTool(input: {
         js: readProgram(toolInput),
         mode,
         toolNames: claimedToolNames,
+        toolCatalog,
       } satisfies CodeModeWorkflowInput),
   });
   return { claimedToolNames, harnessTools, modelTools: modelTools as ToolSet };
@@ -101,6 +114,8 @@ export async function applyCodeModeTool(input: {
  */
 export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean {
   if (name === CODE_MODE_TOOL_NAME) return false;
+  // These names belong to the program's discovery helpers.
+  if (name === SEARCH_TOOLS_NAME || name === DESCRIBE_TOOLS_NAME) return false;
   // Discovery updates the parent context for the next model step's catalog.
   if (name === "connection_search") return false;
   const definition = tools.get(name);
@@ -124,39 +139,33 @@ export function isCodeModeAgentTool(definition: HarnessToolDefinition): boolean 
   return definition.resultKind === "subagent";
 }
 
-/** Discovery helpers exposed to generated code in `"lazy"` mode. */
+/** Discovery covers the complete advertised catalog, independently of execution routing. */
 export function createDiscoveryTools(
-  catalog: Record<string, ToolSet[string]>,
+  catalog: readonly CodeModeToolCatalogEntry[],
 ): Record<string, ToolSet[string]> {
-  const entries = Object.entries(catalog).map(([name, tool]) => ({
-    description: typeof tool.description === "string" ? tool.description : "",
-    inputSchema: tool.inputSchema,
-    name,
-  }));
   return {
     [SEARCH_TOOLS_NAME]: {
-      description: "Search the code-mode tool catalog.",
+      description: "Search all available tools, including tools that require direct calls.",
       inputSchema: z.object({ query: z.string().optional() }),
       execute: async ({ query }: { readonly query?: string }) => {
         const needle = query?.toLowerCase().trim() ?? "";
-        return entries
+        return catalog
           .filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(needle))
-          .map(({ description, name }) => ({ description, name }));
+          .map(({ description, name, requiresDirectCall }) => ({
+            description,
+            name,
+            requiresDirectCall,
+          }));
       },
     } as ToolSet[string],
     [DESCRIBE_TOOLS_NAME]: {
-      description: "Return descriptions and input schemas for code-mode tools.",
+      description:
+        "Return descriptions, input schemas, and direct-call requirements for available tools.",
       inputSchema: z.object({ names: z.array(z.string()) }),
       execute: async ({ names }: { readonly names: readonly string[] }) =>
         names.map((name) => {
-          const entry = entries.find((candidate) => candidate.name === name);
-          return entry === undefined
-            ? { error: "unknown tool", name }
-            : {
-                description: entry.description,
-                inputSchema: asSchema(entry.inputSchema).jsonSchema,
-                name,
-              };
+          const entry = catalog.find((candidate) => candidate.name === name);
+          return entry === undefined ? { error: "unknown tool", name } : entry;
         }),
     } as ToolSet[string],
   };
@@ -179,18 +188,19 @@ function readProgram(toolInput: unknown): string {
   return js;
 }
 
-function lazyDescription(tool: ToolSet[string], hostTools: ToolSet): string {
+function lazyDescription(
+  tool: ToolSet[string],
+  catalog: readonly CodeModeToolCatalogEntry[],
+): string {
   const generated = typeof tool.description === "string" ? tool.description : "";
   const header = generated.split("Tools:\n", 1)[0]?.trimEnd() ?? generated;
-  const names = Object.keys(hostTools).filter(
-    (name) => name !== SEARCH_TOOLS_NAME && name !== DESCRIBE_TOOLS_NAME,
-  );
+  const names = catalog.map((entry) => entry.name);
   return [
     header,
     "",
     ORCHESTRATION_INSTRUCTION,
     "",
     `Available tools: ${names.sort().join(", ")}.`,
-    `Use tools.${SEARCH_TOOLS_NAME} and tools.${DESCRIBE_TOOLS_NAME} to discover signatures.`,
+    DISCOVERY_INSTRUCTION,
   ].join("\n");
 }

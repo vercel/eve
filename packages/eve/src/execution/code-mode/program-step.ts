@@ -1,4 +1,4 @@
-import { asSchema, type ToolSet } from "ai";
+import type { ToolSet } from "ai";
 
 import { deserializeContext } from "#context/serialize.js";
 import { withContextScope } from "#context/run-step.js";
@@ -259,15 +259,7 @@ async function buildProgramHost(input: CodeModeProgramInput): Promise<{
     if (definition === undefined || !claimsForCodeMode(name, harnessTools)) continue;
     hostTools[name] = createCodeModeToolStub(name, definition);
   }
-  if (input.program.mode === "lazy") {
-    const catalog = Object.fromEntries(
-      Object.entries(hostTools).map(([name, tool]) => [
-        name,
-        { ...tool, inputSchema: asSchema(tool.inputSchema) },
-      ]),
-    );
-    Object.assign(hostTools, createDiscoveryTools(catalog));
-  }
+  Object.assign(hostTools, createDiscoveryTools(input.program.toolCatalog));
   return { hostTools: hostTools as ToolSet, security: getWorkflowContinuationSecurity(session) };
 }
 

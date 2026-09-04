@@ -260,9 +260,15 @@ Tools with an approval policy other than `never()`, authored workflow tools,
 ordinary `execution: "background"` tools, and framework task controls stay
 direct. Subagent tools enter the program and
 return their result when called, the same way an authored workflow tool's
-`agent()` does. `"eager"` inlines every claimed signature in the tool
-description; `"lazy"` lists names and lets the program discover schemas with
-`tools.search_tools` and `tools.describe_tools`.
+`agent()` does. `"eager"` inlines every callable signature in the tool
+description; `"lazy"` lists the available tool names.
+
+In both modes, `tools.search_tools` and `tools.describe_tools` discover the
+complete advertised tool catalog, including tools that remain available for
+direct calls. Results include `requiresDirectCall: true` when the program
+cannot execute a tool. Discovery does not run the tool or bypass its approval
+policy. `code_mode` remains available for discovery even when all other tools
+require direct calls.
 
 Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model

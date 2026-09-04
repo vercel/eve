@@ -8,7 +8,8 @@ export default defineEval({
     turn.expectOk();
     turn.calledTool("connection_search", { count: 1, status: "completed" });
     turn.calledTool("code_mode", { count: 1, status: "completed" });
-    turn.messageIncludes('"discovered":"function"');
+    turn.messageIncludes('"discovered":"catalog__getStatus"');
+    turn.messageIncludes('"requiresDirectCall":false');
     turn.messageIncludes('"echo":"ECHO:catalog-ready"');
     t.noFailedActions();
   },

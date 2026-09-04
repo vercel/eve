@@ -54,7 +54,12 @@ function context(aborted = false): ToolContext {
   return { abortSignal: controller.signal, callId: "outer", toolName: "code_mode" } as ToolContext;
 }
 
-const program = { js: "return 1;", mode: "eager", toolNames: ["add", "researcher"] };
+const program = {
+  js: "return 1;",
+  mode: "eager",
+  toolNames: ["add", "researcher"],
+  toolCatalog: [],
+};
 
 beforeEach(() => {
   runProgram.mockReset();
