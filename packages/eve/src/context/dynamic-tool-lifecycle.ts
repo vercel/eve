@@ -36,7 +36,8 @@ import {
 } from "#tools/durable-callbacks.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
-import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
+import { serializeDynamicToolInputSchema } from "#context/dynamic-tool-schema.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
 const log = createLogger("dynamic-tools");
@@ -227,12 +228,13 @@ function createMetadata(input: {
   readonly name: string;
   readonly resolver: ResolvedDynamicToolResolver;
 }): CurrentDynamicToolMetadata {
+  const inputSchema = serializeDynamicToolInputSchema(input.name, input.entry.inputSchema);
   return {
     callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry),
     description: input.entry.description,
     execution: input.entry.execution === "background" ? "background" : undefined,
     entryKey: input.entryKey,
-    inputSchema: serializeInputSchema(input.entry.inputSchema),
+    inputSchema,
     name: input.name,
     outputSchema: serializeOutputSchema(input.entry.outputSchema),
     resolverSlug: input.resolver.slug,

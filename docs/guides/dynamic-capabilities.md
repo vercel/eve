@@ -247,6 +247,49 @@ export default defineDynamic({
 });
 ```
 
+### Input schemas and replay
+
+Dynamic tools persist `inputSchema` as JSON Schema and rebuild validation from
+that snapshot. Use Zod 3 or Zod 4 constraints that JSON Schema can express, such
+as `.min()`, `.max()`, `.regex()`, and `.optional()`, or provide plain JSON Schema.
+
+eve rejects Zod transformations, including `.trim()`, case conversion,
+`.transform()`, preprocessing, coercion, custom refinements, `.pipe()`, and
+`.catch()`, because JSON Schema cannot preserve their runtime behavior. Other
+Standard Schema validators are opaque to this check; provide their JSON Schema
+explicitly and perform custom validation in `execute()`. A rejected input
+schema logs an error with the tool name and omits the resolver's complete
+result.
+
+Keep normalization and custom validation inside a replayable executor. For
+example, this tool rejects whitespace-only input and trims valid input every
+time it executes, including after replay:
+
+```ts title="agent/tools/normalize.ts"
+import { defineDynamic, defineTool } from "eve/tools";
+import { z } from "zod";
+
+const runtimeInput = z.object({ value: z.string().trim().min(1) });
+
+export default defineDynamic({
+  events: {
+    "session.started": () =>
+      defineTool({
+        description: "Normalize a nonempty value.",
+        inputSchema: z.object({ value: z.string().min(1).regex(/\S/) }),
+        execute(input) {
+          return runtimeInput.parse(input);
+        },
+      }),
+  },
+});
+```
+
+The module-level validator remains available to the durable callback without
+being captured in session state. This restriction applies only to dynamic tool
+inputs. Sessions that already persisted a lossy schema must be restarted or re-resolved by a new
+deployment; the missing transformation cannot be recovered from JSON Schema.
+
 ### Author replayable callbacks
 
 Write callback properties as inline function expressions, arrows, method shorthand, or module-level function references. eve transforms authored modules that import `defineTool`, including helper modules outside `agent/tools/`, and stores each callback's referenced closure values independently.

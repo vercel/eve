@@ -32,6 +32,10 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
+Tools returned by `defineDynamic` persist their input schemas as JSON Schema.
+See [Input schemas and replay](/docs/guides/dynamic-capabilities#input-schemas-and-replay)
+for supported validators and where to put transformations or custom validation.
+
 ### Stream preliminary tool results
 
 An async generator lets a long-running tool stream complete output snapshots
