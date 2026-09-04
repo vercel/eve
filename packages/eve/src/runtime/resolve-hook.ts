@@ -2,7 +2,7 @@ import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
 import type { MessageStreamEvent } from "../protocol/message.js";
-import type { StreamEventHook } from "../public/definitions/hook.js";
+import type { BeforeResponseReleaseHook, StreamEventHook } from "../public/definitions/hook.js";
 import { toErrorMessage } from "../shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "./resolve-helpers.js";
 import type { ResolvedHookDefinition } from "./types.js";
@@ -33,6 +33,14 @@ export async function resolveHookDefinition(
       describe(definition, "to return an object"),
     );
 
+    const beforeResponseReleaseRaw = resolvedRecord.beforeResponseRelease;
+    const beforeResponseRelease =
+      beforeResponseReleaseRaw === undefined
+        ? undefined
+        : (expectFunction(
+            beforeResponseReleaseRaw,
+            describe(definition, "to provide a function for beforeResponseRelease"),
+          ) as BeforeResponseReleaseHook);
     const events: Record<string, StreamEventHook<MessageStreamEvent>> = {};
 
     const eventsRaw = resolvedRecord.events;
@@ -52,6 +60,7 @@ export async function resolveHookDefinition(
     }
 
     return {
+      beforeResponseRelease,
       events,
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
