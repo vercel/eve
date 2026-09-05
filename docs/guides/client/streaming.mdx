@@ -24,7 +24,7 @@ The cancellation result is discriminated by `status`: only `accepted` includes
 
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally. Use `session.cancel({ turnId })` instead when you have only a fixed session handle and an observed turn ID.
 
-Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history. A never-started session returns `no_active_session` as a successful no-op.
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history, including when the model returns an empty summary. A never-started session returns `no_active_session` as a successful no-op.
 
 ```ts
 const compaction = await session.compact();
@@ -56,6 +56,10 @@ This consumes the stream until the current turn boundary:
 - `session.waiting`
 - `session.completed`
 - `session.failed`
+
+`result()` closes that HTTP stream, including when fetch instrumentation clones
+the response for tracing. The durable session remains available for follow-up
+turns after `session.waiting`.
 
 ## Stream events live
 

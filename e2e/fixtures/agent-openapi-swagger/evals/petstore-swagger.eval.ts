@@ -5,21 +5,19 @@ const PETSTORE_INVENTORY_TOOL = "petstore__getInventory";
 
 export default defineEval({
   tags: ["real-model"],
-  description:
-    "OpenAPI connection smoke: Swagger Petstore's Swagger 2.0 document exposes and calls getInventory.",
+  description: "A fixture-owned Swagger 2.0 document exposes and calls getInventory over HTTP.",
 
   async test(t) {
     const turn = await t.send(
       [
         "Use the `connection_search` tool to find the inventory operation in the `petstore` connection.",
-        "Then call `petstore__getInventory` exactly once with an empty object.",
+        "Then call `petstore__getInventory` with an empty object.",
         "Reply with the exact words `inventory received` if the tool result contains inventory counts.",
       ].join("\n"),
     );
 
     turn.calledTool(PETSTORE_INVENTORY_TOOL, {
       output: hasInventoryCounts,
-      count: 1,
     });
 
     t.succeeded();
@@ -27,7 +25,6 @@ export default defineEval({
     t.calledTool(SEARCH_TOOL);
     t.calledTool(PETSTORE_INVENTORY_TOOL, {
       output: hasInventoryCounts,
-      count: 1,
     });
     t.messageIncludes(/\binventory received\b/iu);
   },

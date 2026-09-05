@@ -548,6 +548,39 @@ describe("compactMessages: tool-result cap heuristic", () => {
 });
 
 describe("compactMessages: forced summary", () => {
+  it.each(["", " \n\t"])(
+    "rejects a blank checkpoint without replacing history (%j)",
+    async (text) => {
+      const { generateText } = await import("ai");
+      vi.mocked(generateText).mockResolvedValue({
+        finishReason: "content-filter",
+        text,
+      } as Awaited<ReturnType<typeof generateText>>);
+      const messages = [
+        user("Keep the original request."),
+        assistant("Work is in progress."),
+        user("A background task completed."),
+      ];
+      const original = structuredClone(messages);
+
+      await expect(
+        compactMessages(
+          messages,
+          {} as Parameters<typeof compactMessages>[1],
+          { recentWindowSize: 10, threshold: ROOMY },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow(
+        "The compaction model returned an empty summary. Finish reason: content-filter.",
+      );
+      expect(messages).toEqual(original);
+    },
+  );
+
   it("summarizes the full conversation even when it is already under the threshold", async () => {
     const { generateText } = await import("ai");
     vi.mocked(generateText).mockResolvedValue({

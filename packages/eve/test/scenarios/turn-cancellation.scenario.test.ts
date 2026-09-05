@@ -145,7 +145,9 @@ describe("turn cancellation descendant cascade", () => {
     "cancels racing local and authenticated remote children then continues the parent",
     async () => {
       const remoteApp = await scenarioApp(REMOTE_DESCRIPTOR);
-      const remoteServer = await startEveDev(remoteApp.appRoot);
+      const remoteServer = await startEveDev(remoteApp.appRoot, {
+        env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+      });
 
       try {
         const parentApp = await scenarioApp(createParentDescriptor(remoteServer.url));
@@ -236,7 +238,7 @@ describe("turn cancellation descendant cascade", () => {
           ).result();
           expect(followUp.sessionId).toBe(response.sessionId);
           expect(followUp.status).toBe("waiting");
-          expect(followUp.message).toBe("still-alive");
+          expect(followUp.message, JSON.stringify(followUp.events)).toBe("still-alive");
           expect(followUp.events.some((event) => event.type === "turn.cancelled")).toBe(false);
         } catch (error) {
           throw new Error(

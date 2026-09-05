@@ -207,7 +207,7 @@
       "default": "./dist/src/public/tools/workflow.js"
     },
     "./workflow-modules": {
-      "eve-source": "./src/public/workflow-modules.d.ts",
+      "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
     },
     "./models/openai": {
@@ -301,19 +301,19 @@
       "default": "./dist/src/public/local-dev.js"
     },
     "./self-modification": {
-      "eve-source": "./src/self-modification/extension/extension.ts",
+      "eve-source": "./dist/src/self-modification/extension/extension.js",
       "types": "./dist/src/self-modification/extension/extension.d.ts",
       "import": "./dist/src/self-modification/extension/extension.js",
       "default": "./dist/src/self-modification/extension/extension.js"
     },
     "./self-modification/agent": {
-      "eve-source": "./src/self-modification/agent.ts",
+      "eve-source": "./dist/src/self-modification/agent.js",
       "types": "./dist/src/self-modification/agent.d.ts",
       "import": "./dist/src/self-modification/agent.js",
       "default": "./dist/src/self-modification/agent.js"
     },
     "./self-modification/sandbox": {
-      "eve-source": "./src/self-modification/sandbox.ts",
+      "eve-source": "./dist/src/self-modification/sandbox.js",
       "types": "./dist/src/self-modification/sandbox.d.ts",
       "import": "./dist/src/self-modification/sandbox.js",
       "default": "./dist/src/self-modification/sandbox.js"
@@ -410,13 +410,13 @@
     },
     "./package.json": "./package.json",
     "./setup/scaffold": {
-      "eve-source": "./src/setup/scaffold/index.ts",
+      "eve-source": "./dist/src/setup/scaffold/index.js",
       "types": "./dist/src/setup/scaffold/index.d.ts",
       "import": "./dist/src/setup/scaffold/index.js",
       "default": "./dist/src/setup/scaffold/index.js"
     },
     "./setup": {
-      "eve-source": "./src/setup/index.ts",
+      "eve-source": "./dist/src/setup/index.js",
       "types": "./dist/src/setup/index.d.ts",
       "import": "./dist/src/setup/index.js",
       "default": "./dist/src/setup/index.js"
