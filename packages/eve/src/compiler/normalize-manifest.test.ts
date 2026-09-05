@@ -169,6 +169,21 @@ describe("compileAgentManifest source graph", () => {
     ).toEqual(["tools/bash.ts"]);
   });
 
+  it("rejects disabling required connection search", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/connection_search.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
+    );
+  });
+
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
     Reflect.set(execute, "workflowId", "workflow//example/tool//execute");

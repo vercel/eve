@@ -606,6 +606,11 @@ class AgentGraphCompiler {
             loadNamespace,
           });
           if (result.kind === "disabled") {
+            if (canonicalSourceSlot(candidate.logicalPath) === "tools/connection_search") {
+              throw new Error(
+                'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
+              );
+            }
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
