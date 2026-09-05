@@ -13,6 +13,7 @@ const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 const CHILD_MESSAGE = [
   "Call read-workspace-label to look up the workspace name for the current caller.",
+  "Make a fresh lookup: earlier answers in this session may belong to a different caller.",
   "Report the returned name, or explain if access is denied.",
 ].join(" ");
 const CREATE_CHILD_MESSAGE = [
@@ -20,6 +21,7 @@ const CREATE_CHILD_MESSAGE = [
   JSON.stringify(CHILD_MESSAGE),
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
+  "A different user is making this request now.",
   "Continue that same remote-loopback agent using its agentId with this message:",
   JSON.stringify(CHILD_MESSAGE),
 ].join(" ");
