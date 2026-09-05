@@ -7,23 +7,20 @@ import {
 } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
+import { WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+
 const ALICE_WORKSPACE_LABEL = "Maple Studio";
 const BOB_WORKSPACE_LABEL = "Cedar Workshop";
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
-const CHILD_MESSAGE = [
-  "Call read-workspace-label to look up the workspace name for the current caller.",
-  "Make a fresh lookup: earlier answers in this session may belong to a different caller.",
-  "Report the returned name, or explain if access is denied.",
-].join(" ");
 const CREATE_CHILD_MESSAGE = [
   "Use remote-loopback with this message:",
-  JSON.stringify(CHILD_MESSAGE),
+  JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
   "A different user is making this request now.",
   "Continue that same remote-loopback agent using its agentId with this message:",
-  JSON.stringify(CHILD_MESSAGE),
+  JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
 const CLARIFICATION = [
   "Continue the existing agent.",
