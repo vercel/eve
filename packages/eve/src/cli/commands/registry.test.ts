@@ -447,6 +447,29 @@ describe("registry commands", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it("rejects Web Chat before it can write into an agent workspace member", async () => {
+    const logger = createLogger();
+    const appRoot = "/project/agents/support";
+    resolveEveProjectContext.mockResolvedValueOnce({
+      environmentRoot: "/project",
+      kind: "workspace-member",
+      member: { appRoot, name: "support" },
+      workspace: {
+        root: "/project",
+        members: [{ appRoot, name: "support" }],
+      },
+    });
+
+    await runAddCommand(logger, appRoot, "channel/web", {});
+
+    expect(logger.errors).toEqual([
+      "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+    ]);
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it("surfaces required deployment in non-interactive completion", async () => {
     const logger = createLogger();
     const runSetupCommand = vi.fn(async () => ({

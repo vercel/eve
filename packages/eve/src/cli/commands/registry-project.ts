@@ -85,6 +85,13 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
+export async function assertCanInstallWebChat(appRoot: string): Promise<void> {
+  if ((await resolveEveProjectContext(appRoot)).kind === "standalone") return;
+  throw new Error(
+    "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+  );
+}
+
 /** Reads registry namespace mappings from package.json. */
 export async function readRegistryConfig(appRoot: string): Promise<RegistryConfig> {
   return (await readRegistryPackage(appRoot)).config;

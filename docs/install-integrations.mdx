@@ -19,6 +19,8 @@ eve add memory/file
 
 If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
 
+Web Chat installs a project-level Next.js application and cannot currently be added to a top-level `agents/` workspace. For that topology, create a root Next.js application and configure [`withEve({ agents })`](./guides/frontend/nextjs) instead. eve rejects `eve add channel/web` before writing files when the selected agent belongs to such a workspace.
+
 If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
 
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
