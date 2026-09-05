@@ -34,7 +34,7 @@ export default defineDynamic({
             },
           });
           const { response } = await client.sessions.create({
-            message: "Return the structured answer client-recursion-ok.",
+            message: 'Call final_output exactly once with {"answer":"client-recursion-ok"}.',
             outputSchema: {
               type: "object",
               properties: { answer: { type: "string", const: "client-recursion-ok" } },
@@ -45,7 +45,7 @@ export default defineDynamic({
           });
           const result = await response.result();
           signal.throwIfAborted();
-          return { data: result.data, status: result.status };
+          return { data: result.data, status: result.status, sessionId: result.sessionId };
         },
       });
     },

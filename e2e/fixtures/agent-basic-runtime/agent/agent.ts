@@ -9,7 +9,9 @@ const config = e2eAgentConfig({
         ? { toolCalls: [{ name: "call_child", input: {} }] }
         : JSON.stringify(result.output);
     }
-    if (lastUserMessage === "Return the structured answer client-recursion-ok.") {
+    if (
+      lastUserMessage === 'Call final_output exactly once with {"answer":"client-recursion-ok"}.'
+    ) {
       return {
         toolCalls: [{ name: "final_output", input: { answer: "client-recursion-ok" } }],
       };
