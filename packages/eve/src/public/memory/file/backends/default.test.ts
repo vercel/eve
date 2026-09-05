@@ -57,7 +57,7 @@ describe("default file-memory backend", () => {
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({
         access: "private",
-        oidcToken: "oidc_test",
+        oidcToken: undefined,
         storeId: "store_test",
         useCache: false,
       }),
@@ -125,7 +125,7 @@ describe("default file-memory backend", () => {
     await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
-      expect.objectContaining({ oidcToken: "oidc_test", storeId: "store_eve_memory" }),
+      expect.objectContaining({ oidcToken: undefined, storeId: "store_eve_memory" }),
     );
   });
 
@@ -145,6 +145,42 @@ describe("default file-memory backend", () => {
       expect.objectContaining({ storeId: "store_eve_memory" }),
     );
   });
+
+  it.each(["EVE_MEMORY_BLOB", "BLOB"])(
+    "prefers %s store identity over static tokens without capturing OIDC credentials",
+    async (prefix) => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("EVE_DEV", undefined);
+      vi.stubEnv(`${prefix}_STORE_ID`, "store_memory");
+      vi.stubEnv(`${prefix}_READ_WRITE_TOKEN`, "static-token");
+      vi.stubEnv("BLOB_READ_WRITE_TOKEN", "application-token");
+      vi.stubEnv("VERCEL_OIDC_TOKEN", "first-oidc-token");
+      vi.mocked(get).mockResolvedValue(null);
+      vi.mocked(put).mockResolvedValue({
+        contentDisposition: 'attachment; filename="MEMORY.md"',
+        contentType: "text/markdown; charset=utf-8",
+        downloadUrl: "https://example.private.blob.vercel-storage.com/MEMORY.md?download=1",
+        etag: "etag-next",
+        pathname: "eve/memory/file/mem_a/MEMORY.md",
+        url: "https://example.private.blob.vercel-storage.com/MEMORY.md",
+      });
+
+      const backend = defaultFileMemoryBackend();
+      await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+      vi.stubEnv("VERCEL_OIDC_TOKEN", "rotated-oidc-token");
+      await expect(
+        backend.write({ content: "memory", expectedVersion: null, key: "mem_a", signal }),
+      ).resolves.toEqual({ content: "memory", version: "etag-next" });
+
+      const credentials = expect.objectContaining({
+        oidcToken: undefined,
+        storeId: "store_memory",
+        token: undefined,
+      });
+      expect(get).toHaveBeenCalledWith("eve/memory/file/mem_a/MEMORY.md", credentials);
+      expect(put).toHaveBeenCalledWith("eve/memory/file/mem_a/MEMORY.md", "memory", credentials);
+    },
+  );
 
   it("uses Vercel Blob with an attached store and request-scoped OIDC", async () => {
     vi.stubEnv("VERCEL", "1");
@@ -185,7 +221,7 @@ describe("default file-memory backend", () => {
     const backend = defaultFileMemoryBackend();
 
     await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-      "eve integration setup file-memory",
+      /EVE_MEMORY_BLOB_STORE_ID.*eve integration setup file-memory.*redeploy/u,
     );
     expect(get).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
