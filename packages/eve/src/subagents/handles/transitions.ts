@@ -26,8 +26,13 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
  * A crash between an accepted start and that commit replays the step from
  * the pre-step snapshot and re-runs the side effect.
  *
- * Throws when the identity or operation already exists: fresh starts mint
- * a new identity, so a collision means corrupted derivation, not a replay.
+ * Because `mintStartOperation` derives identity and operation
+ * deterministically (so "durable step replays derive the same handle
+ * record"), a replayed step meets its own previous attempt's handle here.
+ * Re-preparing the same identity for the same operation is therefore a
+ * replay no-op, mirroring `confirmAgentStarted`. Throws only when the
+ * identity exists under a DIFFERENT operation: that cannot come from a
+ * replay and means corrupted derivation.
  */
 export function prepareAgentStart(
   session: HarnessSession,
@@ -38,7 +43,14 @@ export function prepareAgentStart(
   },
 ): HarnessSession {
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  if (handles.some((handle) => handle.identity.id === input.identity.id)) {
+  const existing = handles.find((handle) => handle.identity.id === input.identity.id);
+  if (existing !== undefined) {
+    if (
+      (existing.phase === "starting" || existing.phase === "running") &&
+      existing.operation.id === input.operation.id
+    ) {
+      return session;
+    }
     throw new Error(`Agent handle "${input.identity.id}" already exists.`);
   }
   return writeHandles(session, [

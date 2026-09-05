@@ -116,11 +116,43 @@ describe("prepareAgentStart", () => {
     ]);
   });
 
-  it("throws when the identity already exists", () => {
+  it("is a replay no-op when the same operation re-prepares its own handle", () => {
+    const prepared = preparedSession();
+    expect(
+      prepareAgentStart(prepared, {
+        identity,
+        operation: startOperation,
+        target: { continuationToken: "continuation_child", kind: "agent/local" },
+      }),
+    ).toBe(prepared);
+  });
+
+  it("is a replay no-op after the handle is already running", () => {
+    const running = runningSession();
+    expect(
+      prepareAgentStart(running, {
+        identity,
+        operation: startOperation,
+        target: { continuationToken: "continuation_child", kind: "agent/local" },
+      }),
+    ).toBe(running);
+  });
+
+  it("throws when the identity exists under a different operation", () => {
+    const otherOperation: StartOperation = {
+      callId: "call_2",
+      id: deriveAgentOperationId({
+        callId: "call_2",
+        parentSessionId: "session_parent",
+        parentTurnId: "turn_1",
+      }),
+      kind: "start",
+      parentTurnId: "turn_1",
+    };
     expect(() =>
       prepareAgentStart(preparedSession(), {
         identity,
-        operation: startOperation,
+        operation: otherOperation,
         target: { continuationToken: "continuation_child", kind: "agent/local" },
       }),
     ).toThrow(identity.id);
