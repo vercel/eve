@@ -19,6 +19,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "historical-eve-0-30-8": "npm:eve@0.30.8",
+    "historical-eve-0-50-0": "npm:eve@0.50.0",
     "typescript": "catalog:"
   }
 }

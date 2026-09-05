@@ -131,13 +131,21 @@ the current producer must choose the old consumer's wire version, and the real
 old consumer must decode and buffer it. The eval then cancels the deliberately
 blocked turn and verifies that the old session runs the buffered follow-up.
 
+`agent-channels/evals/custom-channels/cross-version-worker.eval.ts` starts a
+session with `eve@0.50.0`, upgrades the deployment, and asks that same session
+to launch a background worker. The worker returns a fixed token; the parent
+must report it without another user message. This covers new worker dispatch
+requests reaching an older session, which ordinary message compatibility does
+not exercise.
+
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
 Because immutable deployment URLs never change what they serve, the eval
 must run against the alias — the `e2e-vercel` workflow sets
 `EVE_E2E_REDEPLOY_ALIAS`, aliases the deployment, and runs `--tag redeploy`
-evals as a second `eve eval` invocation after the main suite. Without the
+evals serially as a second `eve eval` invocation after the main suite. They
+share the fixture files and deployment alias. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents and their configured judges resolve `EVE_E2E_MODEL`
