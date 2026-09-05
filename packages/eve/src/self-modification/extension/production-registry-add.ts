@@ -166,13 +166,20 @@ export async function installProductionRegistryItem(input: {
       typeof event.url === "string" &&
       typeof event.message === "string"
     ) {
-      return {
+      const result: {
+        kind: "external-action-required";
+        installed: boolean;
+        message: string;
+        url: string;
+        userCode?: string;
+      } = {
         kind: "external-action-required",
         installed: input.installed === true,
         message: event.message,
         url: event.url,
-        ...(typeof event.userCode === "string" ? { userCode: event.userCode } : {}),
       };
+      if (typeof event.userCode === "string") result.userCode = event.userCode;
+      return result;
     }
     await restoreTree(input.sandbox, input.workspace.repositoryPath, startingTree);
     return event?.type === "cancelled" || input.signal?.aborted === true
