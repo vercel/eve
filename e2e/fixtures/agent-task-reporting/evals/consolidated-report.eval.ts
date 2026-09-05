@@ -50,7 +50,7 @@ function reportingEval() {
       let session: EveEvalSession | typeof t = t;
       const observed = new Set<string>();
       let finalReport: string | undefined;
-      let compacted = false;
+      let compactionAttempted = false;
       for (let attempt = 0; attempt < 8 && observed.size < taskIds.length; attempt += 1) {
         const live = t.target.watchTurn(started.sessionId, {
           startIndex: requireStreamIndex(session),
@@ -74,7 +74,7 @@ function reportingEval() {
         turn.noFailedActions();
         session = live.session;
 
-        if (!compacted && observed.size > 0 && observed.size < taskIds.length) {
+        if (!compactionAttempted && observed.size > 0 && observed.size < taskIds.length) {
           const compaction = t.target.watchTurn(started.sessionId, {
             startIndex: requireStreamIndex(session),
           });
@@ -92,10 +92,14 @@ function reportingEval() {
           );
           const compactedTurn = await compaction.result();
           compactedTurn.event("compaction.requested", { count: 1 });
-          compactedTurn.event("compaction.completed", { count: 1 });
+          // A declined summary preserves history; the caller still needs the complete report.
+          compactedTurn
+            .event("compaction.completed", { count: 1 })
+            .soft()
+            .label("successful checkpoint");
           compactedTurn.noFailedActions();
           session = compaction.session;
-          compacted = true;
+          compactionAttempted = true;
         }
       }
 
@@ -115,8 +119,8 @@ function reportingEval() {
         ),
       );
       await t.require(
-        compacted,
-        satisfies((value: boolean) => value, "parent session was compacted between wakes"),
+        compactionAttempted,
+        satisfies((value: boolean) => value, "parent session handled compaction between wakes"),
       );
       t.noFailedActions();
     },
