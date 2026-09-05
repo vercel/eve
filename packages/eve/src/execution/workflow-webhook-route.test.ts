@@ -30,7 +30,36 @@ describe("workflow webhook route", () => {
     const response = await handleWorkflowWebhookRequest(request, route({ token: "tok" }));
 
     expect(response).toBe(accepted);
-    expect(runtime.resumeWebhook).toHaveBeenCalledWith("tok", request);
+    const [token, callback] = runtime.resumeWebhook.mock.calls.at(-1)!;
+    expect(token).toBe("tok");
+    expect(callback.url).toBe(request.url);
+    expect(callback.method).toBe("POST");
+    await expect(callback.text()).resolves.toBe("{}");
+  });
+
+  it("materializes lazy server headers before Workflow serializes the request", async () => {
+    const headers = Object.create(Headers.prototype, {
+      [Symbol.iterator]: {
+        value: function* () {
+          yield ["x-callback", "accepted"];
+        },
+      },
+    });
+    const request = new Request("https://agent.example/callback", {
+      method: "POST",
+      body: "payload",
+    });
+    Object.defineProperty(request, "headers", { value: headers });
+    expect(() => Headers.prototype.entries.call(headers).next()).toThrow(TypeError);
+    runtime.resumeWebhook.mockResolvedValueOnce(new Response(null, { status: 202 }));
+
+    await handleWorkflowWebhookRequest(request, route({ token: "tok" }));
+
+    const [, callback] = runtime.resumeWebhook.mock.calls.at(-1)!;
+    expect([...Headers.prototype.entries.call(callback.headers)]).toEqual([
+      ["x-callback", "accepted"],
+    ]);
+    await expect(callback.text()).resolves.toBe("payload");
   });
 
   it("rejects a missing token and reports an unknown hook as not pending", async () => {

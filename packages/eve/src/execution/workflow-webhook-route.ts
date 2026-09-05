@@ -17,7 +17,15 @@ export async function handleWorkflowWebhookRequest(
   }
 
   try {
-    return await resumeWebhook(token, request);
+    // Nitro can supply lazy Headers objects that Workflow's native serializer cannot read.
+    const callback = new Request(request.url, {
+      method: request.method,
+      headers: new Headers(request.headers),
+      body: request.body,
+      signal: request.signal,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    return await resumeWebhook(token, callback);
   } catch (error) {
     for (const candidate of walkCauseChain(error)) {
       if (HookNotFoundError.is(candidate)) {
