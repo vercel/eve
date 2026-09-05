@@ -1353,7 +1353,7 @@ describe("turnStep", () => {
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
   });
 
-  it.each([
+  it.each<{ expected: SessionAuthContext | null; title: string; approvalOnly: boolean }>([
     {
       expected: {
         attributes: { user_id: "U456" },
@@ -1364,12 +1364,24 @@ describe("turnStep", () => {
         subject: "U456",
       } satisfies SessionAuthContext,
       title: "replaces the previous caller",
+      approvalOnly: false,
     },
-    { expected: null, title: "clears the previous caller" },
-  ])("$title from deliver-time auth", async ({ expected }) => {
+    { expected: null, title: "clears the previous caller", approvalOnly: false },
+    {
+      expected: {
+        attributes: {},
+        authenticator: "oidc",
+        principalId: "operator",
+        principalType: "service",
+      } satisfies SessionAuthContext,
+      title: "preserves the execution caller for approval-only delivery",
+      approvalOnly: true,
+    },
+  ])("$title from deliver-time auth", async ({ expected, approvalOnly }) => {
+    const authAdapter: ChannelAdapter = { kind: "auth-test" };
     const bundle = {
       adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+        adaptersByKind: new Map([[authAdapter.kind, authAdapter]]),
       },
       compiledArtifactsSource: {} as never,
       graph: {
@@ -1387,7 +1399,23 @@ describe("turnStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
-    installSessionStoreMocks([createStubSession()]);
+    installSessionStoreMocks([
+      approvalOnly
+        ? appendPendingInputBatch({
+            session: createStubSession(),
+            responseMessages: [],
+            requests: [
+              {
+                kind: "tool-approval",
+                requestId: "approval-1",
+                prompt: "Approve?",
+                action: { callId: "call-1", kind: "tool-call", toolName: "test", input: {} },
+                options: [{ id: "approve", label: "Approve" }],
+              },
+            ],
+          })
+        : createStubSession(),
+    ]);
 
     const previous: SessionAuthContext = {
       attributes: { user_id: "U123" },
@@ -1400,27 +1428,45 @@ describe("turnStep", () => {
     const ctx = new ContextContainer();
     ctx.set(AuthKey, previous);
     ctx.set(BundleKey, bundle);
-    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ChannelKey, authAdapter);
     ctx.set(ContinuationTokenKey, "http:auth-replacement");
     ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
 
     let observed: SessionAuthContext | null | undefined;
+    let observedInput: unknown;
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => {
+      return async (session, stepInput): Promise<StepResult> => {
+        observedInput = stepInput;
         observed = loadContext().get(AuthKey);
         return { next: null, session };
       };
     });
 
     await turnStep({
-      input: { auth: expected, kind: "deliver", payloads: [{ message: "follow up" }] },
+      input: {
+        auth: expected,
+        kind: "deliver",
+        payloads: [
+          approvalOnly
+            ? { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] }
+            : { message: "follow up" },
+        ],
+      },
       parentWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
 
-    expect(observed).toEqual(expected);
+    expect(observed).toEqual(approvalOnly ? previous : expected);
+    if (approvalOnly) {
+      expect(observedInput).toMatchObject({
+        attributedInputResponses: [
+          { auth: expected, response: { requestId: "approval-1", optionId: "approve" } },
+        ],
+      });
+      expect(observedInput).not.toHaveProperty("inputResponses");
+    }
   });
 
   it("routes remote task HITL only to the parent callback", async () => {

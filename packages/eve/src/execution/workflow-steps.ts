@@ -1,6 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
+import { attributeInputResponses } from "#execution/input-response-auth.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
@@ -121,6 +122,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  const executionAuth = ctx.get(AuthKey) ?? null;
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
     ctx.delete(TurnTaskStateKey);
@@ -245,6 +247,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       throw error;
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+    const attributed = attributeInputResponses({
+      caller: executionAuth,
+      responder: ctx.get(AuthKey) ?? null,
+      state: durableSession.state,
+      stepInput: resolved,
+    });
+    resolved = attributed.stepInput;
+    ctx.set(AuthKey, attributed.caller);
   } else if (input.input?.kind === "runtime-action-result") {
     if (input.input.acceptedAtMsByCallId !== undefined) {
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);

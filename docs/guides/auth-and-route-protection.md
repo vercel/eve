@@ -256,6 +256,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
+- An authenticated response answering a pending tool approval or session-limit continuation without a new message preserves the execution caller. Tool approval policies and `approval.settled` still identify the actual responder. Stale responses that become new messages use the responder as their caller.
 - Both are `null` only on internal runtime paths (subagents, for instance) that never went through an authored route. HTTP traffic always populates `auth.current`, since the walk either accepts with a `SessionAuthContext` or returns `401`.
 
 Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.

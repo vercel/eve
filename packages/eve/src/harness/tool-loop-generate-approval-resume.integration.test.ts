@@ -15,6 +15,8 @@ import {
   StepDynamicToolMetadataKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
+import { attributeInputResponses } from "#execution/input-response-auth.js";
+import { getApprovalAuditState } from "#harness/approval-candidates.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
@@ -275,6 +277,53 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
+  it("authorizes and audits the operator while executing as the suspended caller", async () => {
+    const ctx = createApprovalContext();
+    const operator = {
+      authenticator: "oidc",
+      principalType: "service" as const,
+      principalId: "operator",
+      attributes: {},
+    };
+    const authorize = vi.fn(({ responder }: { responder: { principalId: string } }) => {
+      expect(responder.principalId).toBe("operator");
+      return { status: "allowed" as const };
+    });
+    const execute = vi.fn(async () => {
+      expect(contextStorage.getStore()?.get(AuthKey)?.principalId).toBe("user-1");
+      return "/workspace";
+    });
+    const session = createPendingApprovalSession(undefined, true);
+    const attributed = attributeInputResponses({
+      caller: ctx.get(AuthKey) ?? null,
+      responder: operator,
+      state: session.state,
+      stepInput: {
+        inputResponses: [{ requestId: approvalRequest.approvalId, optionId: "approve" }],
+      },
+    });
+    ctx.set(AuthKey, attributed.caller);
+    const runStep = createToolLoopHarness(
+      createConfig(createModel(), execute, {
+        request: () => "user-approval",
+        response: authorize,
+      }),
+    );
+    let result = await contextStorage.run(ctx, () => runStep(session, attributed.stepInput));
+    while (typeof result.next === "function") {
+      const { next, session: resumedSession } = result;
+      result = await contextStorage.run(ctx, () => next(resumedSession));
+    }
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([
+      expect.objectContaining({
+        actor: expect.objectContaining({ principalId: "operator" }),
+        outcome: "allowed",
+      }),
+    ]);
+  });
+
   it.each([
     { label: "direct", responseAuthorization: false },
     { label: "response-authorized", responseAuthorization: true },

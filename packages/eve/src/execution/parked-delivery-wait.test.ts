@@ -116,6 +116,49 @@ describe("nextTurnDelivery", () => {
     vi.mocked(routeDeliverToChildren).mockReset();
   });
 
+  it("keeps buffered caller identities in separate deliveries", async () => {
+    const auth = {
+      authenticator: "test",
+      principalType: "user",
+      principalId: "user-a",
+      attributes: {},
+    };
+    const buffered: DeliverHookPayload[] = [
+      { kind: "deliver", auth, payloads: [{ message: "a1" }] },
+      { kind: "deliver", auth: { ...auth }, payloads: [{ message: "a2" }] },
+      { kind: "deliver", auth: { ...auth, principalId: "user-b" }, payloads: [{ message: "b" }] },
+      {
+        kind: "deliver",
+        auth: { ...auth, principalId: "operator", principalType: "service" },
+        payloads: [{ inputResponses: [{ requestId: "r", optionId: "approve" }] }],
+      },
+    ];
+    vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext: {},
+      sessionState,
+    }));
+    const input = {
+      ...waitInput(createMockInbox([])),
+      awaitAuthorizationCallbacks: false,
+      bufferedDeliveries: buffered,
+    };
+    expect(await nextTurnDelivery(input)).toMatchObject({
+      kind: "turn",
+      delivery: { auth, payloads: [{ message: "a1" }, { message: "a2" }] },
+    });
+    expect(await nextTurnDelivery(input)).toMatchObject({
+      kind: "turn",
+      delivery: { auth: { principalId: "user-b" }, payloads: [{ message: "b" }] },
+    });
+    expect(await nextTurnDelivery(input)).toMatchObject({
+      kind: "turn",
+      delivery: { auth: { principalType: "service" } },
+    });
+    expect(buffered).toEqual([]);
+  });
+
   it("surfaces an authorization callback as its own instruction", async () => {
     const inbox = createMockInbox([authorizationRead()]);
 
