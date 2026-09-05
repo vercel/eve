@@ -55,22 +55,21 @@ This turns off the optional defaults. eve still adds `connection_search` when th
 
 Add or restore any framework tool with a one-line file:
 
-| Tool                | Add command                      | File contents                                            |
-| ------------------- | -------------------------------- | -------------------------------------------------------- |
-| `agent`             | `eve add tool/agent`             | `export { default } from "eve/tools/agent";`             |
-| `ask_question`      | `eve add tool/ask_question`      | `export { default } from "eve/tools/ask_question";`      |
-| `bash`              | `eve add tool/bash`              | `export { default } from "eve/tools/bash";`              |
-| `connection_search` | `eve add tool/connection_search` | `export { default } from "eve/tools/connection_search";` |
-| `load_skill`        | `eve add tool/load_skill`        | `export { default } from "eve/tools/load_skill";`        |
-| `read_file`         | `eve add tool/read_file`         | `export { default } from "eve/tools/read_file";`         |
-| `task_cancel`       | `eve add tool/task_cancel`       | `export { default } from "eve/tools/task_cancel";`       |
-| `task_update`       | `eve add tool/task_update`       | `export { default } from "eve/tools/task_update";`       |
-| `todo`              | `eve add tool/todo`              | `export { default } from "eve/tools/todo";`              |
-| `web_fetch`         | `eve add tool/web_fetch`         | `export { default } from "eve/tools/web_fetch";`         |
-| `web_search`        | `eve add tool/web_search`        | `export { default } from "eve/tools/web_search";`        |
-| `write_file`        | `eve add tool/write_file`        | `export { default } from "eve/tools/write_file";`        |
+| Tool           | Add command                 | File contents                                       |
+| -------------- | --------------------------- | --------------------------------------------------- |
+| `agent`        | `eve add tool/agent`        | `export { default } from "eve/tools/agent";`        |
+| `ask_question` | `eve add tool/ask_question` | `export { default } from "eve/tools/ask_question";` |
+| `bash`         | `eve add tool/bash`         | `export { default } from "eve/tools/bash";`         |
+| `load_skill`   | `eve add tool/load_skill`   | `export { default } from "eve/tools/load_skill";`   |
+| `read_file`    | `eve add tool/read_file`    | `export { default } from "eve/tools/read_file";`    |
+| `task_cancel`  | `eve add tool/task_cancel`  | `export { default } from "eve/tools/task_cancel";`  |
+| `task_update`  | `eve add tool/task_update`  | `export { default } from "eve/tools/task_update";`  |
+| `todo`         | `eve add tool/todo`         | `export { default } from "eve/tools/todo";`         |
+| `web_fetch`    | `eve add tool/web_fetch`    | `export { default } from "eve/tools/web_fetch";`    |
+| `web_search`   | `eve add tool/web_search`   | `export { default } from "eve/tools/web_search";`   |
+| `write_file`   | `eve add tool/write_file`   | `export { default } from "eve/tools/write_file";`   |
 
-Each command writes the corresponding one-line file under `agent/tools/`. Re-added definitions keep their normal availability rules; for example, `agent` remains root-only and `task_update` remains limited to background tasks. You do not usually need to add `connection_search` because eve provides it automatically when connections exist.
+Each command writes the corresponding one-line file under `agent/tools/`. Re-added definitions keep their normal availability rules; for example, `agent` remains root-only and `task_update` remains limited to background tasks. `connection_search` is not a registry item because eve provides it automatically when connections exist. Import it from `eve/tools/connection_search` only when authoring an override.
 
 You can also add the opt-in framework tools described below.
 

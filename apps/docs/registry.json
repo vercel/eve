@@ -324,19 +324,6 @@
       ]
     },
     {
-      "name": "tool/connection_search",
-      "type": "registry:item",
-      "title": "Connection Search",
-      "description": "Discover and load tools from the agent connections.",
-      "files": [
-        {
-          "path": "registry/tools/connection_search.ts",
-          "type": "registry:file",
-          "target": "agent/tools/connection_search.ts"
-        }
-      ]
-    },
-    {
       "name": "tool/load_skill",
       "type": "registry:item",
       "title": "Load Skill",
