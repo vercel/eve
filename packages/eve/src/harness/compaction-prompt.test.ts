@@ -1,7 +1,12 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { COMPACTION_PROMPT_ENVELOPE, createCompactionPrompt } from "#harness/compaction-prompt.js";
+import {
+  COMPACTION_PROMPT_ENVELOPE,
+  createCompactionPrompt,
+  sliceUtf16Safe,
+  TRANSCRIPT_PAYLOAD_LIMIT,
+} from "#harness/compaction-prompt.js";
 
 describe("createCompactionPrompt", () => {
   it("preserves the previous checkpoint without applying transcript truncation", () => {
@@ -180,5 +185,39 @@ describe("createCompactionPrompt", () => {
 
     expect(result.prompt).not.toContain("OLDEST_TAIL_MARKER");
     expect(result.prompt).toContain("NEWEST_TAIL_MARKER");
+  });
+
+  it("does not split a UTF-16 surrogate pair when capping degraded conversational text", () => {
+    // 📥 is U+1F4E5 — two UTF-16 units. Place its high surrogate exactly at
+    // the degraded-text limit boundary (index 1999 of the 2000-unit cap).
+    const content = "x".repeat(1999) + "📥" + " tail ".repeat(400);
+    const { prompt } = createCompactionPrompt({
+      messages: [{ role: "user", content }],
+      previousCheckpoint: undefined,
+      transcriptBudgetTokens: 100,
+    });
+
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(prompt)).toBe(false);
+    expect(prompt).toBe(prompt.toWellFormed());
+    expect(() => JSON.stringify({ prompt })).not.toThrow();
+  });
+});
+
+describe("sliceUtf16Safe", () => {
+  it("steps back when the cut falls on a high surrogate", () => {
+    const value = "x".repeat(1999) + "📥" + "y";
+    expect(value.charCodeAt(1999)).toBe(0xd83d);
+    expect(value.charCodeAt(2000)).toBe(0xdce5);
+
+    const sliced = sliceUtf16Safe(value, TRANSCRIPT_PAYLOAD_LIMIT);
+    expect(sliced).toBe("x".repeat(1999));
+    expect(sliced).toBe(sliced.toWellFormed());
+  });
+
+  it("keeps a complete astral character that fits inside the limit", () => {
+    const value = "x".repeat(1998) + "📥" + "yyyy";
+    const sliced = sliceUtf16Safe(value, TRANSCRIPT_PAYLOAD_LIMIT);
+    expect(sliced).toBe("x".repeat(1998) + "📥");
+    expect(sliced).toBe(sliced.toWellFormed());
   });
 });

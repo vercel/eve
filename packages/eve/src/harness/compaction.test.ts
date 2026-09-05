@@ -397,6 +397,42 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
+  it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
+    // JSON.stringify of this output places 📥's high surrogate at index 1999
+    // of the 2000-unit TRANSCRIPT_PAYLOAD_LIMIT cut.
+    const content = `${"x".repeat(1964)}📥${"y".repeat(500)}`;
+    const call: ModelMessage = {
+      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      role: "assistant",
+    };
+    const resultMsg: ModelMessage = {
+      content: [
+        {
+          output: { type: "json", value: { content } },
+          toolCallId: "call-0",
+          toolName: "grep",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    const messages = [user("investigate"), call, resultMsg, user("what did you find?")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    const value =
+      typeof output === "object" && output !== null && "value" in output
+        ? String(output.value)
+        : "";
+    expect(value).toContain("Truncated by eve");
+    expect(value).toBe(value.toWellFormed());
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(value)).toBe(false);
+    expect(() => JSON.stringify({ value })).not.toThrow();
+  });
+
   it("stubs content-output file parts instead of truncating into their payloads", async () => {
     const base64 = "iVBORw0KGgo".repeat(500);
     const messages: ModelMessage[] = [

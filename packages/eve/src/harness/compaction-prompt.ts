@@ -313,11 +313,32 @@ function renderConversationText(value: string, limit?: number): string {
   return limit === undefined ? value.trim() : capText(value, limit);
 }
 
+/**
+ * Prefix of `value` with at most `limit` UTF-16 code units that never ends on
+ * a high surrogate. Raw `.slice(0, limit)` can split an astral character
+ * (emoji, etc.); JSON then serializes a lone `\ud800`-range escape and
+ * providers reject the body.
+ */
+export function sliceUtf16Safe(value: string, limit: number): string {
+  if (limit <= 0) {
+    return "";
+  }
+  if (value.length <= limit) {
+    return value;
+  }
+  let end = limit;
+  const last = value.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 function capText(value: string, limit: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= limit) {
     return normalized;
   }
 
-  return `${normalized.slice(0, limit).trimEnd()}…`;
+  return `${sliceUtf16Safe(normalized, limit).trimEnd()}…`;
 }
