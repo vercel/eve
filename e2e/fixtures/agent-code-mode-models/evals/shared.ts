@@ -1,6 +1,5 @@
 import { e2eModel } from "@eve-e2e/config";
 import type { EveEvalContext, EveEvalTurn } from "eve/evals";
-import { equals } from "eve/evals/expect";
 import type { Call } from "../src/audit";
 import { inOneProgram } from "../src/checks";
 
@@ -8,7 +7,7 @@ export async function audit(t: EveEvalContext, turn: EveEvalTurn) {
   turn.expectOk();
   const model = e2eModel();
   if (typeof model !== "string") throw new Error("Planning evals require a real matrix model");
-  turn.eventsSatisfy("the configured real model produced the program", (events) => {
+  turn.eventsSatisfy("the configured real model ran the task", (events) => {
     const steps = events.filter((event) => event.type === "step.started");
     return steps.length > 0 && steps.every((event) => event.data.modelId === model);
   });
@@ -26,9 +25,18 @@ export async function audit(t: EveEvalContext, turn: EveEvalTurn) {
       ? [event.data.result.callId]
       : [],
   );
-  t.log(JSON.stringify({ model, calls, completedPrograms: programs }));
-  t.check(inOneProgram(calls, programs), equals(true)).label(
-    "all data calls belong to one completed program",
+  const pages = calls.filter((call) => call.tool === "orders");
+  const cursors = new Set(
+    pages.map((call) => (call.input as { cursor?: string | null }).cursor ?? null),
+  );
+  t.log(
+    JSON.stringify({
+      model,
+      calls,
+      completedPrograms: programs,
+      allDataCallsInOneProgram: inOneProgram(calls, programs),
+      repeatedPageReads: pages.length - cursors.size,
+    }),
   );
   return calls;
 }

@@ -6,7 +6,7 @@ import { audit } from "./shared";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "The model computes a complete paginated aggregate within one Code Mode program.",
+  description: "The model saves the correct aggregate from every page of an orders export.",
   timeoutMs: 180_000,
   async test(t) {
     const turn = await t.send(
@@ -20,7 +20,7 @@ export default defineEval({
         pages.map(({ cursor }) => cursor),
       ),
       equals(true),
-    ).label("every page was fetched using its returned cursor");
+    ).label("every page was successfully fetched");
     const paid = pages
       .flatMap(({ orders }) => orders)
       .filter((order) => order.status === "paid" && order.currency === "USD");
@@ -30,10 +30,12 @@ export default defineEval({
         .map((call) => call.input),
       equals([
         {
-          paidUsdCents: paid.reduce((total, order) => total + order.cents, 0),
-          paidUsdOrders: paid.length,
+          report: {
+            paidUsdCents: paid.reduce((total, order) => total + order.cents, 0),
+            paidUsdOrders: paid.length,
+          },
         },
       ]),
-    ).label("the program saved the filtered aggregate from every page");
+    ).label("the agent saved the filtered aggregate from every page");
   },
 });

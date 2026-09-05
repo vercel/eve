@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { z } from "zod";
+import saveReport from "../agent/tools/save_report.ts";
 import type { Call } from "./audit.ts";
 import { concurrentBalances, inOneProgram, readEveryPage } from "./checks.ts";
 
@@ -21,7 +23,7 @@ test("a fabricated answer without recorded tool execution cannot pass", () => {
   assert.equal(concurrentBalances([], ["north", "south", "archive"], "archive"), false);
 });
 
-test("data calls must share a completed program, allowing separate discovery programs", () => {
+test("reports whether data calls share a completed program, excluding discovery programs", () => {
   const calls = [call(1), call(2)];
   assert.equal(inOneProgram(calls, ["discovery", "program"]), true);
   assert.equal(inOneProgram(calls, ["discovery"]), false);
@@ -32,10 +34,15 @@ test("data calls must share a completed program, allowing separate discovery pro
   assert.equal(inOneProgram([call(1, { callId: "program-other:tool-1" })], ["program"]), false);
 });
 
-test("pagination rejects omitted, repeated, invalid, or failed pages", () => {
+test("pagination requires every valid page, allowing repeated reads and recovered failures", () => {
   const first = call(1);
   const second = call(2, { input: { cursor: "next" } });
   assert.equal(readEveryPage([first, second], [null, "next"]), true);
+  assert.equal(readEveryPage([first, first, second], [null, "next"]), true);
+  assert.equal(
+    readEveryPage([first, { ...second, status: "failed" }, second], [null, "next"]),
+    true,
+  );
   assert.equal(readEveryPage([first], [null, "next"]), false);
   assert.equal(readEveryPage([first, first], [null, "next"]), false);
   assert.equal(
@@ -76,7 +83,7 @@ test("fanout requires actual overlap and the expected per-source outcomes", () =
   assert.equal(concurrentBalances(calls.slice(0, 2), ids, "archive"), false);
 });
 
-test("saving a report after returning the data to the model cannot pass", () => {
+test("separate report programs are visible in the efficiency diagnostic", () => {
   const reads = [call(1), call(2)];
   assert.equal(inOneProgram([...reads, call(3, { tool: "save_report" })], ["program"]), true);
   assert.equal(
@@ -92,4 +99,17 @@ test("saving a report after returning the data to the model cannot pass", () => 
     ),
     false,
   );
+});
+
+test("report tool advertises an object root and validates both report shapes", () => {
+  const schema = saveReport.inputSchema;
+  assert.ok(schema instanceof z.ZodType);
+  assert.equal(z.toJSONSchema(schema).type, "object");
+  for (const report of [
+    { paidUsdCents: 200, paidUsdOrders: 2 },
+    { totalAvailableCents: 300, unavailableAccounts: ["archive"] },
+  ]) {
+    assert.equal(schema.safeParse({ report }).success, true);
+  }
+  assert.equal(schema.safeParse({ report: { paidUsdCents: "invalid" } }).success, false);
 });

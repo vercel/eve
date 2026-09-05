@@ -29,12 +29,14 @@ export default defineEval({
         .map((call) => call.input),
       equals([
         {
-          totalAvailableCents: accounts
-            .filter((account) => account.available)
-            .reduce((total, account) => total + account.cents, 0),
-          unavailableAccounts: unavailable,
+          report: {
+            totalAvailableCents: accounts
+              .filter((account) => account.available)
+              .reduce((total, account) => total + account.cents, 0),
+            unavailableAccounts: unavailable,
+          },
         },
       ]),
-    ).label("the program saved successful balances and identified the failed source");
+    ).label("the agent saved successful balances and identified the failed source");
   },
 });
