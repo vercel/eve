@@ -285,6 +285,162 @@
       ]
     },
     {
+      "name": "tool/agent",
+      "type": "registry:item",
+      "title": "Agent",
+      "description": "Add root-agent background delegation.",
+      "files": [
+        {
+          "path": "registry/tools/agent.ts",
+          "type": "registry:file",
+          "target": "agent/tools/agent.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/ask_question",
+      "type": "registry:item",
+      "title": "Ask Question",
+      "description": "Let the agent ask the user a question during a turn.",
+      "files": [
+        {
+          "path": "registry/tools/ask_question.ts",
+          "type": "registry:file",
+          "target": "agent/tools/ask_question.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/bash",
+      "type": "registry:item",
+      "title": "Bash",
+      "description": "Run shell commands in the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/bash.ts",
+          "type": "registry:file",
+          "target": "agent/tools/bash.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/connection_search",
+      "type": "registry:item",
+      "title": "Connection Search",
+      "description": "Discover and load tools from the agent connections.",
+      "files": [
+        {
+          "path": "registry/tools/connection_search.ts",
+          "type": "registry:file",
+          "target": "agent/tools/connection_search.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/load_skill",
+      "type": "registry:item",
+      "title": "Load Skill",
+      "description": "Load instructions from an agent skill.",
+      "files": [
+        {
+          "path": "registry/tools/load_skill.ts",
+          "type": "registry:file",
+          "target": "agent/tools/load_skill.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/read_file",
+      "type": "registry:item",
+      "title": "Read File",
+      "description": "Read text files from the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/read_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/read_file.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/task_cancel",
+      "type": "registry:item",
+      "title": "Task Cancel",
+      "description": "Cancel background tasks from the root session.",
+      "files": [
+        {
+          "path": "registry/tools/task_cancel.ts",
+          "type": "registry:file",
+          "target": "agent/tools/task_cancel.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/task_update",
+      "type": "registry:item",
+      "title": "Task Update",
+      "description": "Report background-task progress to the parent agent.",
+      "files": [
+        {
+          "path": "registry/tools/task_update.ts",
+          "type": "registry:file",
+          "target": "agent/tools/task_update.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/todo",
+      "type": "registry:item",
+      "title": "Todo",
+      "description": "Maintain a durable per-session todo list.",
+      "files": [
+        {
+          "path": "registry/tools/todo.ts",
+          "type": "registry:file",
+          "target": "agent/tools/todo.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/web_fetch",
+      "type": "registry:item",
+      "title": "Web Fetch",
+      "description": "Fetch a URL from the app runtime.",
+      "files": [
+        {
+          "path": "registry/tools/web_fetch.ts",
+          "type": "registry:file",
+          "target": "agent/tools/web_fetch.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/web_search",
+      "type": "registry:item",
+      "title": "Web Search",
+      "description": "Search the web through the model provider.",
+      "files": [
+        {
+          "path": "registry/tools/web_search.ts",
+          "type": "registry:file",
+          "target": "agent/tools/web_search.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/write_file",
+      "type": "registry:item",
+      "title": "Write File",
+      "description": "Write complete files in the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/write_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/write_file.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/browser-use",
       "type": "registry:item",
       "title": "Browser Use",

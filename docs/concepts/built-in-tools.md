@@ -53,21 +53,24 @@ export default defineAgent({
 
 This turns off the optional defaults. eve still adds `connection_search` when the agent has connections because it provides access to their tools. Files under `agent/tools/` also remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-Re-add any removed tool with a one-line file:
+Add or restore any framework tool with a one-line file:
 
-| Tool           | File                          | Contents                                            |
-| -------------- | ----------------------------- | --------------------------------------------------- |
-| `agent`        | `agent/tools/agent.ts`        | `export { default } from "eve/tools/agent";`        |
-| `ask_question` | `agent/tools/ask_question.ts` | `export { default } from "eve/tools/ask_question";` |
-| `bash`         | `agent/tools/bash.ts`         | `export { default } from "eve/tools/bash";`         |
-| `load_skill`   | `agent/tools/load_skill.ts`   | `export { default } from "eve/tools/load_skill";`   |
-| `read_file`    | `agent/tools/read_file.ts`    | `export { default } from "eve/tools/read_file";`    |
-| `task_cancel`  | `agent/tools/task_cancel.ts`  | `export { default } from "eve/tools/task_cancel";`  |
-| `task_update`  | `agent/tools/task_update.ts`  | `export { default } from "eve/tools/task_update";`  |
-| `todo`         | `agent/tools/todo.ts`         | `export { default } from "eve/tools/todo";`         |
-| `web_fetch`    | `agent/tools/web_fetch.ts`    | `export { default } from "eve/tools/web_fetch";`    |
-| `web_search`   | `agent/tools/web_search.ts`   | `export { default } from "eve/tools/web_search";`   |
-| `write_file`   | `agent/tools/write_file.ts`   | `export { default } from "eve/tools/write_file";`   |
+| Tool                | Add command                      | File contents                                            |
+| ------------------- | -------------------------------- | -------------------------------------------------------- |
+| `agent`             | `eve add tool/agent`             | `export { default } from "eve/tools/agent";`             |
+| `ask_question`      | `eve add tool/ask_question`      | `export { default } from "eve/tools/ask_question";`      |
+| `bash`              | `eve add tool/bash`              | `export { default } from "eve/tools/bash";`              |
+| `connection_search` | `eve add tool/connection_search` | `export { default } from "eve/tools/connection_search";` |
+| `load_skill`        | `eve add tool/load_skill`        | `export { default } from "eve/tools/load_skill";`        |
+| `read_file`         | `eve add tool/read_file`         | `export { default } from "eve/tools/read_file";`         |
+| `task_cancel`       | `eve add tool/task_cancel`       | `export { default } from "eve/tools/task_cancel";`       |
+| `task_update`       | `eve add tool/task_update`       | `export { default } from "eve/tools/task_update";`       |
+| `todo`              | `eve add tool/todo`              | `export { default } from "eve/tools/todo";`              |
+| `web_fetch`         | `eve add tool/web_fetch`         | `export { default } from "eve/tools/web_fetch";`         |
+| `web_search`        | `eve add tool/web_search`        | `export { default } from "eve/tools/web_search";`        |
+| `write_file`        | `eve add tool/write_file`        | `export { default } from "eve/tools/write_file";`        |
+
+Each command writes the corresponding one-line file under `agent/tools/`. Re-added definitions keep their normal availability rules; for example, `agent` remains root-only and `task_update` remains limited to background tasks. You do not usually need to add `connection_search` because eve provides it automatically when connections exist.
 
 You can also add the opt-in framework tools described below.
 
@@ -97,7 +100,7 @@ The section below covers `sleep` in more detail.
 
 ## Override a default
 
-Author a tool at the same slug and it takes over the built-in of that name. The file `agent/tools/write_file.ts` replaces the built-in `write_file` by existing:
+Author a tool at the same slug and it takes over the built-in of that name. When present, `agent/tools/write_file.ts` replaces the built-in `write_file`:
 
 ```ts title="agent/tools/write_file.ts"
 import { defineTool } from "eve/tools";
