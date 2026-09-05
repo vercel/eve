@@ -56,8 +56,8 @@ export async function executeWorkflowBody(
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
-  let reportCount = 0;
   attachWorkflowToolRunContext(ctx, { codeMode: input.codeMode, from, owner: input.owner });
+  let reportCount = 0;
 
   try {
     const execute = resolveWorkflowToolExecute(input);

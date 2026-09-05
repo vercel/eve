@@ -20,7 +20,7 @@ import type { ToolContext } from "#tools/definition.js";
 
 /** Owns callbacks for one nested call; the parent only forwards its authorization events. */
 export async function executeCodeModeTool(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: Omit<
     Parameters<typeof executeCodeModeToolStep>[0],
     "authorizationHookToken" | "authorizationResults"
@@ -111,20 +111,21 @@ export async function executeCodeModeTool(
   }
 }
 
-function coordinates(ctx: ToolContext) {
+function coordinates(ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">) {
   const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
   return { sequence, stepIndex, turnId };
 }
 
 async function publishAuthorizationEvent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   event: SubagentAuthorizationEvent,
 ): Promise<void> {
   const from = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
   await resumeHookStep(
-    owner.request,
+    owner.inbox,
     {
+      kind: "request",
       from,
       replyTo: from.runId,
       request: {

@@ -21,7 +21,10 @@ import { toErrorMessage } from "#shared/errors.js";
  * workflow tool, so the parent keeps sole ownership of agent handles and
  * session state. Each nested call therefore has its own replay boundary.
  */
-export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Promise<JsonValue> {
+export async function codeModeWorkflow(
+  rawInput: unknown,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+): Promise<JsonValue> {
   "use workflow";
 
   const program = parseCodeModeWorkflowInput(rawInput);
@@ -64,7 +67,7 @@ export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Pro
 }
 
 async function settleNestedCall(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   run: ReturnType<typeof readCodeModeRunContext>,
   pending: CodeModePendingCall,
   invocationId: string,

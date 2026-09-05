@@ -2424,7 +2424,12 @@ describe("createToolLoopHarness", () => {
     });
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
     const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
-    expect(Object.keys(advertised ?? {}).sort()).toEqual(["code_mode", "gated_dynamic"]);
+    expect(Object.keys(advertised ?? {}).sort()).toEqual([
+      "add",
+      "code_mode",
+      "discovered",
+      "gated_dynamic",
+    ]);
     expect(advertised?.code_mode?.description).toContain("discovered");
   });
 

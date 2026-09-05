@@ -59,7 +59,10 @@ export type AgentInvocationReply =
 const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-ids");
 
 /** Invokes an agent from a task-owned background workflow tool. */
-export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonValue> {
+export async function agent(
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  input: AgentInput,
+): Promise<JsonValue> {
   validateAgentInput(input, true);
   readWorkflowToolRunRef(ctx);
   return await invokeAgent(
@@ -76,17 +79,17 @@ export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonVa
 
 /** Invokes an agent with a framework-selected replay-stable invocation id. */
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options: { readonly invocationId: string; readonly returnResult: true },
 ): Promise<JsonValue | RuntimeSubagentResult>;
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options: { readonly invocationId: string; readonly returnResult?: false },
 ): Promise<JsonValue>;
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options: { readonly invocationId: string; readonly returnResult?: boolean },
 ): Promise<JsonValue | RuntimeSubagentResult> {
@@ -215,7 +218,10 @@ export function validateAgentInput(
   }
 }
 
-function claimInvocationId(ctx: ToolContext, invocationId: string): void {
+function claimInvocationId(
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  invocationId: string,
+): void {
   const holder = ctx as ToolContext & { [AGENT_INVOCATION_IDS]?: Set<string> };
   const ids = holder[AGENT_INVOCATION_IDS] ?? new Set<string>();
   if (ids.has(invocationId)) {
