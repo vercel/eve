@@ -40,6 +40,9 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (definition.build !== undefined) {
     throw new Error(`${message} The "build" field cannot be selected at runtime.`);
   }
+  if (definition.defaultTools !== undefined) {
+    throw new Error(`${message} The "defaultTools" field cannot be selected at runtime.`);
+  }
   if (definition.experimental !== undefined) {
     throw new Error(`${message} The "experimental" field cannot be selected at runtime.`);
   }

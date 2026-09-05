@@ -115,6 +115,59 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("omits default tools while preserving authored tools and same-slug overrides", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            defaultTools: false,
+            model: "openai/gpt-5.4",
+          }),
+        }),
+      },
+      {
+        logicalPath: "tools/bash.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Application-owned shell replacement.",
+            execute: () => ({ ok: true }),
+            inputSchema: { type: "object" },
+          }),
+        }),
+      },
+      {
+        logicalPath: "tools/weather.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Gets weather.",
+            execute: () => ({ ok: true }),
+            inputSchema: { type: "object" },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.config.defaultTools).toBe(false);
+    expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
+    expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
+      "Application-owned shell replacement.",
+    );
+    expect(
+      compiled.sourceComposition.entries
+        .filter(
+          (entry) =>
+            entry.source.layer === "framework-default" &&
+            entry.source.logicalPath.startsWith("tools/"),
+        )
+        .map((entry) => entry.source.logicalPath),
+    ).toEqual(["tools/bash.ts"]);
+  });
+
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
     Reflect.set(execute, "workflowId", "workflow//example/tool//execute");

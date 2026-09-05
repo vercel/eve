@@ -36,6 +36,19 @@ Notes:
 
 Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
+To start with no default tools, set `defaultTools: false` in `agent/agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  defaultTools: false,
+  model: "openai/gpt-5.4",
+});
+```
+
+Files under `agent/tools/` still add tools when defaults are off. A same-slug file such as `agent/tools/bash.ts` adds your authored `bash` definition without restoring eve's implementation. Framework-provided opt-in tools also remain available when you explicitly add their files.
+
 ## Add framework-provided tools
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:

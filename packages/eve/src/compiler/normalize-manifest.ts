@@ -157,6 +157,29 @@ export async function compileAgentManifest(
   });
 }
 
+function applyDefaultToolPolicy(
+  phaseOne: PhaseOneNodeSourceState,
+  config: CompiledAgentDefinition,
+): void {
+  if (config.defaultTools !== false) return;
+
+  const overriddenSlots = new Set(
+    phaseOne.graph.orderedCandidates
+      .filter((candidate) => candidate.layer !== "framework-default")
+      .map((candidate) => canonicalSourceSlot(candidate.logicalPath)),
+  );
+  phaseOne.graph.composed = composeAgentModuleCandidates(
+    phaseOne.graph.orderedCandidates.filter((candidate) => {
+      const slot = canonicalSourceSlot(candidate.logicalPath);
+      return (
+        candidate.layer !== "framework-default" ||
+        !slot.startsWith("tools/") ||
+        overriddenSlots.has(slot)
+      );
+    }),
+  );
+}
+
 class AgentGraphCompiler {
   private readonly context: ManifestCompileContext;
   private readonly registries: readonly AgentSourceRegistry[];
@@ -183,6 +206,7 @@ class AgentGraphCompiler {
       source: phaseOne.selectedConfig.source,
     });
     assertRootOnlyConfig(config, input.isRoot, input.manifest.agentId);
+    applyDefaultToolPolicy(phaseOne, config);
 
     const externalDependencies = mergeExternalDependencies(
       input.inheritedExternalDependencies,
@@ -280,6 +304,7 @@ class AgentGraphCompiler {
           source: phaseOne.selectedConfig.source,
         });
         assertRootOnlyConfig(config, false, source.manifest.agentId);
+        applyDefaultToolPolicy(phaseOne, config);
       } else {
         dynamicBuildDependencies = normalized.build?.externalDependencies;
       }
