@@ -124,7 +124,7 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
       const second = await step(next, 1);
       expect(second.claimedToolNames).toEqual(claimed ? ["linear__list_issues"] : []);
       expect(Object.keys(second.modelTools).sort()).toEqual(
-        claimed
+        claimed && mode === "lazy"
           ? ["code_mode", "connection_search"]
           : ["code_mode", "connection_search", "linear__list_issues"],
       );

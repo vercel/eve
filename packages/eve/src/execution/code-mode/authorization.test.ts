@@ -49,10 +49,7 @@ function context(signal = new AbortController().signal): ToolContext {
       turnId: "turn",
     },
     owner: {
-      admission: "admission",
-      outcome: "outcome",
-      report: "report",
-      request: "parent-request",
+      inbox: "parent-inbox",
     },
   });
   return ctx;
@@ -121,6 +118,14 @@ describe("code mode authorization", () => {
       status: "completed",
       output: "authorized",
     });
+    expect(mocks.publish).toHaveBeenCalledWith(
+      "parent-inbox",
+      expect.objectContaining({
+        kind: "request",
+        request: expect.objectContaining({ kind: "authorization-request" }),
+      }),
+      { ifPresent: false },
+    );
     expect(next).toHaveBeenCalledTimes(2);
     expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(mocks.execute.mock.calls[1]?.[0]).toMatchObject({

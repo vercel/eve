@@ -357,7 +357,7 @@ describe("executeCodeModeToolStep", () => {
       tools: buildToolSet({ tools: harnessTools }),
     });
     expect(result.claimedToolNames).toEqual(["lookup"]);
-    expect(Object.keys(result.modelTools)).toEqual(["code_mode"]);
+    expect(Object.keys(result.modelTools)).toEqual(["lookup", "code_mode"]);
     await expect(nested("lookup")).resolves.toEqual({ status: "completed", output: "discovered" });
   });
 });
