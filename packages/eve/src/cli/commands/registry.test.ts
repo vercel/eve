@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import {
@@ -25,6 +26,7 @@ const {
   isEveProject,
   prepareDeclaredPnpmBuildPolicy,
   readFile,
+  resolveEveProjectContext,
   resolveInstalledPackageInfo,
   unlink,
   searchRegistries,
@@ -36,6 +38,11 @@ const {
   isEveProject: vi.fn(),
   prepareDeclaredPnpmBuildPolicy: vi.fn(async () => true),
   readFile: vi.fn(),
+  resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
+    appRoot,
+    environmentRoot: appRoot,
+    kind: "standalone",
+  })),
   resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
   unlink: vi.fn(),
   searchRegistries: vi.fn(),
@@ -49,6 +56,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 }));
 
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
+vi.mock("#internal/project-context.js", () => ({ resolveEveProjectContext }));
 vi.mock("./registry-pnpm-build-policy-flow.js", () => ({ prepareDeclaredPnpmBuildPolicy }));
 vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
@@ -131,6 +139,31 @@ describe("registry commands", () => {
       silent: undefined,
     });
     expect(logger.errors).toEqual([]);
+  });
+
+  it("reads registry configuration from a workspace package while targeting its agent", async () => {
+    const logger = createLogger();
+    const appRoot = "/project/agents/support";
+    resolveEveProjectContext.mockResolvedValueOnce({
+      environmentRoot: "/project",
+      kind: "workspace-member",
+      member: { appRoot, name: "support" },
+      workspace: {
+        root: "/project",
+        members: [{ appRoot, name: "support" }],
+      },
+    });
+    getRegistryItems.mockResolvedValue([{ name: "channel/teams", type: "registry:item" }]);
+
+    await runAddCommand(logger, appRoot, "channel/teams", {});
+
+    expect(readFile).toHaveBeenCalledWith("/project/package.json", "utf8");
+    expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/teams.json"], {
+      config: expect.any(Object),
+      cwd: appRoot,
+      overwrite: undefined,
+      silent: undefined,
+    });
   });
 
   it("prepares declared pnpm build policy before installing", async () => {
@@ -412,6 +445,29 @@ describe("registry commands", () => {
       },
     });
     expect(process.exitCode).toBe(2);
+  });
+
+  it("rejects Web Chat before it can write into an agent workspace member", async () => {
+    const logger = createLogger();
+    const appRoot = "/project/agents/support";
+    resolveEveProjectContext.mockResolvedValueOnce({
+      environmentRoot: "/project",
+      kind: "workspace-member",
+      member: { appRoot, name: "support" },
+      workspace: {
+        root: "/project",
+        members: [{ appRoot, name: "support" }],
+      },
+    });
+
+    await runAddCommand(logger, appRoot, "channel/web", {});
+
+    expect(logger.errors).toEqual([
+      "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+    ]);
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {

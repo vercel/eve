@@ -25,13 +25,14 @@ export async function deployServiceWorkflow(
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
 }
 
-export async function confirmDeployWorkflow(
+export async function* confirmDeployWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,
-): Promise<{ readonly approved: boolean; readonly service: string }> {
+): AsyncGenerator<string, { readonly approved: boolean; readonly service: string }> {
   "use workflow";
 
   const plan = await planDeployStep(input.service);
+  yield "awaiting approval";
   const answer = await ctx.ask({
     display: "confirmation",
     options: [
@@ -40,6 +41,7 @@ export async function confirmDeployWorkflow(
     ],
     prompt: `Apply ${plan}?`,
   });
+  yield "approval received";
   return { approved: answer.optionId === "approve", service: input.service };
 }
 

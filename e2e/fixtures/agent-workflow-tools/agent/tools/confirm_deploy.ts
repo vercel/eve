@@ -10,9 +10,10 @@ import { describePlan } from "../lib/plan.ts";
 export default defineWorkflowTool({
   description: "Deploy a service after a human approves the plan.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }, ctx) {
+  async *execute({ service }, ctx) {
     "use workflow";
 
+    yield "awaiting approval";
     const answer = await ctx.ask({
       display: "confirmation",
       options: [
@@ -21,6 +22,7 @@ export default defineWorkflowTool({
       ],
       prompt: `Apply ${describePlan(service)}?`,
     });
+    yield "approval received";
     return { approved: answer.optionId === "approve", service };
   },
 });

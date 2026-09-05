@@ -5,7 +5,6 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import { workflowToolRunAnswerToken } from "#harness/workflow-tool-runs.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
@@ -18,7 +17,6 @@ interface WorkflowToolRunContext {
   readonly admission?: Promise<
     { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
   >;
-  answerSeq: number;
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
 }
@@ -29,11 +27,11 @@ type WorkflowToolRunContextCarrier = {
 
 export function attachWorkflowToolRunContext(
   ctx: ToolContext,
-  context: Omit<WorkflowToolRunContext, "answerSeq">,
+  context: WorkflowToolRunContext,
 ): void {
   Object.defineProperty(ctx, WORKFLOW_TOOL_RUN_CONTEXT, {
     enumerable: false,
-    value: { ...context, answerSeq: 0 },
+    value: context,
   });
 }
 
@@ -65,10 +63,9 @@ export function readWorkflowToolRunAdmission(
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
-  const answer = createHook<ToolInputResponse>({
-    token: workflowToolRunAnswerToken(context.from.runId, context.answerSeq++),
-  });
-  void resumeHookStep(context.owner.request, {
+  const answer = createHook<ToolInputResponse>();
+  void resumeHookStep(context.owner.inbox, {
+    kind: "request",
     from: context.from,
     replyTo: answer.token,
     request: { kind: "ask", request },

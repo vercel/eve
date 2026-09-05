@@ -72,7 +72,7 @@ export async function dispatchCoordinationStep(
         auth: prepared.auth,
         batchEvent: batch.event,
         initiatorAuth: prepared.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+        owner: input.workflowToolRunOwner,
         parentSession: prepared.parentSession,
         session: nextSession,
         task: entry.task,

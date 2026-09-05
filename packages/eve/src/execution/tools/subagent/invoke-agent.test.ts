@@ -6,7 +6,6 @@ import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invo
 import type { ToolContext } from "#tools/definition.js";
 
 const mocks = vi.hoisted(() => ({
-  claimHookOwnership: vi.fn(),
   createHook: vi.fn(),
   disposeHook: vi.fn(),
   resumeHook: vi.fn(),
@@ -17,7 +16,6 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   createHook: mocks.createHook,
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
-  claimHookOwnership: mocks.claimHookOwnership,
   disposeHook: mocks.disposeHook,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
@@ -66,10 +64,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -125,10 +120,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -136,13 +128,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("available");
 
-    expect(mocks.claimHookOwnership).toHaveBeenCalledWith(
-      expect.objectContaining({ token: "agent-reply" }),
-    );
-    expect(mocks.claimHookOwnership.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.resumeHook.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-request", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
@@ -192,15 +179,13 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
     const result = agent(ctx, { key: "research", message: "Find it", target: "research" });
     await Promise.resolve();
+    expect(mocks.createHook).not.toHaveBeenCalled();
     expect(mocks.resumeHook).not.toHaveBeenCalled();
 
     admission.resolve({ status: "accepted" });
@@ -251,10 +236,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -262,7 +244,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("inline");
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-request", {
+    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
+      kind: "request",
       from: expect.objectContaining({ execution: "blocking", runId: "run-1" }),
       replyTo: "agent-reply",
       request: {
@@ -310,10 +293,7 @@ describe("background agent invocation routing", () => {
         turnId: "turn-1",
       },
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -322,111 +302,114 @@ describe("background agent invocation routing", () => {
     ).rejects.toEqual(failure.output);
     expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHook).not.toHaveBeenCalledWith(
-      "owner-request",
+      "owner-inbox",
       expect.objectContaining({ request: expect.objectContaining({ kind: "agent-settled" }) }),
     );
   });
 
-  it("preserves each child HITL event's coordinates when relaying repeated requests", async () => {
-    const childRequest = (input: {
-      readonly requestId: string;
-      readonly stepIndex: number;
-    }): AgentInvocationReply => ({
-      callId: "call-1",
-      childContinuationToken: "child-continuation",
-      childSessionId: "child-1",
-      event: {
-        requests: [
-          {
-            action: {
-              callId: input.requestId,
-              input: {},
-              kind: "tool-call",
-              toolName: "approval_gate",
+  it.each([false, true])(
+    "preserves child HITL coordinates and routes advertised inboxes: %s",
+    async (advertiseInbox) => {
+      const childRequest = (input: {
+        readonly requestId: string;
+        readonly stepIndex: number;
+      }): AgentInvocationReply => ({
+        callId: "call-1",
+        childContinuationToken: "child-continuation",
+        childSessionId: "child-1",
+        childSessionInbox: advertiseInbox ? { sessionId: "child-1", version: 1 } : undefined,
+        event: {
+          requests: [
+            {
+              action: {
+                callId: input.requestId,
+                input: {},
+                kind: "tool-call",
+                toolName: "approval_gate",
+              },
+              kind: "tool-approval",
+              prompt: "Approve?",
+              requestId: input.requestId,
             },
-            kind: "tool-approval",
-            prompt: "Approve?",
-            requestId: input.requestId,
-          },
-        ],
-        sequence: 3,
-        stepIndex: input.stepIndex,
-        turnId: "turn-child",
-      },
-      kind: "subagent-input-request",
-      subagentName: "research",
-    });
-    const replies: AgentInvocationReply[] = [
-      childRequest({ requestId: "approval-1", stepIndex: 1 }),
-      childRequest({ requestId: "approval-2", stepIndex: 2 }),
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1:research",
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "research",
-          } as never,
-        ],
-      },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const from: WorkflowToolRunRef = {
-      callId: "call-1",
-      execution: "background",
-      input: { message: "Find it" },
-      runId: "run-1",
-      sequence: 0,
-      stepIndex: 0,
-      toolName: "research",
-      turnId: "turn-parent",
-    };
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
-      from,
-      owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
-      },
-    });
+          ],
+          sequence: 3,
+          stepIndex: input.stepIndex,
+          turnId: "turn-child",
+        },
+        kind: "subagent-input-request",
+        subagentName: "research",
+      });
+      const replies: AgentInvocationReply[] = [
+        childRequest({ requestId: "approval-1", stepIndex: 1 }),
+        childRequest({ requestId: "approval-2", stepIndex: 2 }),
+        {
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-1:research",
+              kind: "subagent-result",
+              origin: "child",
+              output: "done",
+              subagentName: "research",
+            } as never,
+          ],
+        },
+      ];
+      mocks.createHook.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: async () =>
+            replies.length > 0
+              ? { done: false as const, value: replies.shift()! }
+              : { done: true as const, value: undefined },
+        }),
+        token: "agent-reply",
+      });
+      mocks.resumeHook.mockImplementation(async () => undefined);
+      const from: WorkflowToolRunRef = {
+        callId: "call-1",
+        execution: "background",
+        input: { message: "Find it" },
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-parent",
+      };
+      const ctx = { callId: "call-1" } as ToolContext;
+      attachWorkflowToolRunContext(ctx, {
+        admission: Promise.resolve({ status: "accepted" }),
+        from,
+        owner: {
+          inbox: "owner-inbox",
+        },
+      });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("done");
+      await expect(
+        agent(ctx, { key: "research", message: "Find it", target: "research" }),
+      ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-request", {
-      from,
-      replyTo: "child-continuation",
-      request: {
-        kind: "input-batch",
-        requests: [expect.objectContaining({ requestId: "approval-1" })],
-      },
-      requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
-    });
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-request", {
-      from,
-      replyTo: "child-continuation",
-      request: {
-        kind: "input-batch",
-        requests: [expect.objectContaining({ requestId: "approval-2" })],
-      },
-      requestCoordinates: { sequence: 3, stepIndex: 2, turnId: "turn-child" },
-    });
-  });
+      expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
+        kind: "request",
+        from,
+        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        request: {
+          kind: "input-batch",
+          requests: [expect.objectContaining({ requestId: "approval-1" })],
+        },
+        requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
+      });
+      expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-inbox", {
+        kind: "request",
+        from,
+        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        request: {
+          kind: "input-batch",
+          requests: [expect.objectContaining({ requestId: "approval-2" })],
+        },
+        requestCoordinates: { sequence: 3, stepIndex: 2, turnId: "turn-child" },
+      });
+    },
+  );
 
   it("forwards background authorization as an owner authorization request", async () => {
     const replies: AgentInvocationReply[] = [
@@ -484,10 +467,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -495,7 +475,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-request", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
@@ -503,7 +484,10 @@ describe("background agent invocation routing", () => {
         kind: "authorization-request",
       },
     });
-    expect(mocks.resumeHook).not.toHaveBeenCalledWith("owner-report", expect.anything());
+    expect(mocks.resumeHook).not.toHaveBeenCalledWith(
+      "owner-inbox",
+      expect.objectContaining({ kind: "report" }),
+    );
   });
 
   it("forwards task-owned child updates to the workflow tool report channel", async () => {
@@ -553,10 +537,7 @@ describe("background agent invocation routing", () => {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
-        admission: "owner-admission",
-        outcome: "owner-outcome",
-        report: "owner-report",
-        request: "owner-request",
+        inbox: "owner-inbox",
       },
     });
 
@@ -564,7 +545,8 @@ describe("background agent invocation routing", () => {
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("done");
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-report", {
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "report",
       from,
       update: "Still working",
     });

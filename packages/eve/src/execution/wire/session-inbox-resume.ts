@@ -11,8 +11,10 @@ import {
 } from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+  isSessionInboxAddress,
   isSessionInboxWireVersion,
   SessionInboxWireError,
+  type SessionInboxAddress,
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
@@ -23,9 +25,25 @@ type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
 
 /** Resolves the consumer contract, encodes for it, and resumes that exact hook. */
 export async function resumeSessionInbox(
-  token: string,
+  address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
+  if (typeof address !== "string") {
+    if (!isSessionInboxAddress(address)) {
+      throw new SessionInboxWireError("Session inbox target has an invalid address.");
+    }
+    if (!isSessionInboxWireVersion(address.version)) {
+      throw new SessionInboxWireError(
+        `Session inbox target declares unsupported wire version ${JSON.stringify(address.version)}.`,
+      );
+    }
+    return await resumeHook(
+      sessionCommandHookToken(address.sessionId),
+      sessionInboxWire.encode(command, { version: address.version }),
+    );
+  }
+
+  const token = address;
   if (isStableInboxFastPathCompatible(token, command)) {
     return await resumeHook(
       token,

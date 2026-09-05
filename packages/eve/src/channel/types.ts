@@ -1,5 +1,6 @@
 import type { UserContent } from "ai";
 
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -341,6 +342,7 @@ export interface SubagentInputRequestHookPayload {
   readonly callId: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly event: SubagentInputRequestEvent;
   readonly kind: "subagent-input-request";
   readonly subagentName: string;

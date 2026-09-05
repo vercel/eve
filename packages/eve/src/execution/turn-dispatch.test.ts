@@ -4,7 +4,9 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
+import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import { runTurnOwnedWorkflow } from "#execution/turn-workflow.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
@@ -28,6 +30,14 @@ vi.mock("./forward-turn-delivery-step.js", () => ({
   forwardTurnDeliveryStep: vi.fn(),
 }));
 
+vi.mock("./forward-turn-cancellation-step.js", () => ({
+  forwardTurnCancellationStep: vi.fn(),
+}));
+
+vi.mock("./turn-workflow.js", () => ({
+  runTurnOwnedWorkflow: vi.fn(),
+}));
+
 vi.mock("./workflow-steps.js", () => ({
   turnStep: vi.fn(),
 }));
@@ -36,6 +46,7 @@ describe("dispatchAndAwaitTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createHookMock.mockReset();
+    vi.mocked(runTurnOwnedWorkflow).mockImplementation(async (_input, onReady) => onReady?.());
   });
 
   it("rekeys the public hook when the active turn changes its continuation token", async () => {
@@ -312,8 +323,10 @@ describe("dispatchAndAwaitTurn", () => {
       serializedContext: { state: "start" },
       sessionState: state,
     });
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({ initialCancellation: { tasks: true } }),
+      expect.any(Function),
     );
   });
 
@@ -352,7 +365,7 @@ describe("dispatchAndAwaitTurn", () => {
     expect(dispatchTurnStep).not.toHaveBeenCalled();
   });
 
-  it("hands an already-completed complex step to the child workflow", async () => {
+  it("runs coordination on the parent from an already-completed inline step", async () => {
     const state = createState("http:test");
     const result = {
       action: "park" as const,
@@ -382,14 +395,76 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         initialStep: {
           beforeStep: expect.objectContaining({ serializedContext: { state: "start" } }),
           result,
         },
       }),
+      expect.any(Function),
     );
+  });
+
+  it("waits for inline hook initialization before forwarding a queued cancel", async () => {
+    const state = createState("http:test");
+    const command = Promise.withResolvers<IteratorResult<SessionInboxPayload>>();
+    const forwarded = Promise.withResolvers<void>();
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingCoordinationCallIds: ["call-1"],
+      serializedContext: {},
+      sessionState: state,
+    });
+    vi.mocked(forwardTurnCancellationStep).mockImplementationOnce(async () => {
+      forwarded.resolve();
+      return true;
+    });
+    createHookMock.mockReturnValue(
+      createMockHook(async () => {
+        await forwarded.promise;
+        return {
+          done: false,
+          value: {
+            action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+            kind: "turn-result",
+          },
+        };
+      }),
+    );
+    vi.mocked(runTurnOwnedWorkflow).mockImplementationOnce(async (_input, onReady) => {
+      command.resolve({ done: false, value: { kind: "cancel" } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
+      onReady?.();
+    });
+    let consumed = false;
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox({
+        next: () => (consumed ? new Promise(() => {}) : command.promise),
+        consumeNext: () => {
+          consumed = true;
+        },
+      }),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    expect(turn.action).toMatchObject({ cancelled: true });
+    expect(forwardTurnCancellationStep).toHaveBeenCalledExactlyOnceWith({
+      payload: { tasks: undefined },
+      token: "turn-control:cancel",
+    });
   });
 
   it("defers a guarded deployment mismatch without consuming the delivery", async () => {
@@ -424,7 +499,7 @@ describe("dispatchAndAwaitTurn", () => {
     );
   });
 
-  it("carries inline cancellation into the continued child turn", async () => {
+  it("carries inline cancellation into the shared turn runner on the parent", async () => {
     const state = createState("http:test");
     vi.mocked(turnStep).mockImplementationOnce(async (input) => {
       await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
@@ -463,13 +538,15 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(dispatchTurnStep).toHaveBeenCalledWith(
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         initialCancellation: {},
         initialStep: expect.objectContaining({
           result: expect.objectContaining({ action: "cancelled" }),
         }),
       }),
+      expect.any(Function),
     );
     expect(commandInbox.consumeNext).toHaveBeenCalledOnce();
   });

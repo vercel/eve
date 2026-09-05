@@ -8,42 +8,27 @@ import type {
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
-import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
-import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import type {
+  WorkflowToolRunAddress,
+  WorkflowToolRunInput,
+} from "#execution/tools/workflow/types.js";
+import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
-  waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
-// Derived from the call alone so a replayed dispatch starts a duplicate that
-// loses the claim and still resolves to the workflow tool run that owns the call.
-export function deriveWorkflowToolRunHookToken(input: {
-  readonly callId: string;
-  readonly parentSessionId: string;
-  readonly parentTurnId: string;
-}): string {
-  return `eve:workflow-tool-run:${deriveAgentOperationId(input)}`;
-}
-
-/** Resolves once the workflow tool run owns its hook. Call from a `"use step"` body. */
+/** Starts a new run for each dispatch attempt. Call from a `"use step"` body. */
 export async function startWorkflowToolRun(
-  input: Omit<WorkflowToolRunInput, "hookToken"> & { readonly hookToken?: string },
-): Promise<{ readonly hookToken: string; readonly runId: string }> {
-  const hookToken =
-    input.hookToken ??
-    deriveWorkflowToolRunHookToken({
-      callId: input.callId,
-      parentSessionId: input.session.id,
-      parentTurnId: input.session.turn.id,
-    });
-  const workflowToolRunInput = { ...input, hookToken } as WorkflowToolRunInput;
-  await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [workflowToolRunInput]);
-  const owner = await waitForCommandHookOwner(hookToken);
-  return { hookToken, runId: owner.runId };
+  input: Omit<WorkflowToolRunInput, "hookToken">,
+): Promise<WorkflowToolRunAddress> {
+  const hookToken = crypto.randomUUID();
+  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
+    { ...input, hookToken },
+  ]);
+  return { hookToken, runId: run.runId };
 }
 
 /** Starts one durable workflow task and records it on the owning session. */
@@ -55,7 +40,7 @@ export async function startWorkflowTask(input: {
     readonly turnId: string;
   };
   readonly initiatorAuth: SessionAuth["initiator"];
-  readonly parentContinuationToken: string;
+  readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
   readonly session: RuntimeSession;
   readonly task: RuntimeWorkflowTaskRequest;
@@ -66,7 +51,7 @@ export async function startWorkflowTask(input: {
       callId: task.callId,
       executeInput: task.executeInput,
       input: task.input,
-      owner: deriveWorkflowToolRunOwner(input.parentContinuationToken),
+      owner: input.owner,
       resultKind: task.resultKind,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },

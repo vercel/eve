@@ -88,6 +88,41 @@ describe("session inbox target resolution", () => {
 });
 
 describe("resumeSessionInbox", () => {
+  it.each(SESSION_INBOX_WIRE_VERSIONS)(
+    "uses the persisted consumer version %i without reading hook metadata",
+    async (version) => {
+      await resumeSessionInbox(
+        { sessionId: "child-session", version },
+        { kind: "send", payload: { inputResponses: [{ requestId: "req-1", text: "yes" }] } },
+      );
+
+      expect(getHookByTokenMock).not.toHaveBeenCalled();
+      expect(getRawHookByTokenMock).not.toHaveBeenCalled();
+      expect(resumeHookMock).toHaveBeenCalledWith(
+        sessionCommandHookToken("child-session"),
+        expect.objectContaining({ kind: "deliver", version }),
+      );
+    },
+  );
+
+  it("rejects unsupported saved consumer versions before resuming", async () => {
+    await expect(
+      resumeSessionInbox({ sessionId: "child-session", version: 99 }, { kind: "clear" }),
+    ).rejects.toThrow(/unsupported wire version 99/);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps version-sensitive cancellation checks when using a saved address", async () => {
+    await expect(
+      resumeSessionInbox(
+        { sessionId: "child-session", version: 5 },
+        { kind: "cancel", tasks: true },
+      ),
+    ).rejects.toThrow(/Cannot encode session-owned task cancellation/);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("resumes a compatible stable inbox by token without inspecting metadata", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });

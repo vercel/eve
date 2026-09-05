@@ -1,5 +1,24 @@
 # Task eval transitions
 
+## Remote callback routing regression
+
+`task.input.answer.accepted-complete.remote.eval.ts` reuses the existing remote
+HITL and completion round trip to cover the callback-prefix bug from
+[eve #3047](https://github.com/vercel/eve/pull/3047). The fixture's `vercel.json`
+sets the service route to `/eve/v1`.
+
+The eval uses event assertions labeled "remote input callback reaches the parent"
+and "remote completion callback reaches the parent". It also logs which delivery
+it is waiting for. These assertions check the live round trip through the public
+eval APIs; they do not inspect the generated callback URL.
+
+The [build scenario](../../../../packages/eve/src/internal/nitro/host/build-application.scenario.test.ts)
+separately checks that this service route adds no extra public prefix. Local and
+Postgres runs exercise the remote round trip, but only the Vercel build exercises
+service-prefix inference.
+
+## Transition declarations
+
 These evals are executable evidence for the background-task contract. They do
 not define that contract.
 

@@ -14,7 +14,8 @@ import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import { disposeHook } from "#execution/hook-ownership.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
@@ -94,16 +95,14 @@ export async function invokeAgent(
   const owner = readWorkflowToolRunOwner(ctx);
   const admission = readWorkflowToolRunAdmission(ctx);
   claimInvocationId(ctx, options.invocationId);
+  if (admission !== undefined) {
+    const admitted = await admission;
+    if (admitted.status === "rejected") throw new Error(admitted.reason);
+  }
   const replies = createHook<AgentInvocationReply>();
-  let ownsReplies = false;
   try {
-    await claimHookOwnership(replies);
-    ownsReplies = true;
-    if (admission !== undefined) {
-      const admitted = await admission;
-      if (admitted.status === "rejected") throw new Error(admitted.reason);
-    }
-    await resumeHookStep(owner.request, {
+    await resumeHookStep(owner.inbox, {
+      kind: "request",
       from: run,
       replyTo: replies.token,
       request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
@@ -121,7 +120,8 @@ export async function invokeAgent(
         );
         if (result !== undefined) {
           if (result.origin === "child") {
-            await resumeHookStep(owner.request, {
+            await resumeHookStep(owner.inbox, {
+              kind: "request",
               from: run,
               replyTo: replies.token,
               request: { kind: "agent-settled", result },
@@ -134,9 +134,13 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "subagent-input-request") {
-        await resumeHookStep(owner.request, {
+        await resumeHookStep(owner.inbox, {
+          kind: "request",
           from: run,
-          replyTo: reply.childContinuationToken,
+          replyTo:
+            reply.childSessionInbox?.sessionId === reply.childSessionId
+              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              : reply.childContinuationToken,
           request: {
             kind: "input-batch",
             requests: reply.event.requests,
@@ -150,25 +154,25 @@ export async function invokeAgent(
         continue;
       }
       if (reply.kind === "task-update") {
-        await resumeHookStep(owner.report, {
+        await resumeHookStep(owner.inbox, {
+          kind: "report",
           from: run,
           update: reply.message,
         });
         continue;
       }
-      await resumeHookStep(owner.request, {
+      await resumeHookStep(owner.inbox, {
+        kind: "request",
         from: run,
         replyTo: replies.token,
         request: { event: reply, kind: "authorization-request" },
       });
     }
   } finally {
-    if (ownsReplies) {
-      try {
-        await disposeHook(replies);
-      } catch {
-        // A result or invocation error is authoritative; reply-hook cleanup is best effort.
-      }
+    try {
+      await disposeHook(replies);
+    } catch {
+      // A result or invocation error is authoritative; reply-hook cleanup is best effort.
     }
   }
   throw new Error(`Agent "${input.target}" closed without a result.`);

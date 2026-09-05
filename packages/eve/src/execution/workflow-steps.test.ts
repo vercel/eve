@@ -268,6 +268,46 @@ afterEach(() => {
 });
 
 describe("routeProxiedDeliverStep", () => {
+  it("replies to the saved child inbox after its continuation alias changes", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "request-1",
+          {
+            childContinuationToken: "stale-alias",
+            childSessionInbox: { sessionId: "original-child", version: 1 },
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "stale-alias",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { inputResponses: [{ requestId: "request-1", text: "yes" }] },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "eve:session:original-child:inbox",
+      expect.objectContaining({
+        kind: "deliver",
+        version: 1,
+        payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
+      }),
+    );
+  });
+
   it("forwards descendant input responses as session send commands", async () => {
     const auth = {
       attributes: {},
@@ -905,6 +945,7 @@ describe("dispatchCoordinationStep", () => {
 
     const result = await dispatchCoordinationStep({
       action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -967,7 +1008,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1031,7 +1072,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1108,7 +1149,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,

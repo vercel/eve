@@ -40,6 +40,7 @@ import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
   addRegistryMappings,
+  assertCanInstallWebChat,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
@@ -149,12 +150,10 @@ const CATALOG_PAGE_SIZE = 100;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
 
-function isRegistryAddress(value: string): boolean {
-  return value.startsWith("@") || /^https?:\/\//.test(value);
-}
-
 function itemAddress(item: string): string {
-  return isRegistryAddress(item) ? item : `${OFFICIAL_REGISTRY}/${item}.json`;
+  return item.startsWith("@") || /^https?:\/\//.test(item)
+    ? item
+    : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
 /** Installs an official registry item without running its declared setup command. */
@@ -203,7 +202,7 @@ function configuredRegistrySources(config: RegistryConfig): string[] {
 }
 
 function validateRegistrySource(source: string | undefined): void {
-  if (source !== undefined && !isRegistryAddress(source)) {
+  if (source !== undefined && !source.startsWith("@") && !/^https?:\/\//.test(source)) {
     throw new Error(`Registry sources must be a namespace or URL: ${source}`);
   }
 }
@@ -462,8 +461,9 @@ export async function runAddCommand(
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
-    const config = await readEveRegistryConfig(appRoot);
     const address = itemAddress(item);
+    if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
+    const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
         throw new Error("--overwrite cannot be used with --skip-install.");

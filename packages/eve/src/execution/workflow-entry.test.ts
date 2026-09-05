@@ -28,6 +28,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -187,7 +188,10 @@ describe("workflowEntry", () => {
 
     const result = await workflowEntry({
       input: { message: "hello there" },
-      serializedContext: createSerializedContext(),
+      serializedContext: {
+        ...createSerializedContext(),
+        "eve.sessionInbox": { sessionId: "producer-supplied-id", version: 99 },
+      },
     });
 
     expect(result).toEqual({ output: "ok" });
@@ -215,6 +219,7 @@ describe("workflowEntry", () => {
           "eve.continuationToken": "http:test",
           "eve.mode": "conversation",
           "eve.sessionId": "wrun_test_123",
+          "eve.sessionInbox": { sessionId: "wrun_test_123", version: SESSION_INBOX_WIRE_VERSION },
         }),
         sessionState,
       }),

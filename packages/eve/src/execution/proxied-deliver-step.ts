@@ -1,3 +1,4 @@
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -46,6 +47,7 @@ type LegacyRoutedDeliverResult =
 interface ChildBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
@@ -108,17 +110,16 @@ export async function routeProxiedDeliverStep(
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
-      const key =
-        forChild.taskId === undefined
-          ? forChild.childContinuationToken
-          : [
-              forChild.childContinuationToken,
-              forChild.childResponseUrl ?? "",
-              forChild.taskId,
-            ].join("\0");
+      const key = [
+        forChild.childContinuationToken,
+        forChild.childSessionInbox?.sessionId ?? "",
+        forChild.childResponseUrl ?? "",
+        forChild.taskId ?? "",
+      ].join("\0");
       const child = children.get(key) ?? {
         answerHook: forChild.answerHook,
         childContinuationToken: forChild.childContinuationToken,
+        childSessionInbox: forChild.childSessionInbox,
         childResponseUrl: forChild.childResponseUrl,
         metadata: [],
         payloads: [],
@@ -158,6 +159,7 @@ export async function routeProxiedDeliverStep(
         payload: {
           auth: sourceDelivery.auth,
           childContinuationToken: child.childContinuationToken,
+          childSessionInbox: child.childSessionInbox,
           childResponseUrl: child.childResponseUrl,
           inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
           kind: "input-response",
@@ -188,7 +190,10 @@ export async function routeProxiedDeliverStep(
       deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
       payloads: child.payloads,
     };
-    await resumeSessionInbox(child.childContinuationToken, childDelivery);
+    await resumeSessionInbox(
+      child.childSessionInbox ?? child.childContinuationToken,
+      childDelivery,
+    );
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);

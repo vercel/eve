@@ -387,6 +387,11 @@ session's task index, can be cancelled with `task_cancel`, and are cancelled whe
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the run.
 
+Starting a waiting workflow tool can also be retried. If dispatch is interrupted after starting a
+run, its retry starts another run, and both may execute. The parent tracks the run returned by the
+successful dispatch attempt. Use an application idempotency key for side effects that must happen
+only once.
+
 The workflow id derives from the executor's module path and function name. Inline executors use
 the tool module and the name `execute`; imported executors use their declaring module and name.
 Renaming or moving that function creates a new workflow. Runs in flight finish on the deployment that started them; a run that
