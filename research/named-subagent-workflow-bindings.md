@@ -1,25 +1,27 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-03"
+last_updated: "2026-09-04"
 ---
 
 # Named subagent bindings in workflows
 
-Expose declared subagents as callable named imports from `eve/workflow`, so authored
-code can delegate work and branch on its result in both workflow tools and authored
-workflow functions.
+Expose declared subagents as callable named imports from `eve/workflow`, so workflow
+tools can delegate work and branch on its result.
 
 The proposed call is `await reviewer(message)`. eve supplies the target, invocation
 context, and replay-stable invocation identity currently passed explicitly to
 `agent(ctx, { target, key, message })`. This extends the workflow delegation described
 in [Tools as workflows][tools-as-workflows].
 
+`defineWorkflow` and workflows started without an owning agent session are deferred
+to a separate change.
+
 ## Proposed authoring API
 
 The following examples describe the requested API, not code supported by the current
-exports. `defineSubagent` and `defineWorkflow` retain the names from the initial
-sketch; their inclusion is an open API decision below.
+exports. `defineSubagent` retains the name from the initial sketch; its inclusion
+is an open API decision below.
 
 ```ts
 // agent/subagents/reviewer.ts
@@ -67,31 +69,7 @@ export default defineTool({
 });
 ```
 
-The same bindings should be callable from an authored workflow function. The file
-location does not determine how the workflow is started or which session owns it:
-
-```ts
-// workflows/orchestration.ts
-import { defineWorkflow } from "eve";
-import { agent, reviewer } from "eve/workflow";
-import { z } from "zod";
-
-const ReviewSchema = z.object({ successful: z.boolean() });
-
-export default defineWorkflow(async (input: { issueDescription: string }) => {
-  "use workflow";
-
-  const [[research], [review]] = await Promise.all([
-    agent("Research this: " + input.issueDescription),
-    reviewer("Review this: " + input.issueDescription, { outputSchema: ReviewSchema }),
-  ]);
-
-  if (review.successful) return { successful: true, research };
-  return { successful: false };
-});
-```
-
-Both examples start research and review independently. To review the research
+This example starts research and review independently. To review the research
 itself, await `agent(...)` first and pass its output to `reviewer(...)`.
 
 ### Results and continuation
@@ -328,11 +306,8 @@ continuation metadata, while removing authored replay keys for ordinary calls.
 The helper also requires an
 [attached workflow tool context][attached-workflow-tool-context].
 It asks the owning session to perform delegation; the session holds authorization,
-capabilities, admission state, and child handles. Starting a workflow without an
-existing agent session therefore needs an ownership contract before the shorthand
-can work there. Discovering its source file is insufficient: the
-[workflow scanner][workflow-scanner]
-already scans the application root for workflow directives.
+capabilities, admission state, and child handles. The proposed bindings use that
+existing ownership contract and supply the invocation context implicitly.
 
 Current [agent exports][agent-exports] use `defineAgent` for
 both root agents and local subagents. Single-file subagents are already
@@ -370,32 +345,25 @@ These are requirements for the proposal, not claims about an implementation.
 - **Execution ownership.** In a workflow tool, the existing owning session remains
   responsible for authorization, child handles, human-input routing, usage, and
   cancellation. The binding must use that authority rather than start a separate
-  unowned agent loop. Starting a workflow outside an agent's execution must define
-  equivalent ownership if that entry path is supported.
+  unowned agent loop.
 - **Runtime placement.** Generated code binds names to eve runtime functions. Agent
   execution and lifecycle behavior remain in the `eve` package.
 
 ## Decisions to settle
 
-1. **How is `workflows/orchestration.ts` started?** If an agent calls it within its
-   execution, that session provides the ownership described above. If a route or
-   cron starts it without an existing agent session, specify how eve establishes
-   agent scope, authorization, child handles, and a destination for human input.
-2. **Are new definition helpers needed?** `defineSubagent` is absent from the
-   current exports; `defineAgent` already defines local subagents. `defineWorkflow`
-   is also absent, while plain functions with `"use workflow"` already have a
-   discovery path. Prefer retaining existing helpers unless a new helper owns
-   necessary semantics, such as establishing ownership when starting a workflow.
-3. **Does the explicit helper remain?** The proposed `agent(prompt, options)` is
+1. **Is `defineSubagent` needed?** It is absent from the current exports;
+   `defineAgent` already defines local subagents. Prefer the existing helper unless
+   the new helper introduces necessary semantics.
+2. **Does the explicit helper remain?** The proposed `agent(prompt, options)` is
    strictly self-delegation. Decide whether the current target-selecting
    `agent(ctx, input)` is removed or moved to a separate API; it should not give the
    self-delegation binding a second target-selection meaning.
-4. **What happens to an invalid continuation?** Preserve existing busy-child and
+3. **What happens to an invalid continuation?** Preserve existing busy-child and
    target-mismatch checks. Decide whether an unknown or expired `agentId` rejects
    or retains the [current fallback to a fresh child][current-fallback-to-a-fresh-child].
    Rejection would make an
    explicit request to resume fail visibly instead of silently losing history.
-5. **How do remote schema defaults affect the return type?** Remote definitions
+4. **How do remote schema defaults affect the return type?** Remote definitions
    already allow a default `outputSchema` for new sessions. Decide whether a call
    without an explicit schema infers that default or the binding API requires
    per-call schemas. The remote examples above omit a declaration-level default;
@@ -404,9 +372,7 @@ These are requirements for the proposal, not claims about an implementation.
 ## Acceptance criteria
 
 - Compile a fixture with `reviewer.ts`, import `reviewer` from `eve/workflow`, and
-  verify its model and configuration are selected. Exercise both a workflow tool
-  and an authored workflow function. Cover starting outside an agent session if
-  that entry path is included.
+  verify its model and configuration are selected when called from a workflow tool.
 - Run parallel calls, repeated calls to one binding, and calls through a shared
   helper. Resume the workflow after suspension and verify each invocation retains
   its identity without starting duplicate children.
@@ -438,7 +404,6 @@ the runtime paths. This draft adds no runtime implementation or published API do
 [eve-workflow]: ../packages/eve/src/public/workflow/index.ts
 [implementation]: ../packages/eve/src/execution/tools/subagent/invoke-agent.ts#L68
 [attached-workflow-tool-context]: ../packages/eve/src/execution/tools/workflow/ask.ts#L40
-[workflow-scanner]: ../packages/eve/src/internal/workflow-bundle/authored-workflow-modules.ts#L45
 [agent-exports]: ../packages/eve/src/public/index.ts
 [discovered]: ../packages/eve/src/discover/discover-subagent.ts#L119
 [requires-a-description]: ../packages/eve/src/compiler/normalize-manifest-helpers.ts#L107
