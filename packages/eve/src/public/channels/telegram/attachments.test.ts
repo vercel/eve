@@ -110,4 +110,39 @@ describe("createTelegramFetchFile", () => {
     await expect(result).rejects.not.toThrow("PRIVATE_FILE_ID");
     await expect(result).rejects.not.toThrow("123456:PRIVATE");
   });
+
+  it("prefers the known attachment media type over the HTTP content-type header", async () => {
+    // Telegram's file endpoint frequently returns `application/octet-stream`
+    // (or no content-type) for photos. The channel already knows the photo is
+    // `image/jpeg` from the inbound message; that known type must win so vision
+    // models receive a recognized image media type.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, result: { file_path: "photos/file.jpg" } }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("JFIF", { headers: { "content-type": "application/octet-stream" } }),
+      );
+
+    const fetchFile = createTelegramFetchFile({
+      api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+      credentials: { botToken: "123456:ABCDEF" },
+      policy: { allowedMediaTypes: ["image/*"], maxBytes: 1024 },
+    });
+
+    const result = await fetchFile(
+      String(
+        createTelegramFileUrl({
+          fileId: "photo-id",
+          filename: "photo.jpg",
+          mediaType: "image/jpeg",
+        }),
+      ),
+    );
+
+    expect(result?.mediaType).toBe("image/jpeg");
+  });
 });
