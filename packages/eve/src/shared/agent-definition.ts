@@ -275,6 +275,7 @@ export type InternalAgentDefinition = {
   description?: string;
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
+  defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
@@ -299,6 +300,12 @@ type PublicAgentDefinitionBase = {
   readonly description?: string;
   readonly build?: AgentBuildDefinition;
   readonly compaction?: PublicAgentCompactionDefinition;
+  /**
+   * Whether eve automatically adds its optional default tools. Defaults to `true`.
+   * Required connection tooling and tools authored under `agent/tools/` remain
+   * available when this is `false`.
+   */
+  readonly defaultTools?: boolean;
   /**
    * Experimental, opt-in capabilities. Unstable, see
    * {@link AgentExperimentalDefinition}.
