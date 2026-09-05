@@ -117,9 +117,11 @@ export default webSearch({ provider: "parallel" });
 
 Set `provider` to `"exa"` or `"parallel"`. Without this file, AI Gateway models use Exa.
 
-## Disable a default
+## Disable default tools
 
-Export a `disableTool()` sentinel from a file named after the tool's slug. The filename is what picks the default to remove:
+Set `defaultTools: false` in `agent/agent.ts` to remove every default at once, as described in [Disable all default tools](#disable-all-default-tools). Tools under `agent/tools/` remain available.
+
+To remove one default, export a `disableTool()` sentinel from a file named after the tool's slug. The filename picks the default to remove:
 
 ```ts title="agent/tools/bash.ts"
 import { disableTool } from "eve/tools";

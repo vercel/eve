@@ -36,6 +36,7 @@ import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-lay
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
+import { applyDefaultToolPolicy } from "#compiler/default-tool-policy.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -155,29 +156,6 @@ export async function compileAgentManifest(
     diagnosticsSummary,
     subagents,
   });
-}
-
-function applyDefaultToolPolicy(
-  phaseOne: PhaseOneNodeSourceState,
-  config: CompiledAgentDefinition,
-): void {
-  if (config.defaultTools !== false) return;
-
-  const overriddenSlots = new Set(
-    phaseOne.graph.orderedCandidates
-      .filter((candidate) => candidate.layer !== "framework-default")
-      .map((candidate) => canonicalSourceSlot(candidate.logicalPath)),
-  );
-  phaseOne.graph.composed = composeAgentModuleCandidates(
-    phaseOne.graph.orderedCandidates.filter((candidate) => {
-      const slot = canonicalSourceSlot(candidate.logicalPath);
-      return (
-        candidate.layer !== "framework-default" ||
-        !slot.startsWith("tools/") ||
-        overriddenSlots.has(slot)
-      );
-    }),
-  );
 }
 
 class AgentGraphCompiler {
