@@ -225,7 +225,9 @@ export async function compactMessages(
     });
 
     if (result.text.trim().length === 0) {
-      throw new Error("The compaction model returned an empty summary.");
+      throw new Error(
+        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
+      );
     }
 
     const summaryHead: ModelMessage[] = [

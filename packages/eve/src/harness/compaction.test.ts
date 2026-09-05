@@ -574,7 +574,9 @@ describe("compactMessages: forced summary", () => {
           undefined,
           true,
         ),
-      ).rejects.toThrow("The compaction model returned an empty summary.");
+      ).rejects.toThrow(
+        "The compaction model returned an empty summary. Finish reason: content-filter.",
+      );
       expect(messages).toEqual(original);
     },
   );
