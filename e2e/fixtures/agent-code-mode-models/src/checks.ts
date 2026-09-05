@@ -10,7 +10,9 @@ export function inOneProgram(calls: readonly Call[], completedPrograms: readonly
 export function readEveryPage(calls: readonly Call[], cursors: readonly (string | null)[]) {
   const reads = calls.filter((call) => call.tool === "orders");
   return (
-    reads.length === cursors.length &&
+    reads.every((call) =>
+      cursors.includes((call.input as { cursor?: string | null }).cursor ?? null),
+    ) &&
     cursors.every((cursor) =>
       reads.some(
         (call) =>
