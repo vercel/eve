@@ -9,7 +9,7 @@ export default eveChannel({
       authenticator: "e2e-fixture",
       issuer: "e2e",
       principalId,
-      principalType: "user",
+      principalType: principalId === "e2e-approval-operator" ? "service" : "user",
       subject: principalId,
     };
   },

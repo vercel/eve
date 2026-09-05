@@ -1,3 +1,4 @@
+import { jsonValuesEqual } from "#shared/json.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -279,6 +280,7 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
+      !jsonValuesEqual(first.auth, next.auth) ||
       first.taskDeliveryId !== undefined ||
       next.taskDeliveryId !== undefined ||
       (caller !== undefined && next.caller !== undefined)

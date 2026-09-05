@@ -8,11 +8,12 @@ export default defineTool({
   approval: {
     request: always(),
     response: ({ response, responder }) =>
-      response.decision === "approve" && responder.principalId === "e2e-approval-responder"
+      response.decision === "approve" &&
+      ["e2e-approval-responder", "e2e-approval-operator"].includes(responder.principalId)
         ? ({ status: "allowed" } as const)
         : ({ status: "rejected", reason: "Unexpected eval responder." } as const),
   },
-  async execute({ marker }) {
-    return { executed: true, marker };
+  async execute({ marker }, ctx) {
+    return { executed: true, marker, caller: ctx.session.auth.current?.principalId };
   },
 });
