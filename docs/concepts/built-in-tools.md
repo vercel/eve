@@ -7,36 +7,7 @@ eve provides a default tool set for every agent and additional tools you can add
 
 ## Default tools
 
-Default tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
-
-The default shell and file tools (`bash`, `read_file`, and `write_file`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
-
-| Tool                | Does                                                                                                                                                                                                                | Where it runs |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `bash`              | Run a shell command.                                                                                                                                                                                                | Sandbox       |
-| `read_file`         | Read a text file with line-numbered output (enables read-before-write).                                                                                                                                             | Sandbox FS    |
-| `write_file`        | Write a complete file; enforces read-before-write and stale-read detection.                                                                                                                                         | Sandbox FS    |
-| `web_fetch`         | Fetch a URL.                                                                                                                                                                                                        | App runtime   |
-| `web_search`        | Search the web (provider-managed; resolved from the model provider).                                                                                                                                                | Provider      |
-| `todo`              | Maintain a durable per-session todo list.                                                                                                                                                                           | App runtime   |
-| `ask_question`      | Ask the user a clarifying question or a choice mid-turn and park until they answer. No `execute`; the model calls it with `{ prompt, options?, allowFreeform? }`. See [Human-in-the-loop](/docs/human-in-the-loop). | App runtime   |
-| `agent`             | From the root session, delegate a subtask to a fresh copy of the root agent.                                                                                                                                        | App runtime   |
-| `task_cancel`       | Cancel background tasks from the root session.                                                                                                                                                                      | App runtime   |
-| `task_update`       | Report progress from a background task to its parent.                                                                                                                                                               | App runtime   |
-| `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
-| `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
-
-The model-facing file tools accept absolute paths and paths beginning with `$HOME/`. eve resolves `$HOME` against the sandbox before invoking non-shell file operations, so packaged skill references such as `$HOME/.agents/skills/<skill>/references/...` work consistently across `read_file`, `write_file`, and the opt-in `glob` and `grep` tools.
-
-Notes:
-
-- **`agent`** is available only in the root session and always runs in the background. Its call returns a task receipt immediately, and task notifications deliver updates or the final result. The child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](./state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
-- **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
-- **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. The model sees it only when the agent has connections.
-- **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
-- **`web_fetch`** follows up to ten redirects, rechecking every destination for SSRF safety. Non-success HTTP responses return a plain-text failure result with the response body when available instead of failing the tool call.
-
-Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
+Default tools require no imports. The exact set depends on the agent and session, and the harness advertises only the tools available to the current session.
 
 ### Disable optional default tools
 
@@ -51,29 +22,105 @@ export default defineAgent({
 });
 ```
 
-This turns off the optional defaults. eve still adds `connection_search` when the agent has connections because it provides access to their tools. Files under `agent/tools/` also remain available, including same-name replacements such as `agent/tools/bash.ts`.
+This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-Add back only the tools the agent needs. For example, this restores `bash` by creating `agent/tools/bash.ts`:
+`connection_search` stays available when the agent has connections because it provides access to their tools.
+
+### `bash`
+
+`bash` runs shell commands in the agent's [sandbox](../sandbox).
 
 ```sh
 eve add tool/bash
 ```
 
-| Tool           | Add command                 |
-| -------------- | --------------------------- |
-| `agent`        | `eve add tool/agent`        |
-| `ask_question` | `eve add tool/ask_question` |
-| `bash`         | `eve add tool/bash`         |
-| `load_skill`   | `eve add tool/load_skill`   |
-| `read_file`    | `eve add tool/read_file`    |
-| `task_cancel`  | `eve add tool/task_cancel`  |
-| `task_update`  | `eve add tool/task_update`  |
-| `todo`         | `eve add tool/todo`         |
-| `web_fetch`    | `eve add tool/web_fetch`    |
-| `web_search`   | `eve add tool/web_search`   |
-| `write_file`   | `eve add tool/write_file`   |
+### `read_file`
 
-Added tools keep their normal availability rules; for example, `agent` remains root-only and `task_update` remains limited to background tasks. `connection_search` is not listed because eve provides it automatically when connections exist.
+`read_file` reads text files from the sandbox with line-numbered output. It accepts absolute paths and paths beginning with `$HOME/`.
+
+```sh
+eve add tool/read_file
+```
+
+### `write_file`
+
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+
+```sh
+eve add tool/write_file
+```
+
+### `web_fetch`
+
+`web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available.
+
+```sh
+eve add tool/web_fetch
+```
+
+### `web_search`
+
+`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Exa by default; direct provider models use their native search implementation.
+
+```sh
+eve add tool/web_search
+```
+
+To use Parallel with AI Gateway, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. To provide your own implementation, override the tool with `defineTool()`.
+
+### `todo`
+
+`todo` maintains a durable todo list for the session.
+
+```sh
+eve add tool/todo
+```
+
+### `ask_question`
+
+`ask_question` asks the user for clarification or a choice, then parks the turn until they answer. It appears only when the session can request user input. See [Human-in-the-loop](/docs/human-in-the-loop).
+
+```sh
+eve add tool/ask_question
+```
+
+### `agent`
+
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+
+```sh
+eve add tool/agent
+```
+
+### `task_cancel`
+
+`task_cancel` lets the root session cancel background tasks.
+
+```sh
+eve add tool/task_cancel
+```
+
+### `task_update`
+
+`task_update` lets a background task report progress to its parent. It appears only in delegated task sessions.
+
+```sh
+eve add tool/task_update
+```
+
+### `load_skill`
+
+`load_skill` pulls an on-demand [skill](../skills)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.
+
+```sh
+eve add tool/load_skill
+```
+
+### `connection_search`
+
+`connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+
+Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
 You can also add the opt-in framework tools described below.
 
