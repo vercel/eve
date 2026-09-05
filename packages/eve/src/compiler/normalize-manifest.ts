@@ -36,7 +36,10 @@ import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-lay
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import { applyDefaultToolPolicy } from "#compiler/default-tool-policy.js";
+import {
+  applyDefaultToolPolicy,
+  assertFrameworkToolPolicy,
+} from "#compiler/default-tool-policy.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -605,12 +608,8 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
+          assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
-            if (canonicalSourceSlot(candidate.logicalPath) === "tools/connection_search") {
-              throw new Error(
-                'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
-              );
-            }
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);

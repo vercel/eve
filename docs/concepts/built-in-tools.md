@@ -47,6 +47,10 @@ import { bash } from "eve/tools/bash";
 export default defineTool({
   ...bash,
   description: "Run approved project maintenance commands.",
+  async execute(input, ctx) {
+    console.info("Running sandbox command", input.command);
+    return bash.execute(input, ctx);
+  },
 });
 ```
 
@@ -111,6 +115,12 @@ import { writeFile } from "eve/tools/write_file";
 export default defineTool({
   ...writeFile,
   description: "Write approved project files in the sandbox.",
+  async execute(input, ctx) {
+    if (!input.filePath.startsWith("/workspace/")) {
+      throw new Error("write_file is limited to /workspace");
+    }
+    return writeFile.execute(input, ctx);
+  },
 });
 ```
 
@@ -143,6 +153,13 @@ import { webFetch } from "eve/tools/web_fetch";
 export default defineTool({
   ...webFetch,
   description: "Fetch approved public documentation URLs.",
+  async execute(input, ctx) {
+    const hostname = new URL(input.url).hostname;
+    if (hostname !== "docs.example.com") {
+      throw new Error("web_fetch is limited to docs.example.com");
+    }
+    return webFetch.execute(input, ctx);
+  },
 });
 ```
 
@@ -274,21 +291,7 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-Replace its delegation behavior with an ordinary authored tool:
-
-```ts title="agent/tools/agent.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Submit work to a custom task service.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { submitted: input };
-  },
-});
-```
-
-Disable it:
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -308,21 +311,7 @@ eve add tool/task_cancel
 export { default } from "eve/tools/task_cancel";
 ```
 
-Replace its cancellation behavior with an ordinary authored tool:
-
-```ts title="agent/tools/task_cancel.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Cancel a task in a custom task service.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { cancelled: input };
-  },
-});
-```
-
-Disable it:
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
 
 ```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
@@ -342,21 +331,7 @@ eve add tool/task_update
 export { default } from "eve/tools/task_update";
 ```
 
-Replace its progress-reporting behavior with an ordinary authored tool:
-
-```ts title="agent/tools/task_update.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Report progress to a custom task service.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { updated: input };
-  },
-});
-```
-
-Disable it:
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
 
 ```ts title="agent/tools/task_update.ts"
 import { disableTool } from "eve/tools";

@@ -184,6 +184,30 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it.each(["agent", "task_cancel", "task_update"])(
+    "rejects overriding closed framework tool %s",
+    async (toolName) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: `tools/${toolName}.ts`,
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Replacement tool.",
+              execute: async () => null,
+              inputSchema: {},
+            }),
+          }),
+        },
+      ]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(
+        `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
+      );
+    },
+  );
+
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
     Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
@@ -261,40 +285,6 @@ describe("compileAgentManifest source graph", () => {
         handling: { kind: "provider-tool", provider: "parallel" },
       },
     });
-  });
-
-  it("keeps an authored framework-slot replacement as an ordinary executable tool", async () => {
-    const execute = vi.fn(() => ({ ordinary: true }));
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/agent.ts",
-        loadNamespace: async () => ({
-          default: defineTool({ description: "Application agent tool.", execute, inputSchema: {} }),
-        }),
-      },
-    ]);
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
-    const selected = compiled.tools.find((tool) => tool.name === "agent");
-    expect(selected).toMatchObject({ hasExecute: true, logicalPath: "tools/agent.ts" });
-    expect(selected?.behavior).toEqual({
-      availability: [],
-      shape: { lifetime: "step", suspend: "none" },
-    });
-
-    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
-      frameworkAgentSourceRegistry,
-      sourceRegistry,
-    ]);
-    const graph = await resolveRuntimeAgentGraph({ manifest: compiled, moduleMap });
-    const resolved = graph.root.toolRegistry.toolsByName.get("agent")?.definition;
-    expect(resolved?.behavior).toEqual({
-      availability: [],
-      shape: { lifetime: "step", suspend: "none" },
-    });
-    expect(await resolved?.execute?.({}, {} as never)).toEqual({ ordinary: true });
-    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("loads the selected config before any non-config definition", async () => {
