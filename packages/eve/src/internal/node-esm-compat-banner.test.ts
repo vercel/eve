@@ -5,9 +5,34 @@ import {
   createNodeEsmCompatBannerPlugin,
 } from "#internal/node-esm-compat-banner.js";
 
+type TestProgram = Parameters<typeof buildNodeEsmCompatBanner>[0];
+type TestPlugin = ReturnType<typeof createNodeEsmCompatBannerPlugin>;
+
+const EMPTY_PROGRAM: TestProgram = { body: [] };
+
+function programWithTopLevelBindings(...names: string[]): TestProgram {
+  return {
+    body: [
+      {
+        type: "VariableDeclaration",
+        declarations: names.map((name) => ({ id: { type: "Identifier", name } })),
+      },
+    ],
+  };
+}
+
+function renderChunk(
+  plugin: TestPlugin,
+  code: string,
+  program: TestProgram = EMPTY_PROGRAM,
+  chunk?: { readonly fileName?: string },
+) {
+  return plugin.renderChunk.call({ parse: () => program }, code, chunk);
+}
+
 describe("buildNodeEsmCompatBanner", () => {
   it("emits both path globals when the chunk declares neither", () => {
-    const banner = buildNodeEsmCompatBanner('console.log("noop");');
+    const banner = buildNodeEsmCompatBanner(EMPTY_PROGRAM);
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).toContain("const __dirname = __eveDirname(__filename);");
@@ -15,7 +40,7 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("includes the require shim when requested", () => {
-    const banner = buildNodeEsmCompatBanner('console.log("noop");', { includeRequire: true });
+    const banner = buildNodeEsmCompatBanner(EMPTY_PROGRAM, { includeRequire: true });
 
     expect(banner).toContain("const require = __eveCreateRequire(import.meta.url);");
   });
@@ -25,16 +50,7 @@ describe("buildNodeEsmCompatBanner", () => {
     // `const __dirname = ...`, producing `SyntaxError: Identifier
     // '__dirname' has already been declared` when bundled output
     // re-declared the path global itself.
-    const chunk = [
-      'import { fileURLToPath } from "node:url";',
-      'import { dirname } from "node:path";',
-      "const __filename = fileURLToPath(import.meta.url);",
-      "const __dirname = dirname(__filename);",
-      "",
-      'export const value = "noop";',
-    ].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk);
+    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("__filename", "__dirname"));
 
     expect(banner).not.toContain("__dirname");
     expect(banner).not.toContain("__filename");
@@ -43,9 +59,7 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("emits only the missing path global", () => {
-    const chunk = ["var __dirname = somethingElse;", 'export const value = "noop";'].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk);
+    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("__dirname"));
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).not.toContain("const __dirname = __eveDirname(__filename);");
@@ -53,9 +67,7 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("does not read a chunk-provided __filename before it initializes", () => {
-    const chunk = ["const __filename = '/x/file.js';", 'export const value = "noop";'].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk);
+    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("__filename"));
 
     expect(banner).not.toContain("const __filename");
     expect(banner).toContain(
@@ -64,27 +76,19 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("omits the require shim when the chunk binds require", () => {
-    const chunk = [
-      'import { createRequire } from "node:module";',
-      "const require = createRequire(import.meta.url);",
-      'export const value = "noop";',
-    ].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk, { includeRequire: true });
+    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("require"), {
+      includeRequire: true,
+    });
 
     expect(banner).not.toContain("__eveCreateRequire");
     expect(banner).not.toContain("const require");
   });
 
   it("does not treat bundler-suffixed bindings as compatibility globals", () => {
-    const chunk = [
-      "const __filename$1 = '/x/file.js';",
-      "const __dirname$1 = '/x';",
-      "const require$1 = () => {};",
-      'export const value = "noop";',
-    ].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk, { includeRequire: true });
+    const banner = buildNodeEsmCompatBanner(
+      programWithTopLevelBindings("__filename$1", "__dirname$1", "require$1"),
+      { includeRequire: true },
+    );
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).toContain("const __dirname = __eveDirname(__filename);");
@@ -92,15 +96,22 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("ignores nested declarations inside functions", () => {
-    const chunk = [
-      "function inner() {",
-      "  const __dirname = 'shadowed';",
-      "  return __dirname;",
-      "}",
-      "export { inner };",
-    ].join("\n");
-
-    const banner = buildNodeEsmCompatBanner(chunk);
+    const banner = buildNodeEsmCompatBanner({
+      body: [
+        {
+          type: "FunctionDeclaration",
+          body: {
+            type: "BlockStatement",
+            body: [
+              {
+                type: "VariableDeclaration",
+                declarations: [{ id: { type: "Identifier", name: "__dirname" } }],
+              },
+            ],
+          },
+        },
+      ],
+    });
 
     // The chunk has not bound `__dirname` at the top level, so the
     // banner must still provide it.
@@ -110,10 +121,24 @@ describe("buildNodeEsmCompatBanner", () => {
 });
 
 describe("createNodeEsmCompatBannerPlugin", () => {
+  it("omits bindings declared later in a top-level variable list", () => {
+    const plugin = createNodeEsmCompatBannerPlugin({ includeRequire: true });
+    const chunk =
+      "const logs = getLogs(), require = createRequire(import.meta.url), __filename = fileURLToPath(import.meta.url), __dirname = dirname(__filename);";
+
+    expect(
+      renderChunk(
+        plugin,
+        chunk,
+        programWithTopLevelBindings("logs", "require", "__filename", "__dirname"),
+      ),
+    ).toBeNull();
+  });
+
   it("prepends the banner to chunks that need it", () => {
     const plugin = createNodeEsmCompatBannerPlugin();
     const code = 'export const value = "noop";';
-    const result = plugin.renderChunk(code, { fileName: "agent.mjs" });
+    const result = renderChunk(plugin, code, EMPTY_PROGRAM, { fileName: "agent.mjs" });
 
     expect(result).not.toBeNull();
     expect(result?.code).toMatch(/^import \{ fileURLToPath as __eveFileURLToPath \}/);
@@ -130,7 +155,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
   it("maps original chunk lines after the prepended banner", () => {
     const plugin = createNodeEsmCompatBannerPlugin();
     const code = ['const value = "noop";', "export { value };"].join("\n");
-    const result = plugin.renderChunk(code);
+    const result = renderChunk(plugin, code);
 
     expect(result?.map.mappings).toBe(";;;;AAAA;AACA");
   });
@@ -143,6 +168,8 @@ describe("createNodeEsmCompatBannerPlugin", () => {
       'export const value = "noop";',
     ].join("\n");
 
-    expect(plugin.renderChunk(chunk)).toBeNull();
+    expect(
+      renderChunk(plugin, chunk, programWithTopLevelBindings("__filename", "__dirname")),
+    ).toBeNull();
   });
 });

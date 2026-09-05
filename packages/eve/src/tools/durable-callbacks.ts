@@ -3,6 +3,7 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
+  | "approvalKey"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -22,6 +23,7 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
+  readonly approvalKey?: DurableDynamicCallbackReference;
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
   readonly toModelOutput?: DurableDynamicCallbackReference;
@@ -35,6 +37,7 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
+  approvalKey: StampedDurableDynamicCallback;
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
   toModelOutput: StampedDurableDynamicCallback;
@@ -134,6 +137,7 @@ export function stampDurableDynamicToolCallbacks(
 
 export function collectDurableDynamicToolCallbacks(input: {
   readonly approval?: Approval<never>;
+  readonly approvalKey?: (...args: never[]) => unknown;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
@@ -146,10 +150,12 @@ export function collectDurableDynamicToolCallbacks(input: {
       ? undefined
       : readDurableDynamicCallback(input.approval.response);
 
+  const approvalKey = readDurableDynamicCallback(input.approvalKey);
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
+  if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

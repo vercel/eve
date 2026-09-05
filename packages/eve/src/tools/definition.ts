@@ -348,6 +348,7 @@ export function stampToolDefinition<
     readonly description: string;
     readonly execute: (...args: never[]) => unknown;
     readonly approval?: Approval<never>;
+    readonly approvalKey?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -362,6 +363,7 @@ export function stampToolDefinition<
     definition,
     collectDurableDynamicToolCallbacks({
       approval: definition.approval,
+      approvalKey: definition.approvalKey,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

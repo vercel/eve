@@ -53,6 +53,7 @@ async function transformAndEval(
       entry,
       collectDurableDynamicToolCallbacks({
         approval: entry.approval as never,
+        approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),
@@ -2424,5 +2425,34 @@ export default defineDynamic({
 
     expect(code).toContain("const { tag } = __vars");
     expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
+  });
+});
+
+describe("approvalKey callbacks", () => {
+  it("captures input-scoped approval keys for durable replay", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/scoped.ts",
+      `
+      import { defineDynamic, defineTool } from "eve";
+      export default defineDynamic({ events: { "step.started": () => {
+        const prefix = "repo";
+        return { write: defineTool({
+          description: "write",
+          inputSchema: { type: "object" },
+          execute: () => ({ ok: true }),
+          approvalKey: (input) => prefix + ":" + input.branch,
+        }) };
+      } } });
+    `,
+    );
+    const result = await callHandler();
+    const entry = result.write as { approvalKey: (input: unknown) => string };
+    const descriptor = readDurableDynamicCallback(entry.approvalKey)!;
+    expect(descriptor.closure).toEqual({ prefix: "repo" });
+    expect(
+      (descriptor.callback as Function)(JSON.parse(JSON.stringify(descriptor.closure)), {
+        branch: "main",
+      }),
+    ).toBe("repo:main");
   });
 });

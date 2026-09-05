@@ -451,6 +451,8 @@ events: {
 },
 ```
 
+The private authorization button uses the label **Sign in**, so long connection display names do not make the button invalid. The public status identifies the connection.
+
 ### Proactive sessions
 
 Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, installationTeamId?, threadTs?, initialMessage? }`. Set `installationTeamId` to the app installation workspace when a function-form bot token must select an installation. This sends turn input to the agent; it is not a direct Slack post.

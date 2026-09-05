@@ -150,6 +150,10 @@ export default defineOpenAPIConnection({
 
 The parameter `name` must exactly match the placeholder inside the path. If the spec omits an `in: "path"` parameter, the generated tool has no input for that segment and eve cannot fill it in from query parameters.
 
+## Schema annotations
+
+eve removes `default` and `example` annotations when their values conflict with the declared schema type. For example, a boolean property with `default: "false"` loses that annotation, while `default: false` is retained. This prevents invalid examples from guiding model input; eve does not coerce annotation values.
+
 ## Approval gates
 
 Generated operations can mutate state like authored tools. Use the shared connection `approval` option for human approval, and combine it with `operations.allow` for the smallest practical surface. See [Per-connection approval](../connections#per-connection-approval) for the helpers and [Human-in-the-loop](../human-in-the-loop#approvals) for policy behavior.
