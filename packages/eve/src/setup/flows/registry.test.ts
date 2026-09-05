@@ -524,6 +524,34 @@ describe("runRegistryFlow", () => {
     expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
   });
 
+  it("keeps completed installations successful when the post-install prompt is dismissed", async () => {
+    let prompt = 0;
+    const fake = createFakePrompter({
+      single: () => (++prompt === 1 ? "install" : Promise.reject(new WizardCancelledError())),
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "connection/notion",
+        deps: deps({
+          detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+          installRegistryItem: vi.fn(async () => ({
+            output: [],
+            setup: { facts: [], deploymentRequired: true as const },
+          })),
+        }),
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      result: {
+        items: [{ title: "notion", facts: [], output: [] }],
+        failures: [],
+      },
+    });
+  });
+
   it("offers deployment once after the selected batch completes", async () => {
     const answers = ["install", "deploy", "yes"];
     const fake = createFakePrompter({

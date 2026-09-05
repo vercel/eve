@@ -290,6 +290,7 @@ export async function runRegistryFlow(input: {
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<{ kind: "done"; result: RegistrySessionResult } | { kind: "cancelled" }> {
   let session: ReturnType<typeof createRegistrySession> | undefined;
+  let installationsComplete = false;
   try {
     const initialAddress = input.initialAddress?.trim();
     let items: Item[];
@@ -381,6 +382,7 @@ export async function runRegistryFlow(input: {
         }
       }
     }
+    installationsComplete = true;
     return {
       kind: "done",
       result: await activeSession.continueAfterInstall({
@@ -392,9 +394,11 @@ export async function runRegistryFlow(input: {
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       const settled = session?.result();
-      return hasSettledOutcomes(settled)
-        ? { kind: "done", result: { ...settled, cancelled: true } }
-        : { kind: "cancelled" };
+      if (!hasSettledOutcomes(settled)) return { kind: "cancelled" };
+
+      return installationsComplete
+        ? { kind: "done", result: settled }
+        : { kind: "done", result: { ...settled, cancelled: true } };
     }
     const settled = session?.result();
     if (hasSettledOutcomes(settled)) {
