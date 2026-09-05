@@ -155,9 +155,72 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
-`onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+### Interactive callbacks
+
+#### Shortcuts
 
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
+
+#### Block actions
+
+Use `onBlockActions(interaction, ctx)` for non-HITL `block_actions` callbacks from messages, App Home, and modals. It runs once per callback and exposes the normalized actions under `interaction.actions`; each action includes the old `actionId`, `blockId`, `value`, `selectedOptionValue`, and `label` conveniences, plus `type` and the complete Slack action under `raw`.
+
+Message-backed callbacks provide thread and eve session operations such as `cancel`, `reset`, and `send` under `ctx.message`. App Home and modal callbacks have no message context, so use the workspace-scoped `ctx.slack` handle instead.
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onBlockActions(interaction, ctx) {
+    const action = interaction.actions.find(({ actionId }) => actionId === "stop");
+    if (action && ctx.message) await ctx.message.cancel();
+  },
+});
+```
+
+#### Other interactions
+
+Use `onInteraction(interaction, ctx)` as the raw fallback for signed interactive callbacks not consumed by eve's HITL handling, `onBlockActions`, or `onShortcut`. This includes custom `view_submission` callbacks, dynamic select `block_suggestion` requests, `view_closed`, shortcuts when `onShortcut` is absent, and interaction types added by Slack later. `block_actions` also fall through when `onBlockActions` is absent. Slash commands only reach `onSlashCommand`.
+
+The handler receives the complete decoded Slack payload under `interaction.payload`, plus its `type` and normalized `user`, `teamId`, `installationTeamId`, and `enterpriseId` fields when Slack supplies them. The workspace-scoped `ctx.slack` handle resolves credentials from `installationTeamId`, which can differ from the actor's `teamId` in Slack Connect callbacks. Message-backed `block_actions` additionally provide `ctx.message` when they fall through.
+
+The interaction handler runs inline because its response can acknowledge a modal submission or dynamic select request. Return a `Response` when Slack expects an acknowledgement body, or return nothing for an empty `200 OK`. Use `ctx.waitUntil(...)` for work that does not affect the acknowledgement:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onInteraction(interaction, ctx) {
+    if (interaction.type === "block_actions") {
+      const triggerId = interaction.payload.trigger_id;
+      if (typeof triggerId !== "string") return;
+
+      await ctx.slack.request("views.open", {
+        trigger_id: triggerId,
+        view: {
+          type: "modal",
+          callback_id: "configure_review_hours",
+          title: { type: "plain_text", text: "Review hours" },
+          submit: { type: "plain_text", text: "Save" },
+          blocks: [],
+        },
+      });
+      return;
+    }
+
+    if (interaction.type === "view_submission") {
+      return Response.json({
+        response_action: "errors",
+        errors: { review_hours: "Choose at least one hour" },
+      });
+    }
+  },
+});
+```
+
+eve-owned HITL actions and submissions remain reserved and do not reach authored interaction hooks. `onBlockActions` takes precedence for block actions, and `onShortcut` takes precedence for shortcuts; callbacks fall through to `onInteraction` when the corresponding specific hook is absent. A `block_actions` callback containing any eve-owned action remains reserved even when it also contains custom actions.
+
+#### Slash commands
 
 Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access. eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
 
@@ -175,6 +238,8 @@ export default slackChannel({
   },
 });
 ```
+
+### Message handling details
 
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
@@ -296,7 +361,7 @@ export default slackChannel({
 
 Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) also receive thread-bound session operations directly on `ctx`. `ctx.cancel({ turnId? })` remains useful for a Stop button: it cancels without sending replacement input. `"accepted"` means the live thread session durably queued that request; a parked session consumes it as a no-op, and `"no_active_turn"` means the thread has no active session owner.
 
-Message and interaction hooks expose every current-owner operation directly on `ctx`:
+Message hooks expose every current-owner operation directly on `ctx`:
 
 ```ts
 async onAppMention(ctx) {
@@ -311,7 +376,7 @@ async onAppMention(ctx) {
 }
 ```
 
-These calls are independent examples; a handler normally chooses one. `ctx.send()` is the only method that can create a session when the thread is unowned. It derives Slack auth from the inbound user unless `auth` is supplied explicitly. Use `await ctx.resolveSession()` only when later work must stay pinned to the currently owning durable session ID.
+These calls are independent examples; a handler normally chooses one. `ctx.send()` is the only method that can create a session when the thread is unowned. It derives Slack auth from the inbound user unless `auth` is supplied explicitly. Use `await ctx.resolveSession()` only when later work must stay pinned to the currently owning durable session ID. Message-backed interactions expose these operations under `ctx.message`; check that it is present before using them.
 
 #### Reset a conversation
 
@@ -330,7 +395,7 @@ export default slackChannel({
 });
 ```
 
-Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
+Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Message-backed `onBlockActions` and fallback `onInteraction` handlers receive the same operations under `ctx.message`, which is useful for a New conversation button.
 
 ### Other Events API callbacks
 
@@ -380,7 +445,7 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
-`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`, while interactive payloads reach `onBlockActions`, `onShortcut`, `onInteraction`, or eve's HITL handling; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
 
 ### Slack API calls outside a handler
 

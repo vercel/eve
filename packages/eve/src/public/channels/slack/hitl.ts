@@ -147,7 +147,7 @@ function splitEncodedRequest(value: string): {
 /**
  * Returns `true` when the action id was minted by an HITL widget the
  * framework rendered. Used by the channel route to split inbound
- * clicks into the HITL path vs. the user-owned `onInteraction` path.
+ * clicks into the HITL path vs. the user-owned `onBlockActions` path.
  */
 export function isHitlAction(actionId: string): boolean {
   return actionId.startsWith(HITL_ACTION_PREFIX);

@@ -39,8 +39,8 @@ export default slackChannel({
     },
   },
 
-  onInteraction(action, _ctx) {
-    console.log("Feedback:", action.actionId);
+  onBlockActions(interaction, ctx) {
+    console.log("Feedback:", interaction.type, Boolean(ctx.message));
   },
 });
 `,

@@ -39,12 +39,12 @@ import {
   authorizeInputResponse,
 } from "#public/channels/slack/input-response.js";
 import type {
+  SlackBlockActionsInteraction,
   SlackChannelConfig,
   SlackChannelState,
   SlackInputResponseSubmission,
   SlackInteractionAction,
-  SlackInteractionContext,
-  SlackInteractionUser,
+  SlackMessageInteractionContext,
   SlackShortcut,
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
@@ -52,6 +52,16 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
+import {
+  handleAuthoredBlockActions,
+  handleAuthoredInteraction,
+} from "#public/channels/slack/interaction-handler.js";
+import {
+  isObjectRecord,
+  readOptionalString,
+  readSlackInteractionIdentity,
+  readSlackInstallationTeamId,
+} from "#public/channels/slack/interaction-identity.js";
 
 const log = createLogger("slack.interactions");
 
@@ -60,7 +70,7 @@ const log = createLogger("slack.interactions");
  * {@link parseBlockActionsPayload} and read by the handler.
  */
 interface ParsedBlockActionsPayload {
-  readonly actions: SlackInteractionAction[];
+  readonly actions: readonly SlackInteractionAction[];
   readonly channelId: string;
   readonly installationTeamId: string | undefined;
   readonly threadTs: string;
@@ -98,22 +108,9 @@ export function parseBlockActionsPayload(
   const threadTs = message?.thread_ts ?? message?.ts;
   if (!channel || !threadTs) return null;
 
-  // `team` is Required but can be `null` for org-installed apps.
-  // `user` is Required and always carries `id`.
-  const team = rawBody.team as { id: string } | null;
-  const userBlock = rawBody.user as {
-    id: string;
-    team_id?: string;
-    username?: string;
-    name?: string;
-  };
-  const teamId = userBlock.team_id ?? team?.id;
-  const user: SlackInteractionUser = {
-    id: userBlock.id,
-    username: userBlock.username,
-    name: userBlock.name,
-  };
-
+  const identity = readSlackInteractionIdentity(rawBody);
+  const user = identity.user;
+  if (user === undefined) return null;
   const messageBlocks = message?.blocks ?? [];
 
   return {
@@ -121,15 +118,17 @@ export function parseBlockActionsPayload(
       actionId: String(a.action_id ?? ""),
       value: a.value != null ? String(a.value) : undefined,
       blockId: a.block_id != null ? String(a.block_id) : undefined,
+      type: typeof a.type === "string" ? a.type : undefined,
+      raw: a,
       selectedOptionValue: extractSelectedOptionValue(a),
       messageTs: message?.ts,
       label: extractActionLabel(a),
       user,
     })),
     channelId: channel,
-    installationTeamId: readInstallationTeamId(rawBody),
+    installationTeamId: identity.installationTeamId,
     threadTs,
-    teamId,
+    teamId: identity.teamId,
     messageBlocks,
   };
 }
@@ -145,25 +144,45 @@ function parseSharedBlockActionsPayload(
 ): ParsedBlockActionsPayload | null {
   if (!body.channelId || !body.threadTs) return null;
 
+  const normalized = normalizeSharedBlockActions(body);
   return {
+    actions: normalized.actions,
+    channelId: body.channelId,
+    installationTeamId: normalized.installationTeamId,
+    threadTs: body.threadTs,
+    teamId: normalized.teamId,
+    messageBlocks: body.messageBlocks ?? [],
+  };
+}
+
+function normalizeSharedBlockActions(body: SlackBlockActionsPayload): SlackBlockActionsInteraction {
+  const identity = readSlackInteractionIdentity(body.raw);
+  const user = identity.user ?? { id: body.userId };
+  return {
+    type: "block_actions",
     actions: body.actions.map((action) => ({
       actionId: action.actionId,
       value: action.value,
       blockId: action.blockId,
+      type: action.type,
+      raw: action.raw,
       selectedOptionValue: action.selectedOptionValue,
       messageTs: body.messageTs,
       label: action.label,
-      user: {
-        id: action.user?.id ?? body.userId,
-        username: action.user?.username,
-        name: action.user?.name,
-      },
+      user: action.user
+        ? {
+            id: action.user.id,
+            username: action.user.username,
+            name: action.user.name,
+          }
+        : user,
     })),
-    channelId: body.channelId,
-    installationTeamId: readInstallationTeamId(body.raw),
-    threadTs: body.threadTs,
-    teamId: body.user?.teamId ?? body.teamId,
-    messageBlocks: body.messageBlocks ?? [],
+    triggerId: body.triggerId,
+    payload: body.raw,
+    user,
+    teamId: body.user?.teamId ?? identity.teamId ?? body.teamId,
+    installationTeamId: identity.installationTeamId,
+    enterpriseId: identity.enterpriseId ?? body.enterpriseId,
   };
 }
 
@@ -208,29 +227,6 @@ function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefine
   return text.length > 0 ? text : undefined;
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function readInstallationTeamId(value: unknown): string | undefined {
-  if (!isObjectRecord(value)) return undefined;
-  const view = isObjectRecord(value.view) ? value.view : undefined;
-  const team = isObjectRecord(value.team) ? value.team : undefined;
-  const user = isObjectRecord(value.user) ? value.user : undefined;
-  // Slack Connect modal submissions put the installation workspace on the
-  // nested view, so it must win over the workspace that submitted the view.
-  const candidates = [
-    view?.app_installed_team_id,
-    value.app_installed_team_id,
-    team?.id,
-    user?.team_id,
-    view?.team_id,
-  ];
-  return candidates.find(
-    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
-  );
-}
-
 /** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
   readonly config: SlackChannelConfig;
@@ -266,8 +262,17 @@ export async function handleInteractionPost(
     return ack;
   }
 
+  const authoredInteraction = (
+    raw: unknown,
+    type: string,
+    fallbackResponse: Response = ack,
+    message?: SlackMessageInteractionContext,
+  ) => handleAuthoredInteraction(raw, type, ctx.waitUntil, deps.config, fallbackResponse, message);
+
   if (payload.kind === "view_submission") {
-    return handleViewSubmission(payload, ctx, deps);
+    return payload.callbackId === HITL_FREEFORM_MODAL_CALLBACK_ID
+      ? handleViewSubmission(payload, ctx, deps)
+      : authoredInteraction(payload.raw, payload.kind, new Response(null, { status: 200 }));
   }
 
   if (payload.kind === "slash_command") {
@@ -277,21 +282,28 @@ export async function handleInteractionPost(
 
   if (payload.kind === "unsupported") {
     const shortcut = parseShortcutPayload(payload.raw);
-    if (shortcut !== null) {
-      dispatchShortcut(shortcut, readInstallationTeamId(payload.raw), ctx, deps);
+    if (shortcut !== null && deps.config.onShortcut !== undefined) {
+      dispatchShortcut(shortcut, readSlackInstallationTeamId(payload.raw), ctx, deps);
       return new Response(null, { status: 200 });
     }
-    log.warn("unsupported Slack interaction payload ignored", { type: payload.type });
-    return ack;
+    return authoredInteraction(payload.raw, payload.type);
   }
 
   if (payload.kind !== "block_actions") {
-    log.warn("unsupported Slack interaction payload ignored", { type: payload.kind });
-    return ack;
+    return authoredInteraction(payload.raw, payload.kind);
   }
 
+  const blockActions = normalizeSharedBlockActions(payload);
   const interaction = parseBlockActionsPayload(payload);
-  if (!interaction) return ack;
+  if (!interaction) {
+    if (blockActions.actions.some((action) => isHitlAction(action.actionId))) return ack;
+    return handleAuthoredBlockActions({
+      config: deps.config,
+      fallbackResponse: ack,
+      interaction: blockActions,
+      waitUntil: ctx.waitUntil,
+    });
+  }
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
   if (freeformAction) {
@@ -323,52 +335,50 @@ export async function handleInteractionPost(
     );
   }
 
-  const onInteraction = deps.config.onInteraction;
-  if (onInteraction) {
-    const customActions = interaction.actions.filter((a) => !isHitlAction(a.actionId));
-    if (customActions.length > 0) {
-      const actionUser = customActions[0]!.user;
-      const { thread, slack } = buildSlackBinding({
-        botToken: deps.config.credentials?.botToken,
-        channelId: interaction.channelId,
-        threadTs: interaction.threadTs,
-        installationTeamId: interaction.installationTeamId,
-        teamId: interaction.teamId,
-      });
-      const slackCtx: SlackInteractionContext = {
-        ...bindSlackSessionOperations({
-          address: continuationToken,
-          defaultAuth: buildSlackAuthContext({
-            channelId: interaction.channelId,
-            teamId: interaction.teamId,
-            threadTs: interaction.threadTs,
-            userId: actionUser.id,
-            userName: actionUser.username ?? actionUser.name,
-          }),
-          from: ctx.from,
-          resolveSession: ctx.resolveSession,
-          state: {
-            channelId: interaction.channelId,
-            installationTeamId: interaction.installationTeamId ?? null,
-            teamId: interaction.teamId ?? null,
-            threadTs: interaction.threadTs,
-            triggeringUserId: actionUser.id,
-          },
-        }),
-        thread,
-        slack,
-      };
-      for (const action of customActions) {
-        ctx.waitUntil(
-          Promise.resolve(onInteraction(action, slackCtx)).catch((error: unknown) => {
-            log.error("custom interaction handler failed", { error });
-          }),
-        );
-      }
-    }
-  }
+  // A callback containing any eve-owned action stays reserved even when it
+  // also contains custom actions, since onInteraction receives the raw payload.
+  if (hitlActions.length > 0) return ack;
 
-  return ack;
+  const customAction = interaction.actions.find((action) => !isHitlAction(action.actionId));
+  if (customAction === undefined) return ack;
+
+  const { thread, slack } = buildSlackBinding({
+    botToken: deps.config.credentials?.botToken,
+    channelId: interaction.channelId,
+    threadTs: interaction.threadTs,
+    installationTeamId: interaction.installationTeamId,
+    teamId: interaction.teamId,
+  });
+  const message: SlackMessageInteractionContext = {
+    ...bindSlackSessionOperations({
+      address: continuationToken,
+      defaultAuth: buildSlackAuthContext({
+        channelId: interaction.channelId,
+        teamId: interaction.teamId,
+        threadTs: interaction.threadTs,
+        userId: customAction.user.id,
+        userName: customAction.user.username ?? customAction.user.name,
+      }),
+      from: ctx.from,
+      resolveSession: ctx.resolveSession,
+      state: {
+        channelId: interaction.channelId,
+        installationTeamId: interaction.installationTeamId ?? null,
+        teamId: interaction.teamId ?? null,
+        threadTs: interaction.threadTs,
+        triggeringUserId: customAction.user.id,
+      },
+    }),
+    thread,
+    slack,
+  };
+  return handleAuthoredBlockActions({
+    config: deps.config,
+    fallbackResponse: ack,
+    interaction: blockActions,
+    message,
+    waitUntil: ctx.waitUntil,
+  });
 }
 
 /** Normalizes Slack's two shortcut payload variants. */
@@ -379,17 +389,12 @@ export function parseShortcutPayload(raw: unknown): SlackShortcut | null {
 
   const callbackId = readRequiredString(raw.callback_id);
   const triggerId = readRequiredString(raw.trigger_id);
-  const userBlock = isObjectRecord(raw.user) ? raw.user : undefined;
-  const userId = readRequiredString(userBlock?.id);
-  if (callbackId === null || triggerId === null || userId === null) return null;
+  if (callbackId === null || triggerId === null) return null;
 
-  const teamBlock = isObjectRecord(raw.team) ? raw.team : undefined;
-  const teamId = readOptionalString(userBlock?.team_id) ?? readOptionalString(teamBlock?.id);
-  const user: SlackInteractionUser = {
-    id: userId,
-    username: readOptionalString(userBlock?.username),
-    name: readOptionalString(userBlock?.name),
-  };
+  const identity = readSlackInteractionIdentity(raw);
+  const teamId = identity.teamId;
+  const user = identity.user;
+  if (user === undefined) return null;
 
   if (type === "shortcut") {
     return { type, callbackId, triggerId, user, teamId };
@@ -420,10 +425,6 @@ export function parseShortcutPayload(raw: unknown): SlackShortcut | null {
 
 function readRequiredString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function dispatchShortcut(
@@ -585,8 +586,6 @@ async function handleViewSubmission(
 ): Promise<Response> {
   // Slack view submissions require an empty 200 body to close the modal.
   const ack = new Response(null, { status: 200 });
-  if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) return ack;
-
   let metadata: HitlFreeformModalMetadata;
   try {
     metadata = JSON.parse(payload.privateMetadata ?? "") as HitlFreeformModalMetadata;
@@ -617,7 +616,8 @@ async function handleViewSubmission(
   const user = payload.user;
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
-  const installationTeamId = metadata.installationTeamId ?? readInstallationTeamId(payload.raw);
+  const installationTeamId =
+    metadata.installationTeamId ?? readSlackInstallationTeamId(payload.raw);
   const submission: SlackInputResponseSubmission = {
     type: "view_submission",
     inputResponses: [parseInputResponse({ requestId: metadata.requestId, text })],

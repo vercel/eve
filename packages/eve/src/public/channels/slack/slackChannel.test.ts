@@ -37,6 +37,7 @@ import {
   type SlackInboundEventContext,
   type SlackInputResponseContext,
   type SlackInputResponseSubmission,
+  type SlackMessageInteractionContext,
   type SlackInteractionContext,
   type SlackChannelState,
   type SlackEventContext,
@@ -45,7 +46,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function slackRespondTypeChecks(
-  interaction: SlackInteractionContext,
+  interaction: SlackMessageInteractionContext,
   event: SlackInboundEventContext,
 ): void {
   const widened: readonly InputResponse[] = [{ optionId: "approve", requestId: "approval-1" }];
@@ -2933,12 +2934,188 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
   });
 
-  it("cancels the interaction's Slack thread from onInteraction", async () => {
+  it("uses onShortcut before the interaction handler", async () => {
+    const onShortcut = vi.fn();
+    const onInteraction = vi.fn();
+    const payload = {
+      type: "shortcut",
+      callback_id: "new_request",
+      trigger_id: "trigger-456",
+      team: { id: "T01" },
+      user: { id: "U01" },
+    };
+
+    await firePost(
+      slackChannel({ onInteraction, onShortcut }),
+      buildSignedInteractionRequest(payload),
+    );
+
+    expect(onShortcut).toHaveBeenCalledOnce();
+    expect(onInteraction).not.toHaveBeenCalled();
+  });
+
+  it("falls shortcuts through when onShortcut is absent", async () => {
+    const onInteraction = vi.fn();
+    const payload = {
+      type: "shortcut",
+      callback_id: "new_request",
+      trigger_id: "trigger-456",
+      team: { id: "T01" },
+      user: { id: "U01" },
+    };
+
+    await firePost(slackChannel({ onInteraction }), buildSignedInteractionRequest(payload));
+
+    expect(onInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "shortcut", payload }),
+      expect.any(Object),
+    );
+  });
+
+  it("handles view-backed block actions through onBlockActions inline", async () => {
+    const detached = Promise.resolve();
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onBlockActions = vi.fn(async (interaction, ctx: SlackInteractionContext) => {
+      expect(interaction.type).toBe("block_actions");
+      expect(interaction.actions).toMatchObject([
+        { actionId: "configure", type: "button", value: "hours" },
+      ]);
+      expect(interaction.triggerId).toBe("trigger-123");
+      expect(interaction.payload).toMatchObject({
+        actions: [{ action_id: "configure" }],
+        trigger_id: "trigger-123",
+        view: { id: "V01", type: "home" },
+      });
+      expect(ctx.slack.teamId).toBe("T_ACTOR");
+      expect(ctx.message).toBeUndefined();
+      ctx.waitUntil(detached);
+      await ctx.slack.request("views.open", {
+        trigger_id: "trigger-123",
+        view: { type: "modal", title: { type: "plain_text", text: "Configure" } },
+      });
+    });
+    const channel = slackChannel({ credentials: { botToken }, onBlockActions });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        trigger_id: "trigger-123",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        view: { id: "V01", type: "home" },
+        actions: [{ action_id: "configure", type: "button", value: "hours" }],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onBlockActions).toHaveBeenCalledOnce();
+    expect(waitUntil).toHaveBeenCalledWith(detached);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/views.open");
+  });
+
+  it("delivers one normalized payload for multiple custom actions", async () => {
+    const onBlockActions = vi.fn();
+    const channel = slackChannel({ onBlockActions });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        channel: { id: "C01" },
+        message: { ts: "1700000000.000010", blocks: [] },
+        actions: [{ action_id: "first" }, { action_id: "second" }],
+      }),
+    );
+
+    expect(onBlockActions).toHaveBeenCalledOnce();
+    expect(onBlockActions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actions: [
+          expect.objectContaining({ actionId: "first", raw: { action_id: "first" } }),
+          expect.objectContaining({ actionId: "second", raw: { action_id: "second" } }),
+        ],
+      }),
+      expect.objectContaining({ message: expect.any(Object) }),
+    );
+  });
+
+  it("uses onBlockActions before onInteraction", async () => {
+    const onBlockActions = vi.fn();
+    const onInteraction = vi.fn();
+
+    await firePost(
+      slackChannel({ onBlockActions, onInteraction }),
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        view: { id: "V01", type: "home" },
+        actions: [{ action_id: "configure", type: "button" }],
+      }),
+    );
+
+    expect(onBlockActions).toHaveBeenCalledOnce();
+    expect(onInteraction).not.toHaveBeenCalled();
+  });
+
+  it("falls block actions through to onInteraction", async () => {
+    const onInteraction = vi.fn();
+
+    await firePost(
+      slackChannel({ onInteraction }),
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        view: { id: "V01", type: "home" },
+        actions: [{ action_id: "configure", type: "button" }],
+      }),
+    );
+
+    expect(onInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "block_actions" }),
+      expect.objectContaining({ message: undefined }),
+    );
+  });
+
+  it("reserves mixed HITL and custom actions from onBlockActions", async () => {
+    const onBlockActions = vi.fn();
+    const channel = slackChannel({ onBlockActions });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U_APPROVER" },
+        channel: { id: "C01" },
+        message: { ts: "1700000000.000010", blocks: [] },
+        actions: [
+          {
+            action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+            value: "approve",
+          },
+          { action_id: "custom", type: "button" },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(onBlockActions).not.toHaveBeenCalled();
+  });
+
+  it("cancels the interaction's Slack thread from onBlockActions", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onInteraction(action, ctx) {
-        expect(action.actionId).toBe("stop");
-        await ctx.cancel({ turnId: "turn_observed" });
+      async onBlockActions(interaction, ctx) {
+        expect(interaction.actions).toMatchObject([{ actionId: "stop" }]);
+        if (!ctx.message) throw new Error("expected message context");
+        await ctx.message.cancel({ turnId: "turn_observed" });
       },
     });
 
@@ -2975,10 +3152,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
     const channel = slackChannel({
       credentials: { botToken },
-      async onInteraction(_action, ctx) {
+      async onBlockActions(_interaction, ctx) {
         expect(ctx.slack.teamId).toBe("T_ACTOR");
+        if (!ctx.message) throw new Error("expected message context");
+        expect(ctx.message.slack.teamId).toBe("T_ACTOR");
         await ctx.slack.request("auth.test", {});
-        await ctx.send("inspect result");
+        await ctx.message.send("inspect result");
       },
     });
 
@@ -3005,12 +3184,13 @@ describe("slackChannel() HITL interaction pipeline", () => {
     });
   });
 
-  it("resets the interaction's Slack thread from onInteraction", async () => {
+  it("resets the interaction's Slack thread from onBlockActions", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onInteraction(action, ctx) {
-        expect(action.actionId).toBe("new-conversation");
-        await ctx.reset({ reason: "New conversation button clicked" });
+      async onBlockActions(interaction, ctx) {
+        expect(interaction.actions).toMatchObject([{ actionId: "new-conversation" }]);
+        if (!ctx.message) throw new Error("expected message context");
+        await ctx.message.reset({ reason: "New conversation button clicked" });
       },
     });
 
@@ -3146,6 +3326,27 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(JSON.parse(body.view.private_metadata)).toMatchObject({
       installationTeamId: "T_INSTALLATION",
     });
+  });
+
+  it("routes custom view submissions through onInteraction", async () => {
+    const onInteraction = vi.fn(() => Response.json({ response_action: "clear" }));
+    const channel = slackChannel({ onInteraction });
+
+    const { response } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        view: { callback_id: "custom", state: { values: {} } },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ response_action: "clear" });
+    expect(onInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "view_submission" }),
+      expect.any(Object),
+    );
   });
 
   it("authorizes HITL button answers before resuming with the returned auth", async () => {
