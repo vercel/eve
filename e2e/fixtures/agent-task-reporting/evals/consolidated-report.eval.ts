@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 const TASK_COUNT = 3;
 const MIN_BACKGROUND_TASKS = 2;
-const RESULTS = ["WAKE-MECHANISM", "CHANNEL-DELIVERY", "REPORTING-POLICY"] as const;
+const RESULTS = [/\boranges\b/iu, /\bpears\b/iu, /\bapples\b/iu];
 const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 function reportingEval() {
@@ -13,7 +13,7 @@ function reportingEval() {
     tags: ["real-model"],
     async test(t) {
       const started =
-        await t.send(`Please investigate these three independent checks using the built-in agent tool. Start all three in the background without waiting for their results. Delegate the checks instead of calling probe yourself.
+        await t.send(`Please find the inventory item at each of our three sample warehouses using the built-in agent tool. Start all three lookups in the background without waiting for their results. Delegate the lookups instead of calling probe yourself.
 
 1. "Call probe with check=first and report its result value."
 2. "Call probe with check=second and report its result value."
@@ -34,7 +34,7 @@ function reportingEval() {
           (message: unknown) =>
             typeof message === "string" &&
             message.trim().length > 0 &&
-            RESULTS.every((result) => !message.includes(result)),
+            RESULTS.every((result) => !result.test(message)),
           "the initiating turn acknowledges work without claiming results",
         ),
       );
@@ -110,7 +110,7 @@ function reportingEval() {
         finalReport,
         satisfies(
           (message: unknown) =>
-            typeof message === "string" && RESULTS.every((result) => message.includes(result)),
+            typeof message === "string" && RESULTS.every((result) => result.test(message)),
           "settled tasks produce a complete user-facing report",
         ),
       );

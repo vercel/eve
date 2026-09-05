@@ -7,24 +7,21 @@ import {
 } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-const ALICE_WORKSPACE_LABEL = "ALICE_WORKSPACE_LABEL_7K4M";
-const BOB_WORKSPACE_LABEL = "BOB_WORKSPACE_LABEL_9P2R";
+const ALICE_WORKSPACE_LABEL = "Maple Studio";
+const BOB_WORKSPACE_LABEL = "Cedar Workshop";
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 const CHILD_MESSAGE = [
-  "[workspace-label:child] Call read-workspace-label to check your current workspace access.",
-  "If it succeeds, reply with only its workspaceLabel value.",
-  "If it fails, reply with only NO_WORKSPACE_ACCESS.",
+  "Call read-workspace-label to look up the workspace name for the current caller.",
+  "Report the returned name, or explain if access is denied.",
 ].join(" ");
 const CREATE_CHILD_MESSAGE = [
-  "[workspace-label:create] Use remote-loopback with this message:",
+  "Use remote-loopback with this message:",
   JSON.stringify(CHILD_MESSAGE),
-  "Reply with only the child's output.",
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
-  "[workspace-label:continue] Continue that same remote-loopback agent using its agentId with this message:",
+  "Continue that same remote-loopback agent using its agentId with this message:",
   JSON.stringify(CHILD_MESSAGE),
-  "Reply with only the child's output.",
 ].join(" ");
 
 /** Three users resume one remote child; each tool call resolves only its current caller's workspace membership. */
