@@ -24,9 +24,13 @@ export function codeModeBridgeRequestLimit(maxSubagents: number): number {
 }
 
 const ORCHESTRATION_INSTRUCTION =
-  "Complete the task in one execution program: keep dependent calls, loops, retries, parallel work, and final writes together. " +
-  "Discover all needed schemas before execution; discovery-only programs may precede the execution program. " +
-  "If a program fails, correct it and retry.";
+  "Keep related tool calls and data processing together in one program and return what the user needs. " +
+  "Reuse fetched results; avoid repeated fetches and duplicate computation.";
+
+const EAGER_SELECTION_INSTRUCTION =
+  "Prefer code_mode for dependent lookups, pagination, loops, or filtering and aggregating tool results. " +
+  "Prefer direct tools when a single call or native batch already produces the needed result with little further processing. " +
+  "Use the supplied tool schemas without unnecessary discovery.";
 
 const DISCOVERY_INSTRUCTION =
   "Use tools.search_tools and tools.describe_tools to discover every available tool. " +
@@ -35,7 +39,7 @@ const DISCOVERY_INSTRUCTION =
 export type { CodeModeMode };
 
 /**
- * Moves eligible tools behind the framework `code_mode` workflow tool.
+ * Exposes eligible tools through `code_mode`, retaining direct calls in eager mode.
  *
  * The discovery catalog and callable names are pinned into `executeInput`, so
  * the durable body sees the same names and schemas after a resume. Nothing here
@@ -64,6 +68,7 @@ export async function applyCodeModeTool(input: {
   for (const [name, tool] of Object.entries(input.tools)) {
     if (claimsForCodeMode(name, input.harnessTools)) {
       hostTools[name] = tool;
+      if (input.mode === "eager") modelTools[name] = tool;
     } else if (name !== CODE_MODE_TOOL_NAME) {
       modelTools[name] = tool;
     }
@@ -91,7 +96,7 @@ export async function applyCodeModeTool(input: {
   const generatedDescription =
     input.mode === "lazy"
       ? lazyDescription(generated, toolCatalog)
-      : `${ORCHESTRATION_INSTRUCTION}\n\n${DISCOVERY_INSTRUCTION}\n\n${generated.description ?? ""}`;
+      : `${EAGER_SELECTION_INSTRUCTION}\n\n${ORCHESTRATION_INSTRUCTION}\n\nTools marked requiresDirectCall must be called directly outside this program.\n\n${generated.description ?? ""}`;
   const description = `${generatedDescription}\n\nA program may invoke at most ${maxSubagents} subagents in total, including retries and continuations. Excess calls reject with CODE_MODE_SUBAGENT_LIMIT_REACHED.`;
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeModelTool,

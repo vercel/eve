@@ -3,11 +3,16 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 /**
- * Deterministic script: each directive names the program `code_mode` should
- * run; once the turn holds the `code_mode` result the reply echoes it.
+ * Deterministic script covering direct calls and code_mode programs.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
+  if (message.includes("CODEMODE-DIRECT-START")) {
+    const direct = request.toolResults.find((entry) => entry.id === "CODEMODE-DIRECT");
+    return direct === undefined
+      ? { toolCalls: [{ id: "CODEMODE-DIRECT", input: { value: "direct" }, name: "echo" }] }
+      : `CODEMODE-DIRECT-RESULT ${direct.output}`;
+  }
   let result: MockModelRequest["toolResults"][number] | undefined;
   const echo = (): string =>
     `${directive}-RESULT ${
@@ -64,7 +69,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     const direct = request.tools.map((tool) => tool.name).sort();
     js = [
       "const catalog = await tools.search_tools({});",
-      "const direct = catalog.filter(tool => tool.requiresDirectCall).map(tool => tool.name).sort();",
+      "const direct = catalog.map(tool => tool.name).sort();",
       `const complete = JSON.stringify(direct) === JSON.stringify(${JSON.stringify(direct)});`,
       'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
       'return { complete, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
@@ -74,8 +79,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (!request.toolResults.some((entry) => entry.name === "connection_search")) {
       return { toolCalls: [{ name: "connection_search", input: { keywords: "status" } }] };
     }
-    if (request.tools.some((tool) => tool.name === "catalog__getStatus")) {
-      throw new Error("Discovered never-approved connection tool stayed direct.");
+    if (!request.tools.some((tool) => tool.name === "catalog__getStatus")) {
+      throw new Error("Eager mode hid the discovered connection tool.");
     }
     // The inline spec tests discovery without making an external API request.
     js =
