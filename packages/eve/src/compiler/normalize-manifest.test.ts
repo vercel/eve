@@ -154,6 +154,7 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.config.defaultTools).toBe(false);
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
+    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_search"]);
     expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
       "Application-owned shell replacement.",
     );

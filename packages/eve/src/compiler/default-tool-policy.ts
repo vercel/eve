@@ -2,6 +2,8 @@ import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import type { PhaseOneNodeSourceState } from "#compiler/node-source-state.js";
 import { canonicalSourceSlot, composeAgentModuleCandidates } from "#compiler/source-graph.js";
 
+const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
+
 export function applyDefaultToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
   config: CompiledAgentDefinition,
@@ -19,6 +21,7 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
+        REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
         overriddenSlots.has(slot)
       );
     }),

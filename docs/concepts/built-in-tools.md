@@ -21,6 +21,8 @@ The default shell and file tools (`bash`, `read_file`, and `write_file`) run in 
 | `todo`              | Maintain a durable per-session todo list.                                                                                                                                                                           | App runtime   |
 | `ask_question`      | Ask the user a clarifying question or a choice mid-turn and park until they answer. No `execute`; the model calls it with `{ prompt, options?, allowFreeform? }`. See [Human-in-the-loop](/docs/human-in-the-loop). | App runtime   |
 | `agent`             | From the root session, delegate a subtask to a fresh copy of the root agent.                                                                                                                                        | App runtime   |
+| `task_cancel`       | Cancel background tasks from the root session.                                                                                                                                                                      | App runtime   |
+| `task_update`       | Report progress from a background task to its parent.                                                                                                                                                               | App runtime   |
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
 
@@ -36,9 +38,9 @@ Notes:
 
 Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
-### Disable all default tools
+### Disable optional default tools
 
-Default tools are enabled unless you set `defaultTools: false` in `agent/agent.ts`:
+Optional default tools are enabled unless you set `defaultTools: false` in `agent/agent.ts`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -49,7 +51,25 @@ export default defineAgent({
 });
 ```
 
-This setting removes only the tools eve adds automatically. Files under `agent/tools/` still add their tools, including same-name replacements such as `agent/tools/bash.ts`. You can also add the opt-in framework tools described below.
+This turns off the optional defaults. eve still adds `connection_search` when the agent has connections because it provides access to their tools. Files under `agent/tools/` also remain available, including same-name replacements such as `agent/tools/bash.ts`.
+
+Re-add any removed tool with a one-line file:
+
+| Tool           | File                          | Contents                                            |
+| -------------- | ----------------------------- | --------------------------------------------------- |
+| `agent`        | `agent/tools/agent.ts`        | `export { default } from "eve/tools/agent";`        |
+| `ask_question` | `agent/tools/ask_question.ts` | `export { default } from "eve/tools/ask_question";` |
+| `bash`         | `agent/tools/bash.ts`         | `export { default } from "eve/tools/bash";`         |
+| `load_skill`   | `agent/tools/load_skill.ts`   | `export { default } from "eve/tools/load_skill";`   |
+| `read_file`    | `agent/tools/read_file.ts`    | `export { default } from "eve/tools/read_file";`    |
+| `task_cancel`  | `agent/tools/task_cancel.ts`  | `export { default } from "eve/tools/task_cancel";`  |
+| `task_update`  | `agent/tools/task_update.ts`  | `export { default } from "eve/tools/task_update";`  |
+| `todo`         | `agent/tools/todo.ts`         | `export { default } from "eve/tools/todo";`         |
+| `web_fetch`    | `agent/tools/web_fetch.ts`    | `export { default } from "eve/tools/web_fetch";`    |
+| `web_search`   | `agent/tools/web_search.ts`   | `export { default } from "eve/tools/web_search";`   |
+| `write_file`   | `agent/tools/write_file.ts`   | `export { default } from "eve/tools/write_file";`   |
+
+You can also add the opt-in framework tools described below.
 
 ## Add framework-provided tools
 
@@ -94,16 +114,21 @@ export default defineTool({
 
 Import each reusable definition from its own subpath:
 
-| Definition  | Import                 | Registered by default |
-| ----------- | ---------------------- | --------------------- |
-| `bash`      | `eve/tools/bash`       | Yes                   |
-| `readFile`  | `eve/tools/read_file`  | Yes                   |
-| `writeFile` | `eve/tools/write_file` | Yes                   |
-| `todo`      | `eve/tools/todo`       | Yes                   |
-| `webFetch`  | `eve/tools/web_fetch`  | Yes                   |
-| `loadSkill` | `eve/tools/load_skill` | Yes                   |
-| `glob`      | `eve/tools/glob`       | No                    |
-| `grep`      | `eve/tools/grep`       | No                    |
+| Definition         | Import                        | Registered by default |
+| ------------------ | ----------------------------- | --------------------- |
+| `bash`             | `eve/tools/bash`              | Yes                   |
+| `readFile`         | `eve/tools/read_file`         | Yes                   |
+| `writeFile`        | `eve/tools/write_file`        | Yes                   |
+| `todo`             | `eve/tools/todo`              | Yes                   |
+| `webFetch`         | `eve/tools/web_fetch`         | Yes                   |
+| `loadSkill`        | `eve/tools/load_skill`        | Yes                   |
+| `connectionSearch` | `eve/tools/connection_search` | With connections      |
+| `agent`            | `eve/tools/agent`             | Yes                   |
+| `askQuestion`      | `eve/tools/ask_question`      | Yes                   |
+| `taskCancel`       | `eve/tools/task_cancel`       | Yes                   |
+| `taskUpdate`       | `eve/tools/task_update`       | Yes                   |
+| `glob`             | `eve/tools/glob`              | No                    |
+| `grep`             | `eve/tools/grep`              | No                    |
 
 Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` does not inherit the default's durable state key.
 
@@ -119,7 +144,7 @@ Set `provider` to `"exa"` or `"parallel"`. Without this file, AI Gateway models 
 
 ## Disable default tools
 
-Set `defaultTools: false` in `agent/agent.ts` to remove every default at once, as described in [Disable all default tools](#disable-all-default-tools). Tools under `agent/tools/` remain available.
+Set `defaultTools: false` in `agent/agent.ts` to remove the optional defaults at once, as described in [Disable optional default tools](#disable-optional-default-tools). `connection_search` remains available when the agent has connections, and tools under `agent/tools/` remain available.
 
 To remove one default, export a `disableTool()` sentinel from a file named after the tool's slug. The filename picks the default to remove:
 

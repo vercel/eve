@@ -131,6 +131,16 @@
       "import": "./dist/src/public/tools/index.js",
       "default": "./dist/src/public/tools/index.js"
     },
+    "./tools/agent": {
+      "types": "./dist/src/public/tools/agent.d.ts",
+      "import": "./dist/src/public/tools/agent.js",
+      "default": "./dist/src/public/tools/agent.js"
+    },
+    "./tools/ask_question": {
+      "types": "./dist/src/public/tools/ask-question.d.ts",
+      "import": "./dist/src/public/tools/ask-question.js",
+      "default": "./dist/src/public/tools/ask-question.js"
+    },
     "./tools/bash": {
       "types": "./dist/src/public/tools/bash.d.ts",
       "import": "./dist/src/public/tools/bash.js",
@@ -165,6 +175,21 @@
       "types": "./dist/src/public/tools/load-skill.d.ts",
       "import": "./dist/src/public/tools/load-skill.js",
       "default": "./dist/src/public/tools/load-skill.js"
+    },
+    "./tools/connection_search": {
+      "types": "./dist/src/public/tools/connection-search.d.ts",
+      "import": "./dist/src/public/tools/connection-search.js",
+      "default": "./dist/src/public/tools/connection-search.js"
+    },
+    "./tools/task_cancel": {
+      "types": "./dist/src/public/tools/task-cancel.d.ts",
+      "import": "./dist/src/public/tools/task-cancel.js",
+      "default": "./dist/src/public/tools/task-cancel.js"
+    },
+    "./tools/task_update": {
+      "types": "./dist/src/public/tools/task-update.d.ts",
+      "import": "./dist/src/public/tools/task-update.js",
+      "default": "./dist/src/public/tools/task-update.js"
     },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",

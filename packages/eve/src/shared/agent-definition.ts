@@ -301,8 +301,9 @@ type PublicAgentDefinitionBase = {
   readonly build?: AgentBuildDefinition;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**
-   * Whether eve automatically adds its default tools. Defaults to `true`.
-   * Tools authored under `agent/tools/` remain available when this is `false`.
+   * Whether eve automatically adds its optional default tools. Defaults to `true`.
+   * Required connection tooling and tools authored under `agent/tools/` remain
+   * available when this is `false`.
    */
   readonly defaultTools?: boolean;
   /**
