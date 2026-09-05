@@ -7,7 +7,7 @@ const MULTI_STEP_FINAL_VALUE = "phoenix-rising-9F2X";
 // user-visible reply.
 export default defineEval({
   tags: ["real-model"],
-  description: "Static tools smoke: deterministic two-step tool loop.",
+  description: "Static tools smoke: batched deterministic two-step tool loop.",
   async test(t) {
     await t.send(
       [
