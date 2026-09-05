@@ -17,7 +17,7 @@ describe("defineWorkflowTool", () => {
       async execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        // @ts-expect-error Workflow bodies do not have turn-owned token access.
+        // Token capabilities are available when this context is passed into a step.
         void ctx.getToken;
         // @ts-expect-error Workflow bodies do not have a session sandbox.
         void ctx.getSandbox;

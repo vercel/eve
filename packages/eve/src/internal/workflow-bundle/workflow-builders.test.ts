@@ -104,7 +104,9 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.code).toContain(
       'import { registerStepFunction } from "workflow/internal/private";',
     );
-    expect(transformed.code).toContain('registerStepFunction("step//./steps/ping//ping", ping);');
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./steps/ping//ping", withWorkflowStepAuthorization(ping));',
+    );
     expect(transformed.code).not.toContain('"use step"');
   });
 
@@ -128,7 +130,7 @@ describe("applyWorkflowTransform", () => {
     );
 
     expect(transformed.code).toContain(
-      'export var localStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep");',
+      'export var localStep = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep"));',
     );
     expect(transformed.code).toContain('export const TASK_KIND = "task";');
     expect(transformed.code).toContain("export const RETRY_OFFSET = -1;");
@@ -210,7 +212,7 @@ describe("applyWorkflowTransform", () => {
     });
     expect(transformed.code).toContain("async function runWorkflowLoop");
     expect(transformed.code).toContain(
-      'var notifyDelegatedParentStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep");',
+      'var notifyDelegatedParentStep = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep"));',
     );
     expect(transformed.code).not.toContain("step//./src/execution/workflow-entry//runWorkflowLoop");
   });
@@ -315,7 +317,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
       },
     });
     expect(transformed.code).toContain(
-      'var planDeploy = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy");',
+      'var planDeploy = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy"));',
     );
     expect(transformed.code).toContain(
       'globalThis.__private_workflows.set("workflow//./agent/tools/deploy//execute", execute);',
@@ -358,7 +360,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     );
 
     expect(transformed.code).toContain(
-      'registerStepFunction("step//./agent/tools/deploy//planDeploy", planDeploy);',
+      'registerStepFunction("step//./agent/tools/deploy//planDeploy", withWorkflowStepAuthorization(planDeploy));',
     );
     expect(transformed.code).toContain(
       'execute.workflowId = "workflow//./agent/tools/deploy//execute";',
@@ -425,7 +427,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
     expect(transformed.code).toContain("export function formatPlan(plan: string): string {");
     expect(transformed.code).toContain(
-      'export var hashPlan = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/lib/steps//hashPlan");',
+      'export var hashPlan = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/lib/steps//hashPlan"));',
     );
     expect(transformed.code).not.toContain("node:crypto");
   });

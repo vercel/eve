@@ -209,6 +209,16 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
 export function createAuthorizationAttempt(
   name: string,
 ): { readonly attemptId: string; readonly hookUrl: string } | undefined {
+  const workflowAttempt = loadContext().get(WorkflowAuthorizationAttemptKey);
+  if (workflowAttempt !== undefined) {
+    return {
+      attemptId: workflowAttempt.token,
+      hookUrl: createWorkflowCallbackUrl(
+        workflowAttempt.baseUrl,
+        createEveConnectionCallbackRoutePath(name, workflowAttempt.token, workflowAttempt.token),
+      ),
+    };
+  }
   const attemptId = createUlid();
   const hookUrl = getHookUrl(name, attemptId);
   return hookUrl === undefined ? undefined : { attemptId, hookUrl };
@@ -294,6 +304,12 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
  * metadata.
  */
 export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
+
+/** Step-local callback address owned by an authored workflow, not an agent turn. */
+export const WorkflowAuthorizationAttemptKey = new ContextKey<{
+  readonly baseUrl: string;
+  readonly token: string;
+}>("eve.workflowAuthorizationAttempt");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

@@ -172,6 +172,8 @@ async function handleWorkflowToolRunRequest(
         sessionState: cursor.sessionState,
       }),
     );
+    if (message.request.stepAuthorization === true)
+      await resumeHookStep(message.replyTo, null, { ifPresent: true });
     return;
   }
   await cursor.adopt(

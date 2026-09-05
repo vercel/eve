@@ -16,6 +16,20 @@ export async function acceptTaskAuthorizationEventStep(input: {
   const entry = findSessionTaskEntry(durableSession.state, taskId);
   if (entry === undefined) return false;
 
+  if (
+    entry.metadata.kind === "tool" &&
+    entry.taskRunId === hookPayload.childSessionId &&
+    entry.metadata.name === hookPayload.subagentName &&
+    entry.createdByTurnId === hookPayload.event.data.turnId
+  ) {
+    const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+    // Completion can arrive after the body has returned; its sign-in UI must still close.
+    return (
+      view !== undefined &&
+      (hookPayload.event.type === "authorization.completed" || !isTerminalTaskStatus(view.status))
+    );
+  }
+
   const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
   const claimed = handles.find(
     (candidate) =>

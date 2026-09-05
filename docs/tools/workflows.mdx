@@ -79,8 +79,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, and `ask`.
-  `getSandbox`, `getSkill`, `getToken`, and `requireAuth` are not part of `WorkflowToolContext`.
-  Read credentials from `process.env` in a step; session-scoped workflow authorization is not yet available.
+  `getToken` and `requireAuth` work inside a `"use step"` helper that receives `ctx` as a direct argument;
+  they throw in the workflow body. `getSandbox` and `getSkill` remain unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -147,6 +147,45 @@ Answering resumes the body in either mode.
 `yield` itself does not wait for approval or switch a tool into background execution. An ordinary
 Promise or Node.js timer inside a step also does not create a durable workflow suspension; use
 the workflow operations for waits that must survive a restart.
+
+## Authorize inside a step
+
+Pass `ctx` directly to a step helper and call `ctx.getToken(provider)` there. User-scoped providers
+resolve as whoever launched this workflow tool, even if another person speaks in the session while it waits.
+The provider declaration and the API request both stay inside the step:
+
+```ts
+import { connect } from "@vercel/connect/eve";
+import type { WorkflowToolContext } from "eve/tools";
+
+async function readRepository(ctx: WorkflowToolContext, repository: string) {
+  "use step";
+  const provider = connect("github/my-agent");
+  const { token } = await ctx.getToken(provider);
+  const response = await fetch(`https://api.github.com/repos/${repository}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401) ctx.requireAuth(provider);
+  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+  return response.json();
+}
+```
+
+The workflow body calls `await readRepository(ctx, repository)`. Do not return the token from the
+helper: step results enter the workflow's durable history. eve's token cache stays inside the step.
+
+When sign-in is required, the step attempt ends and the workflow waits on its own callback hook,
+without holding compute. The channel renders the sign-in challenge. After the callback, eve retries
+**the whole interrupted step**, resolves the token, and continues. Previously completed steps are
+not rerun. Resolve auth before other side effects in that step, and make operations before
+`requireAuth` safe to retry. A token rejected immediately after sign-in fails instead of prompting
+again. Provider declarations can be shared imports, but context must be passed directly, not nested
+inside another argument or captured in a closure.
+
+A background task becomes `input_required` during sign-in. The callback resumes that task; it does
+not rely on the launching agent turn still being active. Cancelling an authorization wait withdraws
+its callback. Cancellation uses the existing turn or task cancellation path rather than a separate
+authorization completion event.
 
 ## Ask a human: `ctx.ask`
 

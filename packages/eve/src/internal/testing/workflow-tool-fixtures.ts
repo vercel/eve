@@ -10,6 +10,11 @@ import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/ind
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { TaskExec, TaskMessage } from "#tools/task.js";
+import {
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
+import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
 export interface DeployInput {
   readonly service: string;
@@ -23,6 +28,48 @@ export async function deployServiceWorkflow(
 
   const plan = await planDeployStep(input.service);
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
+}
+
+export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const plan = await planDeployStep(input.service);
+  const authenticatedAs = await authorizedDeployStep(input.service, ctx);
+  return { plan, authenticatedAs };
+}
+
+async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): Promise<string> {
+  "use step";
+  const provider: AuthorizationDefinition = {
+    principalType: "user",
+    async getToken({ principal }) {
+      if (service !== "preauthorized") throw new ConnectionAuthorizationRequiredError("deploy");
+      return { token: `secret:${principal.type === "user" ? principal.id : "app"}` };
+    },
+    async startAuthorization({ principal, callbackUrl }) {
+      return {
+        challenge: {
+          url: `https://idp.example/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
+        },
+        resume: { user: principal.type === "user" ? principal.id : "app" },
+      };
+    },
+    async completeAuthorization({ principal, callback, resume }) {
+      if (
+        callback.params.code !== "approved" ||
+        principal.type !== "user" ||
+        (resume as { user: string }).user !== principal.id
+      ) {
+        throw new ConnectionAuthorizationFailedError("deploy", {
+          message: "Authorization denied or principal changed.",
+          retryable: false,
+        });
+      }
+      return { token: `secret:${principal.id}` };
+    },
+  };
+  const { token } = await ctx.getToken(provider);
+  if (service === "rejected") ctx.requireAuth(provider);
+  return token.slice("secret:".length);
 }
 
 export async function* confirmDeployWorkflow(
