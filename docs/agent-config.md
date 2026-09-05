@@ -252,7 +252,7 @@ installed package must stay external in hosted output, list it in
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
 Set `experimental.codeMode` to `{ mode: "eager" }` or `{ mode: "lazy" }` to
-replace eligible direct tools with one framework-managed `code_mode` tool. The model writes a
+expose eligible tools through a framework-managed `code_mode` tool. The model writes a
 JavaScript program that calls `tools.<name>(input)`; `code_mode` runs it as a
 durable workflow in which every nested call is its own step, so a crash
 mid-program resumes at the pending call instead of re-running earlier ones.
@@ -260,10 +260,18 @@ Tools with an approval policy other than `never()`, authored workflow tools,
 ordinary `execution: "background"` tools, and framework task controls stay
 direct. Subagent tools enter the program and
 return their result when called, the same way an authored workflow tool's
-`agent()` does. `"eager"` inlines every callable signature in the tool
-description; `"lazy"` lists the available tool names and the discovery helpers'
-signatures. The model can discover schemas first, then keep the task's reads,
-computation, and final writes in one execution program.
+`agent()` does.
+
+`"eager"` keeps eligible tools directly callable and also includes their
+signatures in `code_mode`. The model is guided toward programs for dependent
+lookups, pagination, loops, and data processing, and toward direct calls when a
+single call or native batch already provides the needed result. This is model
+guidance, not a deterministic router or a performance guarantee. Schemas are
+included up front even when the model chooses direct calls.
+
+`"lazy"` hides eligible direct tools, lists the available tool names and the
+discovery helpers' signatures, and lets the program discover schemas before
+execution.
 
 Each program can invoke at most 100 subagents by default. Set `maxSubagents` to
 change that limit; sequential calls, parallel calls, retries, and calls that
@@ -298,8 +306,8 @@ input schemas for the requested tool names.
 
 Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model
-step's catalog; eligible discovered tools then move behind `code_mode` in both
-modes. When names overlap, step-scoped definitions override turn-scoped,
+step's catalog; eligible discovered tools become callable through `code_mode`, and remain
+directly callable in eager mode. When names overlap, step-scoped definitions override turn-scoped,
 session-scoped, and static definitions, in that order. Each program keeps the
 tool catalog and captured values from the model step that dispatched it.
 

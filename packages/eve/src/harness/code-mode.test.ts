@@ -102,22 +102,35 @@ describe("applyCodeModeTool", () => {
     },
   );
 
-  it("moves claimed tools behind code_mode and pins the catalog into executeInput", async () => {
+  it("keeps eager tools callable directly and pins the program catalog into executeInput", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["add", tool("add")],
       ["gated", tool("gated", { approval: always() })],
       ["researcher", subagent("researcher")],
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
+    const tools = buildToolSet({ tools: harnessTools });
     const applied = await applyCodeModeTool({
       continuationSecurity,
       harnessTools,
       mode: "eager",
-      tools: buildToolSet({ tools: harnessTools }),
+      tools,
     });
 
     expect(applied.claimedToolNames).toEqual(["add", "researcher"]);
-    expect(Object.keys(applied.modelTools).sort()).toEqual([CODE_MODE_TOOL_NAME, "gated"]);
+    expect(Object.keys(applied.modelTools).sort()).toEqual([
+      "add",
+      CODE_MODE_TOOL_NAME,
+      "gated",
+      "researcher",
+    ]);
+    expect(applied.modelTools.add).toBe(tools.add);
+    expect(applied.modelTools.researcher).toBe(tools.researcher);
+    expect(applied.modelTools.gated).toBe(tools.gated);
+    expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain(
+      "Prefer code_mode for dependent lookups",
+    );
+    expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain("Prefer direct tools");
     expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.execute).toBeUndefined();
     expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain("add");
     expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain("researcher");
@@ -151,6 +164,8 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain('"query"');
     expect(description).toContain("substring");
     expect(description).not.toContain('"q"');
+    expect(Object.keys(applied.modelTools)).toEqual([CODE_MODE_TOOL_NAME]);
+    expect(description).not.toContain("Prefer direct tools");
   });
 
   it("keeps code_mode available for discovery when nothing is claimable", async () => {
