@@ -25,6 +25,11 @@ const CONTINUE_CHILD_MESSAGE = [
   "Continue that same remote-loopback agent using its agentId with this message:",
   JSON.stringify(CHILD_MESSAGE),
 ].join(" ");
+const CLARIFICATION = [
+  "Continue the existing agent.",
+  "The service resolves workspace membership from the authenticated caller on every lookup.",
+  "Do not reuse previous answers; let the service deny access when no membership exists.",
+].join(" ");
 
 /** Three users resume one remote child; each tool call resolves only its current caller's workspace membership. */
 export default defineEval({
@@ -33,18 +38,24 @@ export default defineEval({
     "A persistent remote child switches between two workspace memberships and denies a third caller with none.",
   async test(t) {
     // Alice creates the child and reads her workspace label.
-    await t.send(CREATE_CHILD_MESSAGE);
-    const aliceParent = await waitForRemoteChild(t, t);
+    const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
+    const aliceParent = await waitForRemoteChild(t, t, aliceTurn);
     const childSessionId = aliceParent.childSessionId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
     let childEventCount = aliceChild.events.length;
 
     // Bob continues the same child and must resolve Bob's workspace label, not Alice's.
-    await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
+    const bobTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: BOB_AUTHORIZATION },
     });
-    const bobParent = await waitForRemoteChild(t, aliceParent.session, childSessionId);
+    const bobParent = await waitForRemoteChild(
+      t,
+      aliceParent.session,
+      bobTurn,
+      childSessionId,
+      BOB_AUTHORIZATION,
+    );
     const bobChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
@@ -53,10 +64,16 @@ export default defineEval({
 
     // A grantless observer continues it once more. Reusing either prior membership
     // would complete this call; correct per-turn scoping denies access.
-    await bobParent.session.send(CONTINUE_CHILD_MESSAGE, {
+    const observerTurn = await bobParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: OBSERVER_AUTHORIZATION },
     });
-    await waitForRemoteChild(t, bobParent.session, childSessionId);
+    await waitForRemoteChild(
+      t,
+      bobParent.session,
+      observerTurn,
+      childSessionId,
+      OBSERVER_AUTHORIZATION,
+    );
     const observerChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
@@ -99,20 +116,21 @@ async function expectWorkspaceReads(
   );
 }
 
-type SessionCursor = Pick<EveEvalSession, "send" | "sessionId" | "state">;
+type SessionCursor = Pick<EveEvalSession, "respond" | "send" | "sessionId" | "state">;
 
 async function waitForRemoteChild(
   t: EveEvalContext,
   initial: SessionCursor,
+  initialTurn: EveEvalTurn,
   expectedSessionId?: string,
+  authorization?: string,
 ): Promise<{ readonly childSessionId: string; readonly session: SessionCursor }> {
   let session = initial;
+  let turn = initialTurn;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (session.sessionId === undefined || session.state === undefined) {
       throw new Error("Remote child wait has no parent session cursor.");
     }
-    const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
-    const turn = await live.result();
     turn.expectOk();
     const call = turn.events.find(
       (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
@@ -121,10 +139,27 @@ async function waitForRemoteChild(
       if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
         throw new Error("The parent turn did not continue the existing remote child.");
       }
-      return { childSessionId: call.data.childSessionId, session: live.session };
+      return { childSessionId: call.data.childSessionId, session };
     }
     turn.noFailedActions();
-    session = live.session;
+    if (attempt === 4) break;
+    if (turn.inputRequests.length > 0) {
+      const responses = turn.inputRequests.map((request) => {
+        if (request.kind !== "question" || request.allowFreeform === false) {
+          throw new Error("The remote child continuation requires unsupported input.");
+        }
+        return { requestId: request.requestId, text: CLARIFICATION };
+      });
+      turn = await session.respond(responses, {
+        headers: authorization === undefined ? undefined : { authorization },
+      });
+    } else {
+      const live = t.target.watchTurn(session.sessionId, {
+        startIndex: session.state.streamIndex,
+      });
+      turn = await live.result();
+      session = live.session;
+    }
   }
   throw new Error("The parent did not call remote-loopback after five turns.");
 }
