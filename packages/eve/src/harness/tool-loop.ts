@@ -64,7 +64,11 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { projectParkedAgentHandles, resolveAgentAnnouncements } from "#subagents/handles/prompt.js";
+import {
+  projectParkedAgentHandles,
+  resolveAgentAnnouncements,
+  type AgentView,
+} from "#subagents/handles/prompt.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import {
   getWorkflowTaskInterrupts,
@@ -1041,18 +1045,21 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // providers that reject assistant-final histories. Earlier announcements
     // stay in place so the previous prompt remains an exact cache prefix.
     const agentStore = getAgentHandleStore(session.state);
+    let agentViews: readonly AgentView[] | undefined;
     if (!hasUnansweredToolCall(messages)) {
       const taskAgentViews = await store?.get(BackgroundToolExecutorKey)?.readAgentViews?.();
-      const agentViews =
+      agentViews =
         taskAgentViews === undefined || taskAgentViews.length === 0
           ? undefined
           : [
-              ...projectParkedAgentHandles(agentStore ?? { handles: [] }).map((handle) => ({
-                status: "available" as const,
-                id: handle.identity.id,
-                name: handle.identity.name,
-                statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
-              })),
+              ...projectParkedAgentHandles(agentStore ?? { handles: [] })
+                .filter((handle) => !taskAgentViews.some((view) => view.id === handle.identity.id))
+                .map((handle) => ({
+                  status: "available" as const,
+                  id: handle.identity.id,
+                  name: handle.identity.name,
+                  statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
+                })),
               ...taskAgentViews,
             ];
       const announcements = resolveAgentAnnouncements({
@@ -1158,6 +1165,21 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = compaction.session;
     if (compaction.compacted) {
       messages = compaction.messages;
+      // Compaction can summarize an unchanged agent's only announcement.
+      // Restore its current state before the first model call uses that history.
+      if (!hasUnansweredToolCall(messages)) {
+        const announcements = resolveAgentAnnouncements({
+          agentViews,
+          messages: projectHistory(messages, session.state),
+          store: agentStore,
+        });
+        const inputIndex = messages.findIndex((message) => preparedTurnInput.includes(message));
+        messages.splice(
+          inputIndex < 0 ? messages.length : inputIndex,
+          0,
+          ...announcements.map((content) => ({ content, role: "user" as const })),
+        );
+      }
       if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
         turnClientContext = {
           ...turnClientContext,

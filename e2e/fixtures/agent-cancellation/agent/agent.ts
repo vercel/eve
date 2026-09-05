@@ -24,10 +24,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       ],
     };
   }
-  if (message.includes("[Agents] listing")) {
+  if (message.includes("latest <agent> status message")) {
     return (
-      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Agents]"))?.text ??
-      "No agents listed."
+      [...request.messages]
+        .reverse()
+        .find(
+          (entry) =>
+            entry.role === "user" && /^<agent status="[^"]+" name="sleeper" /.test(entry.text),
+        )?.text ?? "No sleeper status available."
     );
   }
   if (message.includes(RECOVERY_REQUEST)) {

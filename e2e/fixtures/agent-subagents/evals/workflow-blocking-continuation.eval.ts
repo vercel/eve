@@ -25,7 +25,7 @@ export default defineEval({
     const second = await (firstTurn?.session ?? t).send(
       [
         "Use the Workflow tool exactly once. In its JavaScript, call the same echo-marker child twice sequentially",
-        "using the agentId shown in the latest <agents> block, with messages 'blocking second' and 'blocking third'.",
+        "using the id from its latest available <agent> status message, with messages 'blocking second' and 'blocking third'.",
         "Then attempt a third call with that agentId and message 'blocking over limit'.",
         "Return all three inline results and reply with them verbatim as JSON. Do not call echo-marker outside Workflow.",
       ].join(" "),

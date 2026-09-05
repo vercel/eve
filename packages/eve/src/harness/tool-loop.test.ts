@@ -69,6 +69,7 @@ import {
 } from "#harness/input-requests.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
+import { renderAgentAnnouncement, type AgentView } from "#subagents/handles/prompt.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
@@ -1191,6 +1192,75 @@ describe("createToolLoopHarness", () => {
       role: "user",
     });
   });
+
+  it.each(["parked", "available", "working"] as const)(
+    "restores an unchanged %s agent in the first post-compaction model request",
+    async (phase) => {
+      const alpha: AgentView = {
+        id: "ag_alpha:111111111111",
+        name: "alpha",
+        status: phase === "working" ? "working" : "available",
+        taskId: phase === "working" ? "task_alpha" : undefined,
+      };
+      const beta: AgentView = {
+        id: "ag_beta:222222222222",
+        name: "beta",
+        status: "available",
+      };
+      const alphaMessage = { content: renderAgentAnnouncement(alpha), role: "user" as const };
+      const betaMessage = { content: renderAgentAnnouncement(beta), role: "user" as const };
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [
+        { content: "Summary of our conversation so far:", role: "user" },
+        { content: "Earlier work summarized.", role: "assistant" },
+        betaMessage,
+        messages.at(-1)!,
+      ]);
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Ready.", role: "assistant" }] },
+        text: "Ready.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const session = createTestSession({
+        history: [alphaMessage, betaMessage],
+        state: {
+          [AGENT_HANDLES_STATE_KEY]: {
+            handles: [alpha, beta].flatMap((view) => {
+              if (phase === "working" && view.id === alpha.id) return [];
+              const address = {
+                kind: "agent/local",
+                sessionId: `child-${view.name}`,
+                continuationToken: "private-token",
+              };
+              const identity = { id: view.id, name: view.name, nodeId: `subagents/${view.name}` };
+              return [
+                phase === "parked"
+                  ? { address, identity, phase: "parked", lastStatus: "" }
+                  : { address, identity, phase: "available" },
+              ];
+            }),
+          },
+        },
+      });
+      const ctx = new ContextContainer();
+      const readAgentViews = vi.fn().mockResolvedValue(phase === "parked" ? [] : [alpha, beta]);
+      ctx.set(BackgroundToolExecutorKey, { execute: vi.fn(), readAgentViews });
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const result = await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Continue with alpha." }),
+      );
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value;
+      const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+      expect(compactMessages).toHaveBeenCalledOnce();
+      expect(messages).toContainEqual(alphaMessage);
+      expect(messages.filter((message) => message.content === betaMessage.content)).toHaveLength(1);
+      expect(messages.at(-1)).toEqual({ content: "Continue with alpha.", role: "user" });
+      expect(result.session.history).toContainEqual(alphaMessage);
+      expect(readAgentViews).toHaveBeenCalledOnce();
+    },
+  );
 
   it("skips agent announcements when no handle is parked", async () => {
     setupMockAgent({

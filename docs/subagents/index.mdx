@@ -186,7 +186,7 @@ For each model-visible agent lifecycle event, eve appends an independent framewo
 <agent status="available" name="researcher" id="ag_researcher:abcdef123456">initial findings</agent>
 ```
 
-The messages are injected by eve, not written by the user, and never require a reply. They remain append-only so each model request extends the provider's existing prompt-cache prefix; unchanged agents are not repeated.
+The messages are injected by eve, not written by the user, and never require a reply. Between context compactions, messages remain append-only to preserve the existing prompt-cache prefix; unchanged agents are not repeated. If compaction removes an agent's announcement, eve restores its current status before the next model call.
 
 The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 
