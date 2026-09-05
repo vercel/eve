@@ -34,12 +34,60 @@ This turns off the optional defaults described below. Add back only the tools th
 eve add tool/bash
 ```
 
+```ts title="agent/tools/bash.ts"
+export { default } from "eve/tools/bash";
+```
+
+Override its description, approval policy, or executor by wrapping the exported definition:
+
+```ts title="agent/tools/bash.ts"
+import { defineTool } from "eve/tools";
+import { bash } from "eve/tools/bash";
+
+export default defineTool({
+  ...bash,
+  description: "Run approved project maintenance commands.",
+});
+```
+
+Disable only `bash`:
+
+```ts title="agent/tools/bash.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `read_file`
 
 `read_file` reads text files from the sandbox with line-numbered output. It accepts absolute paths and paths beginning with `$HOME/`.
 
 ```sh
 eve add tool/read_file
+```
+
+```ts title="agent/tools/read_file.ts"
+export { default } from "eve/tools/read_file";
+```
+
+Override it:
+
+```ts title="agent/tools/read_file.ts"
+import { defineTool } from "eve/tools";
+import { readFile } from "eve/tools/read_file";
+
+export default defineTool({
+  ...readFile,
+  description: "Read project files from the sandbox.",
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/read_file.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `write_file`
@@ -50,12 +98,60 @@ eve add tool/read_file
 eve add tool/write_file
 ```
 
+```ts title="agent/tools/write_file.ts"
+export { default } from "eve/tools/write_file";
+```
+
+Override it:
+
+```ts title="agent/tools/write_file.ts"
+import { defineTool } from "eve/tools";
+import { writeFile } from "eve/tools/write_file";
+
+export default defineTool({
+  ...writeFile,
+  description: "Write approved project files in the sandbox.",
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/write_file.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `web_fetch`
 
 `web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available.
 
 ```sh
 eve add tool/web_fetch
+```
+
+```ts title="agent/tools/web_fetch.ts"
+export { default } from "eve/tools/web_fetch";
+```
+
+Override it:
+
+```ts title="agent/tools/web_fetch.ts"
+import { defineTool } from "eve/tools";
+import { webFetch } from "eve/tools/web_fetch";
+
+export default defineTool({
+  ...webFetch,
+  description: "Fetch approved public documentation URLs.",
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/web_fetch.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `web_search`
@@ -66,7 +162,39 @@ eve add tool/web_fetch
 eve add tool/web_search
 ```
 
-To use Parallel with AI Gateway, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. To provide your own implementation, override the tool with `defineTool()`.
+```ts title="agent/tools/web_search.ts"
+export { default } from "eve/tools/web_search";
+```
+
+Override the provider-managed configuration for AI Gateway:
+
+```ts title="agent/tools/web_search.ts"
+import { webSearch } from "eve/tools/web_search";
+
+export default webSearch({ provider: "parallel" });
+```
+
+Replace provider-managed search with an authored implementation:
+
+```ts title="agent/tools/web_search.ts"
+import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Search the internal documentation index.",
+  inputSchema: { type: "object" },
+  async execute(input) {
+    return { results: [], query: input };
+  },
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/web_search.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
 
 ### `todo`
 
@@ -74,6 +202,30 @@ To use Parallel with AI Gateway, export `webSearch({ provider: "parallel" })` fr
 
 ```sh
 eve add tool/todo
+```
+
+```ts title="agent/tools/todo.ts"
+export { default } from "eve/tools/todo";
+```
+
+Override it. Spreading the definition preserves its durable state key:
+
+```ts title="agent/tools/todo.ts"
+import { defineTool } from "eve/tools";
+import { todo } from "eve/tools/todo";
+
+export default defineTool({
+  ...todo,
+  description: "Track the current implementation plan.",
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/todo.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `ask_question`
@@ -84,12 +236,64 @@ eve add tool/todo
 eve add tool/ask_question
 ```
 
+```ts title="agent/tools/ask_question.ts"
+export { default } from "eve/tools/ask_question";
+```
+
+Replace its request-input behavior with an ordinary authored tool:
+
+```ts title="agent/tools/ask_question.ts"
+import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Record a clarification request.",
+  inputSchema: { type: "object" },
+  async execute(input) {
+    return { recorded: input };
+  },
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/ask_question.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `agent`
 
 `agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
+```
+
+```ts title="agent/tools/agent.ts"
+export { default } from "eve/tools/agent";
+```
+
+Replace its delegation behavior with an ordinary authored tool:
+
+```ts title="agent/tools/agent.ts"
+import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Submit work to a custom task service.",
+  inputSchema: { type: "object" },
+  async execute(input) {
+    return { submitted: input };
+  },
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/agent.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `task_cancel`
@@ -100,12 +304,64 @@ eve add tool/agent
 eve add tool/task_cancel
 ```
 
+```ts title="agent/tools/task_cancel.ts"
+export { default } from "eve/tools/task_cancel";
+```
+
+Replace its cancellation behavior with an ordinary authored tool:
+
+```ts title="agent/tools/task_cancel.ts"
+import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Cancel a task in a custom task service.",
+  inputSchema: { type: "object" },
+  async execute(input) {
+    return { cancelled: input };
+  },
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/task_cancel.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `task_update`
 
 `task_update` lets a background task report progress to its parent. It appears only in delegated task sessions.
 
 ```sh
 eve add tool/task_update
+```
+
+```ts title="agent/tools/task_update.ts"
+export { default } from "eve/tools/task_update";
+```
+
+Replace its progress-reporting behavior with an ordinary authored tool:
+
+```ts title="agent/tools/task_update.ts"
+import { defineTool } from "eve/tools";
+
+export default defineTool({
+  description: "Report progress to a custom task service.",
+  inputSchema: { type: "object" },
+  async execute(input) {
+    return { updated: input };
+  },
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/task_update.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `load_skill`
@@ -116,9 +372,35 @@ eve add tool/task_update
 eve add tool/load_skill
 ```
 
+```ts title="agent/tools/load_skill.ts"
+export { default } from "eve/tools/load_skill";
+```
+
+Override it:
+
+```ts title="agent/tools/load_skill.ts"
+import { defineTool } from "eve/tools";
+import { loadSkill } from "eve/tools/load_skill";
+
+export default defineTool({
+  ...loadSkill,
+  description: "Load instructions for an available skill.",
+});
+```
+
+Disable it:
+
+```ts title="agent/tools/load_skill.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `connection_search`
 
 `connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+
+An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -147,77 +429,6 @@ export { grep as default } from "eve/tools/grep";
 The filename supplies the model-facing tool name. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations. Wrap either definition with `defineTool({ ...glob, description: "..." })` or `defineTool({ ...grep, description: "..." })` when you need to change its description or approval policy.
 
 The section below covers `sleep` in more detail.
-
-## Override a default
-
-Author a tool at the same slug and it takes over the built-in of that name. When present, `agent/tools/write_file.ts` replaces the built-in `write_file`:
-
-```ts title="agent/tools/write_file.ts"
-import { defineTool } from "eve/tools";
-import { writeFile } from "eve/tools/write_file";
-
-export default defineTool({
-  ...writeFile, // keep the default description, schema, and executor
-  async execute(input, ctx) {
-    console.log("[write_file]", input.path);
-    return writeFile.execute(input, ctx);
-  },
-});
-```
-
-Import each reusable definition from its own subpath:
-
-| Definition         | Import                        | Registered by default |
-| ------------------ | ----------------------------- | --------------------- |
-| `bash`             | `eve/tools/bash`              | Yes                   |
-| `readFile`         | `eve/tools/read_file`         | Yes                   |
-| `writeFile`        | `eve/tools/write_file`        | Yes                   |
-| `todo`             | `eve/tools/todo`              | Yes                   |
-| `webFetch`         | `eve/tools/web_fetch`         | Yes                   |
-| `loadSkill`        | `eve/tools/load_skill`        | Yes                   |
-| `connectionSearch` | `eve/tools/connection_search` | With connections      |
-| `agent`            | `eve/tools/agent`             | Yes                   |
-| `askQuestion`      | `eve/tools/ask_question`      | Yes                   |
-| `taskCancel`       | `eve/tools/task_cancel`       | Yes                   |
-| `taskUpdate`       | `eve/tools/task_update`       | Yes                   |
-| `glob`             | `eve/tools/glob`              | No                    |
-| `grep`             | `eve/tools/grep`              | No                    |
-
-Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` does not inherit the default's durable state key.
-
-Provider-managed web search has a dedicated configuration helper instead of an executable default:
-
-```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools/web_search";
-
-export default webSearch({ provider: "parallel" });
-```
-
-Set `provider` to `"exa"` or `"parallel"`. Without this file, AI Gateway models use Exa.
-
-## Disable default tools
-
-Set `defaultTools: false` in `agent/agent.ts` to remove the optional defaults at once, as described in [Disable optional default tools](#disable-optional-default-tools). `connection_search` remains available when the agent has connections, and tools under `agent/tools/` remain available.
-
-To remove one default, export a `disableTool()` sentinel from a file named after the tool's slug. The filename picks the default to remove:
-
-```ts title="agent/tools/bash.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-Use `agent/tools/agent.ts` to remove the root-only `agent` delegation tool. The root session then receives no tool for delegating to a fresh copy of itself, and the model never sees that tool.
-
-If the filename matches no known framework tool, resolution fails instead of silently doing nothing, so a typo surfaces at build time rather than removing the wrong tool.
-
-## When to override, disable, or author a new tool
-
-Three moves shape the harness. The right one depends on whether the model should keep the built-in capability.
-
-- **Override** when you want the same capability with different behavior. Import its definition from the matching `eve/tools/<name>` subpath and wrap it (logging, an extra guard, or a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
-- **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
-- **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
 
 ## The opt-in `sleep` tool
 
