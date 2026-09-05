@@ -884,6 +884,88 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["Load failed", "network error"])(
+    "does not retry an unrecognized TypeError while opening a stream: %s",
+    async (message) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError(message));
+      const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+      await expect(async () => {
+        for await (const _event of session.stream({
+          streamReconnectPolicy: {
+            streamOpenReconnectPolicy: { baseDelayMs: 1, maxAttempts: 2 },
+          },
+        })) {
+          // The stream fails before producing an event.
+        }
+      }).rejects.toThrow(message);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["Load failed", "network error"])(
+    "reconnects after a mid-stream TypeError regardless of its message: %s",
+    async (message) => {
+      const encoder = new TextEncoder();
+      const streamUrls: string[] = [];
+      let streamRequest = 0;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+        if ((init?.method ?? "GET") === "POST") {
+          return createAcceptedResponse();
+        }
+
+        const url =
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.href
+              : request.url;
+        streamUrls.push(url);
+        streamRequest += 1;
+
+        if (streamRequest === 1) {
+          let emitted = false;
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                if (!emitted) {
+                  emitted = true;
+                  controller.enqueue(
+                    encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                  );
+                  return;
+                }
+                controller.error(new TypeError(message));
+              },
+            }),
+          );
+        }
+
+        return createStreamResponse([
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ]);
+      });
+      const session = createSession();
+
+      vi.useFakeTimers();
+      try {
+        const eventTypes = await collectEventTypes(await session.send("first"));
+        expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
+        null,
+        "1",
+      ]);
+    },
+  );
+
   it("retries a transient fetch failure while reopening an active turn stream", async () => {
     const encoder = new TextEncoder();
     const streamUrls: string[] = [];
