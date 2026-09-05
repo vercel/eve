@@ -106,7 +106,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [createFrameworkAgentTool()],
     });
 
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining('status="working"'));
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
   });
 

@@ -14,7 +14,7 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
     .string()
     .nullable()
     .describe(
-      "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
+      "Only pass this to continue a previous delegation: the id from an available <agent> status message. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
     )
     .optional(),
   message: z

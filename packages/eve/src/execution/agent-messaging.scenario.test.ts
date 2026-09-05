@@ -18,7 +18,7 @@ const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
-  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
+  const agentIdPattern = `<agent status="available" name="${subagentName}" id="([^"]+)"`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
@@ -45,10 +45,10 @@ const model = mockModel((request) => {
   }
 
   if (childResults.length === 1) {
-    // The agents listing rides the conversation as a framework-injected
-    // user-role announcement, so scan every message for the latest listing.
-    const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
-    const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
+    // Agent lifecycle changes ride the conversation as framework-injected
+    // user-role announcements, so scan every message for the available id.
+    const agentAnnouncements = request.messages.map((message) => message.text).join("\\n");
+    const agentId = AGENT_ID_PATTERN.exec(agentAnnouncements)?.[1];
     if (agentId === undefined) {
       throw new Error(\`Parent model did not receive a \${SUBAGENT_NAME} agent id.\`);
     }

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-24"
+last_updated: "2026-09-02"
 ---
 
 # Subagents as tasks: additive delivery plan
@@ -195,7 +195,7 @@ their durable session and task ownership state; the harness must not branch on e
 1. **Lifecycle ownership.** In tasks mode, the task run is the sole execution-lifecycle writer.
    Agent records retain stable identity and private address only. Availability is derived from
    nonterminal tasks, with at most one such task per child session; busy agents remain visible in
-   `<agents>` with their active task id and status.
+   append-only `<agent>` status messages with their active task id.
 2. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
    session delivery path; they are the only wake triggers. Terminal notifications carry the full
    result or error so the model needs no follow-up state read. The resulting parent turn is

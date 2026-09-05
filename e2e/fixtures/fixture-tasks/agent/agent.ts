@@ -410,7 +410,7 @@ function hasTaskNotification(
 }
 
 function isScenarioMessage(message: string): boolean {
-  return !message.startsWith("[Agents]");
+  return !message.startsWith('<agent status="');
 }
 
 function scenarioUserMessageCount(request: MockModelRequest): number {

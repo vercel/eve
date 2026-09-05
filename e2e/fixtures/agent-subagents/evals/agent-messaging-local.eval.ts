@@ -31,7 +31,7 @@ export default defineEval({
 
     const continued = await firstCompletion.session.send(
       [
-        "Message that same agent again: call the agent subagent with the agentId shown in the latest <agents> block",
+        "Message that same agent again: call the agent subagent with the id from its latest available <agent> status message",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
         "Do not state the fact yourself.",
         "Acknowledge the task receipt without stating the fact. When the task completes, reply with the agent's exact output and no other text.",

@@ -171,7 +171,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       if (handle.phase === "available") {
         return [
           {
-            availability: "available" as const,
+            status: "available" as const,
             id: handle.identity.id,
             name: handle.identity.name,
           },
@@ -180,11 +180,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       if (handle.phase !== "claimed") return [];
       return [
         {
-          availability: "busy" as const,
+          status: "working" as const,
           id: handle.identity.id,
           name: handle.identity.name,
           taskId: handle.ownerId,
-          taskStatus: "working" as const,
         },
       ];
     });

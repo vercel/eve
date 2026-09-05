@@ -17,7 +17,7 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   for (let index = 0; index < request.messages.length; index += 1) {
     const entry = request.messages[index]!;
     if (entry.role === "tool") lastToolResultIndex = index;
-    if (entry.role === "user" && !entry.text.trim().startsWith("[Agents]")) {
+    if (entry.role === "user" && !entry.text.trim().startsWith('<agent status="')) {
       lastAuthoredUserIndex = index;
     }
   }

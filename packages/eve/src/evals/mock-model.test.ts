@@ -68,7 +68,7 @@ describe("mockModel", () => {
 
   it("keeps framework scaffolding out of authored user messages", async () => {
     const requests: MockModelRequest[] = [];
-    const agents = "[Agents]\n<agents>\n</agents>";
+    const agent = '<agent status="created" name="worker" id="ag_worker:123"/>';
     const notice = [
       "[Pending approvals]",
       "The following tool calls are awaiting approval and have not executed:",
@@ -77,7 +77,7 @@ describe("mockModel", () => {
     const result = await generateText({
       messages: [
         { content: "Run the mixed approval flow.", role: "user" },
-        { content: agents, role: "user" },
+        { content: agent, role: "user" },
         { content: notice, role: "user" },
       ],
       model: mockModel((request) => {
@@ -91,7 +91,7 @@ describe("mockModel", () => {
       lastUserMessage: "Run the mixed approval flow.",
       messages: [
         { role: "user", text: "Run the mixed approval flow." },
-        { role: "user", text: agents },
+        { role: "user", text: agent },
         { role: "user", text: notice },
       ],
       userMessageCount: 1,

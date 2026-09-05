@@ -9,7 +9,8 @@ describe("composeRuntimeBasePrompt", () => {
     });
 
     expect(prompt).toContainEqual(expect.stringContaining("agentId"));
-    expect(prompt).toContainEqual(expect.stringContaining("<agents>"));
+    expect(prompt).toContainEqual(expect.stringContaining("<agent>"));
+    expect(prompt).toContainEqual(expect.stringContaining('status="created"'));
   });
 
   it("instructs parents to rely on notifications instead of polling", () => {
@@ -34,6 +35,6 @@ describe("composeRuntimeBasePrompt", () => {
     });
 
     expect(prompt).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
-    expect(prompt).not.toContainEqual(expect.stringContaining("<agents>"));
+    expect(prompt).not.toContainEqual(expect.stringContaining("<agent>"));
   });
 });

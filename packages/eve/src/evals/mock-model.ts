@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
-import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
+import { isAgentAnnouncementText } from "#subagents/handles/prompt.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
@@ -176,7 +176,7 @@ function createRequest(options: GenerateOptions): MockModelRequest {
 
 function isFrameworkScaffolding(message: string): boolean {
   const text = message.trim();
-  return text.startsWith(AGENTS_SNIPPET_LABEL) || isPendingApprovalsSnippet(text);
+  return isAgentAnnouncementText(text) || isPendingApprovalsSnippet(text);
 }
 
 function extractMessageText(message: GenerateOptions["prompt"][number]): string {

@@ -14,7 +14,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
     agentId: {
       type: ["string", "null"],
       description:
-        "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
+        "Only pass this to continue a previous delegation: the id from an available <agent> status message. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
     },
     message: {
       type: "string",

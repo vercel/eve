@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-20"
+last_updated: "2026-09-02"
 ---
 
 # Subagents as tasks
@@ -96,8 +96,9 @@ request input, or emit progress after that turn ends.
 
 An **agent address** is the persistent identity and private routing record for one child session.
 Tasks own execution lifecycle and availability; agent addresses do not duplicate `working` or
-`input_required`. At most one nonterminal task may target one child session. The model-visible
-`<agents>` projection keeps an occupied agent visible as busy and names its active task.
+`input_required`. At most one nonterminal task may target one child session. A model-visible
+`<agent status="working">` or `<agent status="input_required">` message keeps an occupied agent
+visible and names its active task.
 
 **Delegated execution** is the outcome of a background tool handing lifecycle ownership to an
 external executor. The tool's `execute` returns once that executor acknowledges the work; the task

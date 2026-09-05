@@ -57,16 +57,17 @@ export default defineEval({
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
-    // The cancelled child must survive in the parent's model-visible
-    // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
-    // `running` never re-enters the listing, so this catches the abandoned
-    // cancelled batch regressing to a permanent leak.
+    // The cancelled child must return to `available` in the parent's
+    // model-visible agent status messages with its "(cancelled)" summary. A
+    // handle leaked as `running` never becomes available, so this catches the
+    // abandoned cancelled batch regressing to a permanent leak.
     const listing = await t.send(
-      "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
+      "Look at the latest <agent> status message for the sleeper in your context and reply with it verbatim.",
     );
     listing.expectOk();
     listing.notEvent("turn.cancelled");
     listing.messageIncludes(/sleeper/i);
+    listing.messageIncludes(/status="available"/i);
     listing.messageIncludes(/\(cancelled\)/);
 
     const resumed = await t.send(

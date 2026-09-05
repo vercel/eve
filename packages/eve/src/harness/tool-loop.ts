@@ -64,7 +64,7 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
+import { projectParkedAgentHandles, resolveAgentAnnouncements } from "#subagents/handles/prompt.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import {
   getWorkflowTaskInterrupts,
@@ -1035,12 +1035,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Announce the parked-agents listing as framework-injected user-role
-    // content, before any new user input so a message present on this step
-    // stays the turn's focus. On a no-input settle resume it trails the tool
-    // results, keeping the request user-final for providers that reject
-    // assistant-final histories. See resolveAgentsAnnouncement for the role
-    // rationale (assistant-final rejection, prompt-cache preservation).
+    // Append changed agent lifecycle state as framework-injected user-role
+    // content before any new user input. On a no-input settle resume the
+    // announcements trail tool results, keeping the request user-final for
+    // providers that reject assistant-final histories. Earlier announcements
+    // stay in place so the previous prompt remains an exact cache prefix.
     const agentStore = getAgentHandleStore(session.state);
     if (!hasUnansweredToolCall(messages)) {
       const taskAgentViews = await store?.get(BackgroundToolExecutorKey)?.readAgentViews?.();
@@ -1049,21 +1048,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ? undefined
           : [
               ...projectParkedAgentHandles(agentStore ?? { handles: [] }).map((handle) => ({
-                availability: "available" as const,
+                status: "available" as const,
                 id: handle.identity.id,
                 name: handle.identity.name,
                 statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
               })),
               ...taskAgentViews,
             ];
-      const announcement = resolveAgentsAnnouncement({
+      const announcements = resolveAgentAnnouncements({
         agentViews,
         messages: projectHistory(messages, session.state),
         store: agentStore,
       });
-      if (announcement !== undefined) {
-        messages.push({ content: announcement, role: "user" });
-      }
+      messages.push(...announcements.map((content) => ({ content, role: "user" as const })));
     }
 
     // Keep the insertion point stable when a later durable step reconstructs
