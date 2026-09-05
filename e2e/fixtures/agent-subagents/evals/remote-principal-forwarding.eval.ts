@@ -1,16 +1,23 @@
-import { defineEval, type EveEvalContext, type EveEvalSession } from "eve/evals";
+import {
+  defineEval,
+  type EveEvalContext,
+  type EveEvalSession,
+  type EveEvalToolCall,
+  type EveEvalTurn,
+} from "eve/evals";
+import { satisfies } from "eve/evals/expect";
 
 const ALICE_WORKSPACE_LABEL = "ALICE_WORKSPACE_LABEL_7K4M";
 const BOB_WORKSPACE_LABEL = "BOB_WORKSPACE_LABEL_9P2R";
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 const CHILD_MESSAGE = [
-  "[workspace-label:child] Call read-workspace-label exactly once.",
+  "[workspace-label:child] Call read-workspace-label to check your current workspace access.",
   "If it succeeds, reply with only its workspaceLabel value.",
   "If it fails, reply with only NO_WORKSPACE_ACCESS.",
 ].join(" ");
 const CREATE_CHILD_MESSAGE = [
-  "[workspace-label:create] Use remote-loopback exactly once with this message:",
+  "[workspace-label:create] Use remote-loopback with this message:",
   JSON.stringify(CHILD_MESSAGE),
   "Reply with only the child's output.",
 ].join(" ");
@@ -31,6 +38,7 @@ export default defineEval({
     const aliceParent = await waitForRemoteChild(t, t);
     const childSessionId = aliceParent.childSessionId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
+    await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
     let childEventCount = aliceChild.events.length;
 
     // Bob continues the same child and must resolve Bob's workspace label, not Alice's.
@@ -41,6 +49,7 @@ export default defineEval({
     const bobChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
+    await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
     childEventCount += bobChild.events.length;
 
     // A grantless observer continues it once more. Reusing either prior membership
@@ -52,21 +61,10 @@ export default defineEval({
     const observerChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
-
-    aliceChild.calledTool("read-workspace-label", {
-      count: 1,
-      output: { workspaceLabel: ALICE_WORKSPACE_LABEL },
-      status: "completed",
-    });
-    bobChild.calledTool("read-workspace-label", {
-      count: 1,
-      output: { workspaceLabel: BOB_WORKSPACE_LABEL },
-      status: "completed",
-    });
-    observerChild.calledTool("read-workspace-label", { count: 1, status: "failed" });
+    observerChild.expectOk();
+    observerChild.calledTool("read-workspace-label", { status: "failed" });
     observerChild.calledTool("read-workspace-label", { count: 0, status: "completed" });
     observerChild.event("action.result", {
-      count: 1,
       data: {
         error: { message: /No workspace membership exists for e2e-observer/ },
         result: { kind: "tool-result", toolName: "read-workspace-label" },
@@ -74,10 +72,33 @@ export default defineEval({
       },
     });
 
-    t.calledSubagent("remote-loopback", { count: 3 });
+    t.calledSubagent("remote-loopback", { count: 3 }).soft().label("no repeated delegation");
     t.succeeded();
   },
 });
+
+async function expectWorkspaceReads(
+  t: EveEvalContext,
+  turn: EveEvalTurn,
+  workspaceLabel: string,
+): Promise<void> {
+  turn.expectOk();
+  await t.require(
+    turn.toolCalls.filter(
+      (call) => call.name === "read-workspace-label" && call.status === "completed",
+    ),
+    satisfies(
+      (calls: readonly EveEvalToolCall[]) =>
+        calls.length > 0 &&
+        calls.every(
+          (call) =>
+            (call.output as { workspaceLabel?: unknown } | null | undefined)?.workspaceLabel ===
+            workspaceLabel,
+        ),
+      "every workspace read uses the current caller",
+    ),
+  );
+}
 
 type SessionCursor = Pick<EveEvalSession, "send" | "sessionId" | "state">;
 

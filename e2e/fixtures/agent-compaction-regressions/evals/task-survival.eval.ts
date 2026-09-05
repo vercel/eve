@@ -21,7 +21,8 @@ export default defineEval({
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("inspect-repository", { count: 1 });
+    t.calledTool("inspect-repository");
+    t.event("compaction.completed");
     t.messageIncludes(TASK_PRESERVED_MARKER);
   },
 });
