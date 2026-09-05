@@ -428,6 +428,45 @@
       ]
     },
     {
+      "name": "tool/glob",
+      "type": "registry:item",
+      "title": "Glob",
+      "description": "Find sandbox files by glob pattern.",
+      "files": [
+        {
+          "path": "registry/tools/glob.ts",
+          "type": "registry:file",
+          "target": "agent/tools/glob.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/grep",
+      "type": "registry:item",
+      "title": "Grep",
+      "description": "Search sandbox file contents with a regular expression.",
+      "files": [
+        {
+          "path": "registry/tools/grep.ts",
+          "type": "registry:file",
+          "target": "agent/tools/grep.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/sleep",
+      "type": "registry:item",
+      "title": "Sleep",
+      "description": "Pause and durably resume the current turn.",
+      "files": [
+        {
+          "path": "registry/tools/sleep.ts",
+          "type": "registry:file",
+          "target": "agent/tools/sleep.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/browser-use",
       "type": "registry:item",
       "title": "Browser Use",

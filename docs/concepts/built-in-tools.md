@@ -406,41 +406,89 @@ Review these tools before production use. Disable, wrap, restrict, or require ap
 
 You can also add the opt-in framework tools described below.
 
-## Add framework-provided tools
+## Opt-in framework tools
 
-Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
+These framework-provided tools are not added by default. Add only the ones the agent needs.
 
-| Tool    | Definition to export             | Purpose                                    |
-| ------- | -------------------------------- | ------------------------------------------ |
-| `glob`  | `glob` from `eve/tools/glob`     | Find sandbox files by glob pattern.        |
-| `grep`  | `grep` from `eve/tools/grep`     | Search sandbox file contents by regex.     |
-| `sleep` | `sleep()` from `eve/tools/sleep` | Pause and durably resume the current turn. |
+### `glob`
 
-For example, add file discovery and content search with two files:
+`glob` finds sandbox files by glob pattern. Add it:
+
+```sh
+eve add tool/glob
+```
 
 ```ts title="agent/tools/glob.ts"
-export { glob as default } from "eve/tools/glob";
+export { default } from "eve/tools/glob";
+```
+
+Customize it by wrapping the framework definition:
+
+```ts title="agent/tools/glob.ts"
+import { defineTool } from "eve/tools";
+import { glob } from "eve/tools/glob";
+
+export default defineTool({
+  ...glob,
+  description: "Find project files by glob pattern.",
+});
+```
+
+Remove the file to remove the tool. `disableTool()` is unnecessary because `glob` is not added by default.
+
+### `grep`
+
+`grep` searches sandbox file contents with a regular expression. Add it:
+
+```sh
+eve add tool/grep
 ```
 
 ```ts title="agent/tools/grep.ts"
-export { grep as default } from "eve/tools/grep";
+export { default } from "eve/tools/grep";
 ```
 
-The filename supplies the model-facing tool name. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations. Wrap either definition with `defineTool({ ...glob, description: "..." })` or `defineTool({ ...grep, description: "..." })` when you need to change its description or approval policy.
+Customize it by wrapping the framework definition:
 
-The section below covers `sleep` in more detail.
+```ts title="agent/tools/grep.ts"
+import { defineTool } from "eve/tools";
+import { grep } from "eve/tools/grep";
 
-## The opt-in `sleep` tool
+export default defineTool({
+  ...grep,
+  description: "Search project files with a regular expression.",
+});
+```
 
-The framework also ships a durable `sleep` tool, but does not add it to agents by default. Enable it with `agent/tools/sleep.ts`:
+Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
 
-```ts
+### `sleep`
+
+`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. Add it:
+
+```sh
+eve add tool/sleep
+```
+
+```ts title="agent/tools/sleep.ts"
 import { sleep } from "eve/tools/sleep";
 
 export default sleep();
 ```
 
-The model calls it with `{ seconds }` when it is useful to wait before checking progress or status again. Each call runs as a durable tool workflow, so it does not hold an application runtime open, and the same turn continues automatically when the duration elapses. Concurrent `sleep` calls run in parallel, so the turn continues after the longest requested duration.
+Customize it by wrapping the framework definition:
+
+```ts title="agent/tools/sleep.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "eve/tools/sleep";
+
+export default defineWorkflowTool({
+  ...sleep(),
+  description: "Pause before checking an external operation again.",
+});
+```
+
+Remove the file to remove the tool. `disableTool()` is unnecessary because `sleep` is not added by default.
 
 ## What to read next
 
