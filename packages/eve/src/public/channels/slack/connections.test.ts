@@ -76,9 +76,20 @@ describe("buildAuthEphemeralBlocks", () => {
       style: string;
     };
     expect(button.type).toBe("button");
-    expect(button.text.text).toBe("Sign in with Linear");
+    expect(button.text.text).toBe("Sign in");
     expect(button.url).toBe("https://connect.example.com/authorize/sca_abc");
     expect(button.style).toBe("primary");
+  });
+
+  it("keeps the button label within Slack's limit for long display names", () => {
+    const blocks = buildAuthEphemeralBlocks({
+      displayName: "x".repeat(63),
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    const actions = blocks[0] as { elements: Array<{ text: { text: string } }> };
+    const button = actions.elements[0] as { text: { text: string } };
+    expect(button.text.text).toBe("Sign in");
+    expect(button.text.text.length).toBeLessThanOrEqual(75);
   });
 
   it("prepends a section with the device user code when one is provided", () => {

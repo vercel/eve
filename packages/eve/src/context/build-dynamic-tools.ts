@@ -89,6 +89,11 @@ export function replayDynamicTools(
   metadata: readonly CurrentDynamicToolMetadata[],
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
+    const approvalKeyReference = entry.callbacks.approvalKey;
+    const approvalKey =
+      approvalKeyReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(entry.name, "approvalKey");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
     const toModelOutputReference = entry.callbacks.toModelOutput;
@@ -135,6 +140,26 @@ export function replayDynamicTools(
       name: entry.name,
       execution: entry.execution,
       approval: buildReplayedApproval(entry),
+      ...(approvalKeyReference === undefined
+        ? {}
+        : {
+            approvalKey: (input: Readonly<Record<string, unknown>>) => {
+              if (approvalKey === undefined) {
+                throw missingCallbackError(entry, "approvalKey");
+              }
+              const key = callDurableDynamicCallback(
+                approvalKey,
+                approvalKeyReference.closure,
+                input,
+              );
+              if (typeof key !== "string") {
+                throw new Error(
+                  `Dynamic tool "${entry.name}" approvalKey callback must return a string.`,
+                );
+              }
+              return key;
+            },
+          }),
       outputSchema: toOutputSchema(entry.outputSchema),
       ...(toModelOutputReference === undefined
         ? {}

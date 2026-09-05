@@ -104,10 +104,29 @@ export function derefSchema(
   }
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
-    result[key] = derefSchema(document, value, depth + 1, seen);
+    if (key === "default" || key === "example") {
+      result[key] = value;
+    } else if (
+      (key === "properties" ||
+        key === "patternProperties" ||
+        key === "$defs" ||
+        key === "definitions") &&
+      isObject(value)
+    ) {
+      // Property and definition names can themselves be annotation keywords.
+      result[key] = Object.fromEntries(
+        Object.entries(value).map(([name, schema]) => [
+          name,
+          derefSchema(document, schema, depth + 2, seen),
+        ]),
+      );
+    } else {
+      result[key] = derefSchema(document, value, depth + 1, seen);
+    }
   }
   normalizeSchemaType(result);
   normalizeNullable(result);
+  normalizeSchemaAnnotations(result);
   return result;
 }
 
@@ -175,6 +194,44 @@ function normalizeNullable(schema: Record<string, unknown>): void {
   } else if (isArray(schema.enum) && !schema.enum.includes(null)) {
     schema.enum = [...schema.enum, null];
   }
+}
+
+/** Drops model-facing annotations that contradict the node's effective type. */
+function normalizeSchemaAnnotations(schema: Record<string, unknown>): void {
+  const type = schema.type;
+  if (typeof type !== "string" && !isArray(type)) {
+    return;
+  }
+
+  for (const keyword of ["default", "example"] as const) {
+    if (keyword in schema && !matchesSchemaType(schema[keyword], type)) {
+      delete schema[keyword];
+    }
+  }
+}
+
+function matchesSchemaType(value: unknown, type: string | readonly unknown[]): boolean {
+  const types = typeof type === "string" ? [type] : type;
+  return types.some((entry) => {
+    switch (entry) {
+      case "string":
+        return typeof value === "string";
+      case "number":
+        return typeof value === "number" && Number.isFinite(value);
+      case "integer":
+        return typeof value === "number" && Number.isInteger(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "object":
+        return isObject(value);
+      case "array":
+        return isArray(value);
+      case "null":
+        return value === null;
+      default:
+        return false;
+    }
+  });
 }
 
 /** Resolves a local JSON pointer ref (`#/components/...`) against the document. */

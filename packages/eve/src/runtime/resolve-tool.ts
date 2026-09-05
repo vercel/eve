@@ -111,7 +111,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [K in "approval" | "approvalKey" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -130,6 +130,13 @@ function extractOptionalHooks(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
+  }
+
+  if (record.approvalKey !== undefined) {
+    optional.approvalKey = expectFunction(
+      record.approvalKey,
+      describe(definition, "to provide an approvalKey function"),
+    ) as ResolvedToolDefinition["approvalKey"];
   }
 
   if (record.toModelOutput !== undefined) {
