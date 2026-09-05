@@ -1,6 +1,16 @@
-import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type Approval,
+  type ApprovalContext,
+  type ApprovalPolicy,
+} from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  stampDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
+
+const NEVER_APPROVAL = Symbol.for("eve:approval-policy:never");
 
 function alwaysApproval(_closure: JsonObject): "user-approval" {
   return "user-approval";
@@ -9,6 +19,9 @@ function alwaysApproval(_closure: JsonObject): "user-approval" {
 function neverApproval(_closure: JsonObject): "not-applicable" {
   return "not-applicable";
 }
+
+// Authored modules and the harness can load separate copies of eve.
+Object.defineProperty(neverApproval, NEVER_APPROVAL, { value: true });
 
 function onceApproval(
   _closure: JsonObject,
@@ -37,6 +50,11 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
     callback: neverApproval,
     closure: {},
   });
+}
+
+export function isNeverApproval(approval: Approval<any>): boolean {
+  const callback = readDurableDynamicCallback(resolveApprovalPolicy(approval))?.callback;
+  return callback !== undefined && Reflect.get(callback, NEVER_APPROVAL) === true;
 }
 
 /**

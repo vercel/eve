@@ -18,7 +18,6 @@ import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
@@ -57,10 +56,6 @@ export async function compileToolEntry(
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
-  }
-
-  if (entry.kind === "workflow-tool") {
-    return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
   }
 
   if (entry.kind === "web-search-tool") {
@@ -119,7 +114,12 @@ export async function compileToolEntry(
           ? entry.definition.behavior === undefined
             ? { availability: [], shape }
             : { ...entry.definition.behavior, shape }
-          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
+          : {
+              ...entry.definition.behavior,
+              availability: entry.definition.behavior?.availability ?? [],
+              handling: { kind: "workflow-tool", workflowId },
+              shape,
+            },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,

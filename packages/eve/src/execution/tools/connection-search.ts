@@ -24,7 +24,11 @@ import {
 } from "#approval/definition.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  stampDurableDynamicToolCallbacks,
+} from "#tools/durable-callbacks.js";
+import { isNeverApproval } from "#tools/approval/policies.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { connectionAuthorizationScope } from "#runtime/connections/instance-identity.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -513,7 +517,7 @@ export async function resolveConnectionSearchDynamicTools() {
   const connectionSearchTool = defineTool({
     description:
       "Search for tools across your connections. " +
-      "Discovered tools become directly callable by their qualified name " +
+      "Discovered tools become available by their qualified name " +
       "(e.g. `linear__list_issues`) in your next response. " +
       `Available connections: ${connectionNames.join(", ")}.`,
     inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
@@ -552,10 +556,12 @@ export async function resolveConnectionSearchDynamicTools() {
       ...(approval === undefined
         ? {}
         : {
-            approvalRequest: {
-              callback: requestDiscoveredConnectionToolApproval,
-              closure,
-            },
+            approvalRequest: isNeverApproval(approval)
+              ? readDurableDynamicCallback(resolveApprovalPolicy(approval))!
+              : {
+                  callback: requestDiscoveredConnectionToolApproval,
+                  closure,
+                },
           }),
       ...(approval === undefined ||
       typeof approval === "function" ||

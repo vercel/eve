@@ -307,6 +307,40 @@ const resolvedStepTools = new WeakMap<
   { readonly coordinate: string; readonly metadata: readonly CurrentDynamicToolMetadata[] }
 >();
 
+/** Rebinds a dispatched tool snapshot without replacing its saved closures or catalog. */
+export async function restoreDynamicToolCallbacks(input: {
+  readonly ctx: AlsContext;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  for (const event of input.events) {
+    const key = durableKeyForEvent(event.type);
+    if (key === undefined) continue;
+    const persisted = input.ctx.get(key) ?? [];
+    if (persisted.length === 0) continue;
+    const owners = new Set(persisted.map((entry) => entry.resolverSlug));
+    const resolved = await resolveToolsFromEvent(
+      input.ctx,
+      input.resolvers.filter((resolver) => owners.has(resolver.slug)),
+      event,
+      input.messages,
+    );
+    for (const entry of persisted) {
+      if (
+        !resolved.metadata.some(
+          (candidate) =>
+            candidate.name === entry.name && candidate.resolverSlug === entry.resolverSlug,
+        ) ||
+        !isCurrentDynamicToolMetadata(entry) ||
+        hasUnregisteredDurableDynamicCallbacks([entry])
+      ) {
+        throw new Error(`Dynamic tool "${entry.name}" could not restore its dispatched callbacks.`);
+      }
+    }
+  }
+}
+
 function stepCoordinate(event: StepStartedStreamEvent): string {
   return `${event.data.turnId}:${String(event.data.stepIndex)}`;
 }

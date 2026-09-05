@@ -49,6 +49,7 @@ import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import { codeModeWorkflowReference } from "#execution/code-mode/workflow-reference.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
@@ -129,6 +130,14 @@ export async function prepareCoordinationDispatch(input: {
     ctx,
     durableSession,
     plan: () => planDispatch({ requests }),
+    // code_mode runs the turn's tools in its own steps; the parent owns the
+    // sandbox record, so it must exist before the child reconnects to it.
+    planSharesSandbox: ({ plan }) =>
+      plan.some(
+        (entry) =>
+          entry.kind === "workflow-task" &&
+          entry.task.workflowId === codeModeWorkflowReference.workflowId,
+      ),
     serializedContext: input.serializedContext,
   });
   if (event === pending.event) {

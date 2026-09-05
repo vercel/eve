@@ -27,6 +27,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
+import { CODE_MODE_TOOL_NAME } from "#harness/code-mode.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -74,11 +75,6 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
-  /**
-   * Effective `maxSubagents` cap configured by the experimental Workflow tool
-   * definition and materialized on the session at creation.
-   */
-  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -102,8 +98,10 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    workflow: input.node.agent.workflowTool !== undefined,
-    workflowMaxSubagents: input.workflowMaxSubagents,
+    codeMode:
+      input.node.agent.config?.experimental?.codeMode === false
+        ? undefined
+        : input.node.agent.config?.experimental?.codeMode,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -212,6 +210,14 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+
+  if (
+    input.tool.name === CODE_MODE_TOOL_NAME &&
+    (input.node.agent.config?.experimental?.codeMode === undefined ||
+      input.node.agent.config.experimental.codeMode === false)
+  ) {
+    return null;
+  }
 
   if (isPreparedRuntimeWorkflowTool(input.tool)) {
     if (registeredTool === null) {

@@ -251,14 +251,80 @@ installed package must stay external in hosted output, list it in
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
-| -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
-| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                  |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
+Set `experimental.codeMode` to `{ mode: "eager" }` or `{ mode: "lazy" }` to
+expose eligible tools through a framework-managed `code_mode` tool. The model writes a
+JavaScript program that calls `tools.<name>(input)`; `code_mode` runs it as a
+durable workflow in which every nested call is its own step, so a crash
+mid-program resumes at the pending call instead of re-running earlier ones.
+Tools with an approval policy other than `never()`, authored workflow tools,
+ordinary `execution: "background"` tools, and framework task controls stay
+direct. Subagent tools enter the program and
+return their result when called, the same way an authored workflow tool's
+`agent()` does.
+
+`"eager"` keeps eligible tools directly callable and also includes their
+signatures in `code_mode`. The model is guided toward programs for dependent
+lookups, pagination, loops, and data processing, and toward direct calls when a
+single call or native batch already provides the needed result. This is model
+guidance, not a deterministic router or a performance guarantee. Schemas are
+included up front even when the model chooses direct calls.
+
+`"lazy"` hides eligible direct tools, lists the available tool names and the
+discovery helpers' signatures, and lets the program discover schemas before
+execution.
+
+Each program can invoke at most 100 subagents by default. Set `maxSubagents` to
+change that limit; sequential calls, parallel calls, retries, and calls that
+continue an existing child all count. Excess calls reject with
+`CODE_MODE_SUBAGENT_LIMIT_REACHED` before starting a child and can be caught by
+the program. Ordinary tool calls do not consume this budget.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "openai/gpt-5.5",
+  experimental: { codeMode: { mode: "eager", maxSubagents: 25 } },
+});
+```
+
+`code_mode` replaces the former `Workflow` tool. Remove the file that exports
+`experimental_workflow()` from `eve/tools/workflow` and enable code mode in
+`agent.ts`. Authored [workflow tools](./tools/workflows) continue to work.
+
+In both modes, `tools.search_tools` and `tools.describe_tools` discover the
+complete advertised tool catalog, including tools that remain available for
+direct calls. Results include `requiresDirectCall: true` when the program
+cannot execute a tool. Discovery does not run the tool or bypass its approval
+policy. `code_mode` remains available for discovery even when all other tools
+require direct calls.
+
+`tools.search_tools({ query })` returns an array of matching tools; `query` is a
+case-insensitive substring of the name or description. Omit it to list every
+tool. `tools.describe_tools({ names })` returns an array of descriptions and
+input schemas for the requested tool names.
+
+Dynamic tools, including discovered connection tools, use the same eligibility
+rules. `connection_search` stays direct so its discoveries reach the next model
+step's catalog; eligible discovered tools become callable through `code_mode`, and remain
+directly callable in eager mode. When names overlap, step-scoped definitions override turn-scoped,
+session-scoped, and static definitions, in that order. Each program keeps the
+tool catalog and captured values from the model step that dispatched it.
+
+If a nested tool requires authorization, eve displays its authorization
+request and waits for the matching callback before retrying that call. Earlier
+completed calls retain their results. Tool and subagent failures reject the
+corresponding JavaScript call, so programs can use `try`/`catch` or
+`Promise.allSettled`. Cancelling code mode stops the workflow.
+
+| Field          | Type                                                                                                        | Default          | Description                                                                                                                                                                                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`                                                                                  | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                            |
+| `modelOptions` | `AgentModelOptionsDefinition`                                                                               | none             | Provider option overrides forwarded to the model call.                                                                                                                                                   |
+| `limits`       | `AgentLimitsDefinition`                                                                                     | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                              |
+| `experimental` | `{ codeMode?: false \| { mode: "eager" \| "lazy"; maxSubagents?: number }; workflow?: { world?: string } }` | unset            | Opt-in settings that can change or disappear in any release. `codeMode` groups eligible tools behind a JavaScript program; `workflow.world` selects the Workflow world package on the root agent.        |
+| `outputSchema` | Standard Schema or a JSON Schema object                                                                     | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.             |
+| `build`        | `{ externalDependencies?: string[] }`                                                                       | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output. |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

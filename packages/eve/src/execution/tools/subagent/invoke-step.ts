@@ -315,7 +315,7 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly result: RuntimeSubagentChildResult;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
+}): Promise<{ readonly accepted: boolean; readonly sessionState: DurableSessionState }> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
@@ -327,7 +327,7 @@ export async function settleTaskAgentInvocationStep(input: {
     candidates.find(
       (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
     ) ?? (candidates.length === 1 ? candidates[0] : undefined);
-  if (handle?.phase !== "claimed") return { sessionState: input.sessionState };
+  if (handle?.phase !== "claimed") return { accepted: false, sessionState: input.sessionState };
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
@@ -370,6 +370,7 @@ export async function settleTaskAgentInvocationStep(input: {
     );
   }
   return {
+    accepted: true,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }

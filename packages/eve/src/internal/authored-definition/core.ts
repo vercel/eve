@@ -279,8 +279,32 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["instrumentationProviders", "workflow"], message);
+  expectOnlyKnownKeys(record, ["codeMode", "instrumentationProviders", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.codeMode === false) {
+    normalizedDefinition.codeMode = false;
+  } else if (record.codeMode !== undefined) {
+    const config = expectObjectRecord(
+      record.codeMode,
+      `${message} "experimental.codeMode" must be an object or false.`,
+    );
+    expectOnlyKnownKeys(config, ["mode", "maxSubagents"], message);
+    if (config.mode !== "eager" && config.mode !== "lazy") {
+      throw new Error(`${message} "experimental.codeMode.mode" must be "eager" or "lazy".`);
+    }
+    normalizedDefinition.codeMode = {
+      mode: config.mode,
+      ...(config.maxSubagents === undefined
+        ? {}
+        : {
+            maxSubagents: expectPositiveInteger(
+              config.maxSubagents,
+              `${message} "experimental.codeMode.maxSubagents" must be a positive integer.`,
+            ),
+          }),
+    };
+  }
 
   if (record.instrumentationProviders !== undefined) {
     if (typeof record.instrumentationProviders !== "boolean") {

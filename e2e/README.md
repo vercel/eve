@@ -47,6 +47,33 @@ until the eval passes under `EVE_E2E_MODEL=mock`, then remove the tag. Prefer
 untagging over new `real-model` tags — deterministic evals make every world
 suite stronger.
 
+### Code Mode planning coverage
+
+`agent-code-mode` uses scripted models to test execution contracts.
+`agent-code-mode-models` and `agent-code-mode-models-lazy` test whether real
+matrix models construct useful programs in eager and lazy mode. Both run on
+every model in `matrix.json`, with the same natural-language tasks and no
+supplied JavaScript:
+
+- Aggregate a paginated export with data-dependent cursors, filtering and
+  totaling every page within one program.
+- Read independent account balances concurrently, retaining successful
+  results when one source fails.
+
+The fixture records actual tool calls independently of the model's answer.
+Assertions check complete data access, the values submitted to `save_report`,
+membership in one completed program, and overlapping balance reads. Requiring
+the reads and report submission in the same program prevents fetching raw data
+for the model to aggregate in a later step. Separate discovery programs are
+allowed. A bounded barrier makes concurrency observable without comparing
+wall-clock speed across machines. Data varies by session, and the eval checks
+the recorded model id against the configured matrix model.
+
+These are capability gates, not a latency or token-savings benchmark against
+direct tool use. Their `real-model` tag keeps them out of the world suites;
+the audit files are shared only within a local-world fixture run and removed
+after each completed eval turn.
+
 ## Local
 
 Run evals from the fixture directory:

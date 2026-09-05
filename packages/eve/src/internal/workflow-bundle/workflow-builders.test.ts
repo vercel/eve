@@ -12,6 +12,30 @@ import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
 
 describe("applyWorkflowTransform", () => {
+  it("registers the actual code mode execute function as a stable workflow", async () => {
+    const filename = "src/execution/code-mode/workflow.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      [
+        "export async function codeModeWorkflow() {",
+        '  "use workflow";',
+        "  return null;",
+        "}",
+        "",
+      ].join("\n"),
+      "workflow",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.workflowManifest.workflows?.[filename]?.codeModeWorkflow).toEqual({
+      workflowId: "workflow//eve//codeModeWorkflow",
+    });
+    expect(transformed.code).toContain(
+      'globalThis.__private_workflows.set("workflow//eve//codeModeWorkflow", codeModeWorkflow);',
+    );
+  });
+
   it("keeps eve workflow references stable when eve is the project root", async () => {
     const filename = "src/execution/turn-workflow.ts";
     const transformed = await applyWorkflowTransform(
