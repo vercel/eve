@@ -280,42 +280,57 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
-  it.each([
-    { scope: "step", metadataKey: StepDynamicToolMetadataKey },
-    { scope: "turn", metadataKey: TurnDynamicToolMetadataKey },
-    { scope: "session", metadataKey: SessionDynamicToolMetadataKey },
-  ])("records the scoped key when approving a $scope dynamic tool", async ({ metadataKey }) => {
-    const ctx = createApprovalContext();
-    const execute = vi.fn(async () => "/workspace");
-    registerDurableDynamicCallback({ toolName: "bash", phase: "execute", callback: execute });
-    registerDurableDynamicCallback({
-      toolName: "bash",
-      phase: "approvalKey",
-      callback: (_closure, input: { command: string }) => `bash:${input.command}`,
-    });
-    ctx.set(metadataKey, [
-      {
-        name: "bash",
-        description: "Run a shell command.",
-        inputSchema: { type: "object" },
-        resolverSlug: "dynamic-shell",
-        entryKey: "bash",
-        callbacks: { execute: { closure: {} }, approvalKey: { closure: {} } },
-      },
-    ]);
-    const staticExecute = vi.fn(async () => "static");
-    const runStep = createToolLoopHarness(createConfig(createModel(), staticExecute));
+  it.each(
+    [
+      { scope: "step", metadataKey: StepDynamicToolMetadataKey },
+      { scope: "turn", metadataKey: TurnDynamicToolMetadataKey },
+      { scope: "session", metadataKey: SessionDynamicToolMetadataKey },
+    ].flatMap((scope) => ["structured", "text"].map((response) => ({ ...scope, response }))),
+  )(
+    "records the scoped key for a $response approval of a $scope dynamic tool",
+    async ({ metadataKey, response }) => {
+      const ctx = createApprovalContext();
+      const execute = vi.fn(async () => "/workspace");
+      registerDurableDynamicCallback({ toolName: "bash", phase: "execute", callback: execute });
+      registerDurableDynamicCallback({
+        toolName: "bash",
+        phase: "approvalKey",
+        callback: (_closure, input: { command: string }) => `bash:${input.command}`,
+      });
+      ctx.set(metadataKey, [
+        {
+          name: "bash",
+          description: "Run a shell command.",
+          inputSchema: { type: "object" },
+          resolverSlug: "dynamic-shell",
+          entryKey: "bash",
+          callbacks: { execute: { closure: {} }, approvalKey: { closure: {} } },
+        },
+      ]);
+      const staticExecute = vi.fn(async () => "static");
+      const resolveStepDynamicTools = vi.fn(async () => {});
+      const runStep = createToolLoopHarness({
+        ...createConfig(createModel(), staticExecute),
+        resolveStepDynamicTools,
+      });
 
-    const result = await contextStorage.run(ctx, () =>
-      runStep(createPendingApprovalSession(), {
-        inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
-      }),
-    );
+      const result = await contextStorage.run(ctx, () =>
+        runStep(
+          createPendingApprovalSession(),
+          response === "text"
+            ? { message: "approve" }
+            : {
+                inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+              },
+        ),
+      );
+      expect(resolveStepDynamicTools).toHaveBeenCalledOnce();
 
-    expect(getApprovedTools(result.session)).toEqual(new Set(["bash:pwd"]));
-    expect(execute).toHaveBeenCalledOnce();
-    expect(staticExecute).not.toHaveBeenCalled();
-  });
+      expect(getApprovedTools(result.session)).toEqual(new Set(["bash:pwd"]));
+      expect(execute).toHaveBeenCalledOnce();
+      expect(staticExecute).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     { label: "direct", responseAuthorization: false },
