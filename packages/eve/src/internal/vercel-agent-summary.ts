@@ -53,6 +53,10 @@ export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 5;
  */
 export const VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH = ".eve/agent-summary.json";
 
+export const VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND = "vercel-eve-multi-agent-summary" as const;
+
+export const VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION = 1;
+
 /**
  * Display category eve exposes to the dashboard for one channel chip. Built
  * from the channel's reported {@link CompiledChannelDefinition.adapterKind}.
@@ -195,6 +199,30 @@ export interface VercelEveSubagentEntry {
 export interface VercelEveDiagnosticsSummary {
   readonly errors: number;
   readonly warnings: number;
+}
+
+/** One independently deployed agent declared by a multi-agent project. */
+export interface VercelEveMultiAgentSummaryEntry {
+  /** Stable workspace member name and public URL segment. */
+  readonly name: string;
+  /** Public route prefix for this agent (for example, `/support`). */
+  readonly routePrefix: string;
+  /** Path to the member's existing single-agent summary, relative to project root. */
+  readonly summaryPath: string;
+}
+
+/**
+ * Versioned project-level index for a multi-agent deployment.
+ *
+ * It deliberately references the existing per-agent summaries instead of
+ * flattening them: schedules, tools, and connections may share names across
+ * independently authored agents and must retain their owner.
+ */
+export interface VercelEveMultiAgentSummary {
+  readonly kind: typeof VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND;
+  readonly schemaVersion: typeof VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION;
+  readonly generatorVersion: string;
+  readonly agents: readonly VercelEveMultiAgentSummaryEntry[];
 }
 
 /**
