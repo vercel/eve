@@ -86,9 +86,9 @@ export async function* readNdjsonStream(
     }
   } finally {
     if (!reachedEof) {
-      // Breaking an async iteration must close the response body; releasing
-      // its lock alone leaves the server-side stream open.
-      await reader.cancel().catch(() => {});
+      // A cloned response waits for both branches to cancel. Let the caller
+      // abort the fetch instead of blocking cleanup on a tracing reader.
+      void reader.cancel().catch(() => {});
     }
     reader.releaseLock();
   }

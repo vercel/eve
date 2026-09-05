@@ -57,6 +57,10 @@ This consumes the stream until the current turn boundary:
 - `session.completed`
 - `session.failed`
 
+`result()` closes that HTTP stream, including when fetch instrumentation clones
+the response for tracing. The durable session remains available for follow-up
+turns after `session.waiting`.
+
 ## Stream events live
 
 Use `for await...of` when you want to render progress:
