@@ -224,6 +224,10 @@ export async function compactMessages(
       temperature: 0,
     });
 
+    if (result.text.trim().length === 0) {
+      throw new Error("The compaction model returned an empty summary.");
+    }
+
     const summaryHead: ModelMessage[] = [
       { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
