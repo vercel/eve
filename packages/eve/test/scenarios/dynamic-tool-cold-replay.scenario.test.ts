@@ -40,7 +40,7 @@ export function createDurableMarkerTool(key: string) {
 
   return tool({
     description: "Durable marker tool " + key + ".",
-    inputSchema: z.object({ label: z.string().optional() }),
+    inputSchema: z.object({ label: z.string().toUpperCase().optional() }),
     approval: {
       request(context) {
         writeMarker("approval-request", key, { callId: context.callId });
@@ -115,6 +115,7 @@ interface Marker {
   readonly phase: string;
   readonly pid: number;
   readonly serviceCreatedInPid?: number;
+  readonly label?: string;
 }
 
 async function readMarker(appRoot: string, phase: string, key: string): Promise<Marker> {
@@ -193,6 +194,7 @@ describe("dynamic tool cold replay", () => {
           expect(response.pid).not.toBe(firstRequest.pid);
           expect(execute.pid).toBe(response.pid);
           expect(execute.serviceCreatedInPid).toBe(execute.pid);
+          expect(execute.label).toBe("STRUCTURED-OUTPUT");
           expect(projection.pid).toBe(execute.pid);
         }
 

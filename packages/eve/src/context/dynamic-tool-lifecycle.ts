@@ -41,7 +41,36 @@ import { parseJsonObject } from "#shared/json.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
+import {
+  hasUnavailableDynamicToolSchemas,
+  rebindDynamicToolSchemas,
+  registerDynamicToolSchemas,
+} from "#context/dynamic-tool-schemas.js";
+
 const log = createLogger("dynamic-tools");
+
+function replayMetadata(
+  persisted: readonly PersistedDynamicToolMetadata[],
+  resolved: readonly CurrentDynamicToolMetadata[] = [],
+): readonly CurrentDynamicToolMetadata[] {
+  return toCurrentDynamicToolMetadataList(persisted, resolved).map((entry) =>
+    rebindDynamicToolSchemas(
+      entry,
+      resolved.find(
+        (candidate) =>
+          candidate.resolverSlug === entry.resolverSlug &&
+          candidate.entryKey === entry.entryKey &&
+          candidate.name === entry.name,
+      ),
+    ),
+  );
+}
+
+function hasMissingBindings(metadata: readonly CurrentDynamicToolMetadata[]): boolean {
+  return (
+    hasUnregisteredDurableDynamicCallbacks(metadata) || hasUnavailableDynamicToolSchemas(metadata)
+  );
+}
 
 function qualifyDynamicToolNames(
   resolver: ResolvedDynamicToolResolver,
@@ -256,6 +285,7 @@ function createMetadata(input: {
     name: input.name,
     outputSchema: serializeOutputSchema(input.entry.outputSchema),
     resolverSlug: input.resolver.slug,
+    runtimeSchemas: registerDynamicToolSchemas(input.entry),
   };
 }
 
@@ -363,7 +393,7 @@ export async function preparePersistedStepDynamicToolMetadata(input: {
 }): Promise<void> {
   const persisted = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
   const current = persisted.filter(isCurrentDynamicToolMetadata);
-  if (current.length === persisted.length && !hasUnregisteredDurableDynamicCallbacks(current)) {
+  if (current.length === persisted.length && !hasMissingBindings(current)) {
     if (current.length > 0) {
       storeResolvedStepTools({ ctx: input.ctx, event: input.event, metadata: current });
     }
@@ -375,10 +405,7 @@ export async function preparePersistedStepDynamicToolMetadata(input: {
   storeResolvedStepTools({
     ctx: input.ctx,
     event: input.event,
-    metadata: toCurrentDynamicToolMetadataList(
-      persisted,
-      resolved.filter(isCurrentDynamicToolMetadata),
-    ),
+    metadata: replayMetadata(persisted, resolved.filter(isCurrentDynamicToolMetadata)),
   });
 }
 
@@ -432,7 +459,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   const hasOldMetadata = current.length !== persisted.length;
   const revisionChanged =
     input.ctx.get(SessionDynamicToolRuntimeRevisionKey) !== input.runtimeRevision;
-  if (!revisionChanged && !hasOldMetadata && !hasUnregisteredDurableDynamicCallbacks(current)) {
+  if (!revisionChanged && !hasOldMetadata && !hasMissingBindings(current)) {
     return;
   }
   const matching = input.resolvers.filter((resolver) =>
@@ -444,7 +471,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
   input.ctx.set(
     SessionDynamicToolMetadataKey,
-    revisionChanged ? metadata : toCurrentDynamicToolMetadataList(persisted, metadata),
+    revisionChanged ? metadata : replayMetadata(persisted, metadata),
   );
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
@@ -459,8 +486,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   const persisted: readonly PersistedDynamicToolMetadata[] =
     input.ctx.get(TurnDynamicToolMetadataKey) ?? [];
   const needsResolution = persisted.filter(
-    (entry) =>
-      !isCurrentDynamicToolMetadata(entry) || hasUnregisteredDurableDynamicCallbacks([entry]),
+    (entry) => !isCurrentDynamicToolMetadata(entry) || hasMissingBindings([entry]),
   );
   if (needsResolution.length === 0) return;
   const resolverSlugs = new Set(needsResolution.map((entry) => entry.resolverSlug));
@@ -475,7 +501,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
       (oldResolverSlugs.has(resolver.slug) || resolver.rebindMissingCallbacks === true),
   );
   if (matching.length === 0) {
-    input.ctx.set(TurnDynamicToolMetadataKey, toCurrentDynamicToolMetadataList(persisted));
+    input.ctx.set(TurnDynamicToolMetadataKey, replayMetadata(persisted));
     return;
   }
 
@@ -483,7 +509,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
     input.ctx,
     async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
   );
-  const updated = toCurrentDynamicToolMetadataList(persisted, resolved.metadata);
+  const updated = replayMetadata(persisted, resolved.metadata);
   input.ctx.set(TurnDynamicToolMetadataKey, updated);
 
   const unresolved = updated.filter(
@@ -491,7 +517,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
       needsResolution.some(
         (candidate) =>
           candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,
-      ) && hasUnregisteredDurableDynamicCallbacks([entry]),
+      ) && hasMissingBindings([entry]),
   );
   if (unresolved.length > 0) {
     throw new Error(
