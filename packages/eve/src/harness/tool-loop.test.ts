@@ -915,6 +915,40 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("restores the requested history prefix before a turn settles", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Sensitive draft", role: "assistant" }] },
+      text: "Sensitive draft",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const beforeResponseRelease = vi.fn().mockResolvedValue(1);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        beforeResponseRelease,
+      }),
+    );
+    const previous = { content: "Earlier context", role: "user" as const };
+
+    const result = await runStep(createTestSession({ history: [previous] }), {
+      message: "Create a response",
+    });
+
+    expect(beforeResponseRelease).toHaveBeenCalledWith({
+      history: [
+        previous,
+        { content: "Create a response", role: "user" },
+        { content: "Sensitive draft", role: "assistant" },
+      ],
+      output: "Sensitive draft",
+      turnId: "",
+    });
+    expect(result.session.history).toEqual([previous]);
+    expect(result.settledTurn).toEqual({ output: "" });
+  });
+
   it("omits user messages with no model-visible content", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -2654,7 +2688,10 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const beforeResponseRelease = vi.fn().mockResolvedValue(undefined);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { beforeResponseRelease }),
+    );
     const session = createTestSession({ outputSchema: { type: "object" } });
 
     const result = await runStep(session, { message: "Hi" });
@@ -2682,6 +2719,7 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(result.session.outputSchema).toBeUndefined();
+    expect(beforeResponseRelease).not.toHaveBeenCalled();
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {
@@ -9564,6 +9602,26 @@ describe("createToolLoopHarness", () => {
     expect(stepViews).toEqual([compactedHistory]);
   });
 
+  it("restores history without running a model turn", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { restoreHistoryTo: 1 }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "keep", role: "user" },
+        { content: "remove", role: "assistant" },
+      ],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual([{ content: "keep", role: "user" }]);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
   it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
     const { emit, events } = createEventCollector();
     const resolveModel = vi.fn();
@@ -9592,7 +9650,6 @@ describe("createToolLoopHarness", () => {
       outputSchema,
       state,
     });
-
     const result = await runStep(session);
 
     expect(result.next).toBeNull();

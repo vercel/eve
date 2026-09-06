@@ -168,6 +168,7 @@ import {
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { restoreSessionHistory } from "#harness/history-restoration.js";
 import {
   getSupersededAuthorizationChallenges,
   setPendingAuthorization,
@@ -545,6 +546,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         turnId: `turn_${emissionState.sequence}`,
       });
     };
+
+    if (config.restoreHistoryTo !== undefined) {
+      session = restoreSessionHistory(session, config.restoreHistoryTo);
+      await emit?.(createSessionWaitingEvent());
+      return { next: null, session };
+    }
 
     if (config.clearOnly === true) {
       session = {
@@ -2723,6 +2730,7 @@ async function handleStepResult(input: {
   }
 
   return finishConversationTurn({
+    beforeResponseRelease: config.beforeResponseRelease,
     emissionState,
     emit,
     history: promptMessages,
@@ -2846,6 +2854,7 @@ async function finishTaskTurn(input: {
  * ends the turn and the session waits for the next message.
  */
 async function finishConversationTurn(input: {
+  readonly beforeResponseRelease?: ToolLoopHarnessConfig["beforeResponseRelease"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly ModelMessage[];
@@ -2859,12 +2868,13 @@ async function finishConversationTurn(input: {
   session = clearTurnClientContextState(session);
 
   if (schema === undefined) {
-    if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
-      session = setHarnessEmissionState(session, emissionState);
-    }
-    const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
-    return { next: null, session, settledTurn };
+    return settleConversationCandidate({
+      beforeResponseRelease: input.beforeResponseRelease,
+      emissionState,
+      emit,
+      output: stepOutput ?? "",
+      session,
+    });
   }
 
   const structured = extractFinalOutput(result);
@@ -2887,12 +2897,48 @@ async function finishConversationTurn(input: {
   }
 
   session = persistStructuredAssistantTurn(session, history, structured);
-  if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+  return settleConversationCandidate({
+    beforeResponseRelease: input.beforeResponseRelease,
+    emissionState,
+    emit,
+    emitAccepted: (emitFn, state) =>
+      emitStructuredResult(emitFn, state, structured, "conversation"),
+    output: structured,
+    session,
+  });
+}
+
+async function settleConversationCandidate(input: {
+  readonly beforeResponseRelease?: ToolLoopHarnessConfig["beforeResponseRelease"];
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly emitAccepted?: (
+    emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
+    state: ReturnType<typeof getHarnessEmissionState>,
+  ) => Promise<ReturnType<typeof getHarnessEmissionState>>;
+  readonly output: unknown;
+  readonly session: HarnessSession;
+}): Promise<StepResult> {
+  let { emissionState, session } = input;
+  const restoreHistoryTo = await input.beforeResponseRelease?.({
+    history: session.history,
+    output: input.output,
+    turnId: emissionState.turnId,
+  });
+  const restored = restoreHistoryTo !== undefined;
+  if (restored) session = restoreSessionHistory(session, restoreHistoryTo);
+  if (input.emit) {
+    emissionState = restored
+      ? await emitTurnEpilogue(input.emit, emissionState, "conversation")
+      : await (input.emitAccepted?.(input.emit, emissionState) ??
+          emitTurnEpilogue(input.emit, emissionState, "conversation"));
     session = setHarnessEmissionState(session, emissionState);
   }
-  const settledTurn = { output: structured } satisfies SettledTurn;
-  return { next: null, session, settledTurn };
+  return {
+    next: null,
+    session,
+    settledTurn: { output: restored ? "" : input.output },
+  };
 }
 
 /** Replays a parked dynamic workflow with completed child-agent results. */

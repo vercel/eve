@@ -1,3 +1,4 @@
+import type { ModelMessage } from "ai";
 import type { HandleMessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
@@ -98,6 +99,30 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
   readonly [TKey_ in TKey]?: StreamEventHook<HookEvent<TKey_>>;
 };
 
+/** Model history available to a response-release hook. */
+export interface ResponseReleaseHistory {
+  readonly messages: readonly ModelMessage[];
+  /** Requests restoration to the exact prefix ending before `index`. */
+  restoreTo(index: number): void;
+}
+
+/** Candidate conversation turn presented immediately before settlement. */
+export interface ResponseReleaseCandidate {
+  readonly history: ResponseReleaseHistory;
+  readonly output: unknown;
+  readonly turnId: string;
+}
+
+/**
+ * Runs after final synthesis but before terminal content reaches the channel.
+ * Requesting history restoration suppresses the pending terminal completion.
+ * Earlier stream events and side effects are not retracted.
+ */
+export type BeforeResponseReleaseHook = (
+  candidate: ResponseReleaseCandidate,
+  ctx: HookContext,
+) => void | Promise<void>;
+
 /**
  * Public hook definition authored in `agent/hooks/*.ts`.
  *
@@ -108,6 +133,7 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
  * `defineInstructions` in `agent/instructions/`.
  */
 export interface HookDefinition<TKey extends HookEventKey = HookEventKey> {
+  readonly beforeResponseRelease?: BeforeResponseReleaseHook;
   readonly events?: StreamEventHooks<TKey>;
 }
 

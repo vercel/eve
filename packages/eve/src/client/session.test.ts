@@ -440,6 +440,35 @@ describe("ClientSession", () => {
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
+  it("queues history restoration without clearing the local session cursor", async () => {
+    const state = { sessionId: "session_1", streamIndex: 4 };
+    const requests: Array<{ body?: string; method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        method: init?.method ?? "GET",
+        url,
+      });
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession(state);
+
+    await expect(session.restoreHistory({ to: 2 })).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+
+    expect(session.state).toEqual(state);
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/restore-history");
+    expect(requests[0]!.method).toBe("POST");
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ to: 2 });
+  });
+
   it("queues compaction without clearing the local session cursor", async () => {
     const state = { sessionId: "session_1", streamIndex: 4 };
     const requests: Array<{ body?: string; method: string; url: string }> = [];

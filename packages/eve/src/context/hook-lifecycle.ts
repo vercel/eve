@@ -1,6 +1,6 @@
 import { getAdapterKind } from "#channel/adapter.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { HookContext } from "#public/definitions/hook.js";
+import type { HookContext, ResponseReleaseCandidate } from "#public/definitions/hook.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
@@ -31,6 +31,18 @@ export async function dispatchStreamEventHooks(input: {
   }
   for (const entry of wildcard) {
     await entry.handler(input.event, hookCtx);
+  }
+}
+
+/** Runs ordered pre-release hooks. */
+export async function dispatchBeforeResponseReleaseHooks(input: {
+  readonly candidate: ResponseReleaseCandidate;
+  readonly ctx: ContextContainer;
+  readonly registry: RuntimeHookRegistry;
+}): Promise<void> {
+  const hookCtx = buildHookContext(input.ctx);
+  for (const entry of input.registry.beforeResponseRelease) {
+    await entry.handler(input.candidate, hookCtx);
   }
 }
 

@@ -48,6 +48,17 @@ describe("resolveHookDefinition", () => {
     expect(Object.keys(resolved.events).sort()).toEqual(["*", "message.completed"]);
   });
 
+  it("resolves a pre-settlement turn hook", async () => {
+    const definition = buildDefinition({ slug: "review" });
+    const beforeResponseRelease = () => undefined;
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { beforeResponseRelease },
+    });
+
+    const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
+    expect(resolved.beforeResponseRelease).toBe(beforeResponseRelease);
+  });
+
   it("accepts a hook with only `events` declared", async () => {
     const definition = buildDefinition({ slug: "audit" });
     const moduleMap = buildModuleMap(definition.sourceId, {

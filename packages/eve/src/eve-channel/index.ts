@@ -38,6 +38,7 @@ import {
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
+  EVE_SESSION_RESTORE_HISTORY_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
   EVE_TASK_INPUT_ROUTE_PATTERN,
@@ -48,6 +49,7 @@ import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
+import type { RestoreHistoryResponse } from "#protocol/restore-history.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
 import {
@@ -66,6 +68,7 @@ import {
   parseIncludeTailIndex,
   parseJsonRequest,
   parseResetBody,
+  parseRestoreHistoryBody,
   parseSessionControlBody,
   parseSessionMessageBody,
   parseStartIndex,
@@ -462,6 +465,40 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 status: "accepted",
               } satisfies ClearResponse)
             : ({ ok: true, status: "no_active_session" } satisfies ClearResponse),
+          {
+            headers: { "cache-control": "no-store" },
+            status: result.status === "accepted" ? 202 : 200,
+          },
+        );
+      }),
+
+      POST(EVE_SESSION_RESTORE_HISTORY_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseRestoreHistoryBody(req);
+        if (body instanceof Response) return body;
+        let result: Awaited<ReturnType<Session["restoreHistory"]>>;
+        try {
+          result = await attachSession(sessionId).restoreHistory(body);
+        } catch (error) {
+          const errorId = logError(log, "session-history restoration request failed", error, {
+            sessionId,
+          });
+          return Response.json(
+            { error: "Failed to restore the session history.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+        return Response.json(
+          result.status === "accepted"
+            ? ({
+                ok: true,
+                sessionId: result.sessionId,
+                status: "accepted",
+              } satisfies RestoreHistoryResponse)
+            : ({ ok: true, status: "no_active_session" } satisfies RestoreHistoryResponse),
           {
             headers: { "cache-control": "no-store" },
             status: result.status === "accepted" ? 202 : 200,

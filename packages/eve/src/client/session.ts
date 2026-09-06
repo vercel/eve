@@ -9,6 +9,7 @@ import {
   clearClientSession,
   compactClientSession,
   resetClientSession,
+  restoreClientSessionHistory,
 } from "#client/session-controls.js";
 import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
@@ -21,6 +22,7 @@ import type {
   ClientRedirectPolicy,
   RespondTurnOptions,
   ResetResult,
+  RestoreHistoryResult,
   SendTurnInput,
   SendTurnOptions,
   SendTurnPayload,
@@ -148,6 +150,15 @@ export class ClientSession {
   /** Queues context compaction without sending model input. */
   async compact(): Promise<CompactResult> {
     return await compactClientSession({ context: this.#context, sessionId: this.#state.sessionId });
+  }
+
+  /** Queues restoration to an earlier model-history index. */
+  async restoreHistory(input: { readonly to: number }): Promise<RestoreHistoryResult> {
+    return await restoreClientSessionHistory({
+      context: this.#context,
+      sessionId: this.#state.sessionId,
+      to: input.to,
+    });
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */

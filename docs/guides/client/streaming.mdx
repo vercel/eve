@@ -38,6 +38,16 @@ const cleared = await session.clear();
 console.log(cleared.status);
 ```
 
+Use `session.restoreHistory({ to })` to retain the exact model-history prefix before an index. The
+control is serialized with turns and other session controls. It does not retract stream events,
+messages already delivered through a channel, tool effects, or other external work. An invalid index
+fails the session operation instead of selecting a nearby boundary.
+
+```ts
+const restored = await session.restoreHistory({ to: historyIndex });
+console.log(restored.status);
+```
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:
