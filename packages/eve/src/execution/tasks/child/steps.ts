@@ -7,6 +7,8 @@ import type {
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
@@ -210,6 +212,25 @@ export async function wakeTaskAgentRequestParentStep(input: {
   try {
     await resumeSessionInbox(input.token, command);
   } catch (error) {
+    if (error instanceof SessionInboxWireError && request.kind === "agent-invoke") {
+      await resumeHook(input.request.replyTo, {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: request.invocationId,
+            isError: true,
+            kind: "subagent-result",
+            origin: "dispatch",
+            output: {
+              code: "SESSION_INBOX_INCOMPATIBLE",
+              message: `The parent session cannot accept this agent request. Start a new session after upgrading. ${error.message}`,
+            },
+            subagentName: request.input.target,
+          },
+        ],
+      });
+      return;
+    }
     if (!isTaskWorkflowTargetGone(error)) throw error;
   }
 }
