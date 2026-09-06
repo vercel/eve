@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { v4ToV5 } from "./v4-to-v5.js";
 
 it("removes token cost without changing tokens or application data", () => {
@@ -76,4 +76,26 @@ it("removes cost from child usage while preserving the child's result", () => {
   expect(request.result.usage).not.toHaveProperty("costUsd");
   expect(request.result.outcome.usageDelta).not.toHaveProperty("costUsd");
   expect(request.result.output).toEqual({ costUsd: 99 });
+});
+
+describe("session inbox wire v5 migration", () => {
+  it("rejects malformed direct migration input", () => {
+    expect(() => v4ToV5.up(null as never)).toThrow("session inbox wire v4 value is not an object");
+  });
+
+  it("preserves a version-4 payload while advancing its version", () => {
+    expect(
+      v4ToV5.up({
+        kind: "deliver",
+        payload: { message: "hello" },
+        payloads: [{ message: "hello" }],
+        version: 4,
+      }),
+    ).toEqual({
+      kind: "deliver",
+      payload: { message: "hello" },
+      payloads: [{ message: "hello" }],
+      version: 5,
+    });
+  });
 });

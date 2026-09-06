@@ -1,4 +1,4 @@
-import type { Migration } from "#execution/session-inbox/migration.js";
+import type { Migration } from "#execution/wire/session-inbox/migration.js";
 
 export const v1ToV2 = {
   from: 1,

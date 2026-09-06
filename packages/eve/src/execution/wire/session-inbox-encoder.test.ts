@@ -28,7 +28,6 @@ describe("session inbox encoder", () => {
     const caller = {
       activityObserver: observer,
       callId: "call-1",
-      futureCallerField: "future-value",
       replyTo: { kind: "hook" as const, token: "callback-token" },
       subagentName: "researcher",
     };

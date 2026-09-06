@@ -1,4 +1,4 @@
-import type { Migration } from "#execution/session-inbox/migration.js";
+import type { Migration } from "#execution/wire/session-inbox/migration.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 
 export const v5ToV6 = {

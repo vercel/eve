@@ -1,16 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import type {
-  DeliverHookPayload,
-  SessionCommand,
-  SessionTimeoutHookPayload,
-} from "#channel/types.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
-import {
-  encodeSessionCommandV5,
-  sessionInboxWireV5Schema,
-} from "#execution/wire/session-inbox-wire.v5.js";
-import { formatValidationError } from "#runtime/validation.js";
+import { sessionInboxWireV5Schema } from "#execution/wire/session-inbox-wire.v5.js";
 
 const v5 = sessionInboxWireV5Schema.options;
 const v5Cancel = v5[5];
@@ -28,30 +18,3 @@ export const sessionInboxWireV6Schema = z.discriminatedUnion("kind", [
 ]);
 
 export type SessionInboxWireV6 = z.infer<typeof sessionInboxWireV6Schema>;
-
-/** Builds and validates one complete version-6 wire value. */
-export function encodeSessionCommandV6(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): SessionInboxWireV6 {
-  const v5Command = withoutOwnedTaskCancellation(command);
-  const value: Record<string, unknown> = {
-    ...encodeSessionCommandV5(v5Command),
-    version: VERSION,
-  };
-  if (command.kind === "cancel") value.tasks = command.tasks;
-  const parsed = sessionInboxWireV6Schema.safeParse(value);
-  if (!parsed.success) {
-    throw new SessionInboxWireError(
-      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
-    );
-  }
-  return parsed.data;
-}
-
-function withoutOwnedTaskCancellation(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload {
-  if (command.kind !== "cancel" || command.tasks === undefined) return command;
-  const { tasks: _tasks, ...v5 } = command;
-  return v5;
-}

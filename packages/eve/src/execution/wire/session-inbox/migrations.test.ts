@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { sessionInboxMigrations } from "#execution/session-inbox/migrations.js";
+import { sessionInboxMigrations } from "#execution/wire/session-inbox/migrations.js";
 import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";

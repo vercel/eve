@@ -174,23 +174,16 @@ describe("session inbox wire v5", () => {
     });
   });
 
-  it("carries current task messages through the stable raw-send fast path", () => {
-    const wire = sessionInboxWire.encode(
-      {
-        kind: "send",
-        payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
-      },
-      { variant: "send", version: 0 },
-    );
-
-    expect(wire).toMatchObject({
-      kind: "send",
-      payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
-    });
-    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
-      kind: "deliver",
-      payloads: [{ task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } }],
-    });
+  it("rejects current task messages for an unversioned receiver", () => {
+    expect(() =>
+      sessionInboxWire.encode(
+        {
+          kind: "send",
+          payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
+        },
+        { variant: "send", version: 0 },
+      ),
+    ).toThrow(/wire version 0/);
   });
 
   it("round-trips accepted deployment provenance", () => {

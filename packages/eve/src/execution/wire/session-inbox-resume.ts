@@ -17,7 +17,7 @@ import {
   type SessionInboxAddress,
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWire } from "#execution/session-inbox/encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";

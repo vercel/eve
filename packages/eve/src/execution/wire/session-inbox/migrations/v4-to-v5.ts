@@ -1,4 +1,5 @@
-import type { Migration, Wire } from "#execution/session-inbox/migration.js";
+import { isObject } from "#shared/guards.js";
+import type { Migration, Wire } from "#execution/wire/session-inbox/migration.js";
 
 type PayloadV4 = Extract<Wire<4>, { kind: "deliver" }>["payload"];
 type PayloadV5 = Extract<Wire<5>, { kind: "deliver" }>["payload"];
@@ -6,7 +7,10 @@ type PayloadV5 = Extract<Wire<5>, { kind: "deliver" }>["payload"];
 export const v4ToV5 = {
   from: 4,
   to: 5,
-  up: (wire) => ({ ...wire, version: 5 }),
+  up(wire) {
+    if (!isObject(wire)) throw new Error("session inbox wire v4 value is not an object.");
+    return { ...wire, version: 5 };
+  },
   down(wire) {
     if (wire.kind !== "deliver") return { ...wire, version: 4 };
     return { ...wire, payload: down(wire.payload), payloads: wire.payloads.map(down), version: 4 };

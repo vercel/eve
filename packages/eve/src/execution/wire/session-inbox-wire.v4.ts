@@ -1,14 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import type {
-  DeliverHookPayload,
-  SessionCommand,
-  SessionTimeoutHookPayload,
-} from "#channel/types.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
-import { formatValidationError } from "#runtime/validation.js";
 import { runtimeSubagentChildResultSchema } from "#shared/action-types.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";
@@ -165,38 +157,3 @@ export const sessionInboxWireV4Schema = z.discriminatedUnion("kind", [
 ]);
 
 export type SessionInboxWireV4 = z.infer<typeof sessionInboxWireV4Schema>;
-
-/** Builds and validates one complete version-4 wire value. */
-export function encodeSessionCommandV4(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): SessionInboxWireV4 {
-  const wire =
-    command.kind === "send"
-      ? {
-          auth: command.auth,
-          caller: command.caller,
-          deliveryMetadata:
-            command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
-          kind: "deliver" as const,
-          payload: command.payload,
-          payloads: [command.payload],
-          requestId: command.requestId,
-          taskDeliveryId: command.taskDeliveryId,
-          turnPolicy: command.turnPolicy,
-          version: VERSION,
-        }
-      : command.kind === "deliver"
-        ? {
-            ...command,
-            payload: coalesceDeliverPayloads(command.payloads),
-            version: VERSION,
-          }
-        : { ...command, version: VERSION };
-  const parsed = sessionInboxWireV4Schema.safeParse(wire);
-  if (!parsed.success) {
-    throw new SessionInboxWireError(
-      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
-    );
-  }
-  return parsed.data;
-}

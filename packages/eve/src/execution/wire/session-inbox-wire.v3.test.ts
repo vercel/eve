@@ -4,8 +4,9 @@ import { z } from "#compiled/zod/index.js";
 import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
-import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
-import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
+import { v1ToV2 } from "#execution/wire/session-inbox/migrations/v1-to-v2.js";
+import type { Wire } from "#execution/wire/session-inbox/migration.js";
 import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
 
 const delivery = {
@@ -58,8 +59,8 @@ describe("session inbox wire v3", () => {
       { delivery, kind: "send", payload: { message: "hello" } },
       { variant: "send", version: 0 },
     );
-    const v1 = sessionInboxWireV0Migration.migrate(normalizeSessionInboxWireV2(wire));
-    const v2 = normalizeSessionInboxWireV2(sessionInboxWireV1Migration.migrate(v1));
+    const v1 = sessionInboxWireV0Migration.migrate(normalizeSessionInboxWire(wire));
+    const v2 = normalizeSessionInboxWire(v1ToV2.up(v1 as Wire<1>));
 
     expect(v2).toMatchObject({
       deliveryMetadata: [{ ...delivery, payloadIndex: 0 }],

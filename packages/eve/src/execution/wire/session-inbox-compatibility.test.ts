@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionInboxWire } from "#execution/session-inbox/encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWire as decoder } from "#execution/wire/session-inbox-wire.js";
 import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
 

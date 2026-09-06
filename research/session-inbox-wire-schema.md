@@ -28,12 +28,12 @@ In this document, **must**, **should**, and **may** are normative.
 
 ## Authoring API
 
-Production sends use `execution/session-inbox/encoder.ts`. It builds the current
+Production sends use `execution/wire/session-inbox-encoder.ts`. It builds the current
 wire representation, walks adjacent migrations backwards to the receiver's
 version, validates the result against that version's frozen schema, and only
 then returns a value that can be delivered.
 
-Pure transformations live in `execution/session-inbox/migrations/`. Each entry
+Pure transformations live in `execution/wire/session-inbox/migrations/`. Each entry
 names two fixed versions. `Wire<V>` is inferred from the schema for version `V`;
 adding a newer version does not change a historical migration's input type.
 
@@ -70,7 +70,7 @@ export const v5ToV6 = {
 } satisfies Migration<5, 6>;
 ```
 
-The static registry in `session-inbox/migrations.ts` assembles both directions:
+The static registry in `wire/session-inbox/migrations.ts` assembles both directions:
 
 ```text
 Read a v3 message:          v3 → v4 → v5 → v6 → normalize for the driver
@@ -100,19 +100,19 @@ Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
   contract, including the stable fast path and unversioned targets.
 - **Keep pure transformations workflow-safe.** Migrations import schema types
   only. Zod stays on the producer side, outside the embedded workflow driver.
-  CI checks the decoder, registry, legacy adapter, and migration imports.
+  CI checks the decoder, registry, and migration imports.
 - **Decoder trust remains explicit.** Known versioned messages are assumed to
   come from validated producers. The decoder checks version and discriminator
   and rejects known operation/version mismatches; it is not a complete second
   schema validator.
-- **Legacy history is a separate adapter.** Unversioned data predates the
-  contract and can include modern task fields emitted by historical writers.
-  `session-inbox/legacy.ts` upgrades already-persisted values using the retained
-  historical transforms. New sends to unversioned receivers must pass v1 first.
-  The two old `send` and `deliver` envelopes remain explicit target variants.
-- **The historical encoder is test-only.** `wire/session-inbox-encoder.ts` stays
-  available to frozen tests, including those recording the original bug. CI
-  forbids production imports; runtime callers use `session-inbox/encoder.ts`.
+- **One encoder and one migration chain.** `wire/session-inbox-encoder.ts`
+  replaces the per-version encoders. Version modules retain their schemas.
+  Tests and runtime sends use the same encoder.
+- **Legacy envelopes enter the same chain.** The v0 adapter converts persisted
+  unversioned `send` and `deliver` envelopes to v1, then the same registry
+  advances them to v6. This includes modern task fields historically written
+  without a version. New sends to unversioned receivers must pass v1 first;
+  the two old envelope shapes remain explicit target variants.
 
 To add a version: freeze its schema and type, add its adjacent migration pair
 and semantic test, register the pair and schema, and update the current wire
@@ -265,13 +265,13 @@ operation was then reinserted, and an old parent received a request it had no
 handler for. The old handler removed the `task` envelope after processing the
 fields it recognized, so no child agent was dispatched.
 
-The historical codec and its frozen tests still describe that old encoding.
-[The production encoder][production-encoder] rejects it while walking v4→v3,
+The old codec is removed. Its regression tests now assert that
+[the shared encoder][production-encoder] rejects this while walking v4→v3,
 including when called directly for an unversioned receiver. The complete target
 value must pass the receiver's schema before `resumeHook` can execute.
 
 [delivery-tests]: ../packages/eve/src/execution/wire/session-inbox-resume.test.ts
-[production-encoder]: ../packages/eve/src/execution/session-inbox/encoder.ts
+[production-encoder]: ../packages/eve/src/execution/wire/session-inbox-encoder.ts
 [delivery-boundary]: ../packages/eve/src/execution/wire/session-inbox-resume.ts
 [task-wire-regression]: https://github.com/vercel/eve/blob/aae26311a845b5638f701311b742fab7d9cb4baf/packages/eve/src/execution/wire/session-inbox-encoder.ts#L76
 
@@ -320,13 +320,14 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   unregistered or untested protocol history.
 - Enforcement is layered by what each CI job can check. Rule 40 runs in the
   lint job and compares declared versions with shipped modules and tests.
-  TypeScript requires an encoder for every registered stamped version. The
+  TypeScript requires a schema for every registered stamped version. The
   required unit tier then encodes and decodes every registry entry, while each
   version's frozen contract pins its exact shape and backwards migration.
-- Rule 40 also freezes pure `*.vN.migration.ts` modules with their tests and
-  rejects policy imports from those transforms. A one-time historical rewrite
-  is represented by exact old/new Git blob hashes, so the exception expires as
-  soon as the approved rewrite reaches `main`.
+- Rule 40 freezes adjacent migration pairs and their tests, and rejects policy
+  imports from those transforms. It compares each shipped schema and its local
+  dependencies with `origin/main`, and separately protects frozen fixtures and
+  snapshots. Encoder implementations and assertions may change without changing
+  the historical protocol contract.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
   deterministic registry checks cover future stamped-version changes. The

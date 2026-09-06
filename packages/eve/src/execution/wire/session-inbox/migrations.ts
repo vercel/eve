@@ -1,25 +1,27 @@
-import type { Wire } from "#execution/session-inbox/migration.js";
+import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import type { Wire } from "#execution/wire/session-inbox/migration.js";
 import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import {
   SessionInboxWireError,
   type SessionInboxWireVersion,
 } from "#execution/wire/session-inbox-contract.js";
-import { v1ToV2 } from "#execution/session-inbox/migrations/v1-to-v2.js";
-import { v2ToV3 } from "#execution/session-inbox/migrations/v2-to-v3.js";
-import { v3ToV4 } from "#execution/session-inbox/migrations/v3-to-v4.js";
-import { v4ToV5 } from "#execution/session-inbox/migrations/v4-to-v5.js";
-import { v5ToV6 } from "#execution/session-inbox/migrations/v5-to-v6.js";
+import { v1ToV2 } from "#execution/wire/session-inbox/migrations/v1-to-v2.js";
+import { v2ToV3 } from "#execution/wire/session-inbox/migrations/v2-to-v3.js";
+import { v3ToV4 } from "#execution/wire/session-inbox/migrations/v3-to-v4.js";
+import { v4ToV5 } from "#execution/wire/session-inbox/migrations/v4-to-v5.js";
+import { v5ToV6 } from "#execution/wire/session-inbox/migrations/v5-to-v6.js";
 
 export const sessionInboxMigrations = [v1ToV2, v2ToV3, v3ToV4, v4ToV5, v5ToV6] as const;
 
 /** The decoder has checked the version; each edge is typed against frozen contracts. */
-export const sessionInboxUpMigrations: readonly VersionMigration[] = sessionInboxMigrations.map(
-  (migration) => ({
+export const sessionInboxUpMigrations: readonly VersionMigration[] = [
+  sessionInboxWireV0Migration,
+  ...sessionInboxMigrations.map((migration) => ({
     from: migration.from,
     to: migration.to,
-    migrate: (wire) => migration.up(wire as never),
-  }),
-);
+    migrate: (wire: unknown) => migration.up(wire as never),
+  })),
+];
 
 export function downgradeSessionInbox(
   wire: Wire<6>,

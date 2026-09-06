@@ -1,16 +1,6 @@
 import type { DataContent } from "ai";
 import { z } from "#compiled/zod/index.js";
-
-import type {
-  DeliverHookPayload,
-  SessionCommand,
-  SessionTimeoutHookPayload,
-  TurnCaller,
-} from "#channel/types.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
-import { formatValidationError } from "#runtime/validation.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";
 import type { TaskView } from "#tasks/types.js";
@@ -199,7 +189,6 @@ const callerSchema = z
     taskId: z.string().optional(),
   })
   .strict();
-const callerProjectionSchema = callerSchema.strip();
 const traceContextSchema = z
   .object({ spanId: z.string(), traceFlags: z.number(), traceId: z.string() })
   .strict();
@@ -247,56 +236,3 @@ export const sessionInboxWireV1Schema = z.discriminatedUnion("kind", [
 ]);
 
 export type SessionInboxWireV1 = z.infer<typeof sessionInboxWireV1Schema>;
-
-/** Builds and validates one complete version-1 wire value. */
-export function encodeSessionCommandV1(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): SessionInboxWireV1 {
-  const input = toV1Command(command);
-  const wire =
-    input.kind === "send"
-      ? {
-          auth: input.auth,
-          caller: input.caller,
-          deliveryMetadata:
-            input.delivery === undefined ? undefined : [{ ...input.delivery, payloadIndex: 0 }],
-          kind: "deliver" as const,
-          payload: input.payload,
-          payloads: [input.payload],
-          requestId: input.requestId,
-          taskDeliveryId: input.taskDeliveryId,
-          turnPolicy: input.turnPolicy,
-          version: VERSION,
-        }
-      : input.kind === "deliver"
-        ? {
-            ...input,
-            payload: coalesceDeliverPayloads(input.payloads),
-            version: VERSION,
-          }
-        : { ...input, version: VERSION };
-  const parsed = sessionInboxWireV1Schema.safeParse(wire);
-  if (!parsed.success) {
-    throw new SessionInboxWireError(
-      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
-    );
-  }
-  return parsed.data;
-}
-
-function toV1Command(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload {
-  if (!("caller" in command) || command.caller === undefined) return command;
-  return { ...command, caller: toV1Caller(command.caller) };
-}
-
-function toV1Caller(caller: TurnCaller) {
-  const parsed = callerProjectionSchema.safeParse(caller);
-  if (!parsed.success) {
-    throw new SessionInboxWireError(
-      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
-    );
-  }
-  return parsed.data;
-}

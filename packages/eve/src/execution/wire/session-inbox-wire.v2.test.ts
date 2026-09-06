@@ -5,6 +5,7 @@ import { z } from "#compiled/zod/index.js";
 
 import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
 import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
 
 const activityObserver = {
@@ -120,7 +121,9 @@ describe("session inbox wire v2", () => {
         ],
       },
     };
-    const wire = sessionInboxWireEncoder.encode({ kind: "send", payload } as never, { version: 2 });
+    const wire = sessionInboxWireV2Schema.parse(
+      normalizeSessionInboxWire({ kind: "deliver", payload, payloads: [payload], version: 2 }),
+    );
 
     const expected = {
       payloads: [

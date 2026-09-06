@@ -9,10 +9,9 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-contract.js";
-import type { Wire } from "#execution/session-inbox/migration.js";
-import { sessionInboxUpMigrations } from "#execution/session-inbox/migrations.js";
-import { upgradeLegacySessionInbox } from "#execution/session-inbox/legacy.js";
-import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
+import type { Wire } from "#execution/wire/session-inbox/migration.js";
+import { sessionInboxUpMigrations } from "#execution/wire/session-inbox/migrations.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
 import { isObject } from "#shared/guards.js";
 
 type SessionInboxWire = Wire<6>;
@@ -22,8 +21,8 @@ type SessionInboxWire = Wire<6>;
  * durable inbox hooks crosses through `sessionInboxWire.encode` /
  * `sessionInboxWire.decode`.
  *
- * Typed adjacent migrations live in `session-inbox/migrations/`. The legacy
- * adapter retains historical transforms for already-persisted raw sends.
+ * Typed adjacent migrations live in `wire/session-inbox/migrations/`.
+ * The v0 envelope adapter feeds the same chain for historical raw sends.
  * This decoder stays dependency-free inside the workflow body.
  *
  * See research/session-inbox-wire-schema.md and issue #1765.
@@ -56,7 +55,7 @@ function decode(value: unknown): DecodedSessionInbox {
   if (hasDeclaredVersion && typeof declaredVersion !== "number") {
     throw new SessionInboxWireError(`${WIRE_LABEL}: value has no numeric "version" field.`);
   }
-  const normalized = normalizeSessionInboxWireV2(value);
+  const normalized = normalizeSessionInboxWire(value);
   if (
     (declaredVersion === 1 || declaredVersion === 2 || declaredVersion === 3) &&
     containsCurrentTaskMessages(normalized)
@@ -83,16 +82,13 @@ function decode(value: unknown): DecodedSessionInbox {
       label: WIRE_LABEL,
       migrations: sessionInboxUpMigrations,
       targetVersion: SESSION_INBOX_WIRE_VERSION,
-      value:
-        !hasDeclaredVersion || declaredVersion === 0
-          ? upgradeLegacySessionInbox(normalized)
-          : normalized,
+      value: normalized,
     });
   } catch (error) {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const wire = normalizeSessionInboxWireV2(migrated) as Partial<SessionInboxWire>;
+  const wire = normalizeSessionInboxWire(migrated) as Partial<SessionInboxWire>;
   if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,

@@ -1,16 +1,16 @@
 import { isObject } from "#shared/guards.js";
 
 /** Converts Workflow-VM records into this realm before wire consumption. */
-export function normalizeSessionInboxWireV2(value: unknown, arrayFallback = false): unknown {
+export function normalizeSessionInboxWire(value: unknown, arrayFallback = false): unknown {
   if (value === undefined) return arrayFallback ? null : undefined;
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeSessionInboxWireV2(item, true));
+    return value.map((item) => normalizeSessionInboxWire(item, true));
   }
   if (!isPlainRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value)
       .filter((entry) => entry[1] !== undefined)
-      .map(([key, item]) => [key, normalizeSessionInboxWireV2(item)]),
+      .map(([key, item]) => [key, normalizeSessionInboxWire(item)]),
   );
 }
 

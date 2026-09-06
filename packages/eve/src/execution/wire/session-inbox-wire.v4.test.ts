@@ -127,23 +127,27 @@ describe("session inbox wire v4", () => {
     });
   });
 
-  it("carries current task messages through the stable raw-send fast path", () => {
-    const wire = sessionInboxWire.encode(
-      {
-        kind: "send",
-        payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
-      },
-      { variant: "send", version: 0 },
-    );
-
-    expect(wire).toMatchObject({
-      kind: "send",
-      payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
-    });
-    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
+  it.each(["single", "batch"])("still reads historical unversioned %s input requests", (shape) => {
+    const { request, ...route } = inputRequest;
+    const entry = shape === "single" ? inputRequest : { ...route, requests: [request] };
+    const payload = { task: { agentRequests: [agentRequest], inputRequests: [entry] } };
+    // Old writers persisted this shape without a version; new writers must reject it.
+    expect(sessionInboxWireDecoder.decode({ kind: "send", payload })).toMatchObject({
       kind: "deliver",
-      payloads: [{ task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } }],
+      payloads: [payload],
     });
+  });
+
+  it("rejects current task messages for an unversioned receiver", () => {
+    expect(() =>
+      sessionInboxWire.encode(
+        {
+          kind: "send",
+          payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
+        },
+        { variant: "send", version: 0 },
+      ),
+    ).toThrow(/wire version 0/);
   });
 
   it("round-trips accepted deployment provenance", () => {
