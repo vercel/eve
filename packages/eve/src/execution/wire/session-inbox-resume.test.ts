@@ -123,60 +123,22 @@ describe("resumeSessionInbox", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("resumes a compatible stable inbox by token without inspecting metadata", async () => {
+  it("uses the advertised version even for an ordinary stable-inbox message", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    resumeHookMock.mockResolvedValue(hook);
+    getHookByTokenMock.mockResolvedValue(hook);
 
-    await resumeSessionInbox(token, {
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
+    await resumeSessionInbox(token, { kind: "send", payload: { message: "follow-up" } });
 
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-    expect(resumeHookMock).toHaveBeenCalledWith(token, {
-      auth: undefined,
-      caller: undefined,
-      delivery: undefined,
-      kind: "send",
-      payload: { message: "follow-up" },
-      requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-    });
-  });
-
-  it("strips an undefined activity observer from the stable fast path", async () => {
-    const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    resumeHookMock.mockResolvedValue(hook);
-
-    await resumeSessionInbox(token, {
-      caller: {
-        activityObserver: undefined,
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "reply-1" },
-        subagentName: "researcher",
-      },
-      kind: "send",
-      payload: { message: "follow-up" },
-    });
-
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-    expect(resumeHookMock).toHaveBeenCalledWith(token, {
-      auth: undefined,
-      caller: {
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "reply-1" },
-        subagentName: "researcher",
-      },
-      delivery: undefined,
-      kind: "send",
-      payload: { message: "follow-up" },
-      requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-    });
+    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      hook,
+      expect.objectContaining({
+        kind: "deliver",
+        payloads: [{ message: "follow-up" }],
+        version: 2,
+      }),
+    );
   });
 
   it("negotiates v6 for stable session-owned task cancellation", async () => {
@@ -211,6 +173,95 @@ describe("resumeSessionInbox", () => {
 
       expect(getHookByTokenMock).toHaveBeenCalledWith(token);
       expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
+
+  describe.each(["stable", "continuation", "saved address"])("%s task delivery", (addressKind) => {
+    const command = {
+      kind: "send" as const,
+      payload: {
+        task: {
+          agentRequests: [
+            {
+              taskId: "task-1",
+              replyTo: "agent-reply",
+              request: {
+                kind: "agent-invoke" as const,
+                invocationId: "call-1",
+                input: { message: "Find it", target: "research" },
+              },
+            },
+          ],
+        },
+      },
+    };
+
+    function address(version: number | undefined) {
+      const token =
+        addressKind === "continuation" ? "continuation-1" : sessionCommandHookToken("session-1");
+      getHookByTokenMock.mockResolvedValue(
+        sessionHook(
+          "session-1",
+          token,
+          version === undefined ? undefined : { sessionInboxWireVersion: version },
+        ),
+      );
+      getRawHookByTokenMock.mockRejectedValue(new HookNotFoundError(token));
+      return addressKind === "saved address"
+        ? { sessionId: "session-1", version: version ?? 0 }
+        : token;
+    }
+
+    it.each([undefined, 1, 2, 3, 99])(
+      "rejects unsupported version %s before delivery",
+      async (version) => {
+        await expect(resumeSessionInbox(address(version), command)).rejects.toThrow(
+          /Session inbox|wire version/,
+        );
+        expect(resumeHookMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([1, 2, 3, 4, 5, 6])(
+      "rejects an unknown task operation for version %i",
+      async (version) => {
+        await expect(
+          resumeSessionInbox(address(version), {
+            kind: "send",
+            payload: { task: { futureOperation: {} } },
+          } as never),
+        ).rejects.toThrow(/wire version/);
+        expect(resumeHookMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([4, 5, 6])("delivers agent requests using supported version %i", async (version) => {
+      await resumeSessionInbox(address(version), command);
+      expect(resumeHookMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ version, payloads: [command.payload] }),
+      );
+    });
+  });
+
+  it.each(["stable", "continuation"])(
+    "keeps ordinary messages working for a markerless %s inbox",
+    async (kind) => {
+      const token = kind === "stable" ? sessionCommandHookToken("session-1") : "continuation-1";
+      const hook = sessionHook("session-1", token);
+      getHookByTokenMock.mockResolvedValue(hook);
+      getRawHookByTokenMock.mockRejectedValue(new HookNotFoundError(token));
+
+      await resumeSessionInbox(token, { kind: "send", payload: { message: "hello" } });
+
+      expect(resumeHookMock).toHaveBeenCalledWith(
+        hook,
+        expect.objectContaining(
+          kind === "stable"
+            ? { kind: "send", payload: { message: "hello" } }
+            : { kind: "deliver", payloads: [{ message: "hello" }] },
+        ),
+      );
     },
   );
 
@@ -251,7 +302,7 @@ describe("resumeSessionInbox", () => {
     });
   });
 
-  it("retains metadata negotiation when a stable delivery needs the current caller wire", async () => {
+  it("encodes caller activity for the advertised version", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
     getHookByTokenMock.mockResolvedValue(hook);

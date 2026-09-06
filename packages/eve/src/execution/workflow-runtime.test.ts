@@ -184,10 +184,14 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "clear",
-    });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      {
+        kind: "clear",
+        version: 1,
+      },
+    );
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
@@ -200,17 +204,21 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      auth: undefined,
-      caller: undefined,
-      delivery: undefined,
-      kind: "send",
-      payload: { message: "hello" },
-      requestId: undefined,
-      taskDeliveryId: undefined,
-      turnPolicy: undefined,
-    });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      {
+        auth: undefined,
+        caller: undefined,
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+        version: 1,
+        payload: { message: "hello" },
+        requestId: undefined,
+        taskDeliveryId: undefined,
+        turnPolicy: undefined,
+      },
+    );
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 
   it.each([
@@ -253,11 +261,15 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "cancel",
-      turnId: "turn-2",
-    });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      {
+        kind: "cancel",
+        turnId: "turn-2",
+        version: 1,
+      },
+    );
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {

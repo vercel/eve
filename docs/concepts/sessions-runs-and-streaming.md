@@ -24,6 +24,18 @@ session data is not deleted. See [Agent config](../agent-config#runtime-limits).
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
+## Sessions across deployments
+
+An existing session keeps the runtime that created it. A newer deployment checks
+that session's inbox protocol version before delivering commands. Commands that
+the older protocol cannot represent fail before delivery; they are not silently
+dropped or sent as unversioned messages to bypass validation.
+
+If a background worker cannot request an agent from its parent's protocol,
+it receives a `SESSION_INBOX_INCOMPATIBLE` dispatch error instead of waiting for
+a reply that cannot arrive. Start a new session on the upgraded deployment to
+use the new operation.
+
 ## Start a session
 
 ```bash
