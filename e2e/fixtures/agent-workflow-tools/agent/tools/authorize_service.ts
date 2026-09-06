@@ -1,6 +1,7 @@
-import { defineWorkflowTool, type WorkflowToolContext, type ToolAuthProvider } from "eve/tools";
-import { ConnectionAuthorizationRequiredError } from "eve/connections";
+import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
+
+import { createFakeAuthProvider } from "../lib/fake-auth-provider.ts";
 
 export default defineWorkflowTool({
   description: "Exercise requester authorization inside a durable step.",
@@ -13,30 +14,8 @@ export default defineWorkflowTool({
 
 async function authorizeService(ctx: WorkflowToolContext, service: string): Promise<string> {
   "use step";
-  const provider: ToolAuthProvider = {
-    principalType: "user",
-    async getToken() {
-      if (service === "EXPLICIT") return { token: "expired-fixture-token" };
-      throw new ConnectionAuthorizationRequiredError("workflow-step");
-    },
-    async startAuthorization({ principal, callbackUrl }) {
-      if (principal.type !== "user") throw new Error("Expected a requester");
-      const url = new URL(callbackUrl);
-      url.searchParams.set("code", principal.id);
-      return { challenge: { url: url.href }, resume: { user: principal.id } };
-    },
-    async completeAuthorization({ principal, callback, resume }) {
-      if (
-        principal.type !== "user" ||
-        callback.params.code !== principal.id ||
-        (resume as { user: string }).user !== principal.id
-      ) {
-        throw new Error("Authorization did not match the workflow requester");
-      }
-      return { token: "authorized-fixture-token" };
-    },
-  };
-  const { token } = await ctx.getToken(provider);
-  if (token === "expired-fixture-token" || service === "REJECTED") ctx.requireAuth(provider);
+  const fakeProvider = createFakeAuthProvider({ expiredToken: service === "EXPLICIT" });
+  const { token } = await ctx.getToken(fakeProvider);
+  if (token === "expired-fixture-token" || service === "REJECTED") ctx.requireAuth(fakeProvider);
   return "WORKFLOW-STEP-AUTH:authorized";
 }
