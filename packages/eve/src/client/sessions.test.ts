@@ -99,7 +99,7 @@ describe("Client.sessions", () => {
       const path = new URL(url).pathname;
       if (path === "/eve/v1/session/wrun_A") {
         return Response.json(
-          { ok: true, sessionId: "wrun_A", status: "accepted" },
+          { ok: true, sessionId: "wrun_A", status: "accepted", deliveryId: "delivery_1" },
           { status: 202 },
         );
       }

@@ -52,6 +52,7 @@ function createAcceptedResponse() {
     {
       ok: true,
       sessionId: "session_1",
+      deliveryId: "delivery_1",
     },
     { status: 202 },
   );
@@ -74,7 +75,11 @@ function createStreamResponse(events: readonly unknown[]) {
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of events) {
-          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ ...(event as object), meta: { deliveryIds: ["delivery_1"] } })}\n`,
+            ),
+          );
         }
         controller.close();
       },
@@ -642,6 +647,7 @@ describe("ClientSession", () => {
           encoder.encode(
             `${JSON.stringify({
               type: "session.waiting",
+              meta: { deliveryIds: ["delivery_1"] },
               data: { continuationToken: "session-id", wait: "next-user-message" },
             })}\n`,
           ),
@@ -832,11 +838,13 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send("first", {
-      streamReconnectPolicy: { reconnect: false },
-    })) {
-      eventTypes.push(event.type);
-    }
+    await expect(async () => {
+      for await (const event of await session.send("first", {
+        streamReconnectPolicy: { reconnect: false },
+      })) {
+        eventTypes.push(event.type);
+      }
+    }).rejects.toThrow("before the accepted message");
 
     expect(eventTypes).toEqual(["turn.started"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -947,7 +955,9 @@ describe("ClientSession", () => {
                 if (!emitted) {
                   emitted = true;
                   controller.enqueue(
-                    encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                    encoder.encode(
+                      `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                    ),
                   );
                   return;
                 }
@@ -1005,7 +1015,9 @@ describe("ClientSession", () => {
               if (!emitted) {
                 emitted = true;
                 controller.enqueue(
-                  encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                  encoder.encode(
+                    `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                  ),
                 );
                 return;
               }
@@ -1136,14 +1148,14 @@ describe("ClientSession", () => {
 
     vi.useFakeTimers();
     try {
-      const eventTypes = await collectEventTypes(
-        await session.send("first", {
-          streamReconnectPolicy: {
-            streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
-          },
-        }),
-      );
-      expect(eventTypes).toEqual([]);
+      const response = await session.send("first", {
+        streamReconnectPolicy: {
+          streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+        },
+      });
+      const assertion = expect(response.result()).rejects.toThrow("before the accepted message");
+      await vi.runAllTimersAsync();
+      await assertion;
     } finally {
       vi.useRealTimers();
     }
@@ -1164,7 +1176,9 @@ describe("ClientSession", () => {
         new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(
-              encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+              encoder.encode(
+                `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+              ),
             );
             signal?.addEventListener("abort", () => {
               controller.error(new DOMException("The operation was aborted.", "AbortError"));

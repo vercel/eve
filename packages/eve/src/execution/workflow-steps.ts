@@ -24,11 +24,13 @@ import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js
 import {
   AuthKey,
   CapabilitiesKey,
+  ChannelDeliveryKey,
   HandleEventKey,
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   TurnTaskDeliveryKey,
+  TurnDeliveryIdsKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -196,6 +198,18 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     sessionId: initialSession.sessionId,
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
+
+  if (
+    rawInput.input?.kind === "deliver" &&
+    rawInput.input.payloads.some((payload) => payload.message !== undefined)
+  ) {
+    ctx.set(
+      TurnDeliveryIdsKey,
+      rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [],
+    );
+  } else if (!initialEmissionState.sessionStarted && ctx.get(ChannelDeliveryKey) !== undefined) {
+    ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
+  }
 
   if (rawInput.input?.kind === "deliver") {
     await contextStorage.run(ctx, () =>
@@ -372,7 +386,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit);
+    const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
     await writer.write(encodeMessageStreamEvent(stamped));
     return stamped;
   };
@@ -385,7 +399,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // the task callback and keep them out of the child's local channel;
     // otherwise two TUIs can present and answer the same request.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
-    const emitted = forwardedToTaskParent ? stampMessageStreamEvent(event) : await emit(event);
+    const emitted = forwardedToTaskParent
+      ? stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey))
+      : await emit(event);
     const lifecycleMessages = await dispatchMemoryLifecycleEvent({
       abortSignal: input.abortSignal,
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
@@ -571,7 +587,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           }),
       serializedContext: preserveSerializedInstrumentationState(
         preserveSerializedAgentTraceState(
-          preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
+          preserveSerializedSessionDynamicModelSelection(
+            {
+              ...input.serializedContext,
+              [TurnDeliveryIdsKey.name]: interrupted[TurnDeliveryIdsKey.name],
+            },
+            interrupted,
+          ),
           interrupted,
         ),
         interrupted,
