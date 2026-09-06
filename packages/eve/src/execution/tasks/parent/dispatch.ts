@@ -143,15 +143,15 @@ export async function cancelOwnedTask(input: {
   }
   if (view.status !== "cancelled") return view;
 
-  const needsParentWake =
-    delivery === "unreachable" ||
-    (await cancelTaskOwnedWork({
-      cancelOwnedWork: input.cancelOwnedWork,
-      entry: input.entry,
-      serializedContext: input.serializedContext,
-      session: input.session,
-    }));
-  if (needsParentWake && input.session !== undefined) {
+  // The task inbox may be closed after an earlier cancellation committed but
+  // failed to stop its child. Retrying must still finish that cancellation.
+  const forcedShutdown = await cancelTaskOwnedWork({
+    cancelOwnedWork: input.cancelOwnedWork,
+    entry: input.entry,
+    serializedContext: input.serializedContext,
+    session: input.session,
+  });
+  if ((delivery === "unreachable" || forcedShutdown) && input.session !== undefined) {
     // Forced shutdown can interrupt the lifecycle between its committed view
     // and parent wake. Retried cancellation must finish delivery even when the
     // inbox is gone; the shared delivery id deduplicates a wake already sent.

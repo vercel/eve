@@ -79,6 +79,48 @@ describe("task cancellation", () => {
     expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
   });
 
+  it("retries child cancellation after the cancelled task's inbox has closed", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.metadata,
+      status: "cancelled",
+      taskId: entry.taskId,
+    });
+    const cancelOwnedWork = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Child cancellation failed"))
+      .mockResolvedValueOnce(undefined);
+    const session = { sessionId: "parent-session" } as Parameters<
+      typeof cancelOwnedTask
+    >[0]["session"];
+    await expect(cancelOwnedTask({ cancelOwnedWork, entry, session })).rejects.toThrow(
+      "Child cancellation failed",
+    );
+    expect(resumeSessionInbox).not.toHaveBeenCalled();
+
+    vi.mocked(sendTaskCommand).mockResolvedValue("unreachable");
+    await expect(cancelOwnedTask({ cancelOwnedWork, entry, session })).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    expect(cancelOwnedWork).toHaveBeenCalledTimes(2);
+    expect(resumeSessionInbox).toHaveBeenCalledTimes(1);
+    expect(cancelOwnedWork.mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(resumeSessionInbox).mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves child work untouched when completion won the cancellation race", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.metadata,
+      lastOutput: { type: "result", data: "Finished" },
+      status: "completed",
+      taskId: entry.taskId,
+    });
+    const cancelOwnedWork = vi.fn();
+    await cancelOwnedTask({ cancelOwnedWork, entry });
+    expect(cancelOwnedWork).not.toHaveBeenCalled();
+    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
+  });
+
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: entry.metadata,
@@ -139,8 +181,10 @@ describe("task cancellation", () => {
     await failed;
 
     vi.mocked(sendTaskCommand).mockResolvedValue("unreachable");
+    getRun.mockReturnValue({ status: Promise.resolve("cancelled") });
     await expect(cancelOwnedTask({ entry, session })).resolves.toEqual(view);
     expect(cancelRun).toHaveBeenCalledTimes(1);
+    expect(cancelWorkflowToolRun).toHaveBeenCalledTimes(2);
     expect(resumeSessionInbox).toHaveBeenCalledTimes(2);
     expect(vi.mocked(resumeSessionInbox).mock.calls[1]).toEqual(
       vi.mocked(resumeSessionInbox).mock.calls[0],

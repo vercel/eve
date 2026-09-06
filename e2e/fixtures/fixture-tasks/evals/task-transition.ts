@@ -27,6 +27,7 @@ type SemanticInput =
   | "authorization-callback"
   | "start-turn"
   | "agent-continuation"
+  | "agent-steering"
   | "task-peek"
   | "task-notification"
   | "task-update"
@@ -330,12 +331,23 @@ export const TASK_TRANSITIONS = {
   "task.agent.continue.rejected-agent-busy": transition({
     preState: { agent: "busy" },
     input: "agent-continuation",
-    guards: ["agent-has-a-nonterminal-task"],
+    guards: ["agent-is-claimed-by-another-call-in-the-same-batch"],
     expected: {
       outcome: "rejected",
       postState: { agent: "busy" },
       events: { suppressed: ["background-receipt"] },
       sideEffects: { suppressed: ["task-index-write", "child-delivery"] },
+    },
+  }),
+  "task.agent.steer.accepted-busy": transition({
+    preState: { lifecycle: "working", agent: "busy", ownership: "owned" },
+    input: "agent-steering",
+    guards: ["parent-owns-admitted-task", "agent-has-a-confirmed-address"],
+    expected: {
+      outcome: "accepted",
+      postState: { lifecycle: "cancelled", agent: "busy", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-ready-notification"] },
+      sideEffects: { executed: ["child-abort", "task-index-write", "child-delivery"] },
     },
   }),
   "task.update.emitted-working": transition({
