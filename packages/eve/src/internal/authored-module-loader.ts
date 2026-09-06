@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
@@ -329,7 +330,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       platform: "node",
       plugins,
       resolve: {
-        conditionNames: ["eve-source"],
+        conditionNames: authoredModuleConditions(),
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: resolveAuthoredTsConfigPath(packageRoot),
@@ -528,7 +529,7 @@ async function buildAuthoredModuleBundle(
       platform: "node",
       plugins,
       resolve: {
-        conditionNames: ["eve-source"],
+        conditionNames: authoredModuleConditions(),
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,

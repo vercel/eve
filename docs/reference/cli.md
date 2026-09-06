@@ -161,6 +161,10 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
 
+Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
+`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
+keeps a channel's `server-only` imports on the same export used during compilation.
+
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
 | `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
