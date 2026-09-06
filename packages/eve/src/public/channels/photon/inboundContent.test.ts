@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { Message } from "#compiled/chat/index.js";
+import { Message, parseMarkdown } from "#compiled/chat/index.js";
 import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
 
 function message(text: string, attachments: Message["attachments"] = []): Message {
   return new Message({
     attachments,
-    author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+    author: {
+      fullName: "Test User",
+      isBot: false,
+      isMe: false,
+      userId: "user",
+      userName: "user",
+    },
+    formatted: parseMarkdown(text),
     id: "message-id",
+    metadata: { dateSent: new Date("2026-01-01T00:00:00.000Z"), edited: false },
     raw: {},
     text,
     threadId: "thread-id",
