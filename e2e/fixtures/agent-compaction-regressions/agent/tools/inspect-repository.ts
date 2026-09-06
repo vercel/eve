@@ -2,26 +2,24 @@ import { defineState } from "eve/context";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-const completionMarker = "REPOSITORY_INSPECTION_COMPLETE";
-const invocationCount = defineState("compaction-regression.inspect-repository", () => 0);
+import { repositoryFindings } from "../../release-findings";
+import { reviewReferences, saveReleaseRecord } from "../../release-reports";
+
+const invocationCount = defineState("storefront.inspect-repository", () => 0);
 
 export default defineTool({
-  description:
-    "Compaction regression tool. Inspect the repository exactly once when the user requests the redundant-tool-calls case.",
-  inputSchema: z.object({
-    scope: z.literal("repository"),
-  }),
+  description: "Review the storefront repository and save a completed review record.",
+  inputSchema: z.object({ scope: z.literal("repository") }),
   async execute() {
     const attempt = invocationCount.get() + 1;
     invocationCount.update(() => attempt);
-
-    return {
-      completed: true,
-      completionMarker,
-      workUnit: "repository-inspection",
-      hardStop: attempt >= 10,
-      attempt,
-      evidencePadding: "repository inspection evidence ".repeat(100),
+    const report = {
+      reportId: reviewReferences.repository,
+      subject: "repository" as const,
+      status: "completed" as const,
+      findings: repositoryFindings,
     };
+    saveReleaseRecord(report);
+    return { completed: true, ...report, attempt, hardStop: attempt >= 10 };
   },
 });

@@ -716,9 +716,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      ai:
-        specifier: 'catalog:'
-        version: 7.0.84(zod@4.5.4)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

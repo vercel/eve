@@ -1,37 +1,36 @@
 import { defineEval } from "eve/evals";
 
-import { SECOND_CHECKPOINT_MARKER } from "../constants";
+import { handoffReferences, reviewReferences } from "../release-reports";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "Source analysis completes across compaction despite a stale pending todo.",
+  description: "A completed checkout review stays complete when the task board has a stale todo.",
   async test(t) {
     const turn = await t.send(
-      [
-        "[case: stale-todo-work]",
-        "Please analyze the source with perform-source-analysis, using approach attempt-1.",
-        "The tool records completed work in its result; its todo entry remains pending after completion.",
-        "Use the completed analysis to record a checkpoint with advance-checkpoint, using regressionCase stale-todo-work.",
-        "Use only these two tools, once each, in that order. A pending todo does not require repeating completed analysis.",
-        "Finish by reporting SOURCE_ANALYSIS_COMPLETE and the checkpoint tool's marker.",
-      ].join("\n"),
+      "Review the checkout implementation and prepare a release handoff for the next maintainer. " +
+        "Check pricing, inventory, order persistence, and customer notifications. The task board may be out of date; " +
+        "use the completed review as the source of truth. Include the review and handoff record references in your final note.",
     );
 
     turn.expectOk();
     t.succeeded();
     t.calledTool("perform-source-analysis", {
-      output: { completed: true, workUnit: "source-analysis" },
+      count: 1,
+      input: { scope: "checkout" },
+      output: { completed: true, reportId: reviewReferences.checkout, status: "completed" },
     });
-    t.calledTool("advance-checkpoint", {
-      output: { checkpointMarker: SECOND_CHECKPOINT_MARKER, completed: true },
+    t.calledTool("prepare-handoff", {
+      count: 1,
+      input: { subject: "checkout", reviewId: reviewReferences.checkout },
+      output: { completed: true, reportId: handoffReferences.checkout, status: "completed" },
     });
     t.event("compaction.completed", { count: (count) => count >= 2 });
-    t.messageIncludes("SOURCE_ANALYSIS_COMPLETE");
-    t.messageIncludes(SECOND_CHECKPOINT_MARKER);
+    t.messageIncludes(reviewReferences.checkout);
+    t.messageIncludes(handoffReferences.checkout);
     t.noFailedActions();
 
     t.calledTool("perform-source-analysis", { count: 1 }).soft().label("no repeated analysis");
-    t.calledTool("advance-checkpoint", { count: 1 }).soft().label("no repeated checkpoint");
+    t.calledTool("prepare-handoff", { count: 1 }).soft().label("no repeated handoff");
     t.event("compaction.completed", { count: 2 }).soft().label("compaction efficiency");
   },
 });
