@@ -351,7 +351,14 @@ If a nested tool requires authorization, eve displays its authorization
 request and waits for the matching callback before retrying that call. Earlier
 completed calls retain their results. Tool and subagent failures reject the
 corresponding JavaScript call, so programs can use `try`/`catch` or
-`Promise.allSettled`. Cancelling code mode stops the workflow.
+`Promise.allSettled`. Parking a call for durable execution does not run the
+program's `catch` or `finally` handlers. After the call settles, the program
+resumes with its result or failure and follows normal JavaScript control flow.
+Cancelling code mode stops the workflow.
+
+Invalid JavaScript, uncaught program or nested-tool errors, and source, bridge,
+or Code Mode serialization limit failures return to the model without retrying
+the unchanged program. Sandbox infrastructure failures retain workflow step retries.
 
 | Field          | Type                                    | Default          | Description                                                                                                                                                                                              |
 | -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

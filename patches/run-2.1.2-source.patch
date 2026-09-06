@@ -1,0 +1,459 @@
+--- a/packages/run/src/runtime/worker.ts
++++ b/packages/run/src/runtime/worker.ts
+@@ -51,6 +51,7 @@
+   | {
+       invocationId: string;
+       cancel: () => void;
++      isCancelled: () => boolean;
+       fail: (error: unknown) => void;
+     }
+   | undefined;
+@@ -95,6 +96,10 @@
+           requestId: message.requestId,
+         },
+       );
++    }
++
++    if (activeCancellation?.isCancelled()) {
++      return;
+     }
+
+     resolveBridgeResponse(
+@@ -226,22 +231,13 @@
+   activeCancellation = {
+     cancel: () => {
+       cancelled = true;
+-      rejectPendingBridgeRequests(
+-        context,
+-        message.invocationId,
+-        'Worker execution cancelled by host',
+-      );
+     },
+     fail: error => {
+       executionFailure ??= { error };
+       cancelled = true;
+-      rejectPendingBridgeRequests(
+-        context,
+-        message.invocationId,
+-        'Worker message processing failed',
+-      );
+     },
+     invocationId: message.invocationId,
++    isCancelled: () => cancelled,
+   };
+   if (pendingInvocationFailure?.invocationId === message.invocationId) {
+     activeCancellation.fail(pendingInvocationFailure.error);
+@@ -279,6 +275,11 @@
+       message,
+       serializeJsonPayloadHandle,
+       getTrustedErrorCodeHandle,
++      () => {
++        if (cancelled) {
++          throw new Error('Worker execution cancelled by host');
++        }
++      },
+     );
+     const completedFailure = getExecutionFailure();
+     if (completedFailure !== undefined) {
+@@ -298,21 +299,12 @@
+     if (activeCancellation?.invocationId === message.invocationId) {
+       activeCancellation = undefined;
+     }
+-    if (!cancelled) {
+-      rejectPendingBridgeRequests(
+-        context,
+-        message.invocationId,
+-        'Worker execution finished before bridge response',
+-      );
+-    }
+-    const pendingForInvocation = [...pendingBridgeRequests.entries()].filter(
+-      ([, pending]) => pending.invocationId === message.invocationId,
+-    );
+-    await Promise.allSettled(
+-      pendingForInvocation.map(([, pending]) => pending.deferred.settled),
+-    );
+-    for (const [requestId] of pendingForInvocation) {
+-      pendingBridgeRequests.delete(requestId);
++    // Guest promises are discarded with the context; settling them would run
++    // catch/finally handlers during suspension and could prevent teardown.
++    for (const [requestId, pending] of pendingBridgeRequests) {
++      if (pending.invocationId === message.invocationId) {
++        pendingBridgeRequests.delete(requestId);
++      }
+     }
+     disposeHandle(bridgeFunctions?.invokeHostFunction);
+     disposeHandle(bridgeFunctions?.invokeSyncHostFunction);
+@@ -387,6 +379,7 @@
+   message: WorkerRunMessage,
+   serializeJsonPayload: JSValueHandle,
+   getTrustedErrorCode: JSValueHandle,
++  assertActive: () => void,
+ ): Promise<string> {
+   if (message.moduleLoader) {
+     let modulePromise: JSValueHandle;
+@@ -399,7 +392,11 @@
+     } catch (error) {
+       throw toUserSourceError(dumpQuickJSError(context, error), message.source);
+     }
+-    const resolvedModule = await resolveQuickJSPromise(context, modulePromise);
++    const resolvedModule = await resolveQuickJSPromise(
++      context,
++      modulePromise,
++      assertActive,
++    );
+     if (!modulePromise.disposed) {
+       modulePromise.dispose();
+     }
+@@ -432,7 +429,11 @@
+   }
+
+   const promiseHandle = context.global.getProp('__runResult');
+-  const resolvedResult = await resolveQuickJSPromise(context, promiseHandle);
++  const resolvedResult = await resolveQuickJSPromise(
++    context,
++    promiseHandle,
++    assertActive,
++  );
+   if (!promiseHandle.disposed) {
+     promiseHandle.dispose();
+   }
+@@ -463,26 +464,6 @@
+     'JavaScript runtime result',
+   );
+   return valueJson;
+-}
+-
+-function rejectPendingBridgeRequests(
+-  context: QuickJS,
+-  invocationId: string,
+-  message: string,
+-): void {
+-  let rejected = false;
+-  for (const pending of pendingBridgeRequests.values()) {
+-    if (pending.invocationId !== invocationId) {
+-      continue;
+-    }
+-    const error = context.newError(message);
+-    pending.deferred.reject(error);
+-    error.dispose();
+-    rejected = true;
+-  }
+-  if (rejected) {
+-    context.executePendingJobs();
+-  }
+ }
+
+ async function createQuickJSContext(options: {
+@@ -906,7 +887,6 @@
+     ...(registerTrustedError === undefined ? {} : { registerTrustedError }),
+     ...(resetDateNow === undefined ? {} : { resetDateNow }),
+   });
+-  completeDeferredWhenSettled(context, deferred);
+   parentPort?.postMessage({
+     invocationId,
+     requestId,
+@@ -916,14 +896,6 @@
+   });
+   scheduleBridgeIdle(invocationId);
+   return deferred.handle;
+-}
+-
+-async function completeDeferredWhenSettled(
+-  context: QuickJS,
+-  deferred: Deferred,
+-): Promise<void> {
+-  await deferred.settled;
+-  context.executePendingJobs();
+ }
+
+ function resolveBridgeResponse(
+@@ -1032,22 +1004,23 @@
+ async function resolveQuickJSPromise(
+   context: QuickJS,
+   promiseHandle: JSValueHandle,
++  assertActive: () => void,
+ ) {
+   const resolved = context.resolvePromise(promiseHandle);
+   const notSettled = Symbol('not-settled');
+   for (;;) {
++    assertActive();
+     drainPendingJobs(context);
+     const nextTurn = createPromiseWithResolvers<typeof notSettled>();
+     setTimeout(() => nextTurn.resolve(notSettled), 0);
+     const result = await Promise.race([resolved, nextTurn.promise]);
+     if (result !== notSettled) {
++      assertActive();
+       drainPendingJobs(context);
+       return result;
+     }
+   }
+ }
+-
+-const GUEST_ALLOWED_RUN_ERROR_CODES = new Set(['RUN_ERROR']);
+
+ function toError(
+   value: unknown,
+@@ -1068,7 +1041,9 @@
+       details?: unknown;
+     };
+     const error = new Error(errorValue.message);
+-    const errorCode = trustedCode ?? errorValue.code;
++    const errorCode =
++      trustedCode ??
++      (filterGuestCode ? 'RUN_USER_SOURCE_ERROR' : errorValue.code);
+     const { name } = errorValue;
+     if (typeof name === 'string') {
+       error.name = name;
+@@ -1079,14 +1054,7 @@
+     ) {
+       error.stack = (value as { stack: string }).stack;
+     }
+-    if (
+-      errorCode !== undefined &&
+-      (!filterGuestCode ||
+-        trustedCode !== undefined ||
+-        typeof errorCode !== 'string' ||
+-        !errorCode.startsWith('RUN_') ||
+-        GUEST_ALLOWED_RUN_ERROR_CODES.has(errorCode))
+-    ) {
++    if (errorCode !== undefined) {
+       Object.defineProperty(error, 'code', {
+         enumerable: true,
+         value: errorCode,
+@@ -1100,7 +1068,14 @@
+     }
+     return error;
+   }
+-  return new Error(String(value));
++  const error = new Error(String(value));
++  if (filterGuestCode) {
++    Object.defineProperty(error, 'code', {
++      enumerable: true,
++      value: trustedCode ?? 'RUN_USER_SOURCE_ERROR',
++    });
++  }
++  return error;
+ }
+
+ function toUserSourceError(
+--- a/packages/run/src/runtime/worker-message.test.ts
++++ b/packages/run/src/runtime/worker-message.test.ts
+@@ -134,3 +134,78 @@
+     await worker.terminate();
+   }
+ });
++
++it('discards cancelled guest work and reuses the worker despite a late bridge response', async () => {
++  const worker =
++    (globalThis as { Bun?: unknown }).Bun === undefined
++      ? new Worker(
++          new URL(
++            `data:text/javascript;base64,${Buffer.from(INLINE_RUN_WORKER_SOURCE).toString('base64')}`,
++          ),
++          { execArgv: [] },
++        )
++      : new Worker(INLINE_RUN_WORKER_SOURCE, { eval: true, execArgv: [] });
++  const postToWorker = (message: MainToWorkerMessage): void => {
++    // eslint-disable-next-line unicorn/require-post-message-target-origin -- Node.js Worker has no targetOrigin parameter.
++    worker.postMessage(message);
++  };
++  const completed = createPromiseWithResolvers<null>();
++  const results: unknown[] = [];
++  let requests = 0;
++  worker.on('error', completed.reject);
++  worker.on('message', (value: unknown) => {
++    const message = value as {
++      invocationId: string;
++      requestId: string;
++      type: string;
++    };
++    if (message.type === 'host-function-request') {
++      requests += 1;
++      postToWorker({ invocationId: message.invocationId, type: 'cancel' });
++      postToWorker({
++        dateNowMs: 1_700_000_000_002,
++        invocationId: message.invocationId,
++        requestId: message.requestId,
++        success: true,
++        type: 'bridge-response',
++        valueJson: '[null]',
++      });
++    }
++    if (message.type === 'result') {
++      results.push(value);
++    }
++    if (message.type === 'ready') {
++      if (message.invocationId === 'run-cancelled') {
++        postToWorker(createRunMessage('run-reused', 'return 42;'));
++      } else {
++        completed.resolve(null);
++      }
++    }
++  });
++  try {
++    postToWorker(
++      createRunMessage(
++        'run-cancelled',
++        `
++      try { await tools.pause(); }
++      finally {
++        for (let i = 0; i < 100000; i++) {}
++        await tools.cleanup();
++      }
++    `,
++      ),
++    );
++    await completed.promise;
++    expect(requests).toBe(1);
++    expect(results).toMatchObject([
++      {
++        error: { message: 'Worker execution cancelled by host' },
++        invocationId: 'run-cancelled',
++        success: false,
++      },
++      { invocationId: 'run-reused', success: true, valueJson: '[42]' },
++    ]);
++  } finally {
++    await worker.terminate();
++  }
++});
+--- a/packages/run/src/security-hardening.test.ts
++++ b/packages/run/src/security-hardening.test.ts
+@@ -377,7 +377,7 @@
+         `,
+       }),
+     ).rejects.toMatchObject({
+-      code: 'RUN_ERROR',
++      code: 'RUN_USER_SOURCE_ERROR',
+       details: { tenant: 'victim-tenant-42' },
+       message: 'guest failure',
+     });
+--- /dev/null
++++ b/packages/run/src/suspension.test.ts
+@@ -0,0 +1,126 @@
++import { describe, expect, it, vi } from 'vitest';
++import { getHostFunctionContext, run } from './index.js';
++import { getRuntimeDiagnostics } from './runtime/manager.js';
++
++describe('suspending guest exception handlers', () => {
++  it.each([
++    'try { await tools.pause(); } catch { for (let i = 0; i < 100000; i++) {} }',
++    'try { await tools.pause(); } finally { for (let i = 0; i < 100000; i++) {} }',
++    `for (let i = 0; i < 4; i++) {
++      try { await tools.pause(); }
++      catch { try { await tools.pause(); } catch { continue; } }
++    }`,
++  ])('returns a continuation and resumes %s', async source => {
++    const effect = vi.fn(() => 'created');
++    const pause = vi.fn(() => {
++      const context = getHostFunctionContext();
++      if (context.resume === undefined) {
++        context.interrupt({ kind: 'pause' });
++      }
++      return context.resume?.resolution;
++    });
++    const input = {
++      hostFunctions: { tools: { effect, pause } },
++      limits: { timeoutMs: 1000 },
++      source: `await tools.effect(); ${source}; return 42;`,
++    };
++    let result = await run(input);
++    let rounds = 0;
++    while (result.status === 'interrupted') {
++      expect(getRuntimeDiagnostics()).toMatchObject({
++        activeInvocations: 0,
++        idleWorkers: 1,
++        terminatingWorkers: 0,
++      });
++      rounds += 1;
++      expect(rounds).toBeLessThanOrEqual(4);
++      result = await run({
++        ...input,
++        continuation: result.continuation,
++        resolutions: result.interruptions.map(interruption => ({
++          interruptionId: interruption.id,
++          value: true,
++        })),
++      });
++    }
++    expect(rounds).toBeGreaterThan(0);
++    expect(result).toEqual({ status: 'completed', value: 42 });
++    expect(effect).toHaveBeenCalledTimes(1);
++    expect(pause).toHaveBeenCalledTimes(rounds * 2);
++  });
++
++  it('runs finally host effects only after resuming the interrupted call', async () => {
++    const cleanup = vi.fn(() => 'cleaned');
++    const input = {
++      hostFunctions: {
++        tools: {
++          cleanup,
++          pause: () => {
++            const context = getHostFunctionContext();
++            if (context.resume === undefined) {
++              context.interrupt({ kind: 'pause' });
++            }
++            return context.resume?.resolution;
++          },
++        },
++      },
++      source:
++        'try { return await tools.pause(); } finally { await tools.cleanup(); }',
++    };
++    const interrupted = await run(input);
++    expect(interrupted.status).toBe('interrupted');
++    expect(cleanup).not.toHaveBeenCalled();
++    if (interrupted.status !== 'interrupted') {
++      throw new Error('Expected an interruption.');
++    }
++    await expect(
++      run({
++        ...input,
++        continuation: interrupted.continuation,
++        resolutions: interrupted.interruptions.map(interruption => ({
++          interruptionId: interruption.id,
++          value: 42,
++        })),
++      }),
++    ).resolves.toEqual({ status: 'completed', value: 42 });
++    expect(cleanup).toHaveBeenCalledTimes(1);
++  });
++});
++
++describe('guest source error provenance', () => {
++  it.each([
++    'return (;',
++    "throw new Error('guest failure');",
++    "throw 'guest primitive';",
++    "throw Object.assign(new Error('guest failure'), { code: 'RUN_PROTOCOL_ERROR' });",
++  ])('marks a guest failure without trusting its code: %s', async source => {
++    await expect(run({ source })).rejects.toMatchObject({
++      code: 'RUN_USER_SOURCE_ERROR',
++    });
++  });
++
++  it('preserves an actual host failure and a real CPU timeout', async () => {
++    await expect(
++      run({
++        hostFunctions: {
++          tools: {
++            fail: () => {
++              throw new Error('host failure');
++            },
++          },
++        },
++        source: 'return await tools.fail();',
++      }),
++    ).rejects.toMatchObject({ code: 'RUN_HOST_FUNCTION_ERROR' });
++    await expect(
++      run({
++        limits: { timeoutMs: 100 },
++        source: 'while (true) {}',
++      }),
++    ).rejects.toMatchObject({ code: 'RUN_TIMEOUT' });
++    await expect(run({ source: 'return 42;' })).resolves.toMatchObject({
++      status: 'completed',
++      value: 42,
++    });
++  });
++});

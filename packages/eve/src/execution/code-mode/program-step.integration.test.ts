@@ -1,4 +1,5 @@
 import { jsonSchema, type ToolSet } from "ai";
+import { experimental_createCodeModeTool } from "#compiled/@ai-sdk/code-mode/index.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,6 +7,7 @@ import {
   createWorkflowSandboxTool,
   getWorkflowSandboxPendingInterrupts,
   readWorkflowSandboxResolution,
+  readWorkflowSandboxProgramFailure,
   requestWorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
@@ -389,5 +391,93 @@ describe("code-mode sandbox continuation contract", () => {
         tools: { a: stub("a"), extra: stub("extra") } as ToolSet,
       }),
     ).rejects.toThrow(/tool names do not match/u);
+  });
+});
+
+describe("compiled sandbox suspension and failure boundaries", () => {
+  it.each([
+    "try { value = await tools.pause({}); } catch { for (let i = 0; i < 100000; i++) {} }",
+    "try { value = await tools.pause({}); } finally { for (let i = 0; i < 100000; i++) {} await tools.cleanup({}); }",
+  ])("parks without executing guest exception handlers: %s", async (source) => {
+    const effect = vi.fn(async () => "created");
+    const cleanup = vi.fn(async () => "cleaned");
+    const hostTools = {
+      effect: { inputSchema: jsonSchema({ type: "object" }), execute: effect },
+      cleanup: { inputSchema: jsonSchema({ type: "object" }), execute: cleanup },
+      pause: createCodeModeToolStub("pause", {
+        name: "pause",
+        description: "Pause",
+        inputSchema: jsonSchema({ type: "object" }),
+      }),
+    };
+    const sandbox = experimental_createCodeModeTool(hostTools, {
+      continuationSecurity: security,
+      executionPolicy: { timeoutMs: 1000 },
+    });
+    const parked = await unwrapWorkflowSandboxResult(
+      await sandbox.execute!(
+        { js: `await tools.effect({}); let value; ${source}; return value;` },
+        { toolCallId: "suspension", messages: [], context: {} },
+      ),
+      security,
+    );
+    expect(parked.status).toBe("interrupted");
+    if (parked.status !== "interrupted") throw new Error("Expected suspension");
+    expect(effect).toHaveBeenCalledTimes(1);
+    expect(cleanup).not.toHaveBeenCalled();
+    const resumed = await unwrapWorkflowSandboxResult(
+      await continueWorkflowSandboxInterrupt({
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
+        continuationSecurity: security,
+        interrupt: parked.interrupt,
+        resolution: { status: "completed", output: 42 },
+        tools: hostTools,
+      }),
+      security,
+    );
+    expect(resumed).toEqual({ status: "completed", output: 42 });
+    expect(effect).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(source.includes("finally") ? 1 : 0);
+    expect(
+      await unwrapWorkflowSandboxResult(
+        await sandbox.execute!(
+          { js: "return 43;" },
+          { toolCallId: "recovery", messages: [], context: {} },
+        ),
+        security,
+      ),
+    ).toEqual({ status: "completed", output: 43 });
+  });
+
+  it.each([
+    "return (;",
+    "throw new Error('guest failure');",
+    "throw 'guest primitive';",
+    "throw Object.assign(new Error('guest failure'), { code: 'RUN_PROTOCOL_ERROR' });",
+  ])("identifies guest source failures without trusting guest error codes: %s", async (js) => {
+    const sandbox = experimental_createCodeModeTool({}, { executionPolicy: { timeoutMs: 1000 } });
+    const error = await Promise.resolve(
+      sandbox.execute!({ js }, { toolCallId: "invalid-source", messages: [], context: {} }),
+    ).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: "RUN_USER_SOURCE_ERROR" });
+    expect(readWorkflowSandboxProgramFailure(error)).toEqual(expect.any(String));
+  });
+
+  it("keeps a real CPU timeout distinct and accepts a subsequent valid program", async () => {
+    const sandbox = experimental_createCodeModeTool({}, { executionPolicy: { timeoutMs: 100 } });
+    const error = await Promise.resolve(
+      sandbox.execute!({ js: "while (true) {}" }, { toolCallId: "cpu", messages: [], context: {} }),
+    ).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: "CODE_MODE_TIMEOUT" });
+    expect(readWorkflowSandboxProgramFailure(error)).toBeUndefined();
+    expect(
+      await unwrapWorkflowSandboxResult(
+        await sandbox.execute!(
+          { js: "return 42;" },
+          { toolCallId: "recovered", messages: [], context: {} },
+        ),
+        security,
+      ),
+    ).toEqual({ status: "completed", output: 42 });
   });
 });

@@ -29,6 +29,8 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
+  // A same-version Run patch must invalidate the embedded Code Mode worker.
+  join(dirname(require.resolve("run/package.json")), "dist/runtime/worker-source.js"),
   join(here, "nitro-rolldown.mjs"),
   join(here, "vendor-warning-log.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),

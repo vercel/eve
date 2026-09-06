@@ -24,7 +24,7 @@ export function codeModeBridgeRequestLimit(maxSubagents: number): number {
 }
 
 const ORCHESTRATION_INSTRUCTION =
-  "Keep related tool calls and data processing together in one program and return what the user needs. " +
+  "Complete the task in one execution program: keep dependent calls, loops, retries, parallel work, and final writes together. " +
   "Reuse fetched results; avoid repeated fetches and duplicate computation.";
 
 const EAGER_SELECTION_INSTRUCTION =

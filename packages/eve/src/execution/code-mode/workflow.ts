@@ -63,6 +63,7 @@ export async function codeModeWorkflow(
     const resolutions = await Promise.all(settling);
     outcome = await runCodeModeProgramStep({ ...base, resume: resolutions });
   }
+  if (outcome.status === "failed") throw new Error(outcome.error);
   return outcome.output;
 }
 

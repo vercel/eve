@@ -54,6 +54,7 @@ import {
   createWorkflowSandboxTool,
   getWorkflowSandboxPendingInterrupts,
   readWorkflowSandboxResolution,
+  readWorkflowSandboxProgramFailure,
   rejectWorkflowSandboxToolCall,
   requestWorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
@@ -80,6 +81,7 @@ export interface CodeModePendingCall {
 
 export type CodeModeProgramOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
+  | { readonly status: "failed"; readonly error: string }
   | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
 
 export type CodeModeToolOutcome =
@@ -121,66 +123,72 @@ export async function runCodeModeProgramStep(
   "use step";
 
   const { hostTools, security } = await buildProgramHost(input);
-  let raw: unknown;
-  if (input.resume === undefined) {
-    const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
-      continuationSecurity: security,
-      hostTools,
-    });
-    if (tool.execute === undefined) throw new Error("code_mode has no executor.");
-    raw = await tool.execute(
-      { js: input.program.js } as never,
-      {
-        toolCallId: input.callId,
-      } as never,
-    );
-  } else {
-    const [first, ...rest] = input.resume;
-    if (first === undefined) {
-      throw new Error("code_mode resume requires at least one resolution.");
-    }
-    // Each `continue` returns a fresh interrupt whose signed ledger includes
-    // the resolution just applied; the next one must be fed that interrupt,
-    // not the original park. The program only runs on the final resolution.
-    let current = first.interrupt;
-    raw = await continueWorkflowSandboxInterrupt({
-      bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
-      continuationSecurity: security,
-      interrupt: current,
-      resolution: first.resolution,
-      tools: hostTools,
-    });
-    for (const { resolution } of rest) {
-      const advanced = await unwrapWorkflowSandboxResult(raw, security);
-      if (advanced.status !== "interrupted") {
-        throw new Error("code_mode resumed before every parked call was resolved.");
+  try {
+    let raw: unknown;
+    if (input.resume === undefined) {
+      const tool = await createWorkflowSandboxTool({
+        bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
+        continuationSecurity: security,
+        hostTools,
+      });
+      if (tool.execute === undefined) throw new Error("code_mode has no executor.");
+      raw = await tool.execute(
+        { js: input.program.js } as never,
+        {
+          toolCallId: input.callId,
+        } as never,
+      );
+    } else {
+      const [first, ...rest] = input.resume;
+      if (first === undefined) {
+        throw new Error("code_mode resume requires at least one resolution.");
       }
-      current = getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
+      // Each `continue` returns a fresh interrupt whose signed ledger includes
+      // the resolution just applied; the next one must be fed that interrupt,
+      // not the original park. The program only runs on the final resolution.
+      let current = first.interrupt;
       raw = await continueWorkflowSandboxInterrupt({
         bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
         continuationSecurity: security,
         interrupt: current,
-        resolution,
+        resolution: first.resolution,
         tools: hostTools,
       });
+      for (const { resolution } of rest) {
+        const advanced = await unwrapWorkflowSandboxResult(raw, security);
+        if (advanced.status !== "interrupted") {
+          throw new Error("code_mode resumed before every parked call was resolved.");
+        }
+        current = getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
+        raw = await continueWorkflowSandboxInterrupt({
+          bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
+          continuationSecurity: security,
+          interrupt: current,
+          resolution,
+          tools: hostTools,
+        });
+      }
     }
+    const unwrapped = await unwrapWorkflowSandboxResult(raw, security);
+    if (unwrapped.status === "completed") {
+      return { output: parseJsonValue(unwrapped.output ?? null), status: "completed" };
+    }
+    const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt).map(
+      (interrupt): CodeModePendingCall => ({
+        call: readCallInterrupt(interrupt),
+        interrupt,
+        toolCallId: interrupt.toolCallId,
+      }),
+    );
+    if (pending.length === 0) {
+      throw new Error("code_mode continuation contains no pending call.");
+    }
+    return { pending, status: "interrupted" };
+  } catch (error) {
+    const message = readWorkflowSandboxProgramFailure(error);
+    if (message === undefined) throw error;
+    return { status: "failed", error: message };
   }
-  const unwrapped = await unwrapWorkflowSandboxResult(raw, security);
-  if (unwrapped.status === "completed") {
-    return { output: parseJsonValue(unwrapped.output ?? null), status: "completed" };
-  }
-  const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt).map(
-    (interrupt): CodeModePendingCall => ({
-      call: readCallInterrupt(interrupt),
-      interrupt,
-      toolCallId: interrupt.toolCallId,
-    }),
-  );
-  if (pending.length === 0) {
-    throw new Error("code_mode continuation contains no pending call.");
-  }
-  return { pending, status: "interrupted" };
 }
 
 /**

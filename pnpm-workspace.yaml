@@ -74,3 +74,6 @@ minimumReleaseAgeExclude:
   - unstorage@2.0.0-alpha.10
   - run
   - workflow
+
+patchedDependencies:
+  run@2.1.2: patches/run@2.1.2.patch

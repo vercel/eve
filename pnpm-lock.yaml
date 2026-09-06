@@ -97,6 +97,9 @@ catalogs:
       specifier: 4.5.4
       version: 4.5.4
 
+patchedDependencies:
+  run@2.1.2: 28a34e64efaa0f1823bcc8e7444006291afc0b4aa38301ea40260ad586aed5bd
+
 importers:
 
   .:
@@ -1586,7 +1589,7 @@ importers:
         version: 19.2.6(react@19.2.6)
       run:
         specifier: 2.1.2
-        version: 2.1.2(typescript@7.0.2)
+        version: 2.1.2(patch_hash=28a34e64efaa0f1823bcc8e7444006291afc0b4aa38301ea40260ad586aed5bd)(typescript@7.0.2)
       semver:
         specifier: 7.8.4
         version: 7.8.4
@@ -16229,7 +16232,7 @@ snapshots:
   '@ai-sdk/code-mode@1.0.50(ai@7.0.93(zod@4.5.4))(typescript@7.0.2)':
     dependencies:
       ai: 7.0.93(zod@4.5.4)
-      run: 2.1.2(typescript@7.0.2)
+      run: 2.1.2(patch_hash=28a34e64efaa0f1823bcc8e7444006291afc0b4aa38301ea40260ad586aed5bd)(typescript@7.0.2)
     transitivePeerDependencies:
       - typescript
 
@@ -31385,7 +31388,7 @@ snapshots:
     dependencies:
       queue-microtask: 1.2.3
 
-  run@2.1.2(typescript@7.0.2):
+  run@2.1.2(patch_hash=28a34e64efaa0f1823bcc8e7444006291afc0b4aa38301ea40260ad586aed5bd)(typescript@7.0.2):
     optionalDependencies:
       typescript: 7.0.2
 

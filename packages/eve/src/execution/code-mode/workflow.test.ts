@@ -119,6 +119,20 @@ describe("codeModeWorkflow", () => {
     ).toEqual(["completed", "completed", "failed"]);
   });
 
+  it.each([false, true])(
+    "reports a failed program without replaying it (resume=%s)",
+    async (resume) => {
+      if (resume) {
+        runProgram.mockResolvedValueOnce(parked(call("tool", "add", {})));
+        executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
+      }
+      runProgram.mockResolvedValueOnce({ status: "failed", error: "Syntax error in program" });
+      await expect(codeModeWorkflow(program, context())).rejects.toThrow("Syntax error in program");
+      expect(runProgram).toHaveBeenCalledTimes(resume ? 2 : 1);
+      expect(executeTool).toHaveBeenCalledTimes(resume ? 1 : 0);
+    },
+  );
+
   it("returns the program output when it completes without nested calls", async () => {
     runProgram.mockResolvedValueOnce(completed(42));
     await expect(codeModeWorkflow(program, context())).resolves.toBe(42);

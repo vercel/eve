@@ -85,6 +85,24 @@ export async function unwrapWorkflowSandboxResult(
     | { readonly interrupt: WorkflowSandboxInterrupt; readonly status: "interrupted" };
 }
 
+/** Only program failures end the step successfully; infrastructure errors still retry. */
+export function readWorkflowSandboxProgramFailure(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const failure = error as { code?: unknown; message?: unknown };
+  if (typeof failure.message !== "string") return undefined;
+  switch (failure.code) {
+    case "RUN_USER_SOURCE_ERROR":
+    case "CODE_MODE_TOOL_ERROR":
+    case "CODE_MODE_SOURCE_TOO_LARGE":
+    case "CODE_MODE_BRIDGE_LIMIT":
+    case "CODE_MODE_DETACHED_BRIDGE_REQUEST":
+    case "CODE_MODE_SERIALIZATION_ERROR":
+      return failure.message;
+    default:
+      return undefined;
+  }
+}
+
 export function readWorkflowSandboxResolution(options: unknown): unknown {
   if (typeof options !== "object" || options === null) return undefined;
   const interrupt = (options as Record<string, unknown>).codeModeInterrupt;

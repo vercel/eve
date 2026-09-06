@@ -1,5 +1,5 @@
 import { jsonSchema } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -30,6 +30,7 @@ import {
   registerDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
+import * as sandbox from "#shared/workflow-sandbox.js";
 import { defineTool } from "#tools/definition.js";
 
 const state = vi.hoisted(() => ({
@@ -63,14 +64,17 @@ vi.mock("#execution/session.js", () => ({
   hydrateDurableSession: () => ({
     agent: { modelReference: { id: "test" } },
     history: [],
-    state: undefined,
+    state: {
+      "eve.harness.workflowContinuationSecurity": { version: 1, signingKey: "a".repeat(43) },
+    },
   }),
 }));
 vi.mock("#runtime/graph.js", () => ({ getResolvedRuntimeAgentNode: () => ({}) }));
 vi.mock("#context/dynamic-subagent-lifecycle.js", () => ({ buildDynamicSubagentTools: () => [] }));
 
 const { BundleKey } = await import("#runtime/sessions/runtime-context-keys.js");
-const { executeCodeModeToolStep } = await import("#execution/code-mode/program-step.js");
+const { executeCodeModeToolStep, runCodeModeProgramStep } =
+  await import("#execution/code-mode/program-step.js");
 
 function definition(
   name: string,
@@ -359,5 +363,54 @@ describe("executeCodeModeToolStep", () => {
     expect(result.claimedToolNames).toEqual(["lookup"]);
     expect(Object.keys(result.modelTools)).toEqual(["lookup", "code_mode"]);
     await expect(nested("lookup")).resolves.toEqual({ status: "completed", output: "discovered" });
+  });
+});
+
+describe("runCodeModeProgramStep failure boundary", () => {
+  const input = {
+    callId: "program",
+    event: { sequence: 1, stepIndex: 2, turnId: "turn" },
+    serializedContext: {},
+    sessionState: {} as never,
+    program: {
+      js: "return 1;",
+      mode: "eager" as const,
+      toolNames: [],
+      toolCatalog: [],
+      maxSubagents: 100,
+    },
+  };
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([false, true])("settles a program failure as data (resume=%s)", async (resume) => {
+    const failure = Object.assign(new Error("invalid program"), { code: "RUN_USER_SOURCE_ERROR" });
+    const execute = vi.fn().mockRejectedValue(failure);
+    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({ execute } as never);
+    const continued = vi
+      .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
+      .mockRejectedValue(failure);
+    await expect(
+      runCodeModeProgramStep({
+        ...input,
+        ...(resume
+          ? {
+              resume: [
+                {
+                  interrupt: {} as never,
+                  resolution: { status: "completed" as const, output: null },
+                },
+              ],
+            }
+          : {}),
+      }),
+    ).resolves.toEqual({ status: "failed", error: "invalid program" });
+    expect(resume ? continued : execute).toHaveBeenCalledOnce();
+  });
+
+  it("rethrows a worker failure so workflow can retry it", async () => {
+    const failure = Object.assign(new Error("worker failed"), { code: "RUN_ERROR" });
+    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockRejectedValue(failure);
+    await expect(runCodeModeProgramStep(input)).rejects.toBe(failure);
   });
 });

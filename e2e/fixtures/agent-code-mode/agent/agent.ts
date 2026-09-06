@@ -13,6 +13,37 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       ? { toolCalls: [{ id: "CODEMODE-DIRECT", input: { value: "direct" }, name: "echo" }] }
       : `CODEMODE-DIRECT-RESULT ${direct.output}`;
   }
+  if (message.includes("CODEMODE-PROGRAM-ERROR-START")) {
+    const failed = request.toolResults.find((entry) => entry.id === "CODEMODE-INVALID");
+    if (failed === undefined) {
+      return {
+        toolCalls: [
+          {
+            id: "CODEMODE-INVALID",
+            name: "code_mode",
+            input: {
+              js: 'return await tools.echo({ value: "invalid" }));',
+            },
+          },
+        ],
+      };
+    }
+    if (!failed.isError) throw new Error("Invalid JavaScript did not produce a tool error.");
+    const corrected = request.toolResults.find((entry) => entry.id === "CODEMODE-CORRECTED");
+    return corrected === undefined
+      ? {
+          toolCalls: [
+            {
+              id: "CODEMODE-CORRECTED",
+              name: "code_mode",
+              input: {
+                js: 'return await tools.echo({ value: "corrected" });',
+              },
+            },
+          ],
+        }
+      : `CODEMODE-PROGRAM-ERROR-RESULT ${corrected.output}`;
+  }
   let result: MockModelRequest["toolResults"][number] | undefined;
   const echo = (): string =>
     `${directive}-RESULT ${
@@ -44,6 +75,20 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   } else if (message.includes("CODEMODE-ECHO-START")) {
     directive = "CODEMODE-ECHO";
     js = 'return await tools.echo({ value: "hello" });';
+  } else if (message.includes("CODEMODE-SUSPENSION-START")) {
+    directive = "CODEMODE-SUSPENSION";
+    js = [
+      "let result, cleanup;",
+      "try {",
+      '  result = await tools.echo({ value: "suspended" });',
+      "} catch (error) {",
+      "  for (let i = 0; i < 100000; i++) {}",
+      "  throw error;",
+      "} finally {",
+      '  cleanup = await tools.echo({ value: "cleanup" });',
+      "}",
+      "return { result, cleanup };",
+    ].join("\n");
   } else if (message.includes("CODEMODE-CHAIN-START")) {
     directive = "CODEMODE-CHAIN";
     js = [
