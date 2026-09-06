@@ -834,6 +834,10 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          authoredWorkflowModules: {
+            directiveModules: [toolPath, stepsPath, join(appRoot, "agent", "lib", "run.ts")],
+            workflowModules: [toolPath, join(appRoot, "agent", "lib", "run.ts")],
+          },
           agentName: "test-agent",
           appRoot,
           compiledArtifactsBootstrapPath,
@@ -866,6 +870,30 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).not.toContain("node:crypto");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+  it("rejects unresolved workflow imports before emitting a VM bundle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-workflow-missing-import-"));
+    const flow = join(root, "flow.ts");
+    try {
+      await writeFile(
+        flow,
+        'import { value } from "missing-workflow-package"; export async function flow() { "use workflow"; return value; }',
+      );
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "missing-import",
+          appRoot: root,
+          rootDir: root,
+          outDir: join(root, "out"),
+          compiledArtifactsBootstrapPath: join(root, "bootstrap.mjs"),
+          watch: false,
+        },
+        [flow],
+      );
+      await expect(builder.build()).rejects.toThrow("missing-workflow-package");
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

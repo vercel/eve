@@ -344,6 +344,7 @@ export async function configureDevelopmentNitroRoutes(
 ): Promise<void> {
   const workflowBuildDirectory = resolveNitroWorkflowBuildDirectory(nitro);
   const builder = new WorkflowBundleBuilder({
+    authoredWorkflowModules: preparedHost.compiledArtifacts.authoredWorkflowModules,
     agentName: preparedHost.compileResult.manifest.config.name,
     appRoot: preparedHost.appRoot,
     compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
@@ -398,6 +399,7 @@ export async function configureProductionNitroRoutes(
   preparedHost: PreparedApplicationHost,
 ): Promise<void> {
   const builder = new WorkflowBundleBuilder({
+    authoredWorkflowModules: preparedHost.compiledArtifacts.authoredWorkflowModules,
     agentName: preparedHost.compileResult.manifest.config.name,
     appRoot: preparedHost.appRoot,
     compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,

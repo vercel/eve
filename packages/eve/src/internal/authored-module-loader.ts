@@ -31,6 +31,7 @@ import {
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
+import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import {
@@ -263,6 +264,7 @@ export async function bundleExtensionDistributionGraph(input: {
  * entry.
  */
 export interface AuthoredModuleMapBundle {
+  readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly code: string;
   /** Fingerprint of the sources that also feed the driver and step registry; a change rebuilds the host. */
   readonly workflowSourceFingerprint: string | undefined;
@@ -340,6 +342,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       },
     });
     return {
+      authoredWorkflowModules: workflowSources.modules(),
       code: removeRolldownModuleRegionComments(chunk.code),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
@@ -396,6 +399,13 @@ class AuthoredWorkflowSourceRecorder {
           imports.set(id, [...info.importedIds, ...info.dynamicallyImportedIds]);
         }
       },
+    };
+  }
+
+  modules(): AuthoredWorkflowModules {
+    return {
+      directiveModules: [...this.#directiveModules].sort(),
+      workflowModules: [...this.#workflowFunctions.keys()].sort(),
     };
   }
 
@@ -637,7 +647,7 @@ function createInFlightModuleLoadKey(
   return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
 }
 
-function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
+export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
   for (const fileName of ["tsconfig.json", "jsconfig.json"]) {
     const path = join(packageRoot, fileName);
     if (existsSync(path)) {

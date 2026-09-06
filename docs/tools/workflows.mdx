@@ -93,6 +93,12 @@ tool object, a channel handler, or a schedule handler fails the build. To start 
 channel or schedule, use the [channel operations](/docs/channels/custom#channel-operations-and-session-handles)
 or [schedule handler](/docs/schedules#handler-form-run) APIs.
 
+Workflow imports resolve `paths` aliases from your application's `tsconfig.json` or
+`jsconfig.json`, including when the application is a workspace package. eve includes only
+workflow and step modules reachable from the agent's runtime modules. Unrelated workflows
+in the host application stay outside the agent bundle. An unresolved workflow import fails
+the build with the missing import in the error.
+
 ### Migrate an existing workflow tool
 
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,

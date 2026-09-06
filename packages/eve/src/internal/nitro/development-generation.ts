@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 
+import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { prepareAuthoredRuntimeModules } from "#internal/authored-runtime-modules.js";
 import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
@@ -12,6 +13,7 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts.js";
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   readonly fingerprint: string;
   /** Identity of the authored sources the workflow driver and step registrations are built from. */
   readonly workflowSourceFingerprint?: string;
@@ -40,9 +42,14 @@ export async function stageDevelopmentGeneration(
     });
 
     return prepared.workflowSourceFingerprint === undefined
-      ? { ...snapshot, fingerprint: materialized.fingerprint }
+      ? {
+          ...snapshot,
+          authoredWorkflowModules: prepared.authoredWorkflowModules,
+          fingerprint: materialized.fingerprint,
+        }
       : {
           ...snapshot,
+          authoredWorkflowModules: prepared.authoredWorkflowModules,
           fingerprint: materialized.fingerprint,
           workflowSourceFingerprint: prepared.workflowSourceFingerprint,
         };
