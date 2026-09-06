@@ -17,7 +17,7 @@ import {
   type SessionInboxAddress,
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire } from "#execution/session-inbox/encoder.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
@@ -56,10 +56,6 @@ export async function resumeSessionInbox(
 
   const hook = await getHookByToken(address);
   const target = await resolveSessionInboxWireTarget(hook);
-  if (target.version === 0) {
-    // A legacy envelope can carry new fields without its consumer understanding them.
-    sessionInboxWire.encode(command, { version: 1 });
-  }
   return await resumeHook(hook, sessionInboxWire.encode(command, target));
 }
 

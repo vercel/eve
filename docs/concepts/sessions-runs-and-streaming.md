@@ -30,7 +30,9 @@ An existing session keeps the runtime that created it. Ordinary messages and
 input answers that fit the frozen legacy contract can use its stable inbox
 without looking up the protocol version. Task operations require the receiver's
 version, either from a saved session address or from the inbox metadata.
-Commands that the selected protocol cannot represent fail before delivery.
+The sender converts the current command through versioned migrations and
+validates the final value against that receiver's schema. Commands that cannot
+preserve their meaning in the selected protocol fail before delivery.
 
 If a background worker cannot request an agent from its parent's protocol,
 it receives a `SESSION_INBOX_INCOMPATIBLE` dispatch error instead of waiting for
