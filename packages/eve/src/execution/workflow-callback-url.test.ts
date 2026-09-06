@@ -69,6 +69,17 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000")).toBe("http://127.0.0.1:2000");
   });
 
+  it("prefers the public Vercel dev router over a private service origin", () => {
+    vi.stubEnv("VERCEL_ENV", "development");
+    vi.stubEnv("VERCEL_URL", "localhost:3000");
+    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "http://127.0.0.1:2000");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
+
+    expect(resolveWorkflowCallbackBaseUrl("http://127.0.0.1:3001")).toBe(
+      "http://localhost:3000/support",
+    );
+  });
+
   it("prefers the stable Vercel production URL over a local world override", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
