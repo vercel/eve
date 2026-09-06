@@ -14,7 +14,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
     agentId: {
       type: ["string", "null"],
       description:
-        "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
+        "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
     },
     message: {
       type: "string",
