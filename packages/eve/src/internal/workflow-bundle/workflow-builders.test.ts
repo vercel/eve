@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,8 +11,41 @@ import {
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
+import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 
 describe("applyWorkflowTransform", () => {
+  it("preserves native arguments and receivers for Workflow built-in steps", async () => {
+    const filename = "src/internal/workflow/builtins.ts";
+    const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
+    const transformed = await applyWorkflowTransform(filename, source, "step");
+    const executable = stripTypeScriptTypes(
+      transformed.code.replace(/^import[^;]+;\n/gm, "").replace(/^export /gm, ""),
+    );
+    const registered = new Map<string, Function>();
+    new Function("registerStepFunction", "withWorkflowStepAuthorization", executable)(
+      (id: string, execute: Function) => registered.set(id, execute),
+      withWorkflowStepAuthorization,
+    );
+
+    await expect(
+      registered.get("__builtin_response_json")!.call(Response.json({ ok: true })),
+    ).resolves.toEqual({ ok: true });
+    await expect(registered.get("__builtin_response_text")!.call(new Response("ok"))).resolves.toBe(
+      "ok",
+    );
+    const bytes = await registered.get("__builtin_response_array_buffer")!.call(new Response("ok"));
+    expect(new TextDecoder().decode(bytes)).toBe("ok");
+    expect(Reflect.get(registered.get("__builtin_set_attributes")!, "maxRetries")).toBe(2);
+
+    const workflow = await applyWorkflowTransform(filename, source, "workflow");
+    expect(workflow.code).not.toContain("workflowToolStep");
+    for (const name of registered.keys()) {
+      expect(workflow.code).toContain(
+        `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(name)})`,
+      );
+    }
+  });
+
   it("keeps eve workflow references stable when eve is the project root", async () => {
     const filename = "src/execution/turn-workflow.ts";
     const transformed = await applyWorkflowTransform(
