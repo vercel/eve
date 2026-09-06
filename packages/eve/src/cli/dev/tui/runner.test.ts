@@ -1286,6 +1286,7 @@ describe("EveTUIRunner development session continuity", () => {
     const encoder = new TextEncoder();
     let nextRevision = 0;
     let nextSession = 0;
+    let nextDelivery = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -1306,7 +1307,7 @@ describe("EveTUIRunner development session continuity", () => {
             url.pathname === "/eve/v1/session"
               ? `session-${String(++nextSession)}`
               : (url.pathname.split("/")[4] ?? `session-${String(++nextSession)}`);
-          return Response.json({ sessionId });
+          return Response.json({ sessionId, deliveryId: `delivery-${++nextDelivery}` });
         }
 
         return new Response(
@@ -1314,12 +1315,17 @@ describe("EveTUIRunner development session continuity", () => {
             start(controller) {
               controller.enqueue(
                 encoder.encode(
-                  `${JSON.stringify(
-                    stampTestEvent({
+                  `${JSON.stringify({
+                    ...stampTestEvent({
                       type: "session.waiting",
                       data: { continuationToken: "session-id", wait: "next-user-message" },
                     } as UnstampedMessageStreamEvent),
-                  )}\n`,
+                    meta: {
+                      at: new Date().toISOString(),
+                      id: `event-${nextDelivery}`,
+                      deliveryIds: [`delivery-${nextDelivery}`],
+                    },
+                  })}\n`,
                 ),
               );
               controller.close();

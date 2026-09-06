@@ -228,7 +228,7 @@ export type SessionCommand =
   | { readonly kind: "reset"; readonly reason?: string };
 
 export type SessionSendCommandResult =
-  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
   | { readonly status: "session_not_active" };
 
 /** Result of terminally resetting a session. */
