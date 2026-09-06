@@ -122,6 +122,9 @@ export async function transformWorkflowDirectives(input: {
 
   const ast = await parseWorkflowSource(input.filename, input.source);
   const functions = findDirectiveFunctions(ast);
+  const hasAuthorizationSteps = functions.some(
+    (fn) => fn.directive === "use step" && !BUILTIN_STEP_NAMES.has(fn.name),
+  );
 
   if (functions.length === 0) {
     return { code: input.source, workflowManifest: {} };
@@ -137,6 +140,12 @@ export async function transformWorkflowDirectives(input: {
   const replacements: { end: number; start: number; text: string }[] = [];
   const suffixes: string[] = [];
   let hasStepRegistration = false;
+  const workflowStepImport =
+    input.authored === true ? "eve/internal/workflow-step" : "#execution/tools/workflow/step.js";
+  const stepExecutionImport =
+    input.authored === true
+      ? "eve/internal/workflow-step-execution"
+      : "#execution/tools/workflow/step-execution.js";
 
   for (const fn of functions) {
     if (fn.directive === "use step") {
@@ -144,13 +153,17 @@ export async function transformWorkflowDirectives(input: {
       manifest.steps ??= {};
       const stepsForFile = (manifest.steps[input.filename] ??= {});
       stepsForFile[fn.name] = { stepId };
+      const authorizationName = `${fn.name}:eve-authorization`;
+      const authorizationStepId = createStepId(defaultIdBase, authorizationName);
+      if (!BUILTIN_STEP_NAMES.has(fn.name))
+        stepsForFile[authorizationName] = { stepId: authorizationStepId };
 
       if (input.mode === "workflow") {
         const exportPrefix = fn.exportPrefix.length > 0 ? "export " : "";
         replacements.push({
           end: fn.rangeEnd,
           start: fn.rangeStart,
-          text: `${exportPrefix}var ${fn.name} = globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(stepId)});`,
+          text: `${exportPrefix}var ${fn.name} = ${createStepProxy(defaultIdBase, fn.name)};`,
         });
       } else if (input.mode === "metadata") {
         continue;
@@ -160,6 +173,10 @@ export async function transformWorkflowDirectives(input: {
         if (input.mode === "step") {
           hasStepRegistration = true;
           suffixes.push(`registerStepFunction(${JSON.stringify(stepId)}, ${fn.name});`);
+          if (!BUILTIN_STEP_NAMES.has(fn.name))
+            suffixes.push(
+              `registerStepFunction(${JSON.stringify(authorizationStepId)}, withWorkflowStepAuthorization(${fn.name}));`,
+            );
         } else {
           suffixes.push(`${fn.name}.stepId = ${JSON.stringify(stepId)};`);
         }
@@ -199,7 +216,7 @@ export async function transformWorkflowDirectives(input: {
 
   if (input.mode === "workflow" && !hasWorkflowDirective && input.authored !== true) {
     return {
-      code: `${manifestComment}\n${createWorkflowStepProxySource(input.source, ast, functions, defaultIdBase)}`,
+      code: `${hasAuthorizationSteps ? `import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};\n` : ""}${manifestComment}\n${createWorkflowStepProxySource(input.source, ast, functions, defaultIdBase)}`,
       workflowManifest: manifest,
     };
   }
@@ -214,12 +231,12 @@ export async function transformWorkflowDirectives(input: {
       ? await stripUnusedValueImports(input.filename, replacedSource)
       : replacedSource;
   const prefix = hasStepRegistration
-    ? `import { registerStepFunction } from "workflow/internal/private";\n${manifestComment}\n`
+    ? `import { registerStepFunction } from "workflow/internal/private";\n${hasAuthorizationSteps ? `import { withWorkflowStepAuthorization } from ${JSON.stringify(stepExecutionImport)};\n` : ""}${manifestComment}\n`
     : `${manifestComment}\n`;
   const suffix = suffixes.length > 0 ? `\n${suffixes.join("\n")}\n` : "";
 
   return {
-    code: `${prefix}${transformedSource}${suffix}`,
+    code: `${input.mode === "workflow" && hasAuthorizationSteps ? `import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};\n` : ""}${prefix}${transformedSource}${suffix}`,
     workflowManifest: manifest,
   };
 }
@@ -243,12 +260,18 @@ function createWorkflowStepProxySource(
       // carry the `export ` keyword whenever the function was reachable
       // to importers.
       const exportPrefix = fn.exported ? "export " : "";
-      const stepId = createStepId(idBase, fn.name);
-      return `${exportPrefix}var ${fn.name} = globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(stepId)});`;
+      return `${exportPrefix}var ${fn.name} = ${createStepProxy(idBase, fn.name)};`;
     });
   const lines = [...literalExports, ...proxies];
 
   return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
+function createStepProxy(idBase: string, name: string): string {
+  const proxy = `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(createStepId(idBase, name))})`;
+  // Workflow invokes built-ins directly, with native arguments and a bound receiver.
+  const authorized = `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(createStepId(idBase, `${name}:eve-authorization`))})`;
+  return BUILTIN_STEP_NAMES.has(name) ? proxy : `workflowToolStep(${proxy}, ${authorized})`;
 }
 
 function findDirectiveFunctions(ast: AstProgram): DirectiveFunction[] {

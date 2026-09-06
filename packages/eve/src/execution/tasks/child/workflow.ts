@@ -19,6 +19,7 @@ import {
   type WorkflowBodyDefinition,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { WorkflowToolRunRequestMessage } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
@@ -315,7 +316,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   // Agent requests and authorization events both target the parent session
   // directly and must wait until the parent has acknowledged the task dispatch.
   async function handleOwnerRequest(message: WorkflowToolRunRequestMessage): Promise<void> {
-    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    const closesAuthorization =
+      message.request.kind === "authorization-request" &&
+      message.request.stepAuthorization === true &&
+      message.request.event.event.type === "authorization.completed";
+    if (dispatchRejected || (isTerminalTaskStatus(view.status) && !closesAuthorization)) {
+      if (
+        message.request.kind === "authorization-request" &&
+        message.request.stepAuthorization === true
+      )
+        await resumeHookStep(message.replyTo, null, { ifPresent: true });
+      return;
+    }
     if (!dispatchAcknowledged) {
       pendingTraffic.ownerRequests.push(message);
       return;
@@ -340,11 +352,34 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   async function wakeTaskOwnerRequestParent(message: WorkflowToolRunRequestMessage): Promise<void> {
     if (message.request.kind === "authorization-request") {
+      if (message.request.stepAuthorization === true) {
+        const event = message.request.event.event;
+        const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
+        if (requestId !== undefined) {
+          const command: TaskCommand =
+            event.type === "authorization.required"
+              ? {
+                  kind: "require-input",
+                  inputRequests: [
+                    ...(view.status === "input_required" ? view.inputRequests : []),
+                    { kind: "authorization", requestId, name: event.data.name },
+                  ],
+                }
+              : { kind: "answered", requestIds: [requestId] };
+          const transition = applyTaskTransition(view, command);
+          if (transition.action === "accepted") {
+            view = transition.view;
+            await appendTaskViewStep({ activityObserver: input.activityObserver, view });
+          }
+        }
+      }
       await wakeTaskAuthorizationParentStep({
         request: message.request,
         taskId: view.taskId,
         token: input.parentContinuationToken,
       });
+      if (message.request.stepAuthorization === true)
+        await resumeHookStep(message.replyTo, null, { ifPresent: true });
       return;
     }
     await wakeTaskAgentRequestParentStep({

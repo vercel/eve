@@ -23,10 +23,13 @@ export interface AgentInput {
   readonly target: string;
 }
 
-/** Context supplied only to a defineWorkflowTool executor, inside its durable run. */
+/**
+ * Context supplied to a workflow tool. Pass it directly to a step helper for
+ * getToken/requireAuth; those capabilities throw in the workflow body itself.
+ */
 export type WorkflowToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName"
+  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
   /** Invoke a visible subagent. The key must be unique within this workflow run. */
   agent(input: AgentInput): Promise<JsonValue>;

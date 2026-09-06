@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-03"
+last_updated: "2026-09-06"
 ---
 
 # Tools: suspendability and lifetime as two explicit axes
@@ -31,10 +31,14 @@ a blocker today for any Connect-backed workflow tool and is in scope.
 
 [Implementation PR #2997](https://github.com/vercel/eve/pull/2997) implements
 the compiled shape, fixed receipt, progress and message yields, and removal of
-`task.delegated()`. Step-scoped provider authorization (§3.2), cancellation of
+`task.delegated()`. Cancellation of
 parked bodies (§7), consolidation of inbound messages (§4.1), and removal of
 the remaining deprecated `TaskExec` fields (§6) are still proposed work. The
-Devbox example below depends on the authorization and cancellation work.
+Devbox example below still depends on the cancellation work. Step-scoped
+provider authorization (§3.2) is implemented through a step adapter: pass the
+workflow context directly to the helper. Sign-in ends the interrupted step
+attempt, parks the workflow, and retries that step with the callback. Earlier
+completed steps are retained. Put auth before side effects within a step.
 
 Motivating case: [vercel/internal-agents#2173](https://github.com/vercel/internal-agents/pull/2173)
 runs Devbox as a background tool and had to build a relay workflow, a webhook
@@ -103,22 +107,28 @@ channel, the task moves to `input_required`, the channel renders it like
 deferred. `postMessage` tells the agent something; `ask` asks the human
 something. A body never posts a question for the parent to relay.
 
-**Provider authorization** is the change. Today `getToken`/`requireAuth`
-throw in a workflow body and a step sees only `process.env`, so no
-Connect-backed tool can be a workflow. Contract:
+**Provider authorization** is the change. `getToken`/`requireAuth`
+throw in a workflow body. Passing the context directly into a step installs
+requester-scoped auth there. Contract:
 
-- Both are callable inside a `"use step"` that received `ctx`. They resolve
+- Both are callable inside a `"use step"` that received `ctx` as a direct argument. They resolve
   under the session identity in the run's serialized context, through the
-  scoped-authorization path a step tool uses (`execution/tool-auth.ts`). The
-  gate is the Workflow SDK's ambient step context: the same `ctx` method
-  succeeds when that context is present and throws when it is not.
+  shared authorization capability (`runtime/authorization-context.ts`). Ordinary tools and
+  workflow steps use the same `getToken`/`requireAuth` implementation. Connection search and
+  discovered connection tools use its underlying scoped execution for callback completion,
+  challenges, and rejection after sign-in. The step adapter reconstructs the capability under that identity;
+  the workflow body retains throwing implementations.
+- The auth capability returns a shared authorization signal. The executing runtime supplies
+  the callback hook and owns suspension/resumption; the auth implementation does not choose
+  between an agent turn and an authored workflow. Interactive providers without a callback
+  address fail instead of leaving the model to improvise a sign-in flow.
 - A token is returned to the step and never enters the body's replay log.
 - Interactive authorization does not return an `AuthorizationSignal` to the
-  model. The run parks the way `ask` parks: the challenge is a `RunRequestMessage`
-  with a new `authorization` variant next to `question`; the task moves to
-  `input_required`; the parent channel renders it like a subagent's
-  `authorization.required` today (`tasks/child/steps.ts`); the callback resumes
-  the step's hook and it re-resolves. To the body this is one `await`.
+  model. The workflow forwards the challenge through its owner's existing
+  `authorization-request` message; the task moves to `input_required` and the
+  parent channel renders `authorization.required`. The callback resumes the
+  workflow's hook and retries the interrupted step. To the body this is one
+  `await`; side effects before authorization must be safe to retry.
 - The loop guard is unchanged: a token rejected immediately after
   authorization fails the run.
 - In the body itself both methods keep throwing.

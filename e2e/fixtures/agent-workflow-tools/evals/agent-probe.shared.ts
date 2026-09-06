@@ -1,4 +1,5 @@
 import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
+import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
 export type ProbeCase = { readonly kind: "auth" | "hitl" };
 
@@ -73,6 +74,7 @@ async function waitForEvent<T extends "authorization.completed" | "authorization
   initial: SessionCursor,
   initialTurn: EveEvalTurn | undefined,
   type: T,
+  expectNoFailedActions = true,
 ): Promise<{
   readonly event: Extract<EveEvalTurn["events"][number], { readonly type: T }>;
   readonly session: SessionCursor;
@@ -87,7 +89,7 @@ async function waitForEvent<T extends "authorization.completed" | "authorization
     if (event !== undefined) return { event, session };
     const live = watchNext(t, session);
     turn = await live.result();
-    turn.noFailedActions();
+    if (expectNoFailedActions) turn.noFailedActions();
     session = live.session;
   }
   throw new Error(`Probe did not surface ${type}.`);
@@ -98,4 +100,34 @@ function watchNext(t: EveEvalContext, session: SessionCursor) {
     throw new Error("Probe session cursor is incomplete.");
   }
   return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+}
+
+export async function runStepAuth(t: EveEvalContext, explicit: boolean): Promise<void> {
+  const started = await t.send(`WORKFLOW-STEP-AUTH-${explicit ? "EXPLICIT" : "IMPLICIT"}`);
+  const required = await waitForEvent(t, t, started, "authorization.required");
+  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Authorization callback failed (${response.status})`);
+  await waitForEvent(t, required.session, undefined, "authorization.completed");
+  await waitForMarker(t, required.session, undefined, "WORKFLOW-STEP-AUTH:authorized");
+  t.noFailedActions();
+}
+
+export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {
+  const started = await t.send("WORKFLOW-STEP-AUTH-REJECTED");
+  const required = await waitForEvent(t, t, started, "authorization.required");
+  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Authorization callback failed (${response.status})`);
+  const completed = await waitForEvent(
+    t,
+    required.session,
+    undefined,
+    "authorization.completed",
+    false,
+  );
+  if (completed.event.data.outcome !== "failed")
+    throw new Error("A freshly rejected token must fail authorization");
+  if ((await fetch(url)).status !== 404)
+    throw new Error("The completed authorization callback must be disposed");
 }

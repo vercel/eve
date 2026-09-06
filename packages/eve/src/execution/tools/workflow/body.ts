@@ -142,8 +142,12 @@ function createWorkflowBodyContext(
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
-      unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
-    requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
+      unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
+    requireAuth: () =>
+      unavailable(
+        "requireAuth()",
+        'pass ctx directly to a "use step" helper to request authorization',
+      ),
     session: input.session,
     toolName: input.toolName,
   };
