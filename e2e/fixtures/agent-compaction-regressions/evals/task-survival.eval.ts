@@ -12,7 +12,7 @@ export default defineEval({
         "Inspect the repository, then confirm the requirements for the change.",
         // Sized to a narrow window: long enough that a 280-char summarizer
         // input cap would destroy the tail sentinel, but short enough that
-        // the task alone cannot cross the fixture's ~640-token threshold —
+        // the task alone cannot cross the fixture's ~640-token history budget —
         // otherwise compaction fires before the first model call and the
         // mock never generates pressure.
         [

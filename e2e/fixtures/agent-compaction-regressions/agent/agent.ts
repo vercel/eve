@@ -1,6 +1,6 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import { mockModel, type MockModelRequest } from "eve/evals";
+import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
@@ -15,6 +15,10 @@ import {
 } from "../constants";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
+// The compiled fixture's instructions and 13 advertised tools occupy ~2,878
+// tokens. Keep the original 640-token history pressure after reserving them.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_878;
+const TEST_HISTORY_BUDGET_TOKENS = 640;
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase =
@@ -59,7 +63,7 @@ let requestCount = 0;
 
 const taskModel = mockModel({
   modelId: "compaction-regression-task-model",
-  respond(request) {
+  respond: withFullRequestUsage((request) => {
     // EVE_E2E_DUMP_CONTEXT=1 prints every request's messages — the context
     // exactly as the model sees it, so compaction, capping, and replay are
     // observable per step while iterating on these evals.
@@ -220,7 +224,7 @@ const taskModel = mockModel({
             },
           ],
         };
-  },
+  }),
 });
 
 export default defineAgent({
@@ -232,7 +236,8 @@ export default defineAgent({
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent: 0.02,
+    thresholdPercent:
+      (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     maxInputTokensPerSession: 100_000,
@@ -269,4 +274,21 @@ function assistantEvidenceContains(
   marker: string,
 ): boolean {
   return messages.some((message) => message.role === "assistant" && message.text.includes(marker));
+}
+
+function withFullRequestUsage(respond: MockModelResponder): MockModelResponder {
+  return async (request) => {
+    const response = await respond(request);
+    const history = request.messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({ role: message.role, content: message.text }));
+    // Real providers include the tool catalog in reported input usage. The
+    // mock's default text-only estimate would hide that cost on later steps.
+    return {
+      ...(typeof response === "string" ? { text: response } : response),
+      usage: {
+        inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + Math.ceil(JSON.stringify(history).length / 4),
+      },
+    };
+  };
 }
