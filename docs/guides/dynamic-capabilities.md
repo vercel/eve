@@ -253,6 +253,8 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
+Dynamic tools retain their authored input and output validators, including Standard Schema transformations and Zod refinements. JSON Schema remains the model-visible description. For session-scoped tools, eve re-runs the owning `session.started` resolver after a process restart or validator-cache eviction to restore its live validators; replay fails with an explicit error if they are unavailable, rather than accepting input against a weaker JSON Schema. Keep resolvers idempotent.
+
 Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories, including [memory provider tools](../memory), may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
 
 ### Identity and redeploys

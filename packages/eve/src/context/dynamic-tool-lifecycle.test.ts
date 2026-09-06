@@ -1,3 +1,5 @@
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import { z as z3 } from "zod/v3";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
@@ -13,7 +15,7 @@ import {
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
+import { isToolSchema, serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
   buildCallbackContext: () => ({
@@ -1712,4 +1714,253 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     const result2 = await tools[0]!.execute!({}, executeOptions);
     expect(result2).toEqual({ version: 2 });
   });
+});
+
+describe("dynamic authored schema replay", () => {
+  function validateSchema(schema: unknown, input: unknown) {
+    if (!isToolSchema(schema)) throw new Error("Expected a live ToolSchema.");
+    return schema["~standard"].validate(input);
+  }
+
+  function schemaTool(inputSchema: StandardSchemaV1, outputSchema?: ToolSchema) {
+    const entry = defineTool({
+      description: "Validated input",
+      inputSchema,
+      outputSchema,
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: (closure) => closure, closure: { captured: "original" } },
+    });
+    return entry;
+  }
+
+  async function resolveSchemaTool(
+    inputSchema: StandardSchemaV1,
+    outputSchema?: ToolSchema,
+    scope: "session" | "turn" | "step" = "session",
+  ) {
+    const ctx = createCtx();
+    const resolver = createResolver("schema-owner", [`${scope}.started`], () => ({
+      validated: schemaTool(inputSchema, outputSchema),
+    }));
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      event: makeEvent(`${scope}.started`),
+      messages: [],
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "stable");
+    return { ctx, resolver };
+  }
+
+  it.each(["session", "turn", "step"] as const)(
+    "retains trimming and rejects whitespace after serializing %s context",
+    async (scope) => {
+      const schema = z.object({ value: z.string().trim().min(1).optional() });
+      const { ctx } = await resolveSchemaTool(schema, undefined, scope);
+      const [tool] = buildDynamicTools(await deserializeContext(serializeContext(ctx)));
+      expect(await validateSchema(tool!.inputSchema, { value: " " })).toHaveProperty("issues");
+      expect(await validateSchema(tool!.inputSchema, { value: "  value  " })).toEqual({
+        value: { value: "value" },
+      });
+    },
+  );
+
+  it("retains Zod 3 input refinements and transformations", async () => {
+    const schema = z3.object({ value: z3.string().trim().min(1) });
+    const { ctx, resolver } = await resolveSchemaTool(schema);
+    const replayed = await deserializeContext(serializeContext(ctx));
+    for (const cold of [false, true]) {
+      if (cold) {
+        (globalThis as Record<symbol, Map<string, unknown>>)[
+          Symbol.for("eve:dynamic-tool-schemas")
+        ]!.clear();
+        await refreshDynamicSessionToolsForRuntimeRevision({
+          ctx: replayed,
+          resolvers: [resolver],
+          event: { data: {}, type: "session.started" },
+          messages: [],
+          runtimeRevision: "stable",
+        });
+      }
+      const [tool] = buildDynamicTools(replayed);
+      expect(await validateSchema(tool!.inputSchema, { value: " " })).toHaveProperty("issues");
+      expect(await validateSchema(tool!.inputSchema, { value: "  value  " })).toEqual({
+        value: { value: "value" },
+      });
+    }
+  });
+
+  it("retains cross-field refinements during replay", async () => {
+    const schema = z.object({ start: z.number(), end: z.number() }).superRefine((value, ctx) => {
+      if (value.start >= value.end)
+        ctx.addIssue({ code: "custom", message: "End must follow start" });
+    });
+    const { ctx } = await resolveSchemaTool(schema);
+    const [tool] = buildDynamicTools(await deserializeContext(serializeContext(ctx)));
+    expect(await validateSchema(tool!.inputSchema, { start: 2, end: 1 })).toHaveProperty("issues");
+    expect(await validateSchema(tool!.inputSchema, { start: 1, end: 2 })).toEqual({
+      value: { start: 1, end: 2 },
+    });
+  });
+
+  it("does not share validators between identical JSON shapes in different sessions", async () => {
+    const schema = (required: string) =>
+      z.object({ value: z.string().refine((value) => value === required) });
+    const first = await resolveSchemaTool(schema("first"));
+    const second = await resolveSchemaTool(schema("second"));
+    const firstTool = buildDynamicTools(await deserializeContext(serializeContext(first.ctx)))[0]!;
+    const secondTool = buildDynamicTools(
+      await deserializeContext(serializeContext(second.ctx)),
+    )[0]!;
+    expect(await validateSchema(firstTool.inputSchema, { value: "second" })).toHaveProperty(
+      "issues",
+    );
+    expect(await validateSchema(secondTool.inputSchema, { value: "first" })).toHaveProperty(
+      "issues",
+    );
+  });
+
+  it("restores schemas after a cold process even when callbacks are still registered", async () => {
+    const schema = z.object({ value: z.string().trim().min(1) });
+    const { ctx, resolver } = await resolveSchemaTool(schema);
+    const serialized = serializeContext(ctx);
+    (
+      Reflect.get(globalThis, Symbol.for("eve:dynamic-tool-schemas")) as Map<string, unknown>
+    ).clear();
+    const restored = await deserializeContext(serialized);
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx: restored,
+      resolvers: [resolver],
+      event: createSessionStartedEvent(),
+      messages: [],
+      runtimeRevision: "stable",
+    });
+    const [tool] = buildDynamicTools(restored);
+    expect(await validateSchema(tool!.inputSchema, { value: " " })).toHaveProperty("issues");
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ captured: "original" });
+  });
+
+  it("fails closed if the owning resolver cannot restore its validator", async () => {
+    const { ctx } = await resolveSchemaTool(z.object({ value: z.string().trim().min(1) }));
+    (
+      Reflect.get(globalThis, Symbol.for("eve:dynamic-tool-schemas")) as Map<string, unknown>
+    ).clear();
+    expect(() => buildDynamicTools(ctx)).toThrow("cannot replay its authored schema validation");
+    await expect(
+      refreshDynamicSessionToolsForRuntimeRevision({
+        ctx,
+        resolvers: [createResolver("schema-owner", ["session.started"], () => null)],
+        event: createSessionStartedEvent(),
+        messages: [],
+        runtimeRevision: "stable",
+      }),
+    ).rejects.toThrow("cannot restore its authored schema validation");
+  });
+
+  it("retains output validation and transforms", async () => {
+    const outputSchema = z.object({ label: z.string().trim().min(1) });
+    const { ctx } = await resolveSchemaTool(z.object({}), outputSchema);
+    const [tool] = buildDynamicTools(await deserializeContext(serializeContext(ctx)));
+    expect(await validateSchema(tool!.outputSchema!, { label: " " })).toHaveProperty("issues");
+    expect(await validateSchema(tool!.outputSchema!, { label: "  valid  " })).toEqual({
+      value: { label: "valid" },
+    });
+  });
+
+  it("preserves asynchronous Standard Schema validation", async () => {
+    const schema: ToolSchema = {
+      "~standard": {
+        version: 1,
+        vendor: "custom",
+        validate: async (value) =>
+          value === "allowed" ? { value: "normalized" } : { issues: [{ message: "Denied" }] },
+        jsonSchema: { input: () => ({ type: "string" }), output: () => ({ type: "string" }) },
+      },
+    };
+    const { ctx } = await resolveSchemaTool(schema);
+    const [tool] = buildDynamicTools(await deserializeContext(serializeContext(ctx)));
+    expect(await validateSchema(tool!.inputSchema, "denied")).toHaveProperty("issues");
+    expect(await validateSchema(tool!.inputSchema, "allowed")).toEqual({
+      value: "normalized",
+    });
+  });
+});
+
+describe("dynamic schema eviction and replacement", () => {
+  async function resolveValidatedTool() {
+    const ctx = createCtx();
+    const schema = z.object({ value: z.string().trim().min(1) });
+    const resolver = createResolver("schema-owner", ["session.started"], () => {
+      const tool = defineTool({
+        description: "Validated",
+        inputSchema: schema,
+        outputSchema: schema,
+        execute: async () => ({ value: "valid" }),
+      });
+      stampDurableDynamicToolCallbacks(tool, {
+        execute: { callback: () => ({ value: "valid" }), closure: {} },
+      });
+      return { validated: tool };
+    });
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      event: makeEvent("session.started"),
+      messages: [],
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "stable");
+    return { ctx, resolver };
+  }
+
+  it("restores the same entry's validators after bounded cache eviction", async () => {
+    const { registerDynamicToolSchemas } = await import("#context/dynamic-tool-schemas.js");
+    const { ctx, resolver } = await resolveValidatedTool();
+    for (let index = 0; index < 2_048; index++)
+      registerDynamicToolSchemas({ inputSchema: z.object({}) });
+    expect(() => buildDynamicTools(ctx)).toThrow("cannot replay its authored schema validation");
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      event: createSessionStartedEvent(),
+      messages: [],
+      runtimeRevision: "stable",
+    });
+    const [tool] = buildDynamicTools(ctx);
+    const schema = tool!.inputSchema;
+    if (!isToolSchema(schema)) throw new Error("Expected a live schema.");
+    expect(await schema["~standard"].validate({ value: " " })).toHaveProperty("issues");
+  });
+
+  it.each(["both", "input", "output"])(
+    "rejects a replacement missing the required live %s schema",
+    async (missing) => {
+      const { ctx } = await resolveValidatedTool();
+      (
+        Reflect.get(globalThis, Symbol.for("eve:dynamic-tool-schemas")) as Map<string, unknown>
+      ).clear();
+      const schema = z.object({ value: z.string() });
+      const replacement = createResolver("schema-owner", ["session.started"], () => {
+        const tool = defineTool({
+          description: "Weakened replacement",
+          inputSchema: missing === "output" ? schema : { type: "object" },
+          outputSchema: missing === "input" ? schema : { type: "object" },
+          execute: async () => null,
+        });
+        stampDurableDynamicToolCallbacks(tool, { execute: { callback: () => null, closure: {} } });
+        return { validated: tool };
+      });
+      await expect(
+        refreshDynamicSessionToolsForRuntimeRevision({
+          ctx,
+          resolvers: [replacement],
+          event: createSessionStartedEvent(),
+          messages: [],
+          runtimeRevision: "stable",
+        }),
+      ).rejects.toThrow("cannot restore its authored schema validation");
+      expect(() => buildDynamicTools(ctx)).toThrow("cannot replay its authored schema validation");
+    },
+  );
 });
