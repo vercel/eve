@@ -21,6 +21,7 @@ interface SandboxShutdownProcess {
 
 interface NitroAppLike {
   readonly hooks?: {
+    callHook?(name: "close"): Promise<void>;
     hook(name: "close", handler: () => Promise<void>): unknown;
   };
 }
@@ -47,25 +48,37 @@ export function shouldInstallSandboxShutdown(env: Record<string, string | undefi
   return true;
 }
 
-/**
- * Stops all tracked sandboxes, bounded by
- * {@link SANDBOX_SHUTDOWN_TIMEOUT_MS}. Never throws.
- */
-export async function runSandboxShutdown(log: (message: string) => void): Promise<void> {
+async function runBoundedShutdown(input: {
+  readonly log: (message: string) => void;
+  readonly shutdown: () => Promise<void>;
+  readonly timeoutMessage: string;
+}): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(() => {
-      log("eve: sandbox shutdown timed out; continuing exit");
+      input.log(input.timeoutMessage);
       resolve();
     }, SANDBOX_SHUTDOWN_TIMEOUT_MS);
     timer.unref?.();
   });
 
   try {
-    await Promise.race([shutdownActiveSandboxHandles({ log }), deadline]);
+    await Promise.race([Promise.resolve().then(input.shutdown), deadline]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Stops all tracked sandboxes, bounded by
+ * {@link SANDBOX_SHUTDOWN_TIMEOUT_MS}. Never throws.
+ */
+export async function runSandboxShutdown(log: (message: string) => void): Promise<void> {
+  await runBoundedShutdown({
+    log,
+    shutdown: () => shutdownActiveSandboxHandles({ log }),
+    timeoutMessage: "eve: sandbox shutdown timed out; continuing exit",
+  });
 }
 
 function exitCodeForSignal(signal: ShutdownSignal): number {
@@ -74,8 +87,9 @@ function exitCodeForSignal(signal: ShutdownSignal): number {
 
 /**
  * Wires sandbox shutdown into the server lifecycle: the nitro `close`
- * hook plus SIGINT/SIGTERM, since the node-server preset installs no
- * signal handling of its own. Exposed for tests; the plugin default
+ * hook plus SIGINT/SIGTERM. Signal shutdown runs the complete nitro close
+ * lifecycle so other resources, including the Workflow World, are released
+ * before this handler exits the process. Exposed for tests; the plugin default
  * export applies it to the real `process`.
  */
 export function installSandboxShutdownHandlers(input: {
@@ -91,11 +105,22 @@ export function installSandboxShutdownHandlers(input: {
     await runSandboxShutdown(input.log);
   });
 
+  let shutdownPromise: Promise<void> | undefined;
   for (const signal of SHUTDOWN_SIGNALS) {
     input.process.once(signal, () => {
-      void runSandboxShutdown(input.log).finally(() => {
-        input.process.exit(exitCodeForSignal(signal));
+      if (shutdownPromise !== undefined) {
+        return;
+      }
+      shutdownPromise = runBoundedShutdown({
+        log: input.log,
+        shutdown: () =>
+          input.nitroApp?.hooks?.callHook?.("close") ?? runSandboxShutdown(input.log),
+        timeoutMessage: "eve: server shutdown timed out; continuing exit",
       });
+      void shutdownPromise.then(
+        () => input.process.exit(exitCodeForSignal(signal)),
+        () => input.process.exit(exitCodeForSignal(signal)),
+      );
     });
   }
 }

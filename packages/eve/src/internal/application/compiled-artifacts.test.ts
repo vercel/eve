@@ -26,6 +26,9 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("setWorld(workflowWorld);");
     expect(source).toContain("await getWorld();");
     expect(source).toContain("await workflowWorld.start?.();");
+    expect(source).toContain('nitroApp.hooks.hook("close"');
+    expect(source).toContain("await workflowWorld.close?.();");
+    expect(source).toContain("workflowWorldClosePromise ??=");
   });
 
   it("configures the vendored local World with eve's app-local data resolver", () => {

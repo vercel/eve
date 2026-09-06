@@ -427,7 +427,15 @@ export function createWorkflowWorldPluginSource(input: {
     "await getWorld();",
     "await workflowWorld.start?.();",
     "",
-    "export default function installWorkflowWorldPlugin() {}",
+    "let workflowWorldClosePromise;",
+    "export default function installWorkflowWorldPlugin(nitroApp) {",
+    '  nitroApp.hooks.hook("close", async () => {',
+    "    workflowWorldClosePromise ??= (async () => {",
+    "      await workflowWorld.close?.();",
+    "    })();",
+    "    await workflowWorldClosePromise;",
+    "  });",
+    "}",
     "",
   ].join("\n");
 }
