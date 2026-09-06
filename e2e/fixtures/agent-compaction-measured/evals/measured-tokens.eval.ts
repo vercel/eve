@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { MEASURED_TOKENS_CASE } from "../agent/lib/measured-tokens";
+const MEASURED_TOKENS_CASE = "[case: measured-tokens]";
 
 export default defineEval({
   description:
