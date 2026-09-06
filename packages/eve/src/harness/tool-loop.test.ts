@@ -12247,6 +12247,78 @@ describe("createToolLoopHarness", () => {
       });
     });
 
+    it.each(["plain", "client context", "compaction", "projected history"])(
+      "keeps framework context before the turn input across durable steps (%s)",
+      async (scenario) => {
+        const withClientContext = scenario === "client context";
+        if (scenario === "compaction") {
+          vi.mocked(shouldCompact).mockReturnValueOnce(true);
+          vi.mocked(compactMessages).mockImplementationOnce(async (messages) => messages.slice(2));
+        }
+        const toolCall = {
+          type: "tool-call" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          input: { a: 20, b: 22 },
+        };
+        const toolResult = {
+          type: "tool-result" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          output: "42",
+        };
+        setupMockAgent({
+          finishReason: "tool-calls",
+          response: {
+            messages: [
+              { role: "assistant", content: [toolCall] },
+              { role: "tool", content: [toolResult] },
+            ],
+          },
+          text: "",
+          toolCalls: [toolCall],
+          toolResults: [{ ...toolResult, input: toolCall.input }],
+        });
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+        const runStep = createToolLoopHarness(
+          createTestConfig("conversation", undefined, {
+            historyProjector:
+              scenario === "projected history"
+                ? ({ messages }) =>
+                    messages.filter((message) => message.content !== "Previous answer")
+                : undefined,
+          }),
+        );
+        const initial = setHarnessEmissionState(
+          createTestSession({
+            history: [
+              { role: "user", content: "Previous request" },
+              { role: "assistant", content: "Previous answer" },
+            ],
+          }),
+          { sessionStarted: true, sequence: 1, stepIndex: 0, turnId: "turn_1" },
+        );
+        const input = { context: ["Current channel context"], message: "Add 20 and 22." };
+        const first = await contextStorage.run(ctx, () =>
+          runStep(
+            initial,
+            withClientContext ? attachClientContext(input, ["Client context"]) : input,
+          ),
+        );
+        expect(first.next).toBe(runStep);
+        const firstPrompt = structuredClone(getLastAgentSettings().messages);
+        setupMockAgent(defaultModelResult());
+        const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
+        await contextStorage.run(ctx, () => runStep(restored));
+        const nextPrompt = getLastAgentSettings().messages;
+        expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
+        expect(
+          nextPrompt.filter((message) => message.content === "Task status: analysis in progress"),
+        ).toHaveLength(1);
+      },
+    );
+
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
       vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);
