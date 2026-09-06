@@ -10,7 +10,7 @@ import {
   type VercelCaptureResult,
 } from "#setup/primitives/run-vercel.js";
 
-export const FILE_MEMORY_BLOB_PREFIX = "EVE_MEMORY_";
+export const FILE_MEMORY_BLOB_PREFIX = "EVE_MEMORY_BLOB";
 export const FILE_MEMORY_BLOB_ENVIRONMENTS = ["production", "preview", "development"] as const;
 const DEFAULT_BLOB_REGION = "iad1";
 
@@ -68,7 +68,7 @@ export interface FileMemoryVercelClient {
     environments: readonly string[];
     prefix: string;
     projectId: string;
-    storeName: string;
+    storeId: string;
   }): Promise<void>;
   getConnections(storeId: string): Promise<readonly BlobStoreConnection[]>;
   getProject(): Promise<VercelProjectConfiguration>;
@@ -139,8 +139,8 @@ export function createFileMemoryVercelClient(
     return parseJson(result.stdout, schema, label.toLowerCase());
   }
 
-  async function captureMutation(args: string[], label: string): Promise<void> {
-    const result = await captureVercel(args, baseOptions);
+  async function captureMutation(args: string[], label: string, stdin?: string): Promise<void> {
+    const result = await captureVercel(args, { ...baseOptions, stdin });
     input.signal?.throwIfAborted();
     if (!result.ok) throw commandFailure(label, result);
   }
@@ -155,19 +155,27 @@ export function createFileMemoryVercelClient(
       );
       return response.store;
     },
-    async connectStore({ environments, prefix, projectId, storeName }) {
-      const args = [
-        "integration-resource",
-        "connect",
-        storeName,
-        projectId,
-        "--prefix",
-        prefix,
-        ...environments.flatMap((environment) => ["--environment", environment]),
-        "--yes",
-        ...scope,
-      ];
-      await captureMutation(args, "Vercel Blob project connection");
+    async connectStore({ environments, prefix, projectId, storeId }) {
+      await captureMutation(
+        [
+          "api",
+          `/v1/storage/stores/${encodeURIComponent(storeId)}/connections`,
+          "-X",
+          "POST",
+          "--header",
+          "x-vercel-use-oidc: 1",
+          "--input",
+          "-",
+          ...scope,
+        ],
+        "Vercel Blob project connection",
+        JSON.stringify({
+          envVarEnvironments: environments,
+          envVarPrefix: prefix,
+          projectId,
+          skipReadWriteToken: true,
+        }),
+      );
     },
     async getConnections(storeId) {
       const response = await captureJson(
@@ -269,7 +277,7 @@ function exactConnection(connection: BlobStoreConnection, projectId: string): bo
 function isEveMemoryConnection(connection: BlobStoreConnection, projectId: string): boolean {
   return (
     connection.projectId === projectId &&
-    connection.envVarPrefix?.startsWith(FILE_MEMORY_BLOB_PREFIX) === true
+    connection.envVarPrefix?.startsWith("EVE_MEMORY_") === true
   );
 }
 
@@ -501,7 +509,7 @@ export async function applyFileMemoryBlob(input: {
           environments: FILE_MEMORY_BLOB_ENVIRONMENTS,
           prefix: FILE_MEMORY_BLOB_PREFIX,
           projectId: input.plan.project.projectId,
-          storeName: input.plan.storeName,
+          storeId,
         }),
     );
   }

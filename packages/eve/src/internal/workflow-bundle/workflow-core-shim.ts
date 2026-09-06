@@ -84,7 +84,17 @@ export function getWritable<T = unknown>(options: { namespace?: string } = {}): 
  * Creates a Workflow webhook from inside a durable workflow body.
  */
 export function createWebhook<T = unknown>(options?: unknown): WorkflowHook<T> & { url?: string } {
-  const hook = createHook<T>(options) as WorkflowHook<T> & { url?: string };
+  const { respondWith, token, ...rest } = (options ?? {}) as Record<string, unknown>;
+  if (token !== undefined) {
+    throw new Error(
+      "`createWebhook()` does not accept a `token` option. Use `createHook()` with `resumeHook()` for deterministic tokens.",
+    );
+  }
+  const hook = createHook<T>({
+    ...rest,
+    metadata: respondWith === undefined ? undefined : { respondWith },
+    isWebhook: true,
+  }) as WorkflowHook<T> & { url?: string };
   const metadata = getWorkflowMetadata();
   const baseUrl = typeof metadata.url === "string" ? metadata.url : "";
 

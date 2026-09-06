@@ -173,7 +173,10 @@ turn recalls the same data again.
 ## Failure behavior
 
 - A throwing or invalid `recall["turn.started"]` fails the turn before the
-  model call. No slot's recall results are committed.
+  model call. No slot's recall results are committed. If the turn's
+  `abortSignal` is already aborted, eve treats the error as cancellation and
+  continues with any queued steering replacement. An `AbortError` with an active
+  signal still fails the turn.
 - A throwing `capture["compaction.requested"]` leaves history unchanged.
 - A throwing `recall["compaction.completed"]` fails an automatic turn. For
   standalone compaction, eve logs the error and returns the session to waiting,

@@ -316,6 +316,7 @@ export class SubagentPump {
           await abortableDelay(reconnectDelayMs, controller.signal);
         }
       } finally {
+        controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
       }
     })();

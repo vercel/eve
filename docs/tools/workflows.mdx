@@ -361,7 +361,9 @@ export default defineWorkflowTool({
 ```
 
 `createWebhook` mints a URL under `/.well-known/workflow/v1/webhook/` that eve serves. The external
-system posts to it when it is done. Nothing runs in between.
+system posts to it when it is done. Nothing runs in between. Webhook tokens are generated for
+you; use `createHook` with `resumeHook` if you need a deterministic token. To customize the HTTP
+response, pass `respondWith: new Response(...)` to `createWebhook`.
 
 ### Ask now, act when answered
 

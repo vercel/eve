@@ -180,6 +180,7 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
+      key !== "approvalKey" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
       key !== "toModelOutput",
@@ -201,6 +202,12 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
+  const approvalKey = validateReference({
+    name,
+    phase: "approvalKey",
+    stamped: raw.approvalKey,
+    required: entry.approvalKey !== undefined,
+  });
   const approvalRequest = validateReference({
     name,
     phase: "approvalRequest",
@@ -222,10 +229,12 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
+    approvalKey?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
+  if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

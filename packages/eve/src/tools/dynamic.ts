@@ -35,6 +35,8 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
    * use the same durable descriptor boundary as `execute` and `toModelOutput`.
    */
   readonly approval?: Approval;
+  /** Derives the input-scoped key recorded when this tool is approved. */
+  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
 }
 
 /**

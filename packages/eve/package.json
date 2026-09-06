@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.52.1",
+  "version": "0.52.2",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -131,6 +131,16 @@
       "import": "./dist/src/public/tools/index.js",
       "default": "./dist/src/public/tools/index.js"
     },
+    "./tools/agent": {
+      "types": "./dist/src/public/tools/agent.d.ts",
+      "import": "./dist/src/public/tools/agent.js",
+      "default": "./dist/src/public/tools/agent.js"
+    },
+    "./tools/ask_question": {
+      "types": "./dist/src/public/tools/ask-question.d.ts",
+      "import": "./dist/src/public/tools/ask-question.js",
+      "default": "./dist/src/public/tools/ask-question.js"
+    },
     "./tools/bash": {
       "types": "./dist/src/public/tools/bash.d.ts",
       "import": "./dist/src/public/tools/bash.js",
@@ -166,6 +176,21 @@
       "import": "./dist/src/public/tools/load-skill.js",
       "default": "./dist/src/public/tools/load-skill.js"
     },
+    "./tools/connection_search": {
+      "types": "./dist/src/public/tools/connection-search.d.ts",
+      "import": "./dist/src/public/tools/connection-search.js",
+      "default": "./dist/src/public/tools/connection-search.js"
+    },
+    "./tools/task_cancel": {
+      "types": "./dist/src/public/tools/task-cancel.d.ts",
+      "import": "./dist/src/public/tools/task-cancel.js",
+      "default": "./dist/src/public/tools/task-cancel.js"
+    },
+    "./tools/task_update": {
+      "types": "./dist/src/public/tools/task-update.d.ts",
+      "import": "./dist/src/public/tools/task-update.js",
+      "default": "./dist/src/public/tools/task-update.js"
+    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",
@@ -182,7 +207,7 @@
       "default": "./dist/src/public/tools/workflow.js"
     },
     "./workflow-modules": {
-      "eve-source": "./src/public/workflow-modules.d.ts",
+      "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
     },
     "./models/openai": {
@@ -286,19 +311,19 @@
       "default": "./dist/src/public/local-dev.js"
     },
     "./self-modification": {
-      "eve-source": "./src/self-modification/extension/extension.ts",
+      "eve-source": "./dist/src/self-modification/extension/extension.js",
       "types": "./dist/src/self-modification/extension/extension.d.ts",
       "import": "./dist/src/self-modification/extension/extension.js",
       "default": "./dist/src/self-modification/extension/extension.js"
     },
     "./self-modification/agent": {
-      "eve-source": "./src/self-modification/agent.ts",
+      "eve-source": "./dist/src/self-modification/agent.js",
       "types": "./dist/src/self-modification/agent.d.ts",
       "import": "./dist/src/self-modification/agent.js",
       "default": "./dist/src/self-modification/agent.js"
     },
     "./self-modification/sandbox": {
-      "eve-source": "./src/self-modification/sandbox.ts",
+      "eve-source": "./dist/src/self-modification/sandbox.js",
       "types": "./dist/src/self-modification/sandbox.d.ts",
       "import": "./dist/src/self-modification/sandbox.js",
       "default": "./dist/src/self-modification/sandbox.js"
@@ -395,13 +420,13 @@
     },
     "./package.json": "./package.json",
     "./setup/scaffold": {
-      "eve-source": "./src/setup/scaffold/index.ts",
+      "eve-source": "./dist/src/setup/scaffold/index.js",
       "types": "./dist/src/setup/scaffold/index.d.ts",
       "import": "./dist/src/setup/scaffold/index.js",
       "default": "./dist/src/setup/scaffold/index.js"
     },
     "./setup": {
-      "eve-source": "./src/setup/index.ts",
+      "eve-source": "./dist/src/setup/index.js",
       "types": "./dist/src/setup/index.d.ts",
       "import": "./dist/src/setup/index.js",
       "default": "./dist/src/setup/index.js"

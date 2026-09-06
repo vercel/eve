@@ -13,8 +13,19 @@ import {
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
-type CallbackPhase = "approvalRequest" | "approvalResponse" | "execute" | "toModelOutput";
-type CallbackPropertyName = "approval" | "execute" | "request" | "response" | "toModelOutput";
+type CallbackPhase =
+  | "approvalKey"
+  | "approvalRequest"
+  | "approvalResponse"
+  | "execute"
+  | "toModelOutput";
+type CallbackPropertyName =
+  | "approvalKey"
+  | "approval"
+  | "execute"
+  | "request"
+  | "response"
+  | "toModelOutput";
 
 interface CallbackInfo {
   readonly body: string;
@@ -176,6 +187,15 @@ function collectToolCallbacks(
     findProperty(tool, "toModelOutput"),
     "toModelOutput",
     "toModelOutput",
+    results,
+    nestedScopes,
+  );
+
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "approvalKey"),
+    "approvalKey",
+    "approvalKey",
     results,
     nestedScopes,
   );

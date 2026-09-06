@@ -5,6 +5,7 @@ import {
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
+  sliceUtf16Safe,
   stubContentOutputFileParts,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
@@ -224,6 +225,12 @@ export async function compactMessages(
       temperature: 0,
     });
 
+    if (result.text.trim().length === 0) {
+      throw new Error(
+        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
+      );
+    }
+
     const summaryHead: ModelMessage[] = [
       { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
@@ -289,7 +296,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
         ...part,
         output: {
           type: "text" as const,
-          value: `${CAPPED_RESULT_ANNOTATION}\n\n${serialized.slice(0, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+          value: `${CAPPED_RESULT_ANNOTATION}\n\n${sliceUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT)}`,
         },
       };
     });

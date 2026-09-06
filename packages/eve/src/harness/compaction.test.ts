@@ -397,6 +397,43 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
+  it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
+    // JSON.stringify of this output places 📥's high surrogate at index 1999
+    // of the 2000-unit TRANSCRIPT_PAYLOAD_LIMIT cut.
+    const content = `${"x".repeat(1964)}📥${"y".repeat(500)}`;
+    const call: ModelMessage = {
+      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      role: "assistant",
+    };
+    const resultMsg: ModelMessage = {
+      content: [
+        {
+          output: { type: "json", value: { content } },
+          toolCallId: "call-0",
+          toolName: "grep",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    const messages = [user("investigate"), call, resultMsg, user("what did you find?")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    const value =
+      typeof output === "object" && output !== null && "value" in output
+        ? String(output.value)
+        : "";
+    expect(value).toContain("Truncated by eve");
+    expect(value).toBe(value.toWellFormed());
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(value)).toBe(false);
+    expect(value).not.toContain("📥");
+    expect(value).toContain("x".repeat(1964));
+  });
+
   it("stubs content-output file parts instead of truncating into their payloads", async () => {
     const base64 = "iVBORw0KGgo".repeat(500);
     const messages: ModelMessage[] = [
@@ -548,6 +585,39 @@ describe("compactMessages: tool-result cap heuristic", () => {
 });
 
 describe("compactMessages: forced summary", () => {
+  it.each(["", " \n\t"])(
+    "rejects a blank checkpoint without replacing history (%j)",
+    async (text) => {
+      const { generateText } = await import("ai");
+      vi.mocked(generateText).mockResolvedValue({
+        finishReason: "content-filter",
+        text,
+      } as Awaited<ReturnType<typeof generateText>>);
+      const messages = [
+        user("Keep the original request."),
+        assistant("Work is in progress."),
+        user("A background task completed."),
+      ];
+      const original = structuredClone(messages);
+
+      await expect(
+        compactMessages(
+          messages,
+          {} as Parameters<typeof compactMessages>[1],
+          { recentWindowSize: 10, threshold: ROOMY },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow(
+        "The compaction model returned an empty summary. Finish reason: content-filter.",
+      );
+      expect(messages).toEqual(original);
+    },
+  );
+
   it("summarizes the full conversation even when it is already under the threshold", async () => {
     const { generateText } = await import("ai");
     vi.mocked(generateText).mockResolvedValue({

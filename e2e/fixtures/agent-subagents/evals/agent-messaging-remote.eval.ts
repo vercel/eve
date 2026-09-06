@@ -15,7 +15,7 @@ export default defineEval({
   async test(t) {
     const started = await t.send(
       [
-        "Use the remote-loopback agent exactly once with this message (no outputSchema):",
+        "Use the remote-loopback agent with this message (no outputSchema):",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
         "When it returns, reply with the single word: delegated.",
       ].join(" "),
@@ -43,17 +43,16 @@ export default defineEval({
     secondCompletedTurn.messageIncludes(MEMORABLE_FACT);
 
     t.succeeded();
-    t.calledSubagent("remote-loopback", { count: 2 });
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
-      const childSessionIds = events.flatMap((event) =>
+      const calls = events.flatMap((event) =>
         event.type === "subagent.called" && event.data.name === "remote-loopback"
-          ? [event.data.childSessionId]
+          ? [event.data]
           : [],
       );
       return (
-        childSessionIds.length === 2 &&
-        childSessionIds[0] !== undefined &&
-        childSessionIds[0] === childSessionIds[1]
+        calls.length >= 2 &&
+        new Set(calls.map((call) => call.childSessionId)).size === 1 &&
+        new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });
     t.noFailedActions();

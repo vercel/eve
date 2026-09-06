@@ -1,14 +1,20 @@
 import { z } from "zod";
-import { defineWorkflowTool } from "#public/tools/index.js";
+import { defineTool, defineWorkflowTool } from "#public/tools/index.js";
 
-defineWorkflowTool({
-  description: "Ask before publishing a report.",
-  execution: "background",
-  inputSchema: z.object({ reportId: z.string() }),
-  async *execute(input, ctx, task) {
+export const write = defineTool({
+  description: "Write an approved message.",
+  inputSchema: z.object({ message: z.string() }),
+  outputSchema: z.object({ written: z.string() }),
+  approval: ({ toolInput }) => (toolInput?.message ? "user-approval" : "not-applicable"),
+  execute: (input) => ({ written: input.message }),
+  toModelOutput: (output) => ({ type: "text", value: output.written }),
+});
+
+export const workflow = defineWorkflowTool({
+  description: "Run a report workflow.",
+  inputSchema: z.object({ report: z.string() }),
+  async execute(input) {
     "use workflow";
-    yield task.postMessage(`Preparing ${input.reportId}`);
-    const answer = await ctx.ask({ prompt: "Publish this report?", allowFreeform: true });
-    return { reportId: input.reportId, answer: answer.text, sessionId: ctx.session.id };
+    return { report: input.report };
   },
 });

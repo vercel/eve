@@ -144,7 +144,6 @@ import {
 } from "#harness/approval-candidates.js";
 import {
   coordinateApprovalDelivery,
-  shouldPrepareApprovalPolicyTools,
   shouldPrepareApprovalReplayTools,
 } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
@@ -457,7 +456,6 @@ function buildHarnessToolsWithDynamicSubagents(
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
-  const resolveApprovalKey = resolveApprovalKeyFromTools(config.tools);
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
@@ -674,7 +672,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedCoordination.messages, session.state),
       });
     }
-    const responseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+    const responseAuthorizationTools = shouldPrepareApprovalReplayTools({
       session,
       stepInput: effectiveStepInput,
     })
@@ -813,7 +811,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const pending = resolvePendingInput({
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
-      resolveApprovalKey,
+      resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
       session,
       stepInput: coordinated.stepInput,
     });
@@ -1181,7 +1179,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         projectedMessages,
       );
     }
-    const approvedTools = getApprovedTools(session, resolveApprovalKey);
+    const approvedTools = getApprovedTools(
+      session,
+      resolveApprovalKeyFromTools(
+        buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx }),
+      ),
+    );
 
     const isFirstTurn = emissionState.sequence === 0;
     const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;

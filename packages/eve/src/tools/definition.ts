@@ -76,6 +76,8 @@ export interface PublicToolDefinition<
    * The AI SDK can use this for tool result typing.
    */
   outputSchema?: PublicToolOutputSchema<TOutput>;
+  /** Derives the input-scoped key recorded when this tool is approved. */
+  approvalKey?: (input: Readonly<ApprovalContextInput<TInput>>) => string;
 }
 
 export interface InternalToolDefinitionWithExecuteFn<
@@ -255,6 +257,10 @@ export function defineTool<
   outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  approvalKey?: BackgroundToolDefinition<
+    StandardSchemaV1.InferOutput<TSchema>,
+    unknown
+  >["approvalKey"];
   toModelOutput?: BackgroundToolDefinition<
     unknown,
     BackgroundToolOutputFromExecuteReturn<TReturn>
@@ -277,6 +283,7 @@ export function defineTool<
   outputSchema: TOutputSchema;
   execute(input: StandardSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
+  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -295,6 +302,7 @@ export function defineTool<
   outputSchema?: JsonObject;
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
@@ -313,6 +321,7 @@ export function defineTool<
   outputSchema: TOutputSchema;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -328,6 +337,7 @@ export function defineTool<TReturn>(definition: {
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
@@ -348,6 +358,7 @@ export function stampToolDefinition<
     readonly description: string;
     readonly execute: (...args: never[]) => unknown;
     readonly approval?: Approval<never>;
+    readonly approvalKey?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -362,6 +373,7 @@ export function stampToolDefinition<
     definition,
     collectDurableDynamicToolCallbacks({
       approval: definition.approval,
+      approvalKey: definition.approvalKey,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),
