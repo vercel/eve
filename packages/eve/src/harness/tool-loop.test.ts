@@ -3133,6 +3133,21 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it.each(["turn.started", "step.started"] as const)(
+    "keeps non-hook %s emitter failures strict",
+    async (failingEventType) => {
+      const failure = new Error("emitter failed");
+      const emit: HarnessEmitFn = async (event) => {
+        if (event.type === failingEventType) {
+          throw failure;
+        }
+      };
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(failure);
+    },
+  );
+
   it("does not emit turn preamble on tool continuation (no input)", async () => {
     setupMockAgent({
       finishReason: "stop",

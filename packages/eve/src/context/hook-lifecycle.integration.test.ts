@@ -61,9 +61,17 @@ function hook(slug: string, hooks: Partial<ResolvedHookDefinition>): ResolvedHoo
 }
 
 describe("dispatchStreamEventHooks", () => {
-  it("invokes typed then wildcard subscribers and propagates errors", async () => {
+  it("invokes typed then wildcard subscribers and isolates errors", async () => {
     const calls: string[] = [];
     const registry = createRuntimeHookRegistry([
+      hook("broken", {
+        events: {
+          "session.completed": async () => {
+            calls.push("broken");
+            throw new Error("event hook boom");
+          },
+        },
+      }),
       hook("audit", {
         events: {
           "session.completed": async (_event, hookContext) => {
@@ -82,33 +90,16 @@ describe("dispatchStreamEventHooks", () => {
     ]);
     const ctx = buildCtx();
 
-    await contextStorage.run(ctx, () =>
-      dispatchStreamEventHooks({
-        ctx,
-        registry,
-        event: stampTestEvent({ type: "session.completed" }),
-      }),
-    );
-    expect(calls).toEqual(["typed", "wildcard:session.completed"]);
-
-    const brokenRegistry = createRuntimeHookRegistry([
-      hook("broken", {
-        events: {
-          "session.completed": async () => {
-            throw new Error("event hook boom");
-          },
-        },
-      }),
-    ]);
     await expect(
       contextStorage.run(ctx, () =>
         dispatchStreamEventHooks({
           ctx,
-          registry: brokenRegistry,
+          registry,
           event: stampTestEvent({ type: "session.completed" }),
         }),
       ),
-    ).rejects.toThrow(/event hook boom/);
+    ).resolves.toBeUndefined();
+    expect(calls).toEqual(["broken", "typed", "wildcard:session.completed"]);
   });
 
   it("can delete the runtime sandbox from a session.completed hook", async () => {

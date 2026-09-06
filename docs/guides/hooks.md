@@ -172,11 +172,11 @@ When a stream event fires, three things happen in order:
 2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 3. Dynamic tool resolvers. Resolvers subscribed to the event type run and update the tool set.
 
-Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
+Hooks always run after the event is durably recorded. The persisted event and every hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 
-A thrown handler propagates through the emit composer and surfaces as `turn.failed`. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+eve logs a thrown handler and continues with the remaining matching hooks. Hook failures do not interrupt event delivery or agent execution. Wrap the body in `try`/`catch` when the hook needs custom recovery or fallback behavior.
 
 ## Subagent isolation
 
