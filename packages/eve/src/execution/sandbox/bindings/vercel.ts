@@ -43,7 +43,12 @@ import {
 import {
   isVercelSandboxMissingError,
   isVercelSnapshotUnavailableError,
+  isVercelSnapshottingError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
+import {
+  ensureVercelSandboxTags,
+  resolveVercelSandboxTags,
+} from "#execution/sandbox/bindings/vercel-tags.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   deleteVercelSandbox,
@@ -213,13 +218,61 @@ async function ensureTemplateWithUnavailableRetry(
   input: EnsureTemplateInput,
 ): Promise<EnsureTemplateOutcome> {
   try {
-    return await ensureTemplate(input);
+    return await ensureTemplateWaitingForConcurrentSnapshot(input);
   } catch (error) {
     if (!isVercelSnapshotUnavailableError(error) && !isVercelSandboxMissingError(error)) {
       throw error;
     }
     input.log?.("cached template disappeared; rebuilding sandbox template");
-    return await ensureTemplate(input);
+    return await ensureTemplateWaitingForConcurrentSnapshot(input);
+  }
+}
+
+/*
+ * How long to keep polling for a concurrent build's in-progress snapshot
+ * before giving up, and how long to wait between polls. Taking a snapshot
+ * is a compress-and-upload-to-S3 operation that can run for tens of
+ * seconds, so we wait generously rather than fail a build over a transient
+ * race that resolves on its own.
+ */
+const SNAPSHOTTING_POLL_DEADLINE_MS = 120_000;
+const SNAPSHOTTING_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * Polls `ensureTemplate` while it keeps failing with a `sandbox_snapshotting`
+ * 422. Template keys are content-derived, so a name collision means a
+ * concurrent build is producing the identical image: once its snapshot
+ * finishes, the next attempt reuses it instead of rebuilding. Other errors
+ * propagate at once; exceeding the deadline throws, naming the template.
+ */
+async function ensureTemplateWaitingForConcurrentSnapshot(
+  input: EnsureTemplateInput,
+): Promise<EnsureTemplateOutcome> {
+  let waitedMs = 0;
+  for (;;) {
+    try {
+      return await ensureTemplate(input);
+    } catch (error) {
+      if (!isVercelSnapshottingError(error)) {
+        throw error;
+      }
+      if (waitedMs >= SNAPSHOTTING_POLL_DEADLINE_MS) {
+        throw new Error(
+          `Gave up after ${Math.round(SNAPSHOTTING_POLL_DEADLINE_MS / 1_000)}s waiting for an ` +
+            `in-progress snapshot of sandbox template "${input.templateKey}" to complete. A ` +
+            "concurrent build is snapshotting the same template and it did not finish in time; " +
+            "retry the build, or rerun once the other build has completed.",
+          { cause: error },
+        );
+      }
+      input.log?.(
+        `sandbox template "${input.templateKey}" is being snapshotted by a concurrent build; ` +
+          `waited ${Math.round(waitedMs / 1_000)}s of ` +
+          `${Math.round(SNAPSHOTTING_POLL_DEADLINE_MS / 1_000)}s, polling again`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, SNAPSHOTTING_POLL_INTERVAL_MS));
+      waitedMs += SNAPSHOTTING_POLL_INTERVAL_MS;
+    }
   }
 }
 
@@ -612,65 +665,6 @@ function getVercelSandboxName(metadata: Record<string, unknown> | undefined): st
   return typeof sandboxName === "string" ? sandboxName : undefined;
 }
 
-function resolveVercelSandboxTags(
-  userTags: VercelCreateOptions["tags"],
-  eveTags: SandboxBackendTags | undefined,
-): Record<string, string> | undefined {
-  const tags: Record<string, string> = {};
-
-  if (userTags !== undefined) {
-    for (const [key, value] of Object.entries(userTags as Record<string, string>)) {
-      tags[key] = value;
-    }
-  }
-
-  if (eveTags !== undefined) {
-    for (const [key, value] of Object.entries(eveTags)) {
-      tags[key] = value;
-    }
-  }
-
-  const count = Object.keys(tags).length;
-  if (count === 0) {
-    return undefined;
-  }
-
-  if (count > VERCEL_SANDBOX_TAG_LIMIT) {
-    throw new Error(
-      `Vercel Sandbox supports at most ${VERCEL_SANDBOX_TAG_LIMIT} tags. ` +
-        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
-    );
-  }
-
-  return tags;
-}
-
-async function ensureVercelSandboxTags(
-  sandbox: VercelSandbox,
-  tags: Record<string, string> | undefined,
-): Promise<void> {
-  if (tags === undefined || areVercelSandboxTagsEqual(sandbox.tags, tags)) {
-    return;
-  }
-
-  await sandbox.update({ tags });
-}
-
-function areVercelSandboxTagsEqual(
-  current: Record<string, string> | undefined,
-  next: Record<string, string>,
-): boolean {
-  const currentTags = current ?? {};
-  const currentEntries = Object.entries(currentTags);
-  const nextEntries = Object.entries(next);
-
-  if (currentEntries.length !== nextEntries.length) {
-    return false;
-  }
-
-  return nextEntries.every(([key, value]) => currentTags[key] === value);
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
     const responseJson = (error as { readonly json?: unknown }).json;
@@ -694,5 +688,3 @@ function errorMessage(error: unknown): string {
  * too short for multi-step workflows — the VM expires between steps.
  */
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
-
-const VERCEL_SANDBOX_TAG_LIMIT = 5;

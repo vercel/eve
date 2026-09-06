@@ -1948,3 +1948,102 @@ describe("vercel (public factory)", () => {
     expect(typeof backend.prewarm).toBe("function");
   });
 });
+
+describe("createVercelSandbox prewarm snapshotting retry", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /*
+   * Mirrors the 422 body the SDK surfaces when a request lands on a
+   * sandbox that a concurrent build is mid-snapshot on. `getNamedVercelSandbox`
+   * rewraps this in its own Error with the original as `cause`, so the
+   * classifier must walk the cause chain to see the 422 + code.
+   */
+  function createSnapshottingError(): Error {
+    return Object.assign(new Error("Status code 422 is not ok"), {
+      json: {
+        error: {
+          code: "sandbox_snapshotting",
+          message: "Sandbox is creating a snapshot and will be stopped shortly.",
+        },
+      },
+      response: { status: 422 },
+    });
+  }
+
+  async function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+    const settled = Promise.allSettled([promise]);
+    await vi.runAllTimersAsync();
+    return (await settled)[0]!;
+  }
+
+  it("waits and retries a template that a concurrent build is snapshotting", async () => {
+    const templateSandbox = createMockSandbox({ name: "template-key" });
+    let remainingFailures = 2;
+    const get = vi.fn().mockImplementation(async () => {
+      if (remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw createSnapshottingError();
+      }
+      return null;
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValue(templateSandbox),
+        get,
+      },
+    };
+
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    const result = await settle(
+      backend.prewarm({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        seedFiles: [],
+        templateKey: "template-key",
+      }),
+    );
+
+    expect(result.status).toBe("fulfilled");
+    // Two snapshotting failures, then a successful lookup on the third try.
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls, then surfaces an informative error when the snapshot never completes", async () => {
+    const get = vi.fn().mockRejectedValue(createSnapshottingError());
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get,
+      },
+    };
+
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    const result = await settle(
+      backend.prewarm({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        seedFiles: [],
+        templateKey: "template-key",
+      }),
+    );
+
+    expect(result.status).toBe("rejected");
+    // Names the concurrent-snapshot wait we gave up on, not a bare 422.
+    expect((result as PromiseRejectedResult).reason).toMatchObject({
+      message: expect.stringMatching(/Failed to prewarm.*did not finish in time/),
+    });
+    // Polled repeatedly across the deadline rather than failing on the first 422.
+    expect(get.mock.calls.length).toBeGreaterThan(10);
+  });
+});
