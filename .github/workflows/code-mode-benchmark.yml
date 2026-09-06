@@ -1,0 +1,111 @@
+name: Code Mode benchmark
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+concurrency:
+  group: code-mode-benchmark-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  request:
+    if: github.event.issue.pull_request && github.event.comment.body == '/benchmark codemode'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      head: ${{ steps.request.outputs.head }}
+      number: ${{ steps.request.outputs.number }}
+    steps:
+      - name: Require a reviewed benchmark revision
+        env:
+          BENCHMARK_REF: ${{ vars.EVE_BENCHMARK_REF }}
+        run: |
+          [[ "$BENCHMARK_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'Set EVE_BENCHMARK_REF to a reviewed ruiconti/shower commit'; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ruiconti/shower
+          ref: ${{ vars.EVE_BENCHMARK_REF }}
+          token: ${{ secrets.BENCHMARK_READ_TOKEN }}
+          path: benchmark
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - id: request
+        name: Authorize comment and freeze current PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node benchmark/research/benchmark/release/pr-comment.mjs resolve
+  benchmark:
+    needs: request
+    if: needs.request.outputs.head != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.request.outputs.head }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ruiconti/shower
+          ref: ${{ vars.EVE_BENCHMARK_REF }}
+          token: ${{ secrets.BENCHMARK_READ_TOKEN }}
+          path: benchmark
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          package_json_file: candidate/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Build the requested runtime
+        working-directory: candidate
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter eve build
+          pnpm --filter eve --config.ignore-scripts=true pack --out "$RUNNER_TEMP/eve.tgz"
+      - uses: ./benchmark/research/benchmark
+        with:
+          profile: code-mode
+          runtime: ${{ runner.temp }}/eve.tgz
+          runtime-commit: ${{ needs.request.outputs.head }}
+          model: openai/gpt-5.4-mini
+          judge-model: google/gemini-3.8-flash
+          reasoning: high
+          attempts: "1"
+          max-spend: "5"
+          gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
+          artifact-name: code-mode-benchmark
+  report:
+    needs: [request, benchmark]
+    if: always() && needs.request.outputs.head != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      # Reporting executes only the reviewed benchmark code, never PR code or downloaded scripts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ruiconti/shower
+          ref: ${{ vars.EVE_BENCHMARK_REF }}
+          token: ${{ secrets.BENCHMARK_READ_TOKEN }}
+          path: benchmark
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Publish current results and compatible history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.request.outputs.number }}
+          PR_HEAD: ${{ needs.request.outputs.head }}
+        run: node benchmark/research/benchmark/release/pr-comment.mjs publish

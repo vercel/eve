@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
-import saveReport from "../agent/tools/save_report.ts";
+import { reportSchema } from "./report-schema.ts";
 import type { Call } from "./audit.ts";
 import { concurrentBalances, inOneProgram, readEveryPage } from "./checks.ts";
 
@@ -102,7 +102,7 @@ test("separate report programs are visible in the efficiency diagnostic", () => 
 });
 
 test("report tool advertises an object root and validates both report shapes", () => {
-  const schema = saveReport.inputSchema;
+  const schema = reportSchema;
   assert.ok(schema instanceof z.ZodType);
   assert.equal(z.toJSONSchema(schema).type, "object");
   for (const report of [
