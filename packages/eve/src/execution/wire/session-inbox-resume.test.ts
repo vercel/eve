@@ -123,21 +123,28 @@ describe("resumeSessionInbox", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("uses the advertised version even for an ordinary stable-inbox message", async () => {
+  it("sends an ordinary message without reading the receiver's version", async () => {
     const token = sessionCommandHookToken("session-1");
-    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
-    getHookByTokenMock.mockResolvedValue(hook);
 
-    await resumeSessionInbox(token, { kind: "send", payload: { message: "follow-up" } });
+    await resumeSessionInbox(token, { kind: "send", payload: { message: "hello" } });
 
-    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
     expect(resumeHookMock).toHaveBeenCalledWith(
-      hook,
-      expect.objectContaining({
-        kind: "deliver",
-        payloads: [{ message: "follow-up" }],
-        version: 2,
-      }),
+      token,
+      expect.objectContaining({ kind: "send", payload: { message: "hello" } }),
+    );
+  });
+
+  it("sends legacy input answers without reading the receiver's version", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const payload = { inputResponses: [{ requestId: "question-1", text: "yes" }] };
+
+    await resumeSessionInbox(token, { kind: "send", payload });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      token,
+      expect.objectContaining({ kind: "send", payload }),
     );
   });
 
@@ -222,6 +229,16 @@ describe("resumeSessionInbox", () => {
       },
     );
 
+    it("does not let an ordinary message hide an unsupported task operation", async () => {
+      await expect(
+        resumeSessionInbox(address(3), {
+          ...command,
+          payload: { message: "hello", ...command.payload },
+        }),
+      ).rejects.toThrow(/wire version 3/);
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    });
+
     it.each([1, 2, 3, 4, 5, 6])(
       "rejects an unknown task operation for version %i",
       async (version) => {
@@ -255,7 +272,7 @@ describe("resumeSessionInbox", () => {
       await resumeSessionInbox(token, { kind: "send", payload: { message: "hello" } });
 
       expect(resumeHookMock).toHaveBeenCalledWith(
-        hook,
+        kind === "stable" ? token : hook,
         expect.objectContaining(
           kind === "stable"
             ? { kind: "send", payload: { message: "hello" } }
@@ -264,6 +281,21 @@ describe("resumeSessionInbox", () => {
       );
     },
   );
+
+  it("negotiates when a payload adds a field outside the frozen fast-path contract", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 6 });
+    getHookByTokenMock.mockResolvedValue(hook);
+    const payload = { message: "hello", adapterData: { channel: "example" } };
+
+    await resumeSessionInbox(token, { kind: "send", payload });
+
+    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      hook,
+      expect.objectContaining({ version: 6, payloads: [payload] }),
+    );
+  });
 
   it("encodes continuation delivery for the resolved consumer and resumes that hook", async () => {
     const hook = sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 1 });

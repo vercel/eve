@@ -5,7 +5,10 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  isSessionCommandHookToken,
+  sessionCommandHookToken,
+} from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
   isSessionInboxAddress,
@@ -15,8 +18,16 @@ import {
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
+
+const legacyDeliverSchema = sessionInboxWireV1Schema.options[0];
+// Task operations need an advertised version, even when the envelope is a legacy send.
+const stablePayloadSchema = legacyDeliverSchema.shape.payload
+  .unwrap()
+  .omit({ task: true })
+  .strict();
 
 type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
 
@@ -40,6 +51,9 @@ export async function resumeSessionInbox(
     );
   }
 
+  const stableWire = encodeStableInboxCommand(address, command);
+  if (stableWire !== undefined) return await resumeHook(address, stableWire);
+
   const hook = await getHookByToken(address);
   const target = await resolveSessionInboxWireTarget(hook);
   if (target.version === 0) {
@@ -47,6 +61,29 @@ export async function resumeSessionInbox(
     sessionInboxWire.encode(command, { version: 1 });
   }
   return await resumeHook(hook, sessionInboxWire.encode(command, target));
+}
+
+/**
+ * `{ kind: "send", payload: { message: "hello" } }` can skip the metadata lookup.
+ * A payload containing `task` must negotiate, even if it also contains a message.
+ */
+function encodeStableInboxCommand(
+  token: string,
+  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+): Record<string, unknown> | undefined {
+  if (!isSessionCommandHookToken(token) || command.kind === "deliver") return undefined;
+  if (command.kind === "send") {
+    if (!stablePayloadSchema.safeParse(command.payload).success) return undefined;
+    if (!legacyDeliverSchema.shape.caller.safeParse(command.caller).success) return undefined;
+  } else if (!sessionInboxWireV1Schema.safeParse({ ...command, version: 1 }).success) {
+    return undefined;
+  }
+  try {
+    return sessionInboxWire.encode(command, { variant: "send", version: 0 });
+  } catch (error) {
+    if (error instanceof SessionInboxWireError) return undefined;
+    throw error;
+  }
 }
 
 type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;

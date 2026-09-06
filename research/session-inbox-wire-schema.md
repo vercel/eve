@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-09-04"
+last_updated: "2026-09-06"
 ---
 
 # Versioned wire schema for the session inbox
@@ -164,12 +164,118 @@ consumer ──decode──────────▶ known version → typed p
   later reused the same token. Ownership-only reads use the raw world API;
   they do not need metadata hydration or an encryption-key lookup.
 
+## Worked examples: choosing the delivery path
+
+The fast path skips the metadata lookup only when the command fits the frozen
+legacy contract. A stable token identifies the inbox; it does not advertise
+which task operations the parent can execute.
+
+These values match the examples in [the delivery tests][delivery-tests]:
+
+```ts
+const token = sessionCommandHookToken("session-1");
+// "eve:session:session-1:inbox"
+
+const message = { kind: "send" as const, payload: { message: "hello" } };
+const agentRequest = {
+  taskId: "task-1",
+  replyTo: "agent-reply",
+  request: {
+    kind: "agent-invoke" as const,
+    invocationId: "call-1",
+    input: { message: "Find it", target: "research" },
+  },
+};
+const workerCommand = {
+  kind: "send" as const,
+  payload: { task: { agentRequests: [agentRequest] } },
+};
+```
+
+### Ordinary message: no metadata lookup
+
+`resumeSessionInbox(token, message)` calls `encodeStableInboxCommand`.
+The message fits the frozen payload schema and has no task operation or newer
+caller fields. The encoder produces the unversioned command below, and
+`resumeHook(token, wire)` performs the delivery. No model or agent tool runs
+inside this delivery helper.
+
+```ts
+{ kind: "send", payload: { message: "hello" } }
+```
+
+The shown wire objects omit optional fields whose values are `undefined`.
+Legacy input answers, such as
+`{ kind: "send", payload: { inputResponses: [{ requestId: "question-1", text: "yes" }] } }`,
+use the same path. Unknown payload fields and task envelopes leave the fast
+path; they must be encoded for the selected receiver contract.
+
+### Agent request: the receiver's version decides
+
+`resumeSessionInbox(token, workerCommand)` cannot use the fast path because
+`stablePayloadSchema` excludes `task`. It reads the hook with `getHookByToken`
+and selects `hook.metadata.sessionInboxWireVersion`:
+
+| Parent metadata                  | Encoder result                                             | Side effect                                                |
+| -------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `{ sessionInboxWireVersion: 3 }` | Rejects `task.agentRequests`: v3 has no such operation.    | `resumeHook` is never called.                              |
+| `{ sessionInboxWireVersion: 4 }` | Encodes a v4 `deliver` value containing the request.       | `resumeHook(hook, wire)` delivers it to that exact parent. |
+| No version metadata              | Checks the legacy contract, which rejects `agentRequests`. | `resumeHook` is never called.                              |
+
+For the v4 parent, the relevant fields are:
+
+```ts
+{
+  kind: "deliver",
+  version: 4,
+  payload: workerCommand.payload,
+  payloads: [workerCommand.payload],
+}
+```
+
+Only after delivery does the parent's `routeDeliverToChildren` process
+`task.agentRequests` and call `applyTaskAgentRequest` to dispatch the child.
+For a rejected invocation, `wakeTaskAgentRequestParentStep` instead replies to
+`"agent-reply"` with a `SESSION_INBOX_INCOMPATIBLE` dispatch error. The worker
+can settle with that error instead of waiting for a child that was never started.
+
+A saved address gives the same protection without a metadata lookup:
+`resumeSessionInbox({ sessionId: "session-1", version: 4 }, workerCommand)`
+encodes v4 directly. Changing that saved version to `3` rejects before delivery.
+
+### The regression: validating a different payload from the one sent
+
+[PR #2690][task-wire-regression] added a legacy-encoder exception that transformed
+`workerCommand` in this order:
+
+```text
+Original payload:         { task: { agentRequests: [agentRequest] } }
+Payload checked as v1:    { task: {} }
+Payload put on the wire:  { task: { agentRequests: [agentRequest] } }
+Envelope sent:           { kind: "send", payload: ... }  // no version
+```
+
+The v1 check passed because the new operation was temporarily removed. The
+operation was then reinserted, and an old parent received a request it had no
+handler for. The old handler removed the `task` envelope after processing the
+fields it recognized, so no child agent was dispatched.
+
+The historical codec and its frozen tests still describe that old encoding.
+[The delivery boundary][delivery-boundary] now prevents using it to send newer task
+operations to an unversioned parent. For a versioned parent, the complete
+operation must pass that parent's schema before `resumeHook` can execute.
+
+[delivery-tests]: ../packages/eve/src/execution/wire/session-inbox-resume.test.ts
+[delivery-boundary]: ../packages/eve/src/execution/wire/session-inbox-resume.ts
+[task-wire-regression]: https://github.com/vercel/eve/blob/aae26311a845b5638f701311b742fab7d9cb4baf/packages/eve/src/execution/wire/session-inbox-encoder.ts#L76
+
 ## Compatibility and payoff timeline
 
-The producer now emits the consumer's actual contract: markerless legacy
+Negotiated sends use the consumer's actual contract: markerless legacy
 continuations receive unversioned `deliver`, markerless stable-inbox consumers
 receive unversioned `send` (required by eve 0.30.5–0.31.0), and stamped
-consumers receive their declared version.
+consumers receive their declared version. Commands that qualify for the stable
+fast path keep the compatible unversioned `send` envelope.
 
 | Phase                                               | Emit                                                        | Removable                                                                      |
 | --------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
