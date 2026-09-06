@@ -33,6 +33,13 @@ const SOURCE_ONLY_ROOT_ENTRIES = new Set([
 ]);
 const WEB_CHANNEL_SOURCE_PATH = "agent/channels/eve.ts";
 
+// Demo-only files that live in the app but are kept out of the generated
+// scaffold. The realtime voice demo depends on beta Gateway voice access, so
+// `eve init --web` stays lean rather than shipping a /voice page that would
+// error without it. (`agent/channels/voice.ts` is already excluded by the
+// `agent/` rule below.)
+const SOURCE_ONLY_PATHS = new Set(["app/voice/page.tsx", "app/_components/voice-call.tsx"]);
+
 const FILE_TRANSFORMS: Record<string, ReadonlyArray<readonly [string, string]>> = {
   "app/_components/agent-chat.tsx": [
     ['const AGENT_NAME = "eve-agent";', 'const AGENT_NAME = "__EVE_INIT_APP_NAME__";'],
@@ -66,6 +73,7 @@ function shouldCopySourcePath(relativePath: string): boolean {
   if (
     rootEntry.startsWith(".") ||
     SOURCE_ONLY_ROOT_ENTRIES.has(rootEntry) ||
+    SOURCE_ONLY_PATHS.has(relativePath) ||
     relativePath.endsWith(".tsbuildinfo")
   ) {
     return false;

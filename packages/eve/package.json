@@ -393,6 +393,11 @@
       "import": "./dist/src/public/channels/twilio/index.js",
       "default": "./dist/src/public/channels/twilio/index.js"
     },
+    "./channels/voice": {
+      "types": "./dist/src/public/channels/voice/index.d.ts",
+      "import": "./dist/src/public/channels/voice/index.js",
+      "default": "./dist/src/public/channels/voice/index.js"
+    },
     "./channels/telegram": {
       "types": "./dist/src/public/channels/telegram/index.d.ts",
       "import": "./dist/src/public/channels/telegram/index.js",
