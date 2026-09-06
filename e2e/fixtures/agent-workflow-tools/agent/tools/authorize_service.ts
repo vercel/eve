@@ -2,6 +2,7 @@ import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
 import { createFakeAuthProvider } from "../lib/fake-auth-provider.ts";
+import { fakeServiceUrl } from "../lib/fake-service.ts";
 
 export default defineWorkflowTool({
   description: "Exercise requester authorization inside a durable step.",
@@ -16,6 +17,11 @@ async function authorizeService(ctx: WorkflowToolContext, service: string): Prom
   "use step";
   const fakeProvider = createFakeAuthProvider({ expiredToken: service === "EXPLICIT" });
   const { token } = await ctx.getToken(fakeProvider);
-  if (token === "expired-fixture-token" || service === "REJECTED") ctx.requireAuth(fakeProvider);
-  return "WORKFLOW-STEP-AUTH:authorized";
+  const response = await fetch(fakeServiceUrl(service), {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: ctx.abortSignal,
+  });
+  if (response.status === 401) ctx.requireAuth(fakeProvider);
+  if (!response.ok) throw new Error(`Fixture service returned ${response.status}`);
+  return await response.text();
 }
