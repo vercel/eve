@@ -121,18 +121,14 @@ export function compileEveVercelService(input: {
     serviceName,
   });
 
-  return {
-    rootDirectory: build.rootDirectory,
-    routeSrc,
-    service: {
-      buildCommand: build.buildCommand,
-      framework: "eve",
-      root: build.root,
-      routes: [createEveRequestPathRoute(routeSrc)],
-      ...(input.agent.publicRoutePrefix.length > 0
-        ? { routePrefix: input.agent.publicRoutePrefix }
-        : {}),
-    },
-    serviceName,
+  const service: GeneratedVercelServiceConfig = {
+    buildCommand: build.buildCommand,
+    framework: "eve",
+    root: build.root,
+    routePrefix:
+      input.agent.publicRoutePrefix.length > 0 ? input.agent.publicRoutePrefix : undefined,
+    routes: [createEveRequestPathRoute(routeSrc)],
   };
+
+  return { rootDirectory: build.rootDirectory, routeSrc, service, serviceName };
 }
