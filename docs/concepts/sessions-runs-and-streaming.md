@@ -26,10 +26,11 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 
 ## Sessions across deployments
 
-An existing session keeps the runtime that created it. A newer deployment checks
-that session's inbox protocol version before delivering commands. Commands that
-the older protocol cannot represent fail before delivery; they are not silently
-dropped or sent as unversioned messages to bypass validation.
+An existing session keeps the runtime that created it. Ordinary messages and
+input answers that fit the frozen legacy contract can use its stable inbox
+without looking up the protocol version. Task operations require the receiver's
+version, either from a saved session address or from the inbox metadata.
+Commands that the selected protocol cannot represent fail before delivery.
 
 If a background worker cannot request an agent from its parent's protocol,
 it receives a `SESSION_INBOX_INCOMPATIBLE` dispatch error instead of waiting for
