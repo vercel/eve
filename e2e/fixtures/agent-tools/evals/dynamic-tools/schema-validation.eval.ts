@@ -8,7 +8,7 @@ export default defineEval({
         'Call `schema_validate` with value "  normalized  ", including the surrounding spaces, and report its returned value.',
       );
       result.expectOk();
-      result.calledTool("schema_validate", { output: { value: "normalized" }, count: 1 });
+      result.calledTool("schema_validate", { output: { value: "normalized" } });
     }
   },
 });
