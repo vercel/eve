@@ -1,5 +1,25 @@
 # eve
 
+## 0.52.2
+
+### Patch Changes
+
+- 9cb98b9: Ignore OpenAPI `default` and `example` annotations whose values conflict with the declared schema type, so models are not prompted to submit invalid tool input.
+- 1807ff9: Preserve conversation history when the compaction model returns an empty summary instead of replacing it with a blank checkpoint.
+- 6dfd6d6: Point published `eve-source` export conditions at `dist` so Workflow bundle resolution works without the unpublished `src` tree.
+- 9cb98b9: Resume settled sessions without waiting for the live stream idle timeout while preserving catch-up for turns accepted during replay.
+- 4e0b345: Fix file-memory setup to connect private Vercel Blob storage with `EVE_MEMORY_BLOB_*` variables and OIDC authentication without provisioning a read-write token. Prefer OIDC for attached stores and let the Blob SDK resolve and refresh tokens instead of caching them in the memory backend.
+- 9cb98b9: Prevent `eve dev` bundles that inline comma-separated CommonJS path globals from failing to load with duplicate declarations.
+- 9cb98b9: Ensure `eve eval --json` writes the complete report when stdout is piped to another process.
+- 9cb98b9: Keep Slack connection authorization buttons valid when a connection has a long display name.
+- 9cb98b9: Workflow tools now create publicly resumable webhooks, fixing callbacks that returned 404. Webhook response options are preserved, and authored webhook tokens are rejected consistently with Workflow.
+- 9cb98b9: Preserve steering replacements when cancelled turn work throws a generic `AbortError`, so the session returns to waiting instead of failing.
+- 1807ff9: Fix client `result()` calls hanging after a turn finishes when fetch instrumentation clones the event stream, including eve-to-eve calls from authored tools. Client and TUI subagent stream cleanup now releases the HTTP connection without waiting for the tracing reader.
+- 4446e0d: Allow agents to set `defaultTools: false` to skip eve's optional default tools while preserving connection discovery and tools explicitly authored under `agent/tools/`. Every optional default can be re-added from its public `eve/tools/*` subpath.
+- 9cb98b9: Preserve complete Unicode characters when truncating compaction transcripts and tool results, preventing emoji at the cutoff from causing provider request failures.
+- 9cb98b9: Preserve input-scoped approval keys on dynamic tools, including durable replay, so approvals record the intended key instead of the bare tool name.
+- 9cb98b9: Reconnect session streams when browser response-body reads fail with vendor-specific `TypeError` messages, while keeping initial fetch retries limited to known transport errors.
+
 ## 0.52.1
 
 ### Patch Changes
