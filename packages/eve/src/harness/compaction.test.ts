@@ -153,6 +153,34 @@ describe("getInputTokenCount", () => {
     expect(result).toBeGreaterThan(42 + 20);
     expect(result).toBeLessThan(42 + 40);
   });
+  it("counts only positive envelope growth above the previous provider usage", () => {
+    const messages: ModelMessage[] = [{ role: "user", content: "unchanged" }];
+    const measured = {
+      ...config,
+      lastKnownInputTokens: 8_000,
+      lastKnownPromptMessageCount: 1,
+    };
+    const stable = getInputTokenCount(messages, measured, 3_000, 3_000);
+    expect(stable).toBe(8_000 + estimateTokens([]));
+    expect(getInputTokenCount(messages, measured, 5_000, 3_000)).toBe(stable + 2_000);
+    expect(getInputTokenCount(messages, measured, 1_000, 3_000)).toBe(stable);
+  });
+
+  it("includes the full envelope when provider usage cannot describe the current history", () => {
+    const messages: ModelMessage[] = [{ role: "user", content: "replacement" }];
+    expect(getInputTokenCount(messages, config, 3_000)).toBe(estimateTokens(messages) + 3_000);
+    expect(
+      getInputTokenCount(
+        messages,
+        {
+          ...config,
+          lastKnownInputTokens: 8_000,
+          lastKnownPromptMessageCount: 5,
+        },
+        3_000,
+      ),
+    ).toBe(estimateTokens(messages) + 3_000);
+  });
 });
 
 describe("shouldCompact", () => {
@@ -366,6 +394,45 @@ async function compact(
 }
 
 describe("compactMessages: tool-result cap heuristic", () => {
+  it("credits removed history against an explicit history-only token floor", async () => {
+    const { generateText } = await import("ai");
+    const [call, resultMsg] = toolExchange({ callId: "large", payloadChars: 40_000 });
+    const messages = [user("investigate"), call, resultMsg, user("continue")];
+    const result = await compactMessages(
+      messages,
+      {} as Parameters<typeof compactMessages>[1],
+      { threshold: 10_000, recentWindowSize: 1 },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      15_000,
+    );
+    expect(generateText).not.toHaveBeenCalled();
+    expect(estimateTokens(result)).toBeLessThan(2_000);
+    expect(result.map((entry) => entry.role)).toEqual(messages.map((entry) => entry.role));
+  });
+
+  it("summarizes when a no-op cannot satisfy the explicit history-only token floor", async () => {
+    const { generateText } = await import("ai");
+    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
+      ReturnType<typeof generateText>
+    >);
+    await compactMessages(
+      [user("earlier"), assistant("reply"), user("continue")],
+      {} as Parameters<typeof compactMessages>[1],
+      { threshold: 2_000, recentWindowSize: 0 },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      8_000,
+    );
+    expect(generateText).toHaveBeenCalledOnce();
+  });
+
   it("caps oversized older tool results in place without calling the summarizer", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
