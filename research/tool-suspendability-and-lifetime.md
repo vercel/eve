@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-05"
+last_updated: "2026-09-06"
 ---
 
 # Tools: suspendability and lifetime as two explicit axes
@@ -113,8 +113,15 @@ requester-scoped auth there. Contract:
 
 - Both are callable inside a `"use step"` that received `ctx` as a direct argument. They resolve
   under the session identity in the run's serialized context, through the
-  scoped-authorization path a step tool uses (`execution/tool-auth.ts`). The step adapter reconstructs the auth capabilities under that identity;
+  shared authorization capability (`runtime/authorization-context.ts`). Ordinary tools and
+  workflow steps use the same `getToken`/`requireAuth` implementation. Connection search and
+  discovered connection tools use its underlying scoped execution for callback completion,
+  challenges, and rejection after sign-in. The step adapter reconstructs the capability under that identity;
   the workflow body retains throwing implementations.
+- The auth capability returns a shared authorization signal. The executing runtime supplies
+  the callback hook and owns suspension/resumption; the auth implementation does not choose
+  between an agent turn and an authored workflow. Interactive providers without a callback
+  address fail instead of leaving the model to improvise a sign-in flow.
 - A token is returned to the step and never enters the body's replay log.
 - Interactive authorization does not return an `AuthorizationSignal` to the
   model. The workflow forwards the challenge through its owner's existing

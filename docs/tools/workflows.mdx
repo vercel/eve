@@ -171,6 +171,11 @@ async function readRepository(ctx: WorkflowToolContext, repository: string) {
 }
 ```
 
+Connections discovered through `connection_search`, ordinary tools, and workflow steps use the same
+authorization machinery for requester identity, token caching, callback completion, and rejection
+after sign-in. The execution runtime owns the wait: an agent returns to its model after authorization,
+while a workflow retries the interrupted step and continues the authored body.
+
 The workflow body calls `await readRepository(ctx, repository)`. Do not return the token from the
 helper: step results enter the workflow's durable history. eve's token cache stays inside the step.
 

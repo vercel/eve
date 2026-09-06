@@ -1,4 +1,5 @@
 import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
+import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
 export type ProbeCase = { readonly kind: "auth" | "hitl" };
 
@@ -104,10 +105,7 @@ function watchNext(t: EveEvalContext, session: SessionCursor) {
 export async function runStepAuth(t: EveEvalContext, explicit: boolean): Promise<void> {
   const started = await t.send(`WORKFLOW-STEP-AUTH-${explicit ? "EXPLICIT" : "IMPLICIT"}`);
   const required = await waitForEvent(t, t, started, "authorization.required");
-  const url = required.event.data.authorization?.url;
-  if (url === undefined || new URL(url).origin !== new URL(t.target.url).origin) {
-    throw new Error("Expected the fixture authorization callback on this deployment");
-  }
+  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Authorization callback failed (${response.status})`);
   await waitForEvent(t, required.session, undefined, "authorization.completed");
@@ -118,9 +116,7 @@ export async function runStepAuth(t: EveEvalContext, explicit: boolean): Promise
 export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {
   const started = await t.send("WORKFLOW-STEP-AUTH-REJECTED");
   const required = await waitForEvent(t, t, started, "authorization.required");
-  const url = required.event.data.authorization?.url;
-  if (url === undefined || new URL(url).origin !== new URL(t.target.url).origin)
-    throw new Error("Expected the fixture authorization callback on this deployment");
+  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Authorization callback failed (${response.status})`);
   const completed = await waitForEvent(

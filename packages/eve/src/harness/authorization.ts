@@ -187,18 +187,20 @@ export function consumeAuthorizationResult(
  * Builds a callback URL for external systems. `name` and `attemptId` identify
  * the exact challenge in the URL path.
  *
- * The URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * By default the URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * A runtime with its own continuation supplies that hook through AuthorizationHookKey.
  * It is independent of the continuation token, so channel re-keying mid-turn
  * does not invalidate the callback URL.
  *
- * Returns `undefined` if the session context isn't available.
+ * Returns `undefined` if no callback address is available.
  */
 export function getHookUrl(name: string, attemptId: string): string | undefined {
   const ctx = loadContext();
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
-  if (!sessionId || !baseUrl) return undefined;
-  const token = authHookToken(sessionId);
+  const token =
+    ctx.get(AuthorizationHookKey)?.token ?? (sessionId ? authHookToken(sessionId) : undefined);
+  if (!token || !baseUrl) return undefined;
   return createWorkflowCallbackUrl(
     baseUrl,
     createEveConnectionCallbackRoutePath(name, attemptId, token),
@@ -209,17 +211,7 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
 export function createAuthorizationAttempt(
   name: string,
 ): { readonly attemptId: string; readonly hookUrl: string } | undefined {
-  const workflowAttempt = loadContext().get(WorkflowAuthorizationAttemptKey);
-  if (workflowAttempt !== undefined) {
-    return {
-      attemptId: workflowAttempt.token,
-      hookUrl: createWorkflowCallbackUrl(
-        workflowAttempt.baseUrl,
-        createEveConnectionCallbackRoutePath(name, workflowAttempt.token, workflowAttempt.token),
-      ),
-    };
-  }
-  const attemptId = createUlid();
+  const attemptId = loadContext().get(AuthorizationHookKey)?.attemptId ?? createUlid();
   const hookUrl = getHookUrl(name, attemptId);
   return hookUrl === undefined ? undefined : { attemptId, hookUrl };
 }
@@ -305,11 +297,11 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
  */
 export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 
-/** Step-local callback address owned by an authored workflow, not an agent turn. */
-export const WorkflowAuthorizationAttemptKey = new ContextKey<{
-  readonly baseUrl: string;
+/** The executing runtime may own its callback hook instead of using the session hook. */
+export const AuthorizationHookKey = new ContextKey<{
   readonly token: string;
-}>("eve.workflowAuthorizationAttempt");
+  readonly attemptId?: string;
+}>("eve.authorizationHook");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

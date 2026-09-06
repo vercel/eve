@@ -5,9 +5,11 @@ import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
-  WorkflowAuthorizationAttemptKey,
+  AuthorizationHookKey,
+  CallbackBaseUrlKey,
 } from "#harness/authorization.js";
-import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { createAuthorizationContext } from "#runtime/authorization-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   type WorkflowStepInvocation,
@@ -25,27 +27,31 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.set(InitiatorAuthKey, input.session.auth.initiator);
     context.set(SessionIdKey, input.session.id);
     context.setVirtualContext(SessionKey, { ...input.session, sessionId: input.session.id });
-    context.setVirtualContext(WorkflowAuthorizationAttemptKey, {
-      baseUrl: resolveWorkflowCallbackBaseUrl(input.baseUrl),
+    context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
+    context.setVirtualContext(AuthorizationHookKey, {
       token: input.token,
+      attemptId: input.token,
     });
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
 
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
-      const run = createToolExecuteWithAuth({
-        scope: input.from.toolName,
-        execute: (_input, ctx) =>
+      const auth = createAuthorizationContext({ scope: input.from.toolName });
+      const ctx = {
+        ...buildBaseToolContext({
+          toolName: input.from.toolName,
+          options: { abortSignal: input.abortSignal, toolCallId: input.from.callId },
+        }),
+        getToken: auth.getToken,
+        requireAuth: auth.requireAuth,
+      };
+      let output: unknown;
+      try {
+        output = await auth.run(() =>
           execute(
             ...(args.map((arg, index) =>
               invocation.contextIndexes?.includes(index) ? ctx : arg,
             ) as never[]),
           ),
-      });
-      let output: unknown;
-      try {
-        output = await run(
-          {},
-          { abortSignal: input.abortSignal, toolCallId: input.from.callId, messages: [] },
         );
       } catch (error) {
         // The Workflow SDK recognizes fatal=true; preserve eve's classified error fields.
