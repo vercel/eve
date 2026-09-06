@@ -199,6 +199,8 @@ eve start [--host <host>] [--port <port>]
 
 Serves the previously built output. Prints the listening URL.
 
+For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. The deployment directory can differ from the build directory. Preserve the relative layout of any workspace packages used by the app; startup resolves sandbox prewarm modules from the deployed source.
+
 ## `eve dev`
 
 ```bash
