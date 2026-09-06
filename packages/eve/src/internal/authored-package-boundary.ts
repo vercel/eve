@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isBuiltin } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -92,6 +92,17 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 
       if (isFrameworkRuntimeImport(source, importer)) {
         return { external: true, id: resolveFrameworkRuntimeImport(source) };
+      }
+
+      // The published package maps #imports to dist, while the eve-source
+      // condition used by the app build maps them to TypeScript source.
+      // Resolve through Node's default package-import conditions here so a
+      // packed eve installation does not leak #shared/* into the bundle.
+      if (source.startsWith("#")) {
+        const resolvedPackageImport = resolvePackageImport(source, input.packageRoot);
+        if (resolvedPackageImport !== undefined) {
+          return { id: resolvedPackageImport };
+        }
       }
 
       const externalModule = await resolveConfiguredExternalModule.call(this, {
@@ -308,6 +319,17 @@ function nearestPackageName(filePath: string): string | undefined {
       return undefined;
     }
     directory = parent;
+  }
+}
+
+function resolvePackageImport(source: string, packageRoot: string): string | undefined {
+  try {
+    const resolved = createRequire(join(packageRoot, "package.json")).resolve(source);
+    return isPathInsideOrEqual(toCanonicalPath(resolved), toCanonicalPath(packageRoot))
+      ? resolved
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 
