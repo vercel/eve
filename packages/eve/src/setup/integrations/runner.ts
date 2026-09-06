@@ -60,7 +60,10 @@ export async function runIntegrationSetup(
   ]);
   const project = projectResolutionFromDeployment(deployment);
   const environment = integrationSetupEnvironment(authStatus, project);
-  options.prompter.log.info(describeIntegrationSetupEnvironment(environment));
+  options.prompter.log.info(
+    integration.describeEnvironment?.(environment) ??
+      describeIntegrationSetupEnvironment(environment),
+  );
   return integration.run(
     createSetupContexts({
       appRoot: options.appRoot,

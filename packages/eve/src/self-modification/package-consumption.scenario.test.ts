@@ -9,12 +9,15 @@ import { afterEach, describe, it } from "vitest";
 
 const runFile = promisify(execFile);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const compatibilityPackageRoot = resolve(packageRoot, "../eve-self-modification");
 const temporaryRoots: string[] = [];
 
-async function run(command: string, args: string[], cwd: string): Promise<void> {
+async function run(
+  command: string,
+  args: string[],
+  cwd: string,
+): Promise<{ stderr: string; stdout: string }> {
   try {
-    await runFile(command, args, {
+    return await runFile(command, args, {
       cwd,
       maxBuffer: 10 * 1024 * 1024,
       shell: process.platform === "win32",
@@ -73,7 +76,9 @@ describe("packed package consumption", () => {
   it("builds a fresh app using only installed tarball contents", async () => {
     await access(join(packageRoot, "dist/src/index.js"));
     await access(join(packageRoot, "dist/src/self-modification/agent.js"));
-    await access(join(packageRoot, "dist/src/self-modification/extension/extension.js"));
+    await access(join(packageRoot, "dist/src/self-modification/config.js"));
+    await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
+    await access(join(packageRoot, "dist/src/self-modification/setup.js"));
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
@@ -82,13 +87,7 @@ describe("packed package consumption", () => {
     await mkdir(tarballsRoot, { recursive: true });
     await mkdir(appRoot, { recursive: true });
 
-    await run("pnpm", ["run", "build"], compatibilityPackageRoot);
     const eveTarball = await pack(packageRoot, tarballsRoot, "eve");
-    const compatibilityTarball = await pack(
-      compatibilityPackageRoot,
-      tarballsRoot,
-      "eve-self-modification",
-    );
     await writeAppFile(
       appRoot,
       "package.json",
@@ -99,7 +98,7 @@ describe("packed package consumption", () => {
           type: "module",
           scripts: { build: "eve build" },
           dependencies: {
-            "@eve/self-modification": `file:${compatibilityTarball}`,
+            "@vercel/connect": "1.0.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
           },
@@ -121,18 +120,23 @@ describe("packed package consumption", () => {
     await writeAppFile(appRoot, "agent/instructions.md", "You are a test agent.\n");
     await writeAppFile(
       appRoot,
+      "agent/subagents/self-modification/config.ts",
+      'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({ deployed: { source: { git: { directory: ".", repository: "github.com/acme/agent" } }, target: { branch: "main" }, credentials: { vercelConnect: { connector: "github/selfmod-acme-agent" } } } });\n',
+    );
+    await writeAppFile(
+      appRoot,
       "agent/subagents/self-modification/agent.ts",
-      'import { defineSelfModificationAgent } from "@eve/self-modification/agent";\n\nexport default defineSelfModificationAgent();\n',
+      'import { defineSelfModificationAgent } from "eve/self-modification/agent";\nimport config from "./config";\n\nexport default defineSelfModificationAgent({ config });\n',
     );
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/sandbox.ts",
-      'export { default } from "@eve/self-modification/sandbox";\n',
+      'import { defineSelfModificationSandbox } from "eve/self-modification/sandbox";\nimport config from "./config";\n\nexport default defineSelfModificationSandbox({ config });\n',
     );
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/extensions/selfmod.ts",
-      'export { default } from "@eve/self-modification";\n',
+      'import selfModification from "eve/self-modification";\nimport config from "../config";\n\nexport default selfModification(config);\n',
     );
 
     await run(
@@ -147,7 +151,12 @@ describe("packed package consumption", () => {
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
-    await access(join(appRoot, "node_modules/@eve/self-modification/scaffold/agent.js"));
-    await run("pnpm", ["build"], appRoot);
+    const build = await run("pnpm", ["build"], appRoot);
+    const output = `${build.stdout}\n${build.stderr}`;
+    if (output.includes("Could not resolve '#shared/")) {
+      throw new Error(
+        `Packed eve leaked a package-private import into the application build:\n${output}`,
+      );
+    }
   }, 120_000);
 });

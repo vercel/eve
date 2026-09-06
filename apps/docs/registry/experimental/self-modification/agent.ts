@@ -1,5 +1,5 @@
 import { defineSelfModificationAgent } from "eve/self-modification/agent";
 
-export default defineSelfModificationAgent({
-  model: "openai/gpt-5.6-terra",
-});
+import config from "./config";
+
+export default defineSelfModificationAgent({ config });
