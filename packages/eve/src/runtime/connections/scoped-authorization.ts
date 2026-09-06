@@ -63,12 +63,19 @@ export interface ScopedAuthorization {
 }
 
 /** One execution's token capability and authorization interruption boundary. */
-export function createAuthorizationExecution() {
+export function createAuthorizationExecution(
+  options: {
+    readonly completeAuthorization?: typeof completeScopedAuthorization;
+  } = {},
+) {
   const justAuthorized = new Set<string>();
 
   async function complete(scoped: ScopedAuthorization): Promise<void> {
     const key = scoped.instanceId ?? scoped.scope;
-    if (!justAuthorized.has(key) && (await completeScopedAuthorization(scoped))) {
+    if (
+      !justAuthorized.has(key) &&
+      (await (options.completeAuthorization ?? completeScopedAuthorization)(scoped))
+    ) {
       justAuthorized.add(key);
     }
   }

@@ -11,8 +11,9 @@ import {
 export function createAuthorizationContext(input: {
   readonly scope: string;
   readonly boundResponder?: SessionAuthContext;
+  readonly completeAuthorization?: (scoped: ScopedAuthorization) => Promise<boolean>;
 }) {
-  const execution = createAuthorizationExecution();
+  const execution = createAuthorizationExecution(input);
   const inlineAuthState: InlineAuthState = {};
   const resolve = (provider: ToolAuthProvider, options?: ToolAuthOptions) =>
     buildInlineScopedAuthorization({ ...input, inlineAuthState, provider, options });

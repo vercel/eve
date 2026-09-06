@@ -153,6 +153,10 @@ export async function transformWorkflowDirectives(input: {
       manifest.steps ??= {};
       const stepsForFile = (manifest.steps[input.filename] ??= {});
       stepsForFile[fn.name] = { stepId };
+      const authorizationName = `${fn.name}:eve-authorization`;
+      const authorizationStepId = createStepId(defaultIdBase, authorizationName);
+      if (!BUILTIN_STEP_NAMES.has(fn.name))
+        stepsForFile[authorizationName] = { stepId: authorizationStepId };
 
       if (input.mode === "workflow") {
         const exportPrefix = fn.exportPrefix.length > 0 ? "export " : "";
@@ -168,9 +172,11 @@ export async function transformWorkflowDirectives(input: {
 
         if (input.mode === "step") {
           hasStepRegistration = true;
-          suffixes.push(
-            `registerStepFunction(${JSON.stringify(stepId)}, ${BUILTIN_STEP_NAMES.has(fn.name) ? fn.name : `withWorkflowStepAuthorization(${fn.name})`});`,
-          );
+          suffixes.push(`registerStepFunction(${JSON.stringify(stepId)}, ${fn.name});`);
+          if (!BUILTIN_STEP_NAMES.has(fn.name))
+            suffixes.push(
+              `registerStepFunction(${JSON.stringify(authorizationStepId)}, withWorkflowStepAuthorization(${fn.name}));`,
+            );
         } else {
           suffixes.push(`${fn.name}.stepId = ${JSON.stringify(stepId)};`);
         }
@@ -264,7 +270,8 @@ function createWorkflowStepProxySource(
 function createStepProxy(idBase: string, name: string): string {
   const proxy = `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(createStepId(idBase, name))})`;
   // Workflow invokes built-ins directly, with native arguments and a bound receiver.
-  return BUILTIN_STEP_NAMES.has(name) ? proxy : `workflowToolStep(${proxy})`;
+  const authorized = `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(createStepId(idBase, `${name}:eve-authorization`))})`;
+  return BUILTIN_STEP_NAMES.has(name) ? proxy : `workflowToolStep(${proxy}, ${authorized})`;
 }
 
 function findDirectiveFunctions(ast: AstProgram): DirectiveFunction[] {

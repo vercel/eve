@@ -187,6 +187,11 @@ not rerun. Resolve auth before other side effects in that step, and make operati
 again. Provider declarations can be shared imports, but context must be passed directly, not nested
 inside another argument or captured in a closure.
 
+After a successful callback exchange, eve records completion before returning to authored code.
+If that code later fails and the step retries, eve reads the token from the provider instead of
+exchanging the same callback again. The provider must persist the grant or token; the durable
+completion marker contains no credentials.
+
 A background task becomes `input_required` during sign-in. The callback resumes that task; it does
 not rely on the launching agent turn still being active. Cancelling an authorization wait withdraws
 its callback. Cancellation uses the existing turn or task cancellation path rather than a separate

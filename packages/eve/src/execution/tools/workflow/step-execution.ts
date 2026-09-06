@@ -11,6 +11,7 @@ import {
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { completeWorkflowStepAuthorization } from "#execution/tools/workflow/authorization-completion.js";
 import {
   type WorkflowStepInvocation,
   type WorkflowStepResult,
@@ -18,9 +19,12 @@ import {
 
 /** Keeps token capabilities and bearer values inside the executing step. */
 export function withWorkflowStepAuthorization(execute: (...args: never[]) => unknown) {
-  const wrapped = async (invocation: WorkflowStepInvocation): Promise<unknown> => {
+  const wrapped = async function (
+    this: unknown,
+    invocation: WorkflowStepInvocation,
+  ): Promise<unknown> {
     const { args, context: input } = invocation;
-    if (input === undefined) return execute(...(args as never[]));
+    if (input === undefined) return Reflect.apply(execute, this, args);
     getStepMetadata();
     const context = new ContextContainer();
     context.set(AuthKey, input.session.auth.current);
@@ -35,7 +39,10 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
 
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
-      const auth = createAuthorizationContext({ scope: input.from.toolName });
+      const auth = createAuthorizationContext({
+        scope: input.from.toolName,
+        completeAuthorization: completeWorkflowStepAuthorization,
+      });
       const ctx = {
         ...buildBaseToolContext({
           toolName: input.from.toolName,
@@ -47,10 +54,10 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
       let output: unknown;
       try {
         output = await auth.run(() =>
-          execute(
-            ...(args.map((arg, index) =>
-              invocation.contextIndexes?.includes(index) ? ctx : arg,
-            ) as never[]),
+          Reflect.apply(
+            execute,
+            this,
+            args.map((arg, index) => (invocation.contextIndexes?.includes(index) ? ctx : arg)),
           ),
         );
       } catch (error) {

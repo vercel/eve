@@ -17,80 +17,94 @@ import type {
 
 /** Wraps a step proxy only when the caller explicitly passes its workflow tool context. */
 export function workflowToolStep(
+  original: (...args: unknown[]) => Promise<unknown>,
   execute: (invocation: WorkflowStepInvocation) => Promise<unknown>,
 ) {
-  return async (...args: unknown[]): Promise<unknown> => {
-    const index = args.findIndex((arg) => findWorkflowToolRunContext(arg) !== undefined);
-    if (index === -1) return execute({ args });
-    const ctx = args[index] as ToolContext;
-    const run = findWorkflowToolRunContext(ctx)!;
-    const authorizationResults: (AuthorizationResult & { name: string })[] = [];
-    const pending = new Map<string, AuthorizationChallenge>();
-    for (;;) {
-      const callback = createHook<unknown>();
-      const input: WorkflowStepContext = {
-        from: run.from,
-        owner: run.owner,
-        session: ctx.session,
-        abortSignal: ctx.abortSignal,
-        baseUrl: getWorkflowMetadata().url,
-        token: callback.token,
-        authorizationResults,
+  // Forward the SDK proxy's stepId, bind implementation, and serialization metadata.
+  // A revived reference still calls the original registered function with native arguments.
+  return new Proxy(original, {
+    apply(target, receiver, args: unknown[]) {
+      const index = args.findIndex((arg) => findWorkflowToolRunContext(arg) !== undefined);
+      if (index === -1) return Reflect.apply(target, receiver, args);
+      return executeAuthorizedStep(execute, receiver, args, index);
+    },
+  });
+}
+
+async function executeAuthorizedStep(
+  execute: (invocation: WorkflowStepInvocation) => Promise<unknown>,
+  receiver: unknown,
+  args: unknown[],
+  index: number,
+): Promise<unknown> {
+  const ctx = args[index] as ToolContext;
+  const run = findWorkflowToolRunContext(ctx)!;
+  const authorizationResults: (AuthorizationResult & { name: string })[] = [];
+  const pending = new Map<string, AuthorizationChallenge>();
+  for (;;) {
+    const callback = createHook<unknown>();
+    const input: WorkflowStepContext = {
+      from: run.from,
+      owner: run.owner,
+      session: ctx.session,
+      abortSignal: ctx.abortSignal,
+      baseUrl: getWorkflowMetadata().url,
+      token: callback.token,
+      authorizationResults,
+    };
+    try {
+      const invocation: WorkflowStepInvocation = {
+        args: args.map((arg) => (arg === ctx ? null : arg)),
+        context: input,
+        contextIndexes: args.flatMap((arg, index) => (arg === ctx ? [index] : [])),
       };
+      let result: WorkflowStepResult;
       try {
-        const invocation: WorkflowStepInvocation = {
-          args: args.map((arg) => (arg === ctx ? null : arg)),
-          context: input,
-          contextIndexes: args.flatMap((arg, index) => (arg === ctx ? [index] : [])),
-        };
-        let result: WorkflowStepResult;
-        try {
-          result = (await execute(invocation)) as WorkflowStepResult;
-        } catch (error) {
-          if (!ctx.abortSignal.aborted)
-            for (const challenge of pending.values())
-              await reportAuthorization(input, challenge, "failed");
-          throw error;
-        }
-        for (const attemptId of result.authorized) {
-          const challenge = pending.get(attemptId);
-          if (challenge !== undefined) await reportAuthorization(input, challenge, "authorized");
-          pending.delete(attemptId);
-        }
-        for (let i = authorizationResults.length - 1; i >= 0; i--) {
-          if (result.authorized.includes(authorizationResults[i]!.attemptId!))
-            authorizationResults.splice(i, 1);
-        }
-        if (result.kind === "eve:workflow-step-result") {
+        result = (await execute.call(receiver, invocation)) as WorkflowStepResult;
+      } catch (error) {
+        if (!ctx.abortSignal.aborted)
           for (const challenge of pending.values())
             await reportAuthorization(input, challenge, "failed");
-          return result.output;
-        }
-        for (const challenge of result.signal.challenges) {
-          pending.set(challenge.attemptId!, challenge);
-          await reportAuthorization(input, challenge);
-          try {
-            const response = await waitForCallback(callback, challenge, ctx.abortSignal);
-            authorizationResults.push({
-              name: challenge.name,
-              instanceId: challenge.instanceId,
-              attemptId: challenge.attemptId,
-              hookUrl: challenge.hookUrl,
-              principal: challenge.principal,
-              resume: challenge.resume,
-              callback: response,
-            });
-          } catch (error) {
-            // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
-            if (!ctx.abortSignal.aborted) await reportAuthorization(input, challenge, "failed");
-            throw error;
-          }
-        }
-      } finally {
-        await disposeHook(callback);
+        throw error;
       }
+      for (const attemptId of result.authorized) {
+        const challenge = pending.get(attemptId);
+        if (challenge !== undefined) await reportAuthorization(input, challenge, "authorized");
+        pending.delete(attemptId);
+      }
+      for (let i = authorizationResults.length - 1; i >= 0; i--) {
+        if (result.authorized.includes(authorizationResults[i]!.attemptId!))
+          authorizationResults.splice(i, 1);
+      }
+      if (result.kind === "eve:workflow-step-result") {
+        for (const challenge of pending.values())
+          await reportAuthorization(input, challenge, "failed");
+        return result.output;
+      }
+      for (const challenge of result.signal.challenges) {
+        pending.set(challenge.attemptId!, challenge);
+        await reportAuthorization(input, challenge);
+        try {
+          const response = await waitForCallback(callback, challenge, ctx.abortSignal);
+          authorizationResults.push({
+            name: challenge.name,
+            instanceId: challenge.instanceId,
+            attemptId: challenge.attemptId,
+            hookUrl: challenge.hookUrl,
+            principal: challenge.principal,
+            resume: challenge.resume,
+            callback: response,
+          });
+        } catch (error) {
+          // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
+          if (!ctx.abortSignal.aborted) await reportAuthorization(input, challenge, "failed");
+          throw error;
+        }
+      }
+    } finally {
+      await disposeHook(callback);
     }
-  };
+  }
 }
 
 async function reportAuthorization(

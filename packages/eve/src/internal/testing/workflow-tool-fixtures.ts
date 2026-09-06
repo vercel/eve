@@ -6,7 +6,11 @@
  * `agent/tools/*.ts`.
  */
 
-import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
+import {
+  createHook,
+  getStepMetadata,
+  sleep as workflowSleep,
+} from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { TaskExec, TaskMessage } from "#tools/task.js";
@@ -37,12 +41,33 @@ export async function authorizedDeployWorkflow(input: DeployInput, ctx: Workflow
   return { plan, authenticatedAs };
 }
 
+export async function stepReferenceWorkflow(input: DeployInput) {
+  "use workflow";
+  const byArgument = await returnStepReference(planDeployStep);
+  const byReceiver = await returnStepReference(readServiceStep);
+  return {
+    argument: await byArgument.bind(undefined, input.service)(),
+    receiver: await byReceiver.call({ service: input.service }),
+  };
+}
+
+async function returnStepReference<T extends (...args: never[]) => Promise<string>>(step: T) {
+  "use step";
+  return step;
+}
+
+async function readServiceStep(this: DeployInput) {
+  "use step";
+  return this.service;
+}
+
 async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): Promise<string> {
   "use step";
   const provider: AuthorizationDefinition = {
     principalType: "user",
     async getToken({ principal }) {
-      if (service !== "preauthorized") throw new ConnectionAuthorizationRequiredError("deploy");
+      if (service !== "preauthorized" && !(service === "retry" && getStepMetadata().attempt > 1))
+        throw new ConnectionAuthorizationRequiredError("deploy");
       return { token: `secret:${principal.type === "user" ? principal.id : "app"}` };
     },
     async startAuthorization({ principal, callbackUrl }) {
@@ -54,6 +79,11 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
       };
     },
     async completeAuthorization({ principal, callback, resume }) {
+      if (service === "retry" && getStepMetadata().attempt > 1)
+        throw new ConnectionAuthorizationFailedError("deploy", {
+          message: "Authorization code was already exchanged.",
+          retryable: false,
+        });
       if (
         callback.params.code !== "approved" ||
         principal.type !== "user" ||
@@ -68,6 +98,8 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
     },
   };
   const { token } = await ctx.getToken(provider);
+  if (service === "retry" && getStepMetadata().attempt === 1)
+    throw new Error("Transient service failure after sign-in.");
   if (service === "rejected") ctx.requireAuth(provider);
   return token.slice("secret:".length);
 }

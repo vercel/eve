@@ -18,6 +18,7 @@ import {
   holdUntilAbortedWorkflow,
   reportingDeployWorkflow,
   stepThenRaceWorkflow,
+  stepReferenceWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
@@ -187,9 +188,14 @@ describe("workflow step authorization", () => {
     60_000,
   );
 
-  it.each([false, true])(
-    "parks on its own callback and resumes the step (background=%s)",
-    async (background) => {
+  it.each([
+    { background: false, service: "interactive" },
+    { background: true, service: "interactive" },
+    { background: false, service: "retry" },
+    { background: true, service: "retry" },
+  ])(
+    "parks on its own callback and resumes the step (background=$background, service=$service)",
+    async ({ background, service }) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth",
         background,
@@ -199,7 +205,7 @@ describe("workflow step authorization", () => {
       await runtime.run(async () => {
         const run = await start(workflowEntry, [
           {
-            input: { message: 'Run deploy_service with service "interactive"' },
+            input: { message: `Run deploy_service with service "${service}"` },
             serializedContext: {
               ...buildSerializedContext({
                 continuationToken: "http:step-auth",
@@ -263,9 +269,23 @@ describe("workflow step authorization", () => {
             steps.data.filter((step) => step.stepName.endsWith("//planDeployStep")),
           ).toHaveLength(1);
           const attempts = steps.data.filter((step) =>
-            step.stepName.endsWith("//authorizedDeployStep"),
+            step.stepName.endsWith("//authorizedDeployStep:eve-authorization"),
           );
           expect(attempts).toHaveLength(2);
+          if (service === "retry") {
+            expect(attempts.map((step) => step.attempt).sort()).toEqual([1, 2]);
+            const retried = attempts.find((step) => step.attempt === 2)!;
+            const marker = getRun(executorRunId).getReadable({
+              namespace: `eve.authorization.${retried.stepId}.${required.data.attemptId}`,
+            });
+            const reader = marker.getReader();
+            try {
+              expect((await reader.read()).value).toBe(true);
+            } finally {
+              await reader.cancel();
+              reader.releaseLock();
+            }
+          }
           for (const step of attempts) {
             const output = await hydrateWorkflowReturnValue(step.output, executorRunId, undefined);
             expect(JSON.stringify(output)).not.toContain("secret:");
@@ -382,6 +402,27 @@ describe("workflow step authorization", () => {
 
 describe("workflow tools", () => {
   afterEach(() => vi.unstubAllEnvs());
+  it("invokes restored step references with bound arguments and receivers", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-reference",
+      execute: stepReferenceWorkflow,
+      toolName: "deploy_service",
+    });
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:step-reference",
+            mode: "task",
+          }),
+        },
+      ]);
+      return String((await run.returnValue).output);
+    });
+    expect(output).toContain('"argument":"plan:api"');
+    expect(output).toContain('"receiver":"api"');
+  });
   it("runs the framework sleep tool through the workflow tool path", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-sleep",

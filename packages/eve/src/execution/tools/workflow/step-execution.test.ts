@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import {
+  ConnectionAuthorizationRequiredError,
+  ConnectionAuthorizationFailedError,
+} from "#connections/errors.js";
 import type {
   WorkflowStepContext,
   WorkflowStepResult,
@@ -10,7 +13,30 @@ import type {
 import type { ToolContext } from "#tools/definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({ getStepMetadata: () => ({ attempt: 1 }) }));
+const durable = vi.hoisted(() => ({
+  attempt: 1,
+  stepId: "step-1",
+  entries: new Map<string, unknown[]>(),
+}));
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getStepMetadata: () => ({ attempt: durable.attempt, stepId: durable.stepId }),
+  getWorkflowMetadata: () => ({ workflowRunId: "run-1" }),
+  getWritable: ({ namespace }: { namespace: string }) => ({
+    getWriter: () => ({
+      write: async (value: unknown) =>
+        durable.entries.set(namespace, [...(durable.entries.get(namespace) ?? []), value]),
+      releaseLock: () => {},
+    }),
+  }),
+}));
+vi.mock("#internal/workflow/runtime.js", () => ({
+  getRun: () => ({
+    getReadable: ({ namespace }: { namespace: string }) => ({
+      getTailIndex: async () => (durable.entries.get(namespace)?.length ?? 0) - 1,
+      cancel: async () => {},
+    }),
+  }),
+}));
 
 function context(user = "user-1"): WorkflowStepContext {
   const auth = {
@@ -56,7 +82,67 @@ async function runStep(
 }
 
 describe("workflow step authorization", () => {
+  beforeEach(() => {
+    durable.attempt = 1;
+    durable.stepId = "step-1";
+    durable.entries.clear();
+  });
   afterEach(() => vi.unstubAllEnvs());
+  it("does not exchange a consumed code again when the rest of the step retries", async () => {
+    let exchanged = false;
+    const complete = vi.fn(async () => {
+      if (exchanged)
+        throw new ConnectionAuthorizationFailedError("devbox", {
+          message: "code already used",
+          retryable: false,
+        });
+      exchanged = true;
+      return { token: "provider-stored-secret" };
+    });
+    const getToken = vi.fn(async () => {
+      if (!exchanged) throw new ConnectionAuthorizationRequiredError("devbox");
+      return { token: "provider-stored-secret" };
+    });
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      getToken,
+      completeAuthorization: complete,
+      startAuthorization: async () => ({ challenge: { url: "https://idp.example" } }),
+    };
+    const input: WorkflowStepContext = {
+      ...context(),
+      authorizationResults: [
+        {
+          name: "devbox__inline_auth",
+          attemptId: "auth-1",
+          hookUrl: "https://agent.example/callback",
+          callback: { method: "GET", params: { code: "single-use" } },
+        },
+      ],
+    };
+    const execute = async (ctx: ToolContext) => {
+      await ctx.getToken(provider);
+      if (durable.attempt === 1) throw new Error("temporary service failure");
+      return "done";
+    };
+    await expect(runStep(execute, input)).rejects.toThrow("temporary service failure");
+    durable.attempt = 2;
+    await expect(runStep(execute, input)).resolves.toMatchObject({
+      output: "done",
+      authorized: ["auth-1"],
+    });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(getToken).toHaveBeenCalledOnce();
+    expect([...durable.entries.values()]).toEqual([[true]]);
+    // Retries still reject a fresh token that the service refuses, without another sign-in.
+    await expect(
+      runStep(async (ctx) => {
+        await ctx.getToken(provider);
+        ctx.requireAuth(provider);
+      }, input),
+    ).rejects.toMatchObject({ fatal: true, reason: "token_rejected_after_authorization" });
+    expect(complete).toHaveBeenCalledOnce();
+  });
   it("uses the captured requester instead of another ambient user and caches only within a step", async () => {
     const principals: string[] = [];
     const provider: AuthorizationDefinition = {
