@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import {
   isStepCount,
   type LanguageModelCallEndEvent,
@@ -189,7 +190,7 @@ import {
   extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
-import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
@@ -537,6 +538,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
       };
     };
+    const failBoundaryEvent = async (
+      error: unknown,
+      failureState: ReturnType<typeof getHarnessEmissionState>,
+    ): Promise<StepResult> => {
+      throwIfTurnAborted(config.abortSignal);
+      if (isTurnCancellation(error)) throw error;
+      if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
+      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
+        throw error;
+      }
+
+      stepInstrumentation?.recordError(error);
+      const errorId = createErrorId();
+      const message = toErrorMessage(error);
+      log.error("turn boundary handler failed — parking session", {
+        error,
+        errorId,
+        sessionId: session.sessionId,
+        turnId: failureState.turnId,
+      });
+      emissionState = await emitRecoverableFailedTurn(emit, failureState, {
+        code: "EVENT_HANDLER_FAILED",
+        continuationToken: session.continuationToken,
+        details: { errorId },
+        message,
+      });
+      return {
+        next: null,
+        session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
+        settledTurn: { isError: true, output: message },
+      };
+    };
     const preparePreambleTrace = async (): Promise<RuntimeTraceContext | undefined> => {
       return await stepInstrumentation?.preparePreamble({
         sequence: emissionState.sequence,
@@ -856,8 +889,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             history: [...parkedSession.history, ...instructionMessages],
           };
           session = parkedSession;
-          if (!isDynamicModelSelectionError(error)) throw error;
-          return failModelSelection(error, {
+          return failBoundaryEvent(error, {
             sessionStarted: true,
             sequence: emissionState.sequence,
             stepIndex: 0,
@@ -989,8 +1021,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           history: [...(memoryCommit?.history ?? pending.session.history), ...instructionMessages],
           state: memoryCommit?.state ?? pending.session.state,
         };
-        if (!isDynamicModelSelectionError(error)) throw error;
-        return failModelSelection(error, {
+        return failBoundaryEvent(error, {
           sessionStarted: true,
           sequence: emissionState.sequence,
           stepIndex: 0,
@@ -1172,12 +1203,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     );
 
     if (emit) {
-      await emitStepStarted(
-        emit,
-        emissionState,
-        requireSessionModelReference(session).id,
-        projectedMessages,
-      );
+      try {
+        await emitStepStarted(
+          emit,
+          emissionState,
+          requireSessionModelReference(session).id,
+          projectedMessages,
+        );
+      } catch (error) {
+        return failBoundaryEvent(error, emissionState);
+      }
     }
     const approvedTools = getApprovedTools(
       session,

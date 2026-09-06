@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -12776,5 +12777,126 @@ describe("appendMissingToolResultMessages", () => {
         responseMessages: [toolMessage],
       }),
     ).toEqual([toolMessage]);
+  });
+});
+
+describe("boundary event failures", () => {
+  it.each(["turn.started", "step.started"] as const)(
+    "parks a failed %s and accepts the next turn",
+    async (boundary) => {
+      const events: UnstampedMessageStreamEvent[] = [];
+      let denied = true;
+      const emit: HarnessEmitFn = async (event) => {
+        events.push(event);
+        if (denied && event.type === boundary)
+          throw new BoundaryHookError(new Error("admission denied"));
+      };
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+        message: "Denied request",
+      });
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({ isError: true, output: "admission denied" });
+      expect(result.session.outputSchema).toBeUndefined();
+      expect(ToolLoopAgent).not.toHaveBeenCalled();
+      expect(events.filter((event) => event.type === "turn.failed")).toMatchObject([
+        { data: { turnId: "turn_0", sequence: 0, code: "EVENT_HANDLER_FAILED" } },
+      ]);
+      expect(events.map((event) => event.type)).toContain("session.waiting");
+      expect(events.map((event) => event.type)).not.toContain("session.failed");
+      expect(getHarnessEmissionState(result.session.state)).toEqual({
+        sessionStarted: true,
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "",
+      });
+      denied = false;
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ role: "assistant", content: "recovered" }] },
+        text: "recovered",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const recovered = await runStep(
+        JSON.parse(JSON.stringify(result.session)) as HarnessSession,
+        { message: "Try again" },
+      );
+      expect(recovered.next).toBeNull();
+      expect(events.filter((event) => event.type === "turn.completed")).toMatchObject([
+        { data: { turnId: "turn_1", sequence: 1 } },
+      ]);
+      expect(events.filter((event) => event.type === "session.started")).toHaveLength(1);
+    },
+  );
+
+  it("fails the current later step without invoking another model", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "step.started")
+        throw new BoundaryHookError(new Error("step budget exhausted"));
+    };
+    const session = setHarnessEmissionState(createTestSession(), {
+      sessionStarted: true,
+      sequence: 2,
+      stepIndex: 3,
+      turnId: "turn_2",
+    });
+    const result = await createToolLoopHarness(createTestConfig("conversation", emit))(session);
+    expect(result.next).toBeNull();
+    expect(events[1]).toMatchObject({
+      type: "step.failed",
+      data: { stepIndex: 3, turnId: "turn_2" },
+    });
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("lets a failed failure handler escalate", async () => {
+    const emit: HarnessEmitFn = async (event) => {
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
+      if (event.type === "turn.failed") throw new Error("failure handler failed");
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toThrow("failure handler failed");
+  });
+
+  it("keeps task failures terminal", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("task denied"));
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("task", emit))(createTestSession(), { message: "Hi" }),
+    ).rejects.toThrow("task denied");
+    expect(events.map((event) => event.type)).not.toContain("session.waiting");
+  });
+
+  it("keeps runtime preamble failures terminal", async () => {
+    const failure = new Error("memory recall failed");
+    const emit: HarnessEmitFn = async (event) => {
+      if (event.type === "turn.started") throw failure;
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toBe(failure);
+  });
+
+  it("preserves explicit cancellation from a boundary handler", async () => {
+    const cancellation = new TurnCancelledError();
+    const emit: HarnessEmitFn = async () => {
+      throw cancellation;
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toBe(cancellation);
   });
 });
