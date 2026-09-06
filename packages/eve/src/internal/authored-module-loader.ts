@@ -647,7 +647,7 @@ function createInFlightModuleLoadKey(
   return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
 }
 
-function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
+export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
   for (const fileName of ["tsconfig.json", "jsconfig.json"]) {
     const path = join(packageRoot, fileName);
     if (existsSync(path)) {

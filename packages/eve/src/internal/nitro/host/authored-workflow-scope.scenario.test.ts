@@ -10,6 +10,8 @@ import {
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
+import { buildApplication } from "./build-application.js";
+import { startProductionServer } from "./start-production-server.js";
 import { prepareProductionApplicationHost } from "./prepare-application-host.js";
 
 const ALIAS_MARKER = "workflow-alias-resolved";
@@ -62,6 +64,13 @@ describe("authored workflow scope", () => {
         );
         expect(code).toContain(ALIAS_MARKER);
         expect(code).not.toContain('require("@/lib/describe")');
+        await buildApplication(appRoot, { skipVercelSandboxPrewarm: false });
+        const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
+        try {
+          expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
+        } finally {
+          await server.close();
+        }
       } finally {
         await removeApplicationBuildWorkspace(workspace);
       }

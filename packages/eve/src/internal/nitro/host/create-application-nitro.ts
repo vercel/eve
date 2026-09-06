@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
@@ -637,7 +638,10 @@ function createApplicationNitroBundlerConfiguration(
     createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
-  const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
+  const nitroRolldownConfig = {
+    ...createNitroBundlerConfig(nitroBundlerPlugins),
+    tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
+  };
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,
