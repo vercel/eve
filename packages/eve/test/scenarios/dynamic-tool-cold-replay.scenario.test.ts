@@ -197,8 +197,8 @@ describe("dynamic tool cold replay", () => {
         }
 
         // The fresh process rebinds persisted callbacks by re-running session
-        // resolvers exactly once (identity is the tool name, so the same
-        // definitions re-register); replay itself never depends on it.
+        // resolvers exactly once for this session; the same resolver entries
+        // re-register without replacing another session's bindings.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )

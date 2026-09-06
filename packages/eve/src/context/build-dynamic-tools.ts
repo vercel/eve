@@ -2,6 +2,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextReader } from "#context/key.js";
 import {
+  SessionIdKey,
   SessionDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
@@ -23,6 +24,7 @@ import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
+  type DynamicToolCallbackOwner,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 
@@ -41,11 +43,12 @@ function missingCallbackError(
 
 function buildReplayedApproval(
   metadata: CurrentDynamicToolMetadata,
+  owner: DynamicToolCallbackOwner,
 ): HarnessToolDefinition["approval"] | undefined {
   const requestReference = metadata.callbacks.approvalRequest;
   if (requestReference === undefined) return undefined;
 
-  const request = lookupDurableDynamicCallback(metadata.name, "approvalRequest");
+  const request = lookupDurableDynamicCallback(owner, "approvalRequest");
   const requestPolicy =
     request === undefined
       ? async () => {
@@ -62,7 +65,7 @@ function buildReplayedApproval(
   const responseReference = metadata.callbacks.approvalResponse;
   if (responseReference === undefined) return requestPolicy;
 
-  const response = lookupDurableDynamicCallback(metadata.name, "approvalResponse");
+  const response = lookupDurableDynamicCallback(owner, "approvalResponse");
   return {
     request: requestPolicy,
     response:
@@ -87,20 +90,25 @@ function buildReplayedApproval(
 /** Reconstructs every callback exclusively from its durable descriptor. */
 export function replayDynamicTools(
   metadata: readonly CurrentDynamicToolMetadata[],
+  scope: Pick<DynamicToolCallbackOwner, "sessionId" | "scope">,
 ): HarnessToolDefinition[] {
+  if (metadata.length > 0 && scope.sessionId.length === 0) {
+    throw new Error("Dynamic tool replay requires a session id.");
+  }
   return metadata.map((entry) => {
+    const owner = { ...entry, ...scope };
     const approvalKeyReference = entry.callbacks.approvalKey;
     const approvalKey =
       approvalKeyReference === undefined
         ? undefined
-        : lookupDurableDynamicCallback(entry.name, "approvalKey");
+        : lookupDurableDynamicCallback(owner, "approvalKey");
     const executeReference = entry.callbacks.execute;
-    const execute = lookupDurableDynamicCallback(entry.name, "execute");
+    const execute = lookupDurableDynamicCallback(owner, "execute");
     const toModelOutputReference = entry.callbacks.toModelOutput;
     const toModelOutput =
       toModelOutputReference === undefined
         ? undefined
-        : lookupDurableDynamicCallback(entry.name, "toModelOutput");
+        : lookupDurableDynamicCallback(owner, "toModelOutput");
 
     return {
       description: entry.description,
@@ -139,7 +147,7 @@ export function replayDynamicTools(
       inputSchema: toInputSchema(entry.inputSchema),
       name: entry.name,
       execution: entry.execution,
-      approval: buildReplayedApproval(entry),
+      approval: buildReplayedApproval(entry, owner),
       ...(approvalKeyReference === undefined
         ? {}
         : {
@@ -212,12 +220,15 @@ export function buildResponseAuthorizationTools(input: {
 export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
   const step = replayDynamicTools(
     requireCurrentDynamicToolMetadata(ctx.get(StepDynamicToolMetadataKey) ?? []),
+    { sessionId: ctx.get(SessionIdKey) ?? "", scope: "step" },
   );
   const turn = replayDynamicTools(
     requireCurrentDynamicToolMetadata(ctx.get(TurnDynamicToolMetadataKey) ?? []),
+    { sessionId: ctx.get(SessionIdKey) ?? "", scope: "turn" },
   );
   const session = replayDynamicTools(
     requireCurrentDynamicToolMetadata(ctx.get(SessionDynamicToolMetadataKey) ?? []),
+    { sessionId: ctx.get(SessionIdKey) ?? "", scope: "session" },
   );
   return [...step, ...turn, ...session];
 }
