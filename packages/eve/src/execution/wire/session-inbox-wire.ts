@@ -4,31 +4,27 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
-import {
-  runMigrationChain,
-  type VersionMigration,
-} from "#execution/durable-session-migrations/chain.js";
+import { runMigrationChain } from "#execution/durable-session-migrations/chain.js";
 import {
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-contract.js";
-import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import type { Wire } from "#execution/session-inbox/migration.js";
+import { sessionInboxUpMigrations } from "#execution/session-inbox/migrations.js";
+import { upgradeLegacySessionInbox } from "#execution/session-inbox/legacy.js";
 import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
-import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
-import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
-import { sessionInboxWireV3Migration } from "#execution/wire/session-inbox-wire.v4.migration.js";
-import { sessionInboxWireV4Migration } from "#execution/wire/session-inbox-wire.v5.migration.js";
 import { isObject } from "#shared/guards.js";
+
+type SessionInboxWire = Wire<6>;
 
 /**
  * The session inbox wire family: every payload persisted to a session's
  * durable inbox hooks crosses through `sessionInboxWire.encode` /
  * `sessionInboxWire.decode`.
  *
- * Historic migrations live in `session-inbox-wire.vN.ts` modules; the
- * current schema and encoder live in the current version module. This file
- * remains the dependency-free decoder facade reached by the workflow body.
+ * Typed adjacent migrations live in `session-inbox/migrations/`. The legacy
+ * adapter retains historical transforms for already-persisted raw sends.
+ * This decoder stays dependency-free inside the workflow body.
  *
  * See research/session-inbox-wire-schema.md and issue #1765.
  */
@@ -43,24 +39,6 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 
 /** Prefixes migration and contract failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
-
-const sessionInboxWireV5Migration: VersionMigration = {
-  from: 5,
-  migrate(prior) {
-    if (!isObject(prior)) throw new Error("session inbox wire v5 value is not an object.");
-    return { ...prior, version: 6 };
-  },
-  to: 6,
-};
-
-const sessionInboxMigrations: readonly VersionMigration[] = [
-  sessionInboxWireV0Migration,
-  sessionInboxWireV1Migration,
-  sessionInboxWireV2Migration,
-  sessionInboxWireV3Migration,
-  sessionInboxWireV4Migration,
-  sessionInboxWireV5Migration,
-];
 
 /**
  * Decodes a persisted inbox payload or throws {@link SessionInboxWireError}.
@@ -87,14 +65,28 @@ function decode(value: unknown): DecodedSessionInbox {
       `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
     );
   }
+  if (
+    typeof declaredVersion === "number" &&
+    declaredVersion < 6 &&
+    isObject(normalized) &&
+    normalized.kind === "cancel" &&
+    "tasks" in normalized
+  ) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
+    );
+  }
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
       initialVersion: 0,
       label: WIRE_LABEL,
-      migrations: sessionInboxMigrations,
+      migrations: sessionInboxUpMigrations,
       targetVersion: SESSION_INBOX_WIRE_VERSION,
-      value: normalized,
+      value:
+        !hasDeclaredVersion || declaredVersion === 0
+          ? upgradeLegacySessionInbox(normalized)
+          : normalized,
     });
   } catch (error) {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));

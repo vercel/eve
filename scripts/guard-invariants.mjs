@@ -609,6 +609,12 @@ function importSpecifier(node) {
 // ---------- Rule 40: wire versions carry colocated contract tests ----------
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+const SESSION_INBOX_DIR = "packages/eve/src/execution/session-inbox";
+const SESSION_INBOX_MIGRATIONS_DIR = `${SESSION_INBOX_DIR}/migrations`;
+const SESSION_INBOX_MIGRATION_RE = new RegExp(
+  `^${SESSION_INBOX_MIGRATIONS_DIR}/v\\d+-to-v\\d+(?:\\.test)?\\.ts$`,
+);
+const SESSION_INBOX_HISTORY_SCOPE = [WIRE_FAMILY_DIR, SESSION_INBOX_MIGRATIONS_DIR];
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
 const SESSION_INBOX_WIRE_DECODER = `${WIRE_FAMILY_DIR}/session-inbox-wire.ts`;
 const VERSIONED_WIRE_HISTORY_RE = new RegExp(
@@ -624,10 +630,23 @@ const RULE_40_ALLOWED_REWRITES = new Map([
   ],
 ]);
 const PURE_MIGRATION_IMPORTS = new Map([
+  [
+    "#execution/session-inbox/migration.js",
+    new Map([
+      ["Migration", "type"],
+      ["Wire", "type"],
+    ]),
+  ],
+  ["#execution/wire/session-inbox-contract.js", new Map([["SessionInboxWireError", "value"]])],
   ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
   ["#shared/guards.js", new Map([["isObject", "value"]])],
 ]);
 const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
+  "#execution/session-inbox/migrations.js",
+  "#execution/session-inbox/legacy.js",
+  ...[1, 2, 3, 4, 5].map(
+    (version) => `#execution/session-inbox/migrations/v${version}-to-v${version + 1}.js`,
+  ),
   "#execution/durable-session-migrations/chain.js",
   "#execution/wire/session-inbox-contract.js",
   "#execution/wire/session-inbox-wire.v0.js",
@@ -654,15 +673,15 @@ function gitOutput(args) {
 function checkRule40ImmutableWireHistory() {
   const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
   const comparisons = [
-    { args: ["diff", "--name-status", "--", WIRE_FAMILY_DIR], state: "worktree" },
+    { args: ["diff", "--name-status", "--", ...SESSION_INBOX_HISTORY_SCOPE], state: "worktree" },
     {
-      args: ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+      args: ["diff", "--cached", "--name-status", "--", ...SESSION_INBOX_HISTORY_SCOPE],
       state: "index",
     },
   ];
   if (hasBase)
     comparisons.push({
-      args: ["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR],
+      args: ["diff", "--name-status", "origin/main...HEAD", "--", ...SESSION_INBOX_HISTORY_SCOPE],
       state: "head",
     });
 
@@ -677,7 +696,9 @@ function checkRule40ImmutableWireHistory() {
   const violations = [];
   for (const change of changes) {
     const [state, status, ...paths] = change.split("\t");
-    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    const protectedPaths = paths.filter(
+      (path) => VERSIONED_WIRE_HISTORY_RE.test(path) || SESSION_INBOX_MIGRATION_RE.test(path),
+    );
     if (protectedPaths.length === 0 || status === "A") continue;
     if (protectedPaths.every((path) => isAllowedRule40Rewrite(path, state))) continue;
     if (
@@ -740,9 +761,9 @@ function checkRule40MigrationPurity(path, source) {
   return violations;
 }
 
-function checkRule40WorkflowDecoderImports(source) {
+function checkRule40WorkflowDecoderImports(source, path = SESSION_INBOX_WIRE_DECODER) {
   const sourceFile = ts.createSourceFile(
-    SESSION_INBOX_WIRE_DECODER,
+    path,
     source,
     ts.ScriptTarget.Latest,
     true,
@@ -759,7 +780,7 @@ function checkRule40WorkflowDecoderImports(source) {
     ) {
       violations.push({
         rule: 40,
-        file: SESSION_INBOX_WIRE_DECODER,
+        file: path,
         line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
         message: `imports "${specifier.text}" at runtime. The session-inbox decoder is embedded with inline sources in every workflow driver; keep schema and validation dependencies in the encoder and import only the inferred wire type here.`,
       });
@@ -819,6 +840,58 @@ async function checkRule40WireContracts() {
         ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
       );
     }
+  }
+
+  const migrationFiles = await readdir(join(REPO_ROOT, SESSION_INBOX_MIGRATIONS_DIR));
+  for (const name of migrationFiles) {
+    if (!/^v\d+-to-v\d+\.ts$/.test(name)) continue;
+    const path = `${SESSION_INBOX_MIGRATIONS_DIR}/${name}`;
+    violations.push(
+      ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+    );
+    if (!migrationFiles.includes(name.replace(/\.ts$/, ".test.ts"))) {
+      violations.push({
+        rule: 40,
+        file: path,
+        line: 1,
+        message: "Every session inbox migration needs a colocated contract test.",
+      });
+    }
+  }
+  for (const name of ["migrations.ts", "legacy.ts", "migration.ts"]) {
+    const path = `${SESSION_INBOX_DIR}/${name}`;
+    violations.push(
+      ...checkRule40WorkflowDecoderImports(await readFile(join(REPO_ROOT, path), "utf8"), path),
+    );
+  }
+  for await (const entry of walkFiles(join(REPO_ROOT, "packages/eve/src"))) {
+    if (
+      !entry.relPath.endsWith(".ts") ||
+      /\.(?:test|scenario|integration)\.ts$/.test(entry.relPath)
+    )
+      continue;
+    const source = await readFile(entry.absPath, "utf8");
+    const ast = ts.createSourceFile(
+      entry.relPath,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const visit = (node) => {
+      const specifier = importSpecifier(node);
+      if (specifier?.text.endsWith("/session-inbox-encoder.js") && isRuntimeImportReference(node)) {
+        violations.push({
+          rule: 40,
+          file: entry.relPath,
+          line: ast.getLineAndCharacterOfPosition(specifier.getStart(ast)).line + 1,
+          message:
+            "The historical inbox encoder is test-only. Production sends must use #execution/session-inbox/encoder.js.",
+        });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
   }
 
   const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");

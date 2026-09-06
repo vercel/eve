@@ -28,91 +28,96 @@ In this document, **must**, **should**, and **may** are normative.
 
 ## Authoring API
 
-No new framework. Version walking reuses `runMigrationChain`
-(`execution/durable-session-migrations/chain.ts`), exactly as the durable
-session snapshot and turn-workflow input already do. The complete current
-wire value is defined by one zod schema in a server/step-only encoder module;
-the workflow-safe decoder imports only its inferred type. The session inbox
-is the first family; turn-control, the subagent proxies, and the auth-hook
-delivery adopt the same split in follow-ups.
+Production sends use `execution/session-inbox/encoder.ts`. It builds the current
+wire representation, walks adjacent migrations backwards to the receiver's
+version, validates the result against that version's frozen schema, and only
+then returns a value that can be delivered.
+
+Pure transformations live in `execution/session-inbox/migrations/`. Each entry
+names two fixed versions. `Wire<V>` is inferred from the schema for version `V`;
+adding a newer version does not change a historical migration's input type.
 
 ```ts
-// Dependency-free contract imported by encoder and decoder.
-export const SESSION_INBOX_WIRE_VERSION = 1;
-export type SessionInboxWireTarget =
-  | { version: 0; variant: "deliver" | "send" }
-  | { version: 1 };
-
-// One append-only module per shipped version:
-// execution/wire/session-inbox-wire.v1.ts (server/step only)
-const deliverPayloadSchema = z.object({
-  context: z.array(z.string()).optional(),
-  inputResponses: z.array(inputResponseSchema).optional(),
-  message: userContentSchema.optional(),
-  outputSchema: jsonObjectSchema.optional(),
-}).loose(); // explicit adapter extension point
-
-export const sessionInboxWireV1Schema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("deliver"), payloads: z.array(deliverPayloadSchema), ... }),
-  ...controls,
-]);
-export type SessionInboxWireV1 = z.infer<typeof sessionInboxWireV1Schema>;
-encodeSessionCommandV1(input) // build → parse complete value once → persist
-
-// execution/wire/session-inbox-wire.v0.ts (dependency-free, temporary)
-export const sessionInboxWireV0Migration: VersionMigration = { from: 0, to: 1, migrate };
-
-// Server/step-safe encoder facade selects the target consumer's version.
-sessionInboxWire.encode(input, target)
-
-// Workflow-safe decoder: execution/wire/session-inbox-wire.ts
-import type { SessionInboxWireV1 } from "./session-inbox-wire.v1.js";
-export class SessionInboxWireError extends Error { ... }
-const sessionInboxMigrations: readonly VersionMigration[] = [{ from: 0, to: 1, migrate }];
-sessionInboxWire.decode(value) // runMigrationChain (initialVersion: 0) → version/kind → trust → normalize
+interface Migration<From extends Version, To extends Version> {
+  readonly from: From;
+  readonly to: To;
+  up(payload: Wire<From>): Wire<To>;
+  down(payload: Wire<To>): Wire<From>;
+}
 ```
 
-Normative rules:
+`down` throws `SessionInboxWireError` when there is no faithful translation.
+An old receiver's inability to execute a requested operation is an error, never
+permission to remove that operation and send the remainder.
 
-- **The current version has exactly one declared shape.** Changing it
-  **must** be a new version: bump the constant, add a one-step
-  `VersionMigration`, freeze the new shape. Historic versions live on as
-  executable migrations plus frozen payload fixtures (the turn-workflow
-  precedent), not as retained schemas.
-- **Protocol data and migration policy stay separate.** A `*.vN.ts` module
-  owns the immutable schema and version-bound encoder. A
-  `*.vN.migration.ts` module is a pure data transform with no normalization or
-  version-selection dependencies. The encoder and decoder facades own mutable
-  policy: selecting a target, assembling the chain, and normalizing values
-  received from another Workflow VM realm.
-- **The complete transported value is validated once, at encode.** The
-  schema owns the envelope and every eve-owned `DeliverPayload` field,
-  composing the existing strict `inputResponseSchema` and
-  `jsonObjectSchema`; adapter-specific payload fields are the explicit open
-  extension point. The inferred schema type is the wire type, so runtime
-  validation and TypeScript cannot drift.
-- **Zod stays outside the workflow driver bundle.** Every producer is
-  server-side or a `"use step"` body; in the driver bundle those steps are
-  dependency-free stubs. The decoder imports `SessionInboxWire` with
-  `import type` and the numeric version from a dependency-free contract
-  module, so zod never enters the self-contained/base64-embedded driver.
-- **Version 0 is the unversioned era** (`initialVersion: 0`): every shape
-  the family persisted before payloads carried `version`, following the
-  field name every persisted eve structure already uses.
-- **Decode trusts a known current version because that trust is earned by
-  the single encoder.** `runMigrationChain` rejects unknown newer versions;
-  known v1 values were produced only by the schema-validating encoder. The
-  decoder checks version and kind, then normalizes away wire-only fields.
-  Legacy v0 is the temporary exception: those writers predate the encoder,
-  so its 0→1 migration defensively checks the historic `send`/`deliver`
-  fields until that cohort ages out under the 30-day timeout.
-- **Encode goes through the wire module too.** Every persisted inbox
-  payload — sends and controls alike — is built and validated against the
-  current schema before it persists, so producer drift dies at the producer
-  instead of at a pinned consumer weeks later.
-- Per family, `sessionInboxWire.encode` **must** be the only producer of
-  persisted payloads and `sessionInboxWire.decode` the only consumer-side
-  interpretation.
+For example, the v5→v6 entry handles session-owned task cancellation:
+
+```ts
+export const v5ToV6 = {
+  from: 5,
+  to: 6,
+  up: (wire) => ({ ...wire, version: 6 }),
+  down(wire) {
+    if (wire.kind !== "cancel") return { ...wire, version: 5 };
+    if (wire.tasks === true) {
+      throw new SessionInboxWireError(
+        "Cannot encode session-owned task cancellation for wire version 5.",
+      );
+    }
+    const { tasks: _tasks, ...cancel } = wire;
+    return { ...cancel, version: 5 };
+  },
+} satisfies Migration<5, 6>;
+```
+
+The static registry in `session-inbox/migrations.ts` assembles both directions:
+
+```text
+Read a v3 message:          v3 → v4 → v5 → v6 → normalize for the driver
+Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
+```
+
+### Compatibility decisions belong to the transition
+
+| Transition | Upgrade                                                    | Downgrade                                                                                    |
+| ---------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| v1 ↔ v2    | Adds the required payload mirror if absent.                | Removes optional caller activity-observer metadata.                                          |
+| v2 ↔ v3    | Preserves the payload.                                     | Removes optional accepted-deployment metadata.                                               |
+| v3 ↔ v4    | Converts executor input requests into typed answer routes. | Rejects agent and input requests; downgrading their execution protocol is unsupported.       |
+| v4 ↔ v5    | Preserves the payload.                                     | Removes optional token cost from usage reports, retaining token counts and application data. |
+| v5 ↔ v6    | Preserves the payload.                                     | Rejects session-owned task cancellation; ordinary cancellation survives.                     |
+
+### Invariants
+
+- **Historical contracts stay frozen.** Shipped schemas, snapshots, migration
+  pairs, and their tests are append-only. Retained schemas validate downgrade
+  outputs; fixtures preserve examples of actual historical data.
+- **Every transition has a typed pair and a test.** The registry test requires
+  one adjacent pair per supported transition and checks both directions against
+  the frozen schemas. Semantic tests cover the operation-specific differences.
+- **Validate after conversion.** The production encoder validates the current
+  command and the final target value. Delivery helpers cannot bypass that
+  contract, including the stable fast path and unversioned targets.
+- **Keep pure transformations workflow-safe.** Migrations import schema types
+  only. Zod stays on the producer side, outside the embedded workflow driver.
+  CI checks the decoder, registry, legacy adapter, and migration imports.
+- **Decoder trust remains explicit.** Known versioned messages are assumed to
+  come from validated producers. The decoder checks version and discriminator
+  and rejects known operation/version mismatches; it is not a complete second
+  schema validator.
+- **Legacy history is a separate adapter.** Unversioned data predates the
+  contract and can include modern task fields emitted by historical writers.
+  `session-inbox/legacy.ts` upgrades already-persisted values using the retained
+  historical transforms. New sends to unversioned receivers must pass v1 first.
+  The two old `send` and `deliver` envelopes remain explicit target variants.
+- **The historical encoder is test-only.** `wire/session-inbox-encoder.ts` stays
+  available to frozen tests, including those recording the original bug. CI
+  forbids production imports; runtime callers use `session-inbox/encoder.ts`.
+
+To add a version: freeze its schema and type, add its adjacent migration pair
+and semantic test, register the pair and schema, and update the current wire
+builder. Existing migration files do not change. CI checks continuity, schema
+snapshots, migration output shapes, and rejection before hook delivery.
 
 ## Version signals and their semantics
 
@@ -216,11 +221,11 @@ path; they must be encoded for the selected receiver contract.
 `stablePayloadSchema` excludes `task`. It reads the hook with `getHookByToken`
 and selects `hook.metadata.sessionInboxWireVersion`:
 
-| Parent metadata                  | Encoder result                                             | Side effect                                                |
-| -------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
-| `{ sessionInboxWireVersion: 3 }` | Rejects `task.agentRequests`: v3 has no such operation.    | `resumeHook` is never called.                              |
-| `{ sessionInboxWireVersion: 4 }` | Encodes a v4 `deliver` value containing the request.       | `resumeHook(hook, wire)` delivers it to that exact parent. |
-| No version metadata              | Checks the legacy contract, which rejects `agentRequests`. | `resumeHook` is never called.                              |
+| Parent metadata                  | Encoder result                                          | Side effect                                                |
+| -------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
+| `{ sessionInboxWireVersion: 3 }` | Rejects `task.agentRequests`: v3 has no such operation. | `resumeHook` is never called.                              |
+| `{ sessionInboxWireVersion: 4 }` | Encodes a v4 `deliver` value containing the request.    | `resumeHook(hook, wire)` delivers it to that exact parent. |
+| No version metadata              | Downgrades toward v1; v4→v3 rejects `agentRequests`.    | `resumeHook` is never called.                              |
 
 For the v4 parent, the relevant fields are:
 
@@ -261,11 +266,12 @@ handler for. The old handler removed the `task` envelope after processing the
 fields it recognized, so no child agent was dispatched.
 
 The historical codec and its frozen tests still describe that old encoding.
-[The delivery boundary][delivery-boundary] now prevents using it to send newer task
-operations to an unversioned parent. For a versioned parent, the complete
-operation must pass that parent's schema before `resumeHook` can execute.
+[The production encoder][production-encoder] rejects it while walking v4→v3,
+including when called directly for an unversioned receiver. The complete target
+value must pass the receiver's schema before `resumeHook` can execute.
 
 [delivery-tests]: ../packages/eve/src/execution/wire/session-inbox-resume.test.ts
+[production-encoder]: ../packages/eve/src/execution/session-inbox/encoder.ts
 [delivery-boundary]: ../packages/eve/src/execution/wire/session-inbox-resume.ts
 [task-wire-regression]: https://github.com/vercel/eve/blob/aae26311a845b5638f701311b742fab7d9cb4baf/packages/eve/src/execution/wire/session-inbox-encoder.ts#L76
 
