@@ -264,3 +264,17 @@ This project follows the [Code of Conduct](./CODE_OF_CONDUCT.md). By participati
 `eve` is licensed under the [Apache License 2.0](./LICENSE). By contributing,
 you agree that your contributions will be licensed under that same license
 (inbound = outbound).
+
+## Adding a session inbox wire migration
+
+Run `pnpm run migratew session-inbox` from the repository root. It creates a
+migration file containing the new schema and both conversions, plus a test
+file under `packages/eve/src/execution/wire/session-inbox/migrations/`.
+Implement the protocol change and replace the deliberately failing example
+test. Preserve each operation when downgrading, or throw `SessionInboxWireError`.
+
+Run `pnpm run migratew --sync` after editing; framework builds and typechecks
+also sync automatically. Commit the generated files with the two authored
+files. CI checks freshness with `pnpm run migratew --check` and runs the
+scaffolder tests through `pnpm guard:invariants`. Do not edit registrations or
+historical migrations by hand. See [the wire contract](research/session-inbox-wire-schema.md).

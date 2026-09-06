@@ -1,11 +1,7 @@
-/** Every explicit session-inbox wire version still supported by producers. */
-export const SESSION_INBOX_WIRE_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
-
+import { versions as SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox/generated/versions.js";
+export { SESSION_INBOX_WIRE_VERSIONS };
+export { currentVersion as SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox/generated/versions.js";
 export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[number];
-
-/** Current persisted session-inbox wire version. */
-export const SESSION_INBOX_WIRE_VERSION =
-  SESSION_INBOX_WIRE_VERSIONS[SESSION_INBOX_WIRE_VERSIONS.length - 1]!;
 
 /** Hook metadata field advertising the consumer's inbox wire capability. */
 export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";

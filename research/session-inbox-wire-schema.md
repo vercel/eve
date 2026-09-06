@@ -28,6 +28,35 @@ In this document, **must**, **should**, and **may** are normative.
 
 ## Authoring API
 
+Add a wire version with:
+
+```sh
+pnpm run migratew session-inbox
+```
+
+The command creates exactly two authored files under
+`execution/wire/session-inbox/migrations/`: `vN-to-vNext.ts` and its
+`vN-to-vNext.test.ts`. Define the new `schema` and the `migration` object's
+`up`/`down` conversions in the migration file. The scaffold preserves the
+previous variants with the new version stamp. Its second test deliberately
+fails until replaced with an example of the actual protocol change and its
+downgrade behavior.
+
+`pnpm run migratew --sync` regenerates the static catalogs and extracts the
+migration's helpers into a schema-free workflow module. Normal framework
+builds and typechecks sync automatically. `pnpm run migratew --check` checks
+freshness without writing; the invariant guard runs this check in CI.
+No imports, version arrays, schema/type maps, or guard allowlists need hand edits.
+Generated files live under `wire/session-inbox/generated/` and are committed.
+Shipped v1–v6 schemas keep their original files; new schemas live in their
+migration file.
+
+Schema construction stays on the producer side. The generator follows local
+symbol references from `migration`, keeps required helpers and named imports,
+and rejects runtime dependencies on `schema` or unsupported imports. It does
+not execute authored modules to discover versions. Directory discovery happens
+in tooling; the runtime uses static imports.
+
 Production sends use `execution/wire/session-inbox-encoder.ts`. It builds the current
 wire representation, walks adjacent migrations backwards to the receiver's
 version, validates the result against that version's frozen schema, and only
@@ -70,7 +99,8 @@ export const v5ToV6 = {
 } satisfies Migration<5, 6>;
 ```
 
-The static registry in `wire/session-inbox/migrations.ts` assembles both directions:
+The generated registry in `wire/session-inbox/generated/catalog.ts` supplies
+both directions to the runner:
 
 ```text
 Read a v3 message:          v3 → v4 → v5 → v6 → normalize for the driver
@@ -98,9 +128,10 @@ Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
 - **Validate after conversion.** The production encoder validates the current
   command and the final target value. Delivery helpers cannot bypass that
   contract, including the stable fast path and unversioned targets.
-- **Keep pure transformations workflow-safe.** Migrations import schema types
-  only. Zod stays on the producer side, outside the embedded workflow driver.
-  CI checks the decoder, registry, and migration imports.
+- **Keep pure transformations workflow-safe.** Generated workflow transforms
+  import schema types only. Authored schema construction stays on the producer
+  side, outside the embedded workflow driver. CI checks the decoder, generated
+  catalogs, and extracted migration imports.
 - **Decoder trust remains explicit.** Known versioned messages are assumed to
   come from validated producers. The decoder checks version and discriminator
   and rejects known operation/version mismatches; it is not a complete second
@@ -114,10 +145,11 @@ Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
   without a version. New sends to unversioned receivers must pass v1 first;
   the two old envelope shapes remain explicit target variants.
 
-To add a version: freeze its schema and type, add its adjacent migration pair
-and semantic test, register the pair and schema, and update the current wire
-builder. Existing migration files do not change. CI checks continuity, schema
-snapshots, migration output shapes, and rejection before hook delivery.
+The generator derives the current version and all version types from the
+schema and migration files. Existing migration files do not change. CI checks
+continuity, generated-file freshness, historical contracts, migration output
+shapes, and rejection before hook delivery. The generator tests scaffold a
+new version and execute its extracted transformations in both directions.
 
 ## Version signals and their semantics
 
@@ -311,18 +343,14 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - **Round-trip.** `encode` output is byte-frozen, declares `currentVersion`,
   and decodes under the current schema — producers cannot drift from the
   schema they claim to emit.
-- **Invariant guard (rule 40).** The explicit session-inbox version registry
-  must be contiguous from v1, its highest entry must equal `currentVersion`,
-  and its entries must exactly match the append-only
-  `execution/wire/session-inbox-wire.vN.ts` modules. Every wire-version module
-  must also have a colocated `*.test.ts`: v0 pins legacy fixtures and migration
-  behavior; v1 pins the complete schema and encoder. A version cannot ship as
-  unregistered or untested protocol history.
-- Enforcement is layered by what each CI job can check. Rule 40 runs in the
-  lint job and compares declared versions with shipped modules and tests.
-  TypeScript requires a schema for every registered stamped version. The
-  required unit tier then encodes and decodes every registry entry, while each
-  version's frozen contract pins its exact shape and backwards migration.
+- **Invariant guard (rule 40).** Discovery requires contiguous schemas from v1,
+  exactly one adjacent migration per transition, and a colocated migration test.
+  The generated catalog supplies supported/current versions, schema types, and
+  registrations. CI rejects stale generated files. Historical standalone schemas
+  retain their colocated contract tests; new schemas share their migration test.
+- Enforcement is layered by what each CI job can check. The guard checks the
+  catalog and source contracts; TypeScript checks the generated type map and
+  every typed migration. Unit tests encode and decode every registered version.
 - Rule 40 freezes adjacent migration pairs and their tests, and rejects policy
   imports from those transforms. It compares each shipped schema and its local
   dependencies with `origin/main`, and separately protects frozen fixtures and

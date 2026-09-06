@@ -1,21 +1,7 @@
 import { expect, it } from "vitest";
 import { sessionInboxMigrations } from "#execution/wire/session-inbox/migrations.js";
 import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
-import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
-import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
-import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
-import { sessionInboxWireV5Schema } from "#execution/wire/session-inbox-wire.v5.js";
-import { sessionInboxWireV6Schema } from "#execution/wire/session-inbox-wire.v6.js";
-
-const schemas = {
-  1: sessionInboxWireV1Schema,
-  2: sessionInboxWireV2Schema,
-  3: sessionInboxWireV3Schema,
-  4: sessionInboxWireV4Schema,
-  5: sessionInboxWireV5Schema,
-  6: sessionInboxWireV6Schema,
-};
+import { schemas } from "#execution/wire/session-inbox/generated/schemas.js";
 
 it("has exactly one adjacent migration for every supported version transition", () => {
   expect(sessionInboxMigrations.map((m) => [m.from, m.to])).toEqual(

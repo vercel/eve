@@ -5,13 +5,9 @@ import {
   SessionInboxWireError,
   type SessionInboxWireVersion,
 } from "#execution/wire/session-inbox-contract.js";
-import { v1ToV2 } from "#execution/wire/session-inbox/migrations/v1-to-v2.js";
-import { v2ToV3 } from "#execution/wire/session-inbox/migrations/v2-to-v3.js";
-import { v3ToV4 } from "#execution/wire/session-inbox/migrations/v3-to-v4.js";
-import { v4ToV5 } from "#execution/wire/session-inbox/migrations/v4-to-v5.js";
-import { v5ToV6 } from "#execution/wire/session-inbox/migrations/v5-to-v6.js";
-
-export const sessionInboxMigrations = [v1ToV2, v2ToV3, v3ToV4, v4ToV5, v5ToV6] as const;
+import { migrations as sessionInboxMigrations } from "#execution/wire/session-inbox/generated/catalog.js";
+import type { CurrentWire } from "#execution/wire/session-inbox/generated/versions.js";
+export { sessionInboxMigrations };
 
 /** The decoder has checked the version; each edge is typed against frozen contracts. */
 export const sessionInboxUpMigrations: readonly VersionMigration[] = [
@@ -24,7 +20,7 @@ export const sessionInboxUpMigrations: readonly VersionMigration[] = [
 ];
 
 export function downgradeSessionInbox(
-  wire: Wire<6>,
+  wire: CurrentWire,
   target: SessionInboxWireVersion,
 ): Wire<SessionInboxWireVersion> {
   let value: Wire<SessionInboxWireVersion> = wire;

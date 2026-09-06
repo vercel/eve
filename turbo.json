@@ -1,7 +1,7 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "envMode": "strict",
-  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
+  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json", "scripts/migratew.mjs"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

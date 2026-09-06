@@ -14,21 +14,8 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import { encodeSessionCommandV0 } from "#execution/wire/session-inbox-wire.v0.js";
 import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
-import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
-import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
-import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
-import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
-import { sessionInboxWireV5Schema } from "#execution/wire/session-inbox-wire.v5.js";
-import { sessionInboxWireV6Schema } from "#execution/wire/session-inbox-wire.v6.js";
-
-const schemas = {
-  1: sessionInboxWireV1Schema,
-  2: sessionInboxWireV2Schema,
-  3: sessionInboxWireV3Schema,
-  4: sessionInboxWireV4Schema,
-  5: sessionInboxWireV5Schema,
-  6: sessionInboxWireV6Schema,
-} as const;
+import { schemas, currentSchema } from "#execution/wire/session-inbox/generated/schemas.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
@@ -48,10 +35,8 @@ function encode(
     throw new SessionInboxWireError(`Unknown session inbox wire version ${target.version}.`);
   }
   try {
-    const current = sessionInboxWireV6Schema.parse(
-      normalizeSessionInboxWire(buildCurrentWire(command)),
-    );
-    if (target.version === 6) return current;
+    const current = currentSchema.parse(normalizeSessionInboxWire(buildCurrentWire(command)));
+    if (target.version === SESSION_INBOX_WIRE_VERSION) return current;
     const version = target.version === 0 ? 1 : target.version;
     const migrated = downgradeSessionInbox(current, version);
     // Validate the exact target representation after every transformation has finished.
@@ -94,12 +79,16 @@ function buildCurrentWire(command: Command): unknown {
       requestId: command.requestId,
       taskDeliveryId: command.taskDeliveryId,
       turnPolicy: command.turnPolicy,
-      version: 6,
+      version: SESSION_INBOX_WIRE_VERSION,
     };
   }
   if (command.kind === "deliver")
-    return { ...command, payload: coalesceDeliverPayloads(command.payloads), version: 6 };
-  return { ...command, version: 6 };
+    return {
+      ...command,
+      payload: coalesceDeliverPayloads(command.payloads),
+      version: SESSION_INBOX_WIRE_VERSION,
+    };
+  return { ...command, version: SESSION_INBOX_WIRE_VERSION };
 }
 
 /** The only production encoder: current command → migration chain → validated target. */

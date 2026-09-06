@@ -130,6 +130,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
+import { extractMigration, generateCatalog } from "./migratew.mjs";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const require = createRequire(import.meta.url);
@@ -634,9 +635,8 @@ const PURE_MIGRATION_IMPORTS = new Map([
 ]);
 const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
   "#execution/wire/session-inbox/migrations.js",
-  ...[1, 2, 3, 4, 5].map(
-    (version) => `#execution/wire/session-inbox/migrations/v${version}-to-v${version + 1}.js`,
-  ),
+  "#execution/wire/session-inbox/generated/catalog.js",
+  "#execution/wire/session-inbox/generated/versions.js",
   "#execution/durable-session-migrations/chain.js",
   "#execution/wire/session-inbox-contract.js",
   "#execution/wire/session-inbox-wire.v0.js",
@@ -840,7 +840,10 @@ function checkRule40WorkflowDecoderImports(source, path = SESSION_INBOX_WIRE_DEC
     if (
       specifier !== undefined &&
       isRuntimeImportReference(node) &&
-      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text)
+      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text) &&
+      !/^#execution\/wire\/session-inbox\/(?:migrations|generated)\/v\d+-to-v\d+\.js$/.test(
+        specifier.text,
+      )
     ) {
       violations.push({
         rule: 40,
@@ -910,9 +913,15 @@ async function checkRule40WireContracts() {
   for (const name of migrationFiles) {
     if (!/^v\d+-to-v\d+\.ts$/.test(name)) continue;
     const path = `${SESSION_INBOX_MIGRATIONS_DIR}/${name}`;
-    violations.push(
-      ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
-    );
+    const source = await readFile(join(REPO_ROOT, path), "utf8");
+    try {
+      const runtime = /export const schema\s*=/.test(source)
+        ? extractMigration(join(REPO_ROOT, path), source, "migration")
+        : source;
+      violations.push(...checkRule40MigrationPurity(path, runtime));
+    } catch (error) {
+      violations.push({ rule: 40, file: path, line: 1, message: error.message });
+    }
     if (!migrationFiles.includes(name.replace(/\.ts$/, ".test.ts"))) {
       violations.push({
         rule: 40,
@@ -928,52 +937,25 @@ async function checkRule40WireContracts() {
       ...checkRule40WorkflowDecoderImports(await readFile(join(REPO_ROOT, path), "utf8"), path),
     );
   }
-  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
-  const decoderSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8");
-  violations.push(...checkRule40WorkflowDecoderImports(decoderSource));
-  const registryMatch = contractSource.match(
-    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  for (const name of ["catalog.ts", "versions.ts"]) {
+    const path = `${SESSION_INBOX_DIR}/generated/${name}`;
+    violations.push(
+      ...checkRule40WorkflowDecoderImports(await readFile(join(REPO_ROOT, path), "utf8"), path),
+    );
+  }
+  violations.push(
+    ...checkRule40WorkflowDecoderImports(
+      await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8"),
+    ),
   );
-  const tokens = registryMatch?.[1]
-    .split(",")
-    .map((token) => token.trim())
-    .filter(Boolean);
-  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+  try {
+    await generateCatalog(REPO_ROOT, "session-inbox", true);
+  } catch (error) {
     violations.push({
       rule: 40,
       file: SESSION_INBOX_WIRE_CONTRACT,
       line: 1,
-      message:
-        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
-    });
-    return violations;
-  }
-
-  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
-  const versions = tokens.map(Number);
-  const expectedVersions = versions.map((_, index) => index + 1);
-  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
-    });
-  }
-
-  const shippedVersions = entries
-    .flatMap((name) => {
-      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
-      return match === null ? [] : [Number(match[1])];
-    })
-    .sort((left, right) => left - right);
-  const registeredModules = [0, ...versions];
-  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+      message: error.message,
     });
   }
 

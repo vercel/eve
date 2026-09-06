@@ -9,12 +9,12 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-contract.js";
-import type { Wire } from "#execution/wire/session-inbox/migration.js";
+import type { CurrentWire } from "#execution/wire/session-inbox/generated/versions.js";
 import { sessionInboxUpMigrations } from "#execution/wire/session-inbox/migrations.js";
 import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
 import { isObject } from "#shared/guards.js";
 
-type SessionInboxWire = Wire<6>;
+type SessionInboxWire = CurrentWire;
 
 /**
  * The session inbox wire family: every payload persisted to a session's
