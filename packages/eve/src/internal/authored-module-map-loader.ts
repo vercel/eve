@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -23,9 +23,11 @@ import { formatValidationError } from "#runtime/validation.js";
 
 const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
 
-/** Hydrates the compiled module map from the exact physical bindings in the manifest. */
+/** Hydrates the compiled module map from the manifest’s authored bindings. */
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+  /** Current location of a built application deployed with its source and dependencies. */
+  readonly authoredAppRoot?: string;
 }): Promise<CompiledModuleMap> {
   const manifest = await loadCompiledManifest({
     compiledArtifactsSource: input.compiledArtifactsSource,
@@ -33,12 +35,14 @@ export async function loadCompiledModuleMapFromAuthoredSource(input: {
   return await hydrateCompiledModuleMapFromManifest(
     manifest,
     input.compiledArtifactsSource.appRoot,
+    input.authoredAppRoot,
   );
 }
 
 async function hydrateCompiledModuleMapFromManifest(
   manifest: CompiledAgentManifest,
   runtimeAppRoot: string,
+  authoredAppRoot: string = manifest.appRoot,
 ): Promise<CompiledModuleMap> {
   const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
   if (materializedIndex !== undefined) {
@@ -60,7 +64,9 @@ async function hydrateCompiledModuleMapFromManifest(
   ];
   for (const node of nodeManifests) {
     nodes[node.nodeId] = {
-      modules: await hydrateCompiledNodeScope(node.manifest),
+      modules: await hydrateCompiledNodeScope(node.manifest, (sourcePath) =>
+        resolve(authoredAppRoot, relative(manifest.appRoot, sourcePath)),
+      ),
     };
   }
   return { nodes };
@@ -68,6 +74,7 @@ async function hydrateCompiledModuleMapFromManifest(
 
 async function hydrateCompiledNodeScope(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  resolveSourcePath: (sourcePath: string) => string,
 ): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
   const mountScopes = new Map(
     manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
@@ -89,7 +96,7 @@ async function hydrateCompiledNodeScope(
               ),
             )
           : memoizeModuleNamespaceFactories(
-              await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
+              await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
                 externalDependencies: binding.backing.externalDependencies,
                 extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
               }),
