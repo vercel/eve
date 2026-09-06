@@ -1067,10 +1067,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Keep the insertion point stable when a later durable step reconstructs
     // the model-only prompt, preserving the full prompt prefix within the turn.
     let turnClientContext = storedClientContext;
-    if (clientContext !== undefined) {
+    if (
+      clientContext !== undefined ||
+      (storedClientContext === undefined && preparedTurnInput.length > 0)
+    ) {
       turnClientContext = {
         insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
-        messages: [...clientContext],
+        messages: clientContext ?? storedClientContext?.messages ?? [],
         turnId,
       };
     }
@@ -1208,7 +1211,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Insert that context before the current delivery so the triggering user
     // message remains the model's latest request.
     const currentMessages = createCurrentMessages(projectedMessages, {
-      currentTurnMessages: preparedTurnInput,
+      currentTurnMessages:
+        turnClientContext === undefined
+          ? preparedTurnInput
+          : messages.slice(turnClientContext.insertionIndex),
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
