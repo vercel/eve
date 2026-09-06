@@ -1,7 +1,7 @@
 import type { WorkflowToolContext } from "eve/tools";
 import { sleep } from "workflow";
 
-import { describePlan, hashPlan } from "./plan.ts";
+import { describePlan, hashPlan } from "@/agent/lib/plan.ts";
 
 export async function deployService({ service }: { service: string }, ctx: WorkflowToolContext) {
   "use workflow";
