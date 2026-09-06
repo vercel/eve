@@ -92,6 +92,8 @@ export function buildToolSet(input: {
       description: definition.description,
       execute: wrapToolExecute(definition, backgroundBatch),
       inputSchema: definition.inputSchema,
+      // Responses otherwise normalizes optional properties into required fields.
+      strict: false,
       ...(definition.execution === "background"
         ? {
             onInputAvailable: ({
