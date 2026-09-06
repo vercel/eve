@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "ai": "catalog:",
     "typescript": "catalog:"
   },
   "e2e": {

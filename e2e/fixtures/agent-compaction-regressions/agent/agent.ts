@@ -1,6 +1,8 @@
-import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
+import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
+
+import { compactionModel } from "../compaction-model";
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
@@ -234,7 +236,7 @@ export default defineAgent({
   model: taskModel,
   modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
   compaction: {
-    model: e2eModel(),
+    model: compactionModel,
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
     thresholdPercent:
       (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
