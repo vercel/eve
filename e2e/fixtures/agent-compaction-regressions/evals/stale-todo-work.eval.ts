@@ -9,10 +9,11 @@ export default defineEval({
     const turn = await t.send(
       [
         "[case: stale-todo-work]",
-        "Call perform-source-analysis exactly once with approach attempt-1.",
-        "The tool deliberately leaves its completed work in a pending todo.",
-        "After it succeeds, call advance-checkpoint exactly once with regressionCase stale-todo-work.",
-        "Then report SOURCE_ANALYSIS_COMPLETE and the checkpoint tool's marker and call no more tools.",
+        "Please analyze the source with perform-source-analysis, using approach attempt-1.",
+        "The tool records completed work in its result; its todo entry remains pending after completion.",
+        "Use the completed analysis to record a checkpoint with advance-checkpoint, using regressionCase stale-todo-work.",
+        "Use only these two tools, once each, in that order. A pending todo does not require repeating completed analysis.",
+        "Finish by reporting SOURCE_ANALYSIS_COMPLETE and the checkpoint tool's marker.",
       ].join("\n"),
     );
 

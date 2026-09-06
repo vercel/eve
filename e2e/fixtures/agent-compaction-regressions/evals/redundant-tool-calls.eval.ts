@@ -9,9 +9,10 @@ export default defineEval({
     const turn = await t.send(
       [
         "[case: redundant-tool-calls]",
-        "Call inspect-repository exactly once with scope repository.",
-        "After it succeeds, call advance-checkpoint exactly once with regressionCase redundant-tool-calls.",
-        "Then report REPOSITORY_INSPECTION_COMPLETE and the checkpoint tool's marker and call no more tools.",
+        "Please inspect the repository with inspect-repository, using scope repository.",
+        "Use the inspection result to record a checkpoint with advance-checkpoint, using regressionCase redundant-tool-calls.",
+        "Use only these two tools, once each, in that order.",
+        "Finish by reporting REPOSITORY_INSPECTION_COMPLETE and the checkpoint tool's marker.",
       ].join("\n"),
     );
 
