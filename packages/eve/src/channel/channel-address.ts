@@ -22,6 +22,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -100,7 +101,7 @@ export function createChannelAddress<TState = undefined>(input: {
         },
         requestId: metadata.requestId,
         turnPolicy:
-          payload.message === undefined
+          payload.message === undefined || payload.observe === true
             ? undefined
             : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
       };
@@ -121,6 +122,9 @@ export function createChannelAddress<TState = undefined>(input: {
 
       const existing = await dispatch();
       if (existing !== undefined) return existing;
+      if (payload.observe === true) {
+        throw new RuntimeNoActiveSessionError(namespacedToken);
+      }
       if (payload.inputResponses && payload.inputResponses.length > 0) {
         throw new Error(
           "Cannot deliver inputResponses — the target session was not found via continuation token.",

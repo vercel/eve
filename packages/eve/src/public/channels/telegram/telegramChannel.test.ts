@@ -234,10 +234,135 @@ describe("telegramChannel() inbound route", () => {
       },
     });
     expect(mentioned.send).toHaveBeenCalledTimes(1);
-    expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::11");
+    expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::");
     expect((mentioned.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
       "is_mentioned: true",
     );
+  });
+
+  it("keys group mentions, bot replies, and callback queries chat-wide", async () => {
+    const channel = telegramChannel({
+      api: { fetch: fakeTelegramFetch() },
+      botUsername: "testbot",
+      credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+    });
+
+    const mentioned = await firePost(channel, {
+      message: {
+        message_id: 11,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "hello @testbot",
+      },
+    });
+    expect(mentioned.send).toHaveBeenCalledTimes(1);
+    expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(mentioned.send.mock.calls[0]![1]).toMatchObject({ state: { conversationId: null } });
+
+    const replied = await firePost(channel, {
+      message: {
+        message_id: 13,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        reply_to_message: {
+          message_id: 12,
+          from: { id: 99, is_bot: true, username: "testbot" },
+          chat: { id: -1001, type: "supergroup" },
+        },
+        text: "follow-up",
+      },
+    });
+    expect(replied.send).toHaveBeenCalledTimes(1);
+    expect(replied.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(replied.send.mock.calls[0]![1]).toMatchObject({
+      inputResponses: [{ requestId: "telegram_reply:12", text: "follow-up" }],
+      message: "follow-up",
+      state: { chatId: "-1001", conversationId: null },
+    });
+
+    const inTopic = await firePost(channel, {
+      message: {
+        message_id: 14,
+        message_thread_id: 7,
+        is_topic_message: true,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "hello @testbot",
+      },
+    });
+    expect(inTopic.send.mock.calls[0]![0]).toBe("-1001:7:");
+
+    const inReplyChain = await firePost(channel, {
+      message: {
+        message_id: 15,
+        message_thread_id: 11,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        reply_to_message: {
+          message_id: 11,
+          from: { id: 42, is_bot: false },
+          chat: { id: -1001, type: "supergroup" },
+        },
+        text: "hello @testbot",
+      },
+    });
+    expect(inReplyChain.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(inReplyChain.send.mock.calls[0]![1]).toMatchObject({ state: { messageThreadId: null } });
+
+    const callback = await firePost(channel, {
+      callback_query: {
+        id: "cb1",
+        from: { id: 42, is_bot: false },
+        data: "eve:0",
+        message: {
+          message_id: 55,
+          chat: { id: -1001, type: "supergroup" },
+        },
+      },
+    });
+    expect(callback.send).toHaveBeenCalledWith("-1001::", expect.anything());
+  });
+
+  it("delivers observed group messages as history without a turn", async () => {
+    const channel = telegramChannel({
+      api: { fetch: fakeTelegramFetch() },
+      botUsername: "testbot",
+      credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+      onMessage: (_ctx, message) => ({
+        auth: null,
+        observe: !isTelegramBotMentioned(message, "testbot"),
+      }),
+    });
+
+    const aside = await firePost(channel, {
+      message: {
+        message_id: 20,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "had a rough week",
+      },
+    });
+    expect(aside.send).toHaveBeenCalledTimes(1);
+    expect(aside.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(aside.send.mock.calls[0]![1]).toMatchObject({
+      message: "had a rough week",
+      observe: true,
+      state: { chatId: "-1001", conversationId: null },
+    });
+    expect((aside.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
+      "is_mentioned: false",
+    );
+
+    const mention = await firePost(channel, {
+      message: {
+        message_id: 21,
+        from: { id: 42, is_bot: false },
+        chat: { id: -1001, type: "supergroup" },
+        text: "@testbot what do you think?",
+      },
+    });
+    expect(mention.send.mock.calls[0]![0]).toBe("-1001::");
+    expect(mention.send.mock.calls[0]![1]).not.toHaveProperty("observe");
   });
 
   it("delivers Telegram callback queries as compact HITL input responses", async () => {
@@ -259,7 +384,7 @@ describe("telegramChannel() inbound route", () => {
     });
 
     expect(send).toHaveBeenCalledWith(
-      "-1001::55",
+      "-1001::",
       expect.objectContaining({
         auth: null,
         inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }],
@@ -740,7 +865,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBeNull();
   });
 
-  it("hydrates unknown group message posts and re-keys to the posted message id", async () => {
+  it("keeps group message posts chat-wide", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -769,9 +894,9 @@ describe("telegramChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(writes).toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
+    expect(writes).not.toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
     expect(ctx.state.chatType).toBe("supergroup");
-    expect(ctx.state.conversationId).toBe("77");
+    expect(ctx.state.conversationId).toBeNull();
   });
 
   it("preserves explicit conversation ids after Telegram identifies a private chat", async () => {
@@ -808,7 +933,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBe("caller-selected");
   });
 
-  it("group message posts re-key the session to the posted message id", async () => {
+  it("preserves explicit conversation ids on group message posts", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -834,8 +959,8 @@ describe("telegramChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(writes).toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
-    expect(ctx.state.conversationId).toBe("77");
+    expect(writes).not.toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
+    expect(ctx.state.conversationId).toBe("10");
   });
 });
 
@@ -919,7 +1044,7 @@ describe("telegramChannel().receive", () => {
     );
   });
 
-  it("anchors group initialMessage sessions under Telegram's message id", async () => {
+  it("keeps group initialMessage sessions chat-wide", async () => {
     for (const chatType of ["group", "supergroup"] as const) {
       const fetchMock = vi.fn().mockResolvedValue(
         new Response(
@@ -947,13 +1072,13 @@ describe("telegramChannel().receive", () => {
       );
 
       expect(send).toHaveBeenCalledWith(
-        "-1001::88",
+        "-1001::",
         expect.objectContaining({
           message: "run",
           state: expect.objectContaining({
             chatId: "-1001",
             chatType,
-            conversationId: "88",
+            conversationId: null,
           }),
         }),
       );

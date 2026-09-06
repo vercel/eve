@@ -87,7 +87,7 @@ export {
   createTelegramFileUrl,
 } from "#public/channels/telegram/attachments.js";
 
-export { defaultTelegramAuth } from "#public/channels/telegram/defaults.js";
+export { defaultTelegramAuth, isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
 
 export {
   resolveTelegramWebhookSecretToken,

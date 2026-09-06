@@ -61,6 +61,25 @@ describe("TurnControlReceiver", () => {
     expect(bufferedDeliveries).toEqual([]);
   });
 
+  it("buffers observed deliveries without steering or forwarding them", async () => {
+    const observed: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "U1: had a rough week", observe: true }],
+      turnPolicy: "steer",
+    };
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    const action = await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([observed]),
+    });
+
+    expect(action.kind).toBe("park");
+    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
+    expect(forwardTurnDeliveryStep).not.toHaveBeenCalled();
+    expect(bufferedDeliveries).toEqual([observed]);
+  });
+
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
     const delivery: DeliverHookPayload = {
       kind: "deliver",

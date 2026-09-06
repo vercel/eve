@@ -32,6 +32,12 @@ export default defineChannel({
 
 Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.
 
+## Observed messages
+
+Pass `observe: true` on a delivery to append a message to the session as history without running a turn. eve buffers observed deliveries on the session, whether it is parked or mid-turn, and folds them in arrival order into the next delivery that does run a turn, so the model sees them as part of that turn's input. An observed delivery never steers an active turn and never starts a session: when no session owns the address, it throws `RuntimeNoActiveSessionError` and the message is dropped. The buffer keeps the most recent 256 observed payloads.
+
+Use it for group surfaces where the bot should follow the conversation without answering every message. The Telegram channel exposes it as `observe` on the `onMessage` result; custom channels reach it through `deliver({ message, observe: true }, options)`.
+
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
 ## Where channels live

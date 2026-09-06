@@ -1,6 +1,12 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
-import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type ChannelFrom,
+  type ChannelResolveSession,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -16,7 +22,6 @@ import {
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
-  telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramApiResponse,
   type TelegramCredentials,
@@ -96,7 +101,7 @@ export interface TelegramChannelState extends TelegramHitlState {
   chatId: string | null;
   /** Telegram chat type, when known from an inbound update. */
   chatType: TelegramChatType | null;
-  /** Group/supergroup conversation anchor message id. */
+  /** Group/supergroup conversation id, when a proactive target pins one. */
   conversationId: string | null;
   /** Forum topic id, when known. */
   messageThreadId: number | null;
@@ -113,7 +118,7 @@ export interface TelegramChannelCredentials extends TelegramCredentials {
   readonly webhookVerifier?: TelegramWebhookVerifier;
 }
 
-/** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` resumes an existing thread; `initialMessage` posts a seed message and starts a new thread from it. The two are mutually exclusive: supplying both throws. */
+/** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` pins the session to a caller-selected id instead of the chat-wide session; inbound messages never route to it. `initialMessage` posts a seed message before the session starts; in groups the session stays chat-wide. The two are mutually exclusive: supplying both throws. */
 export interface TelegramReceiveTarget {
   readonly chatId: number | string;
   readonly conversationId?: number | string;
@@ -125,6 +130,8 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Appends the message to the chat's session as history without running a turn. Dropped when the chat has no session yet. */
+  readonly observe?: boolean;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -368,20 +375,8 @@ function buildTelegramHandle(input: {
   const credentials = input.config.credentials;
 
   function anchor(posted: TelegramMessageResult): void {
-    const chatType = state.chatType ?? posted.chatType ?? null;
     if (state.chatType === null && posted.chatType !== undefined) {
       state.chatType = posted.chatType;
-    }
-    if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
-    state.conversationId = posted.id;
-    if (state.chatId) {
-      input.session?.continuation?.rekey(
-        telegramContinuationToken({
-          chatId: state.chatId,
-          conversationId: posted.id,
-          messageThreadId: state.messageThreadId ?? undefined,
-        }),
-      );
     }
   }
 
@@ -497,10 +492,6 @@ function buildTelegramHandle(input: {
   };
 }
 
-function shouldAnchorTelegramConversation(chatType: TelegramChatType | null): boolean {
-  return chatType === "group" || chatType === "supergroup";
-}
-
 async function postTelegramMessage(
   message: string | TelegramMessageBody,
   sendOne: (body: TelegramMessageBody) => Promise<TelegramMessageResult>,
@@ -592,7 +583,12 @@ async function dispatchMessage(input: {
 
   try {
     const source = input.from(telegramContinuationTokenFromState(state));
-    if (replyInputResponses === undefined) {
+    if (result.observe === true) {
+      await (source as InternalChannelSource<TelegramChannelState>)[INTERNAL_CHANNEL_DELIVER](
+        { context: [contextBlock, ...channelContext], message: turnMessage, observe: true },
+        { auth: result.auth, state },
+      );
+    } else if (replyInputResponses === undefined) {
       await source.send(turnMessage, {
         auth: result.auth,
         context: [contextBlock, ...channelContext],
@@ -600,12 +596,20 @@ async function dispatchMessage(input: {
         title: result.title,
       });
     } else {
-      await source.respond(replyInputResponses, {
-        auth: result.auth,
-        context: [contextBlock, ...channelContext],
-      });
+      await (source as InternalChannelSource<TelegramChannelState>)[INTERNAL_CHANNEL_DELIVER](
+        {
+          context: [contextBlock, ...channelContext],
+          inputResponses: replyInputResponses,
+          message: turnMessage,
+        },
+        { auth: result.auth, state, title: result.title },
+      );
     }
   } catch (error) {
+    if (result.observe === true && isRuntimeNoActiveSessionError(error)) {
+      log.debug("observed message dropped: chat has no session yet", { chatId: state.chatId });
+      return;
+    }
     log.error("message delivery failed", { error });
   }
 }

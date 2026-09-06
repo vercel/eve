@@ -1,18 +1,21 @@
 import { telegramContinuationToken } from "#public/channels/telegram/api.js";
-import type { TelegramCallbackQuery, TelegramMessage } from "#public/channels/telegram/inbound.js";
+import type {
+  TelegramCallbackQuery,
+  TelegramMessage,
+  TelegramMessageReference,
+} from "#public/channels/telegram/inbound.js";
 import type { TelegramChannelState } from "#public/channels/telegram/telegramChannel.js";
 
 export function stateFromTelegramMessage(
   message: TelegramMessage,
   botUsername: string | undefined,
 ): TelegramChannelState {
-  const privateChat = message.chat.type === "private";
   return {
     ...initialTelegramState(botUsername),
     chatId: message.chat.id,
     chatType: message.chat.type,
-    conversationId: privateChat ? null : conversationIdForMessage(message),
-    messageThreadId: message.messageThreadId ?? null,
+    conversationId: null,
+    messageThreadId: sessionThreadId(message),
     triggeringUserId: message.from?.id ?? null,
   };
 }
@@ -25,13 +28,12 @@ export function stateFromTelegramCallbackQuery(
   if (!message) {
     return { ...initialTelegramState(botUsername), triggeringUserId: query.from.id };
   }
-  const privateChat = message.chat.type === "private";
   return {
     ...initialTelegramState(botUsername),
     chatId: message.chat.id,
     chatType: message.chat.type,
-    conversationId: privateChat ? null : message.messageId,
-    messageThreadId: message.messageThreadId ?? null,
+    conversationId: null,
+    messageThreadId: sessionThreadId(message),
     triggeringUserId: query.from.id,
   };
 }
@@ -59,8 +61,8 @@ export function initialTelegramState(botUsername: string | undefined): TelegramC
   };
 }
 
-function conversationIdForMessage(message: TelegramMessage): string {
-  return message.replyToMessage?.from?.isBot === true
-    ? message.replyToMessage.messageId
-    : message.messageId;
+function sessionThreadId(message: TelegramMessageReference): number | null {
+  const threadId = message.messageThreadId ?? null;
+  if (message.chat.type === "private") return threadId;
+  return message.isTopicMessage === true ? threadId : null;
 }

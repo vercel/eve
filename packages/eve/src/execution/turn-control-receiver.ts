@@ -1,6 +1,7 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { bufferObservedDelivery, isObserveOnlyDelivery } from "#execution/deliver-payloads.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
@@ -138,6 +139,7 @@ export class TurnControlReceiver {
   }
 
   private async bufferDelivery(delivery: DeliverHookPayload): Promise<void> {
+    if (bufferObservedDelivery(this.bufferedDeliveries, delivery)) return;
     this.bufferedDeliveries.push(delivery);
     if (delivery.turnPolicy !== "steer" || !deliveryHasMessage(delivery)) return;
 
@@ -267,7 +269,7 @@ export class TurnControlReceiver {
       }
       if (decoded.kind === "deliver") {
         if (!this.acceptTaskDelivery(decoded)) continue;
-        if (deliveryHasMessage(decoded)) {
+        if (isObserveOnlyDelivery(decoded) || deliveryHasMessage(decoded)) {
           await this.bufferDelivery(decoded);
         } else {
           delivery = decoded;
@@ -298,7 +300,9 @@ export class TurnControlReceiver {
   }
 
   private takeInputResponseDelivery(): DeliverHookPayload | undefined {
-    const index = this.bufferedDeliveries.findIndex((delivery) => !deliveryHasMessage(delivery));
+    const index = this.bufferedDeliveries.findIndex(
+      (delivery) => !isObserveOnlyDelivery(delivery) && !deliveryHasMessage(delivery),
+    );
     if (index === -1) return undefined;
     return this.bufferedDeliveries.splice(index, 1)[0];
   }

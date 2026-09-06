@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import {
+  bufferObservedDelivery,
+  coalesceDeliverPayloads,
+  hasAddressedDelivery,
+  isObserveOnlyDelivery,
+} from "#execution/deliver-payloads.js";
 
 const FIRST_MESSAGE = "Please summarize the synthetic release checklist before the rollout.";
 const SECOND_MESSAGE = "Proceed after the synthetic health check passes.";
@@ -62,6 +68,22 @@ describe("coalesceDeliverPayloads", () => {
     });
   });
 
+  it("keeps observe only when every payload was observed", () => {
+    expect(
+      coalesceDeliverPayloads([
+        { message: "U1: had a rough week", observe: true },
+        { message: "U2: same here", observe: true },
+      ]),
+    ).toEqual({ message: "U1: had a rough week\n\nU2: same here", observe: true });
+
+    expect(
+      coalesceDeliverPayloads([
+        { message: "U1: had a rough week", observe: true },
+        { message: "@bot what do you think?" },
+      ]),
+    ).toEqual({ message: "U1: had a rough week\n\n@bot what do you think?" });
+  });
+
   it("preserves task agent requests and authorization events across queued payloads", () => {
     const agentRequests = [
       {
@@ -110,5 +132,39 @@ describe("coalesceDeliverPayloads", () => {
         },
       ]),
     ).toEqual({ task: { agentRequests, authorizationEvents } });
+  });
+});
+
+describe("bufferObservedDelivery", () => {
+  function observed(message: string): DeliverHookPayload {
+    return { kind: "deliver", payloads: [{ message, observe: true }] };
+  }
+
+  it("buffers observe-only deliveries and leaves addressed ones to the caller", () => {
+    const buffer: DeliverHookPayload[] = [];
+    const addressed: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "@bot hi" }] };
+
+    expect(bufferObservedDelivery(buffer, observed("aside"))).toBe(true);
+    expect(bufferObservedDelivery(buffer, addressed)).toBe(false);
+
+    expect(buffer).toEqual([observed("aside")]);
+    expect(isObserveOnlyDelivery(observed("aside"))).toBe(true);
+    expect(isObserveOnlyDelivery(addressed)).toBe(false);
+    expect(hasAddressedDelivery(buffer)).toBe(false);
+    expect(hasAddressedDelivery([...buffer, addressed])).toBe(true);
+  });
+
+  it("drops the oldest observed deliveries past the buffer limit", () => {
+    const buffer: DeliverHookPayload[] = [
+      { kind: "deliver", payloads: [{ inputResponses: [{ optionId: "yes", requestId: "r1" }] }] },
+    ];
+    for (let index = 0; index < 257; index += 1) {
+      bufferObservedDelivery(buffer, observed(`message ${index}`));
+    }
+
+    expect(buffer).toHaveLength(257);
+    expect(buffer[0]?.payloads[0]?.inputResponses).toBeDefined();
+    expect(buffer[1]).toEqual(observed("message 1"));
+    expect(buffer.at(-1)).toEqual(observed("message 256"));
   });
 });
