@@ -32,6 +32,8 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
+Optional input fields can be omitted. eve disables implicit provider strict-mode normalization to preserve that distinction and validates tool inputs against your schema before execution. Include rules such as mutually exclusive arguments in the tool description as well as the schema, since custom validation rules may not appear in the model's JSON Schema.
+
 ### Label tool activity
 
 Use `label.start(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:

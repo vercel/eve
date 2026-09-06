@@ -1,6 +1,9 @@
-import type { LanguageModel, ModelMessage } from "ai";
+import { generateText, stepCountIs, type LanguageModel, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+
+import { buildToolSet } from "#harness/tools.js";
 
 import { getPendingInputRequestIds } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -34,6 +37,75 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
 }
 
 describe("framework tool input validation (real AI SDK)", () => {
+  it("preserves optional arguments at the provider boundary and still rejects conflicting scopes", async () => {
+    const inputSchema = z
+      .object({
+        query: z.string().optional(),
+        queries: z.array(z.string()).optional(),
+      })
+      .refine(
+        (input) => Number(input.query !== undefined) + Number(input.queries !== undefined) === 1,
+        "Provide exactly one of query or queries.",
+      );
+    const execute = vi.fn((input: unknown) => input);
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        ...[{ query: "account", queries: ["account"] }, { query: "account" }].map(
+          (input, index) => ({
+            content: [
+              {
+                type: "tool-call" as const,
+                toolName: "lookup",
+                toolCallId: `lookup-${index}`,
+                input: JSON.stringify(input),
+              },
+            ],
+            finishReason: { raw: undefined, unified: "tool-calls" as const },
+            usage,
+            warnings: [],
+          }),
+        ),
+        {
+          content: [{ type: "text", text: "done" }],
+          finishReason: { raw: undefined, unified: "stop" },
+          usage,
+          warnings: [],
+        },
+      ],
+    });
+    await generateText({
+      model,
+      prompt: "Look up account.",
+      stopWhen: stepCountIs(3),
+      tools: buildToolSet({
+        tools: new Map([
+          [
+            "lookup",
+            {
+              name: "lookup",
+              description: "Look up a single query or a batch.",
+              inputSchema,
+              execute,
+            },
+          ],
+        ]),
+      }),
+    });
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]).toEqual({ query: "account" });
+    expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], "lookup-0")).toMatchObject({
+      output: expect.objectContaining({ type: "error-text" }),
+    });
+    expect(model.doGenerateCalls[0]?.tools?.[0]).toMatchObject({
+      type: "function",
+      strict: false,
+      inputSchema: { properties: { query: { type: "string" }, queries: { type: "array" } } },
+    });
+    const schema = model.doGenerateCalls[0]?.tools?.[0];
+    expect(schema?.type === "function" && schema.inputSchema.required).toBeUndefined();
+  });
+
   it("returns malformed and schema-invalid ask_question input to the model before accepting a retry", async () => {
     const malformedCallId = "question-malformed";
     const invalidCallId = "question-invalid";
