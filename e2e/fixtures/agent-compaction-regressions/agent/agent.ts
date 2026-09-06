@@ -122,6 +122,9 @@ const taskModel = mockModel({
 
       toolCallCounts.set(regressionCase, contentOutputCalls + 1);
       return {
+        // This case isolates cap-only rewriting: the file supplies the
+        // pressure, while the measured-token fixture covers a large baseline.
+        usage: { inputTokens: 1 },
         toolCalls: [
           {
             id: "emit-compaction-content-1",
