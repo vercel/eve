@@ -1,6 +1,8 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic } from "eve";
 import { mockModel, type MockModelRequest } from "eve/evals";
+
+import { MEASURED_TOKENS_CASE, measuredTokensModel } from "./lib/measured-tokens";
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
@@ -226,9 +228,23 @@ const taskModel = mockModel({
 export default defineAgent({
   // Harness config wires the workflow world; the task model stays the
   // fixture's scripted mock regardless of the matrix model.
-  ...e2eAgentConfig(),
-  model: taskModel,
-  modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
+  experimental: e2eAgentConfig().experimental,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const measured = ctx.messages.some(
+          (message) =>
+            message.role === "user" &&
+            typeof message.content === "string" &&
+            message.content.includes(MEASURED_TOKENS_CASE),
+        );
+        return {
+          model: measured ? measuredTokensModel : taskModel,
+          modelContextWindowTokens: measured ? 1_000_000 : TEST_CONTEXT_WINDOW_TOKENS,
+        };
+      },
+    },
+  }),
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,

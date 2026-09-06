@@ -352,6 +352,8 @@ async function compact(
   } as Awaited<ReturnType<typeof generateText>>);
 
   const compactionConfig: CompactionConfig = {
+    lastKnownInputTokens: overrides.lastKnownInputTokens,
+    lastKnownPromptMessageCount: overrides.lastKnownPromptMessageCount,
     recentWindowSize: overrides.recentWindowSize ?? 4,
     threshold: overrides.threshold ?? ROOMY,
   };
@@ -366,6 +368,73 @@ async function compact(
 }
 
 describe("compactMessages: tool-result cap heuristic", () => {
+  it.each([false, true])(
+    "summarizes provider-measured pressure when capping is insufficient (tool output: %s)",
+    async (withToolOutput) => {
+      const messages = [
+        ...checkpointHead("Previous investigation checkpoint."),
+        user("Dense multilingual context ".repeat(30)),
+        ...(withToolOutput
+          ? toolExchange({ callId: "call-0", payloadChars: 4_000 })
+          : [assistant("Evidence recorded.")]),
+        user("Continue the investigation."),
+      ];
+      const measuredConfig = {
+        lastKnownInputTokens: 30_000,
+        lastKnownPromptMessageCount: messages.length - 1,
+        recentWindowSize: 1,
+        threshold: 20_000,
+      };
+      expect(shouldCompact(messages, measuredConfig)).toBe(true);
+      expect(estimateTokens(messages) + ENVELOPE_TOKENS).toBeLessThan(measuredConfig.threshold);
+
+      const { result, summarizer } = await compact(messages, measuredConfig);
+
+      expect(summarizer).toHaveBeenCalledOnce();
+      expect(result[1]).toEqual(assistant("checkpoint text"));
+      expect(result.at(-1)).toEqual(messages.at(-1));
+      expect(result).toHaveLength(3);
+      expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
+    },
+  );
+
+  it("accepts capping that frees enough space against the measured input count", async () => {
+    const messages = [
+      user("Investigate."),
+      ...toolExchange({ callId: "large", payloadChars: 100_000 }),
+      user("Continue."),
+    ];
+    const measuredConfig = {
+      lastKnownInputTokens: 30_000,
+      lastKnownPromptMessageCount: messages.length,
+      recentWindowSize: 1,
+      threshold: 20_000,
+    };
+    expect(shouldCompact(messages, measuredConfig)).toBe(true);
+    const { result, summarizer } = await compact(messages, measuredConfig);
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(result).toHaveLength(messages.length);
+    expect(JSON.stringify(result)).toContain("Truncated by eve");
+  });
+
+  it.each([undefined, -1, 100])(
+    "ignores unusable prompt counts (%s) when evaluating capping",
+    async (lastKnownPromptMessageCount) => {
+      const messages = [
+        user("Investigate."),
+        ...toolExchange({ callId: "large", payloadChars: 4_000 }),
+        user("Continue."),
+      ];
+      const { summarizer } = await compact(messages, {
+        lastKnownInputTokens: 30_000,
+        lastKnownPromptMessageCount,
+        recentWindowSize: 1,
+        threshold: 20_000,
+      });
+      expect(summarizer).not.toHaveBeenCalled();
+    },
+  );
+
   it("caps oversized older tool results in place without calling the summarizer", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
