@@ -2329,15 +2329,23 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
+    ctx.set(SessionIdKey, "test-session");
+    const owner = {
+      sessionId: "test-session",
+      scope: "step" as const,
+      resolverSlug: "tfl",
+      entryKey: "tfl__getLineStatus",
+      name: "tfl__getLineStatus",
+    };
     registerDurableDynamicCallback({
       callback: () => ({ ok: true }),
       phase: "execute",
-      toolName: "tfl__getLineStatus",
+      owner,
     });
     registerDurableDynamicCallback({
       callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
       phase: "approvalRequest",
-      toolName: "tfl__getLineStatus",
+      owner,
     });
     ctx.set(StepDynamicToolMetadataKey, [
       {

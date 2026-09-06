@@ -12,6 +12,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import {
   AuthKey,
   SessionKey,
+  SessionIdKey,
   SessionDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
@@ -211,6 +212,7 @@ function createApprovalContext(): ContextContainer {
   };
   const ctx = new ContextContainer();
   ctx.set(AuthKey, responder);
+  ctx.set(SessionIdKey, "generate-approval-resume-session");
   ctx.set(SessionKey, {
     auth: { current: responder, initiator: null },
     sessionId: "generate-approval-resume-session",
@@ -288,12 +290,19 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     ].flatMap((scope) => ["structured", "text"].map((response) => ({ ...scope, response }))),
   )(
     "records the scoped key for a $response approval of a $scope dynamic tool",
-    async ({ metadataKey, response }) => {
+    async ({ metadataKey, response, scope }) => {
       const ctx = createApprovalContext();
       const execute = vi.fn(async () => "/workspace");
-      registerDurableDynamicCallback({ toolName: "bash", phase: "execute", callback: execute });
+      const owner = {
+        sessionId: ctx.require(SessionIdKey),
+        scope: scope as "session" | "turn" | "step",
+        resolverSlug: "dynamic-shell",
+        entryKey: "bash",
+        name: "bash",
+      };
+      registerDurableDynamicCallback({ owner, phase: "execute", callback: execute });
       registerDurableDynamicCallback({
-        toolName: "bash",
+        owner,
         phase: "approvalKey",
         callback: (_closure, input: { command: string }) => `bash:${input.command}`,
       });
@@ -389,6 +398,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       principalType: "user" as const,
     };
     ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: null },
       sessionId: "generate-approval-resume-session",
@@ -516,6 +526,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: null },
       sessionId: "generate-approval-resume-session",

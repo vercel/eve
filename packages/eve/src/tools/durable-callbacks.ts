@@ -13,7 +13,8 @@ export type DurableDynamicCallbackFn = (closure: JsonObject, ...args: never[]) =
 
 /**
  * Persisted binding for one callback phase. Identity is
- * `(toolName, phase)` — carried by the surrounding metadata — so only the
+ * session, lifecycle scope, resolver, entry, tool name, and phase — carried
+ * by the surrounding context and metadata — so only the
  * snapshotted closure values persist.
  */
 export interface DurableDynamicCallbackReference {
@@ -46,43 +47,79 @@ export type LiveDurableDynamicToolCallbacks = Partial<{
 const STAMPED_CALLBACK = Symbol.for("eve:durable-dynamic-callback");
 export const DURABLE_DYNAMIC_TOOL_CALLBACKS = Symbol.for("eve:durable-dynamic-tool-callbacks");
 
-const REGISTRY = Symbol.for("eve:dynamic-tool-callbacks");
+const REGISTRY = Symbol.for("eve:scoped-dynamic-tool-callbacks");
+const MAX_CACHED_SESSIONS = 1_024;
 
-type Registry = Map<string, Map<DurableDynamicCallbackPhase, DurableDynamicCallbackFn>>;
+export type DynamicToolCallbackScope = "session" | "turn" | "step";
+
+export interface DynamicToolCallbackOwner {
+  readonly sessionId: string;
+  readonly scope: DynamicToolCallbackScope;
+  readonly resolverSlug: string;
+  readonly entryKey: string;
+  readonly name: string;
+}
+
+type Registry = Map<string, Map<string, DurableDynamicCallbackFn>>;
 
 function getRegistry(): Registry {
   const global = globalThis as Record<symbol, Registry | undefined>;
-  const existing = global[REGISTRY];
-  if (existing !== undefined) return existing;
-
-  const registry: Registry = new Map();
-  global[REGISTRY] = registry;
-  return registry;
+  return (global[REGISTRY] ??= new Map());
 }
 
-/**
- * Binds the current implementation of one tool callback phase. Re-resolution
- * replaces the binding, so replay after a redeploy runs the latest code.
- */
+function getSessionBindings(sessionId: string): Map<string, DurableDynamicCallbackFn> | undefined {
+  const registry = getRegistry();
+  const bindings = registry.get(sessionId);
+  if (bindings !== undefined) {
+    registry.delete(sessionId);
+    registry.set(sessionId, bindings);
+  }
+  return bindings;
+}
+
+function callbackKey(owner: DynamicToolCallbackOwner, phase: DurableDynamicCallbackPhase): string {
+  return JSON.stringify([owner.scope, owner.resolverSlug, owner.entryKey, owner.name, phase]);
+}
+
+/** Re-resolution updates only the same session's resolver and lifecycle scope. */
 export function registerDurableDynamicCallback(input: {
   readonly callback: DurableDynamicCallbackFn;
   readonly phase: DurableDynamicCallbackPhase;
-  readonly toolName: string;
+  readonly owner: DynamicToolCallbackOwner;
 }): void {
   const registry = getRegistry();
-  let phases = registry.get(input.toolName);
-  if (phases === undefined) {
-    phases = new Map();
-    registry.set(input.toolName, phases);
+  let bindings = getSessionBindings(input.owner.sessionId);
+  if (bindings === undefined) {
+    bindings = new Map();
+    registry.set(input.owner.sessionId, bindings);
+    // Eviction behaves like a process restart: missing bindings must rebind or fail closed.
+    if (registry.size > MAX_CACHED_SESSIONS) registry.delete(registry.keys().next().value!);
   }
-  phases.set(input.phase, input.callback);
+  bindings.set(callbackKey(input.owner, input.phase), input.callback);
 }
 
 export function lookupDurableDynamicCallback(
-  toolName: string,
+  owner: DynamicToolCallbackOwner,
   phase: DurableDynamicCallbackPhase,
 ): DurableDynamicCallbackFn | undefined {
-  return getRegistry().get(toolName)?.get(phase);
+  return getSessionBindings(owner.sessionId)?.get(callbackKey(owner, phase));
+}
+
+/** Discards completed sessions or a resolver's previous result before replacement. */
+export function clearDurableDynamicCallbacks(
+  sessionId: string,
+  resolver?: { readonly scope: DynamicToolCallbackScope; readonly resolverSlug: string },
+): void {
+  if (resolver === undefined) {
+    getRegistry().delete(sessionId);
+    return;
+  }
+  const bindings = getSessionBindings(sessionId);
+  if (bindings === undefined) return;
+  const prefix = JSON.stringify([resolver.scope, resolver.resolverSlug]).slice(0, -1) + ",";
+  for (const key of bindings.keys()) {
+    if (key.startsWith(prefix)) bindings.delete(key);
+  }
 }
 
 /** Invokes a registered callback with its snapshotted closure and live arguments. */
@@ -96,11 +133,17 @@ export function callDurableDynamicCallback(
 
 /** True when any persisted callback of these tools has no registered binding. */
 export function hasUnregisteredDurableDynamicCallbacks(
-  metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
+  metadata: readonly {
+    callbacks: DurableDynamicToolCallbacks;
+    name: string;
+    resolverSlug: string;
+    entryKey: string;
+  }[],
+  scope: Pick<DynamicToolCallbackOwner, "sessionId" | "scope">,
 ): boolean {
   return metadata.some((entry) =>
     (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
-      (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
+      (phase) => lookupDurableDynamicCallback({ ...entry, ...scope }, phase) === undefined,
     ),
   );
 }
