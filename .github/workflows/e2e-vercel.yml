@@ -207,7 +207,7 @@ jobs:
             pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
             wait_for_target "https://$ALIAS"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
-              npx eve eval --tag redeploy --max-concurrency 1 --strict --verbose --exclude-tag real-model \
+              npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \
               --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"
           fi

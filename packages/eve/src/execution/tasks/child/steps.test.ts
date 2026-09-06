@@ -8,8 +8,11 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 
+vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn() }));
 vi.mock("#execution/wire/session-inbox-resume.js", () => ({ resumeSessionInbox: vi.fn() }));
 vi.mock("#execution/tools/workflow/answer.js", () => ({
   resumeWorkflowToolRunAnswers: vi.fn(),
@@ -235,26 +238,26 @@ describe("deliverTaskInputResponsesStep", () => {
 });
 
 describe("wakeTaskAgentRequestParentStep", () => {
-  it("forwards an agent invocation through the typed task envelope", async () => {
-    const request = {
-      from: {
-        callId: "call-1",
-        execution: "background" as const,
-        input: {},
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      replyTo: "agent-reply",
-      request: {
-        input: { message: "Find it", target: "research" },
-        invocationId: "call-1:research",
-        kind: "agent-invoke" as const,
-      },
-    };
+  const request = {
+    from: {
+      callId: "call-1",
+      execution: "background" as const,
+      input: {},
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: "research",
+      turnId: "turn-1",
+    },
+    replyTo: "agent-reply",
+    request: {
+      input: { message: "Find it", target: "research" },
+      invocationId: "call-1:research",
+      kind: "agent-invoke" as const,
+    },
+  };
 
+  it("forwards an agent invocation through the typed task envelope", async () => {
     await wakeTaskAgentRequestParentStep({ request, taskId: "task-1", token: "parent-token" });
 
     expect(resumeSessionInbox).toHaveBeenCalledWith("parent-token", {
@@ -276,5 +279,40 @@ describe("wakeTaskAgentRequestParentStep", () => {
       },
       taskDeliveryId: "task-1:agent:run-1:call-1:research",
     });
+  });
+
+  it("returns a compatibility error to the waiting worker instead of leaving it blocked", async () => {
+    vi.mocked(resumeSessionInbox).mockRejectedValue(
+      new SessionInboxWireError("Unsupported wire version 3."),
+    );
+
+    await wakeTaskAgentRequestParentStep({ request, taskId: "task-1", token: "parent-token" });
+
+    expect(resumeHook).toHaveBeenCalledWith("agent-reply", {
+      kind: "runtime-action-result",
+      results: [
+        {
+          callId: "call-1:research",
+          isError: true,
+          kind: "subagent-result",
+          origin: "dispatch",
+          output: {
+            code: "SESSION_INBOX_INCOMPATIBLE",
+            message: expect.stringContaining("Unsupported wire version 3"),
+          },
+          subagentName: "research",
+        },
+      ],
+    });
+  });
+
+  it("leaves transport failures retryable", async () => {
+    const error = new Error("Connection reset");
+    vi.mocked(resumeSessionInbox).mockRejectedValue(error);
+
+    await expect(
+      wakeTaskAgentRequestParentStep({ request, taskId: "task-1", token: "parent-token" }),
+    ).rejects.toBe(error);
+    expect(resumeHook).not.toHaveBeenCalled();
   });
 });

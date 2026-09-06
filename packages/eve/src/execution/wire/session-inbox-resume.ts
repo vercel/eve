@@ -5,10 +5,7 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
-import {
-  isSessionCommandHookToken,
-  sessionCommandHookToken,
-} from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
   isSessionInboxAddress,
@@ -43,26 +40,13 @@ export async function resumeSessionInbox(
     );
   }
 
-  const token = address;
-  if (isStableInboxFastPathCompatible(token, command)) {
-    return await resumeHook(
-      token,
-      sessionInboxWire.encode(command, { variant: "send", version: 0 }),
-    );
-  }
-
-  const hook = await getHookByToken(token);
+  const hook = await getHookByToken(address);
   const target = await resolveSessionInboxWireTarget(hook);
+  if (target.version === 0) {
+    // A legacy envelope can carry new fields without its consumer understanding them.
+    sessionInboxWire.encode(command, { version: 1 });
+  }
   return await resumeHook(hook, sessionInboxWire.encode(command, target));
-}
-
-function isStableInboxFastPathCompatible(
-  token: string,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): boolean {
-  if (!isSessionCommandHookToken(token)) return false;
-  if (command.kind === "cancel" && command.tasks === true) return false;
-  return !("caller" in command && command.caller?.activityObserver !== undefined);
 }
 
 type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;
