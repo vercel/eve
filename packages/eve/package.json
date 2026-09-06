@@ -420,6 +420,12 @@
       "types": "./dist/src/setup/index.d.ts",
       "import": "./dist/src/setup/index.js",
       "default": "./dist/src/setup/index.js"
+    },
+    "./self-modification/config": {
+      "eve-source": "./src/self-modification/config.ts",
+      "types": "./dist/src/self-modification/config.d.ts",
+      "import": "./dist/src/self-modification/config.js",
+      "default": "./dist/src/self-modification/config.js"
     }
   },
   "publishConfig": {
