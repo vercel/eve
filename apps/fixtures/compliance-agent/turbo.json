@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["$TURBO_EXTENDS$", "eve#build"]
+    },
+    "test": {
+      "dependsOn": ["eve#build"]
+    }
+  }
+}
