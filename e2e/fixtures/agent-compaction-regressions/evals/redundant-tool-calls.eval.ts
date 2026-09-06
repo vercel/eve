@@ -11,7 +11,7 @@ export default defineEval({
         "[case: redundant-tool-calls]",
         "Call inspect-repository exactly once with scope repository.",
         "After it succeeds, call advance-checkpoint exactly once with regressionCase redundant-tool-calls.",
-        "Then report REPOSITORY_INSPECTION_COMPLETE and SECOND_CHECKPOINT_READY and call no more tools.",
+        "Then report REPOSITORY_INSPECTION_COMPLETE and the checkpoint tool's marker and call no more tools.",
       ].join("\n"),
     );
 
