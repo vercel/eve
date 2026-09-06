@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import {
   isStepCount,
   type LanguageModelCallEndEvent,
@@ -544,7 +545,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
-      if (!emit || config.mode !== "conversation") throw error;
+      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
+        throw error;
+      }
 
       stepInstrumentation?.recordError(error);
       const errorId = createErrorId();

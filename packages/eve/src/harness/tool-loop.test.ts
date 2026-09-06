@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -12787,7 +12788,8 @@ describe("boundary event failures", () => {
       let denied = true;
       const emit: HarnessEmitFn = async (event) => {
         events.push(event);
-        if (denied && event.type === boundary) throw new Error("admission denied");
+        if (denied && event.type === boundary)
+          throw new BoundaryHookError(new Error("admission denied"));
       };
       const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
       const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
@@ -12832,7 +12834,8 @@ describe("boundary event failures", () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const emit: HarnessEmitFn = async (event) => {
       events.push(event);
-      if (event.type === "step.started") throw new Error("step budget exhausted");
+      if (event.type === "step.started")
+        throw new BoundaryHookError(new Error("step budget exhausted"));
     };
     const session = setHarnessEmissionState(createTestSession(), {
       sessionStarted: true,
@@ -12851,7 +12854,7 @@ describe("boundary event failures", () => {
 
   it("lets a failed failure handler escalate", async () => {
     const emit: HarnessEmitFn = async (event) => {
-      if (event.type === "turn.started") throw new Error("admission denied");
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
       if (event.type === "turn.failed") throw new Error("failure handler failed");
     };
     await expect(
@@ -12865,12 +12868,24 @@ describe("boundary event failures", () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const emit: HarnessEmitFn = async (event) => {
       events.push(event);
-      if (event.type === "turn.started") throw new Error("task denied");
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("task denied"));
     };
     await expect(
       createToolLoopHarness(createTestConfig("task", emit))(createTestSession(), { message: "Hi" }),
     ).rejects.toThrow("task denied");
     expect(events.map((event) => event.type)).not.toContain("session.waiting");
+  });
+
+  it("keeps runtime preamble failures terminal", async () => {
+    const failure = new Error("memory recall failed");
+    const emit: HarnessEmitFn = async (event) => {
+      if (event.type === "turn.started") throw failure;
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toBe(failure);
   });
 
   it("preserves explicit cancellation from a boundary handler", async () => {

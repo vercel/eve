@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
@@ -26,11 +27,18 @@ export async function dispatchStreamEventHooks(input: {
   }
 
   const hookCtx = buildHookContext(input.ctx);
-  for (const entry of typed) {
-    await entry.handler(input.event, hookCtx);
-  }
-  for (const entry of wildcard) {
-    await entry.handler(input.event, hookCtx);
+  try {
+    for (const entry of typed) {
+      await entry.handler(input.event, hookCtx);
+    }
+    for (const entry of wildcard) {
+      await entry.handler(input.event, hookCtx);
+    }
+  } catch (error) {
+    if (input.event.type === "turn.started" || input.event.type === "step.started") {
+      throw new BoundaryHookError(error);
+    }
+    throw error;
   }
 }
 
