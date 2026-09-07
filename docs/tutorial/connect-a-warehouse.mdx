@@ -35,7 +35,7 @@ npx vercel@latest connect attach "<returned-connector-uid>" --yes
 npx vercel@latest env pull
 ```
 
-`vercel env pull` provides `VERCEL_OIDC_TOKEN` for local requests to Connect. Restart `npm run dev` after pulling the environment. The [Connect reference](https://vercel.com/docs/connect) covers service-specific setup and project attachments.
+`vercel env pull` provides `VERCEL_OIDC_TOKEN` for local requests to Connect. That token identifies your Vercel project; it does not sign an end user into the app. The steps below use the authenticated deployment from [Ship it](./ship-it#replace-placeholderauth). The [Connect reference](https://vercel.com/docs/connect) covers service-specific setup and project attachments.
 
 ## Declare the connection
 
@@ -56,7 +56,15 @@ The filename registers the eve connection as `"warehouse"`, with tools named `wa
 
 `connect("...")` is user-scoped by default. Each end-user authorizes in their own browser, and eve resolves that user's token before a tool call. The eve channel's route auth must map the signed-in app user to `principalType: "user"`. `localDev()`, a runtime token, or a placeholder guard cannot supply that identity; those sessions fail with `reason: "principal_required"` before OAuth starts. For a shared app credential, see [app vs. user auth](../connections#choose-app-vs-user-auth).
 
-## What the user sees
+## Deploy and try it
+
+Deploy the updated app so the authenticated web app includes the new connection:
+
+```bash
+npx vercel@latest deploy
+```
+
+Open the new HTTPS preview URL, sign in with the credentials configured in [Ship it](./ship-it#replace-placeholderauth), and create a new session. The tutorial's development server bypasses the browser login and uses `localDev()`; restarting `npm run dev` alone does not provide the user identity this connection requires.
 
 From your authenticated web app, ask the agent to inspect the warehouse's available tables and then query a table you have access to. Use the server's schema rather than assuming it has the tutorial's `orders` and `customers` tables.
 
