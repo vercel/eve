@@ -757,12 +757,19 @@ describe("workflowEntry integration", () => {
             },
             continuationToken,
           }),
-        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+        ).resolves.toEqual({
+          deliveryId: "delivery-followup",
+          sessionId: run.runId,
+          status: "accepted",
+        });
 
         const secondTurn = await stream.nextTurn();
 
         expect(secondTurn.at(-1)?.type).toBe("session.waiting");
         expect(secondTurn.every((event) => typeof event.meta?.at === "string")).toBe(true);
+        expect(
+          secondTurn.every((event) => event.meta?.deliveryIds?.includes("delivery-followup")),
+        ).toBe(true);
         expect(
           secondTurn.some(
             (event) =>

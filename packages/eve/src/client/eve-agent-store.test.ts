@@ -66,10 +66,18 @@ function streamingTurnEvents(): MessageStreamEvent[] {
 }
 
 function startedResponse(): Response {
-  return new Response(JSON.stringify({ ok: true, sessionId: "session_1", status: "accepted" }), {
-    headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
-    status: 202,
-  });
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      sessionId: "session_1",
+      status: "accepted",
+      deliveryId: "delivery_1",
+    }),
+    {
+      headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
+      status: 202,
+    },
+  );
 }
 
 function versionedStreamResponse<Version extends MessageStreamVersion>(
@@ -840,7 +848,10 @@ describe("EveAgentStore steering", () => {
         turnId: "turn_2",
       }),
       createSessionWaitingEvent(),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: [index < 4 ? "first-delivery" : "delivery_1"] },
+    }));
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())

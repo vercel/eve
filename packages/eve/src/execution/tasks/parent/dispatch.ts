@@ -9,6 +9,8 @@ import {
 } from "#execution/tasks/parent/control-shared.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   cancelTaskOwnedWork,
   type TaskExecutorCancel,
@@ -123,7 +125,7 @@ export async function cancelOwnedTask(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {
-  await sendTaskCommand({
+  const delivery = await sendTaskCommand({
     command: { kind: "cancel" },
     taskInboxToken: input.entry.taskInboxToken,
   });
@@ -143,12 +145,21 @@ export async function cancelOwnedTask(input: {
 
   // The task inbox may be closed after an earlier cancellation committed but
   // failed to stop its child. Retrying must still finish that cancellation.
-  await cancelTaskOwnedWork({
+  const forcedShutdown = await cancelTaskOwnedWork({
     cancelOwnedWork: input.cancelOwnedWork,
     entry: input.entry,
     serializedContext: input.serializedContext,
     session: input.session,
   });
+  if ((delivery === "unreachable" || forcedShutdown) && input.session !== undefined) {
+    // Forced shutdown can interrupt the lifecycle between its committed view
+    // and parent wake. Retried cancellation must finish delivery even when the
+    // inbox is gone; the shared delivery id deduplicates a wake already sent.
+    await wakeTaskParentStep({
+      token: sessionCommandHookToken(input.session.sessionId),
+      view,
+    });
+  }
   return view;
 }
 

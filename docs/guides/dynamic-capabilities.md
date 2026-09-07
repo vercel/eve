@@ -257,11 +257,11 @@ Call expressions such as `execute: makeExecutor()` are not transformed. Put the 
 
 ### Identity and redeploys
 
-A parked call binds to its callback by **tool name and phase** — the same identity a static tool uses — never by source position. This gives dynamic tools static-tool semantics across deploys:
+A parked call binds to its callback within its session, lifecycle scope, and resolver entry. Another session or scope can expose the same tool name without replacing that binding. Callback identity does not depend on source position:
 
-- Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
-- If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
+- Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
+- If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
+- If the owning resolver no longer returns that tool, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
 
 ### Naming
 

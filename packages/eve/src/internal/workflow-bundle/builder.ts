@@ -14,9 +14,6 @@ import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-pac
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
   type AuthoredWorkflowModules,
-  discoverAuthoredWorkflowModules,
-} from "#internal/workflow-bundle/authored-workflow-modules.js";
-import {
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
   composeWorkflowDriverCode,
@@ -54,6 +51,7 @@ import {
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
 export class WorkflowBundleBuilder {
+  readonly #authoredWorkflowModules: AuthoredWorkflowModules;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
@@ -78,6 +76,10 @@ export class WorkflowBundleBuilder {
       workingDir: options.rootDir,
     };
 
+    this.#authoredWorkflowModules = options.authoredWorkflowModules ?? {
+      directiveModules: [],
+      workflowModules: [],
+    };
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
@@ -107,7 +109,7 @@ export class WorkflowBundleBuilder {
 
     await mkdir(this.#outDir, { recursive: true });
     const frameworkEntries = await this.discoverEntries(frameworkInputFiles);
-    const appEntries = await discoverAuthoredWorkflowModules(this.transformProjectRoot);
+    const appEntries = this.#authoredWorkflowModules;
     const stepEntries = mergeStepEntries(frameworkEntries, appEntries);
 
     const stepsOutfile = join(this.#outDir, "steps.mjs");
@@ -172,7 +174,7 @@ export class WorkflowBundleBuilder {
   }
 
   protected async findTsConfigPath(): Promise<string | undefined> {
-    let current = this.config.workingDir;
+    let current = this.transformProjectRoot;
 
     while (true) {
       for (const filename of ["tsconfig.json", "jsconfig.json"]) {
@@ -290,6 +292,12 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
+      onwarn(warning: { code: string; message: string }, warn: (warning: unknown) => void) {
+        if (warning.code === "UNRESOLVED_IMPORT") {
+          throw new Error(`Cannot build workflow bundle: ${warning.message}`);
+        }
+        warn(warning);
+      },
       input: WORKFLOW_VIRTUAL_ENTRY_ID,
       platform: "neutral",
       plugins: [
