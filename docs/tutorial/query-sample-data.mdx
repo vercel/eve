@@ -60,7 +60,7 @@ async function db() {
 
 export async function runReadOnlySql(sql: string) {
   const database = await db();
-  const query = `SELECT * FROM (${sql.trim().replace(/;$/, "")}) LIMIT 501`;
+  const query = `SELECT * FROM (\n${sql.trim().replace(/;$/, "")}\n) LIMIT 501`;
   const statement = database.prepare(query);
   try {
     // prepare() accepts the first statement; reject any unparsed trailing SQL.
