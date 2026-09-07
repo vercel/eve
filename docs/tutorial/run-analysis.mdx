@@ -32,37 +32,57 @@ Top-level workspace entries get advertised to the model automatically, so it kno
 The built-in `bash`, `read_file`, and `write_file` tools already target the sandbox. When you write your own analysis steps, grab a live handle with `ctx.getSandbox()`:
 
 ```ts title="agent/tools/chart_series.ts"
+import { randomUUID } from "node:crypto";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
   description:
     "Plot a time series to a PNG in the workspace. Pass {date, value} points; " +
-    "returns the chart path.",
+    "returns the chart path and PNG data for the client to save.",
   inputSchema: z.object({
-    title: z.string(),
-    points: z.array(z.object({ date: z.string(), value: z.number() })),
+    title: z.string().min(1).max(120),
+    points: z
+      .array(z.object({ date: z.string().max(40), value: z.number() }))
+      .min(1)
+      .max(366),
   }),
   async execute({ title, points }, ctx) {
     const sandbox = await ctx.getSandbox();
+    const directory = `analysis/${randomUUID()}`;
     await sandbox.writeTextFile({
-      path: "analysis/series.json",
+      path: `${directory}/series.json`,
       content: JSON.stringify({ title, points }),
     });
     await sandbox.writeTextFile({
-      path: "analysis/plot.py",
+      path: `${directory}/plot.py`,
       content: [
         "import json, matplotlib",
         "matplotlib.use('Agg')",
         "import matplotlib.pyplot as plt",
         "d = json.load(open('series.json'))",
+        "plt.figure(figsize=(8, 4), dpi=100)",
         "plt.plot([p['date'] for p in d['points']], [p['value'] for p in d['points']])",
         "plt.title(d['title']); plt.savefig('chart.png')",
       ].join("\n"),
     });
-    const root = sandbox.resolvePath("analysis");
+    const root = sandbox.resolvePath(directory);
     await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
-    return { chart: `${root}/chart.png` };
+    const chart = `${root}/chart.png`;
+    const png = await sandbox.readBinaryFile({ path: chart });
+    if (!png || png.byteLength === 0) {
+      throw new Error("The chart command did not produce a PNG.");
+    }
+    if (png.byteLength > 1024 * 1024) {
+      throw new Error("The chart exceeds the 1 MiB download limit. Plot fewer points.");
+    }
+    return { chart, pngBase64: Buffer.from(png).toString("base64") };
+  },
+  toModelOutput({ chart }) {
+    return {
+      type: "text",
+      value: `Created ${chart}. The PNG is available in the tool result for the client to save.`,
+    };
   },
 });
 ```
@@ -76,6 +96,66 @@ Plot total order revenue per customer.
 ```
 
 The model queries for the numbers (the warehouse from Step 4, or the sample dataset if you skipped it), checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
+
+## Save the chart to your computer
+
+A sandbox path is not a download URL or a file on your laptop. `readBinaryFile` copies the generated PNG out of the sandbox into the tool result, where your client can use it. `toModelOutput` sends the model only a short description, so the image's base64 data does not fill its context. The TUI shows tool results as text; it does not save or preview this PNG automatically.
+
+Create this script in your project root. It asks for a chart through the same local HTTP API as the TUI, then saves the successful tool result as `chart.png` in the directory where you run the script:
+
+```ts title="save-chart.ts"
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { Client } from "eve/client";
+import { z } from "zod";
+
+const host = process.argv[2];
+if (!host) throw new Error("Usage: node save-chart.ts <dev-server-url>");
+
+const client = new Client({ host });
+const { response } = await client.sessions.create({
+  message: "Use run_sql and chart_series to plot daily order revenue in May 2026.",
+});
+const turn = await response.result();
+if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
+
+const chartOutput = z.object({ pngBase64: z.string().min(1).max(1_398_104) });
+let saved = false;
+for (const event of turn.events) {
+  if (event.type !== "action.result") continue;
+  const result = event.data.result;
+  if (result.kind !== "tool-result" || result.toolName !== "chart_series" || result.isError)
+    continue;
+
+  const { pngBase64 } = chartOutput.parse(result.output);
+  const png = Buffer.from(pngBase64, "base64");
+  if (
+    png.byteLength > 1024 * 1024 ||
+    !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  ) {
+    throw new Error("The tool result is not a PNG within the 1 MiB download limit.");
+  }
+  await writeFile("chart.png", png);
+  saved = true;
+}
+if (!saved) {
+  console.error(turn.message ?? "The agent returned no explanation.");
+  throw new Error("No chart was returned. Check the agent's response above and sandbox setup.");
+}
+console.log(`Saved ${resolve("chart.png")}`);
+```
+
+Keep `npm run dev` running. In a second terminal, run the script with the actual URL printed by the dev server; for example:
+
+```bash
+node save-chart.ts http://localhost:2000
+```
+
+Open the saved `chart.png` in your image viewer. This creates a separate session from your TUI conversation and overwrites an existing `chart.png`. A failed tool call or a turn without a chart fails the script instead of claiming a file was saved.
+
+The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
+
+This example caps charts at 1 MiB because tool outputs are persisted with session events. For larger files, copy the bytes to your application's file storage and return an authorized download URL instead. Sandbox files themselves are not permanent artifact storage.
 
 ## Secrets stay out of the sandbox
 
