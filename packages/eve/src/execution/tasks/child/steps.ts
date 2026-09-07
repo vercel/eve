@@ -27,7 +27,6 @@ import {
   type TaskProgress,
   type TaskView,
 } from "#tasks/types.js";
-import { withAgentInvocationParent } from "#tracing/agent-invocation-request.js";
 
 const log = createLogger("execution.tasks.run");
 
@@ -198,10 +197,7 @@ export async function wakeTaskAgentRequestParentStep(input: {
   }
   const delivery: TaskAgentRequestDelivery = {
     replyTo: input.request.replyTo,
-    request:
-      request.kind === "agent-invoke"
-        ? withAgentInvocationParent(request, input.request.from.callId)
-        : request,
+    request,
     taskId: input.taskId,
   };
   const invocationId =

@@ -10,6 +10,8 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 
+export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
+
 export interface AgentTraceContextState {
   readonly actionAnchors: Readonly<Record<string, AgentActionTraceState>>;
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;

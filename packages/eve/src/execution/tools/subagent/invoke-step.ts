@@ -50,19 +50,15 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
-import {
-  failAgentInvocationTrace,
-  prepareAgentInvocationTrace,
-  settleAgentInvocationTrace,
-} from "#tracing/agent-invocation-coordinator.js";
-import { readAgentInvocationParent } from "#tracing/agent-invocation-request.js";
+import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
+import { withAgentChildTrace } from "#tracing/agent-child-trace.js";
 
 export type AgentInvocationDispatchResult =
   | {
       readonly kind: "dispatched";
       readonly agentId: string;
       readonly event: SubagentCalledStreamEvent;
-      readonly serializedContext: Record<string, unknown>;
+      readonly serializedContext?: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
@@ -111,17 +107,14 @@ export async function dispatchAgentInvocation(input: {
   const invocationAction = entry.kind === "start" ? entry.target.action : entry.action;
   const tracing = prepareAgentInvocationTrace({
     channelMetadata: prepared.channelMetadata,
-    invocation: {
-      callId: invocationAction.callId,
-      kind: invocationAction.kind,
-      name: invocationAction.name,
-      parentActionCallId: readAgentInvocationParent(input.request),
-    },
+    invocation: invocationAction,
+    ownerId: input.ownerId,
     serializedContext: prepared.serializedContext,
     sessionId: prepared.session.sessionId,
+    sessionState: durableSession.state,
+    taskId: input.taskId,
     turnId: prepared.batch.event.turnId,
   });
-  let serializedContext = tracing.serializedContext;
   let session = prepared.session;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
@@ -130,6 +123,12 @@ export async function dispatchAgentInvocation(input: {
       session: projectToDurableSession(session),
       state: input.sessionState,
     });
+  const failed = (result: RuntimeSubagentResult): AgentInvocationDispatchResult => ({
+    kind: "failed",
+    result,
+    serializedContext: tracing.fail(result),
+    sessionState: sessionState(),
+  });
   const applyHandleCommand = (command: AgentHandleStoreCommand): AgentHandleStoreCommandResult => {
     const applied = applyTaskAgentHandleCommand(session, command);
     session = applied.session;
@@ -171,20 +170,7 @@ export async function dispatchAgentInvocation(input: {
       });
       claimed = readClaimedHandle(claim);
       if (claimed === undefined) {
-        const result = createTaskClaimError(entry.action, entry.agentId, claim);
-        serializedContext = failAgentInvocationTrace({
-          callId: invocationAction.callId,
-          result,
-          serializedContext,
-          sessionId: prepared.session.sessionId,
-          turnId: prepared.batch.event.turnId,
-        });
-        return {
-          kind: "failed",
-          result,
-          serializedContext,
-          sessionState: sessionState(),
-        };
+        return failed(createTaskClaimError(entry.action, entry.agentId, claim));
       }
     }
     const bundle = createAgentContinuationBundle({
@@ -243,25 +229,26 @@ export async function dispatchAgentInvocation(input: {
         throw new Error(`Agent handle store rejected start operation "${start.operation.id}".`);
       }
     }
-    outcome = await startSubagent({
-      auth: prepared.auth,
-      batchEvent: prepared.batch.event,
-      bundle: prepared.bundle,
-      callbackBaseUrl: input.callbackBaseUrl,
-      capabilities: prepared.capabilities,
-      channelMetadata: prepared.channelMetadata,
-      currentSession: session,
-      fanoutSize: prepared.fanoutSize,
-      initiatorAuth: prepared.initiatorAuth,
-      localDevRequest: prepared.localDevRequest,
-      parentContinuationToken: input.replyTo,
-      activityObserver: prepared.activityObserver,
-      sandboxSessionId: prepared.sandboxSessionId,
-      session,
-      taskId: input.taskId,
-      target: entry.target,
-      traceDispatch: tracing.dispatch,
-    });
+    outcome = await withAgentChildTrace(tracing.dispatch, () =>
+      startSubagent({
+        auth: prepared.auth,
+        batchEvent: prepared.batch.event,
+        bundle: prepared.bundle,
+        callbackBaseUrl: input.callbackBaseUrl,
+        capabilities: prepared.capabilities,
+        channelMetadata: prepared.channelMetadata,
+        currentSession: session,
+        fanoutSize: prepared.fanoutSize,
+        initiatorAuth: prepared.initiatorAuth,
+        localDevRequest: prepared.localDevRequest,
+        parentContinuationToken: input.replyTo,
+        activityObserver: prepared.activityObserver,
+        sandboxSessionId: prepared.sandboxSessionId,
+        session,
+        taskId: input.taskId,
+        target: entry.target,
+      }),
+    );
     agentId = start.identity.id;
     if (outcome.kind === "error") {
       applyHandleCommand({ agentId, kind: "remove", ownerId: input.ownerId });
@@ -281,19 +268,7 @@ export async function dispatchAgentInvocation(input: {
   }
 
   if (outcome.kind === "error") {
-    serializedContext = failAgentInvocationTrace({
-      callId: invocationAction.callId,
-      result: outcome.result,
-      serializedContext,
-      sessionId: prepared.session.sessionId,
-      turnId: prepared.batch.event.turnId,
-    });
-    return {
-      kind: "failed",
-      result: outcome.result,
-      serializedContext,
-      sessionState: sessionState(),
-    };
+    return failed(outcome.result);
   }
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
@@ -327,7 +302,13 @@ export async function dispatchAgentInvocation(input: {
   if (input.emit !== undefined) {
     await input.emit(event);
   }
-  return { kind: "dispatched", agentId, event, serializedContext, sessionState: sessionState() };
+  return {
+    kind: "dispatched",
+    agentId,
+    event,
+    serializedContext: tracing.serializedContext,
+    sessionState: sessionState(),
+  };
 }
 
 /**
@@ -360,21 +341,12 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
-  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
-}): Promise<{
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}> {
+}): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
-  const serializedContext = settleAgentInvocationTrace({
-    result: input.result,
-    serializedContext: input.serializedContext ?? {},
-    sessionId: durable.sessionId,
-  });
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
     (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
@@ -384,7 +356,7 @@ export async function settleTaskAgentInvocationStep(input: {
       (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
     ) ?? (candidates.length === 1 ? candidates[0] : undefined);
   if (handle?.phase !== "claimed") {
-    return { serializedContext, sessionState: input.sessionState };
+    return { sessionState: input.sessionState };
   }
 
   const nextHandles =
@@ -428,7 +400,6 @@ export async function settleTaskAgentInvocationStep(input: {
     );
   }
   return {
-    serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }

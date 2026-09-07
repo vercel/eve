@@ -11,7 +11,6 @@ import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import { withAgentInvocationParent } from "#tracing/agent-invocation-request.js";
 
 vi.mock("#subagents/event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
@@ -177,14 +176,11 @@ describe("task HITL delivery routing", () => {
 
   it("dispatches agent invocations against the parent state and replies with immediate errors", async () => {
     const nextState = state(false);
-    const request = withAgentInvocationParent(
-      {
-        input: { message: "Find it", target: "research" },
-        invocationId: "call-1:research",
-        kind: "agent-invoke" as const,
-      },
-      "call-1",
-    );
+    const request = {
+      input: { message: "Find it", target: "research" },
+      invocationId: "call-1:research",
+      kind: "agent-invoke" as const,
+    };
     const result = {
       callId: "call-1:research",
       isError: true as const,

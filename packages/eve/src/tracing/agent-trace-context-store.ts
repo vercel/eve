@@ -7,13 +7,13 @@ import type { ContextAccessor } from "#context/key.js";
 import { SessionTraceSeedKey, type SessionTraceSeed } from "#context/keys.js";
 import type {
   AgentActionTraceState,
-  AgentActionTraceTerminalState,
   AgentInvocationTraceState,
   AgentSessionTraceState,
   AgentTraceStateStore,
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { deriveTaskId } from "#tasks/task-id.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   decisionToTraceContentCeiling,
@@ -21,12 +21,13 @@ import {
 } from "#shared/forwarded-trace-policy.js";
 import {
   deserializeAgentTraceContextState,
+  AGENT_TRACE_CONTEXT_KEY,
   emptyAgentTraceContextState,
   serializeAgentTraceContextState,
   type AgentTraceContextState,
 } from "#tracing/agent-trace-context-codec.js";
 
-const AgentTraceContextKey = new ContextKey<AgentTraceContextState>("eve.harness.agentTrace", {
+const AgentTraceContextKey = new ContextKey<AgentTraceContextState>(AGENT_TRACE_CONTEXT_KEY, {
   codec: {
     deserialize: deserializeAgentTraceContextState,
     serialize: serializeAgentTraceContextState,
@@ -107,6 +108,24 @@ export function readActionTraceContext(
   );
 }
 
+/** Task IDs already bind the originating call and turn, including after that turn ends. */
+export function readTaskActionTrace(
+  serializedContext: Readonly<Record<string, unknown>>,
+  sessionId: string,
+  taskId: string,
+): AgentActionTraceState | undefined {
+  const state = deserializeAgentTraceContextState(serializedContext[AgentTraceContextKey.name]);
+  return Object.values(state.actionAnchors).find(
+    (action) =>
+      action.sessionId === sessionId &&
+      deriveTaskId({
+        callId: action.callId,
+        parentSessionId: sessionId,
+        parentTurnId: action.turnId,
+      }) === taskId,
+  );
+}
+
 export function recordNestedAgentInvocation(input: {
   readonly callId: string;
   readonly kind: "remote-agent-call" | "subagent-call";
@@ -153,36 +172,6 @@ export function recordNestedAgentInvocation(input: {
     [AgentTraceContextKey.name]: serializeAgentTraceContextState({
       ...state,
       invocations: { ...state.invocations, [key]: invocation },
-    }),
-  };
-}
-
-export function recordNestedAgentInvocationTerminal(input: {
-  readonly callId: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionId: string;
-  readonly terminal: AgentActionTraceTerminalState;
-  readonly turnId?: string;
-}): Record<string, unknown> {
-  const raw = input.serializedContext[AgentTraceContextKey.name];
-  if (raw === undefined) return input.serializedContext;
-  const state = deserializeAgentTraceContextState(raw);
-  const entry = Object.entries(state.invocations).find(
-    ([, invocation]) =>
-      invocation.sessionId === input.sessionId &&
-      (input.turnId === undefined || invocation.turnId === input.turnId) &&
-      invocation.callId === input.callId,
-  );
-  if (entry === undefined) return input.serializedContext;
-  const [key, invocation] = entry;
-  return {
-    ...input.serializedContext,
-    [AgentTraceContextKey.name]: serializeAgentTraceContextState({
-      ...state,
-      invocations: {
-        ...state.invocations,
-        [key]: { ...invocation, terminal: input.terminal },
-      },
     }),
   };
 }

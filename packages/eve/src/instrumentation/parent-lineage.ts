@@ -1,4 +1,4 @@
-import type { SessionParent } from "#channel/types.js";
+import type { SessionCallback, SessionParent } from "#channel/types.js";
 import { isSubagentAdapterState } from "#subagents/adapter-state.js";
 import type { InstrumentationParentLineage } from "#instrumentation/lifecycle.js";
 
@@ -11,14 +11,15 @@ import type { InstrumentationParentLineage } from "#instrumentation/lifecycle.js
 export function resolveParentLineage(
   parent: SessionParent | undefined,
   adapter: { readonly state?: unknown } | undefined,
-  parentCallId?: string,
+  callback?: SessionCallback,
 ): InstrumentationParentLineage | undefined {
   if (parent === undefined) return undefined;
   const state = adapter?.state;
+  const subagent = isSubagentAdapterState(state) ? state : undefined;
   return {
-    callId: parentCallId ?? parent.callId,
+    callId: callback?.callId ?? subagent?.callId ?? parent.callId,
     sessionId: parent.sessionId,
-    subagentName: isSubagentAdapterState(state) ? state.subagentName : undefined,
+    subagentName: subagent?.subagentName,
     turnId: parent.turn.id,
   };
 }

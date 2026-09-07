@@ -18,6 +18,8 @@ const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 export interface AlsContext extends ContextAccessor {
   /** Verified local development provenance, inherited across durable execution contexts. */
   readonly localDevRequest?: LocalDevRequestProvenance;
+  /** Copies durable and step-local bindings for an isolated nested scope. */
+  fork(): ContextContainer;
   /** Removes a durable or step-local value from the context. */
   delete<T>(key: ContextKey<T>): boolean;
   /**
@@ -45,6 +47,13 @@ export class ContextContainer implements AlsContext {
 
   get localDevRequest(): LocalDevRequestProvenance | undefined {
     return this.get(LocalDevRequestKey);
+  }
+
+  fork(): ContextContainer {
+    const fork = new ContextContainer();
+    for (const [name, value] of this._durableValues) fork._durableValues.set(name, value);
+    for (const [name, value] of this._virtualValues) fork._virtualValues.set(name, value);
+    return fork;
   }
 
   get<T>(key: ContextKey<T>): T | undefined {

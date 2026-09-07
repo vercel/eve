@@ -8,7 +8,7 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { ActivityObserverKey, ParentCallIdKey, SessionCallbackKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
   isSubagentAdapterState,
   SUBAGENT_ADAPTER_KIND,
@@ -269,7 +269,6 @@ export async function bindTurnCallerContextStep(input: {
     caller.activityObserver === undefined
       ? input.serializedContext
       : { ...input.serializedContext, [ActivityObserverKey.name]: caller.activityObserver };
-  const withCaller = { ...withActivity, [ParentCallIdKey.name]: caller.callId };
   if (caller.replyTo.kind === "callback") {
     const callback = {
       callId: caller.callId,
@@ -278,13 +277,13 @@ export async function bindTurnCallerContextStep(input: {
       url: caller.replyTo.url,
     };
     return {
-      ...withCaller,
+      ...withActivity,
       [SessionCallbackKey.name]:
         caller.taskId === undefined ? callback : { ...callback, taskId: caller.taskId },
     };
   }
 
-  const adapter = withCaller[ChannelKey.name];
+  const adapter = withActivity[ChannelKey.name];
   if (
     adapter === null ||
     typeof adapter !== "object" ||
@@ -303,7 +302,7 @@ export async function bindTurnCallerContextStep(input: {
   };
   if (caller.taskId !== undefined) nextState.taskId = caller.taskId;
   return {
-    ...withCaller,
+    ...withActivity,
     [ChannelKey.name]: {
       ...adapter,
       state: nextState,

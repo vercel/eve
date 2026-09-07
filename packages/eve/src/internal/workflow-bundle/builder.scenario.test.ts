@@ -701,6 +701,60 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("keeps agent settlement tracing workflow-safe", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-agent-settlement-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const requestsPath = resolvePackageSourceFilePath(
+      "src/execution/tools/subagent/task-agent-requests.ts",
+    );
+
+    try {
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowFilePath,
+          [
+            `import { applyTaskAgentRequest } from ${JSON.stringify(requestsPath)};`,
+            "export async function settle(delivery, context) {",
+            '  "use workflow";',
+            "  return applyTaskAgentRequest(delivery, context);",
+            "}",
+          ].join("\n"),
+        ),
+      ]);
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const source = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encoded = source.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encoded).not.toBeNull();
+      const code = Buffer.from((JSON.parse(encoded![1]!) as string[]).join(""), "base64").toString(
+        "utf8",
+      );
+      expect(code).toContain("settleAgentInvocationTrace");
+      expect(code).not.toContain("node:crypto");
+      expect(code).not.toContain("node:async_hooks");
+      expect(code).not.toContain("compiled/zod");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows a node builtin used only inside a use step body", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-node-step-ok-"));
     const outDir = join(tempRoot, "workflow-build");

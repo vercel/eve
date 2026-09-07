@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
+import { readAgentChildTrace, withAgentChildTrace } from "#tracing/agent-child-trace.js";
 
 vi.mock("#subagents/start-local.js", () => ({ startLocalSubagent: vi.fn() }));
 vi.mock("#subagents/start-remote.js", () => ({ startRemoteSubagent: vi.fn() }));
@@ -23,7 +24,9 @@ describe("startSubagent", () => {
         traceId: "1".repeat(32),
       };
 
-      await startSubagent({
+      await withAgentChildTrace(
+        { originAudience: "private", parentTraceContext: caller },
+        () => startSubagent({
         auth: null,
         batchEvent: { sequence: 1, turnId: "turn-1" },
         bundle: {} as never,
@@ -44,8 +47,8 @@ describe("startSubagent", () => {
                 source: { type: "runtime" },
               }
             : { action: { callId: "child-action" } as never, kind },
-        traceDispatch: { originAudience: "private", parentTraceContext: caller },
-      });
+      }),
+      );
 
       const start = kind === "local" ? startLocalSubagent : startRemoteSubagent;
       const other = kind === "local" ? startRemoteSubagent : startLocalSubagent;
@@ -66,6 +69,7 @@ describe("startSubagent", () => {
         }),
       );
       expect(other).not.toHaveBeenCalled();
+      expect(readAgentChildTrace()).toBeUndefined();
     },
   );
 });

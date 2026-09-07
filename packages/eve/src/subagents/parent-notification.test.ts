@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { ParentCallIdKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -466,7 +466,6 @@ describe("turn caller binding", () => {
         },
       }),
     ).resolves.toEqual({
-      [ParentCallIdKey.name]: "call-new",
       [ChannelKey.name]: {
         kind: SUBAGENT_ADAPTER_KIND,
         state: {
@@ -494,7 +493,6 @@ describe("turn caller binding", () => {
         serializedContext: {},
       }),
     ).resolves.toEqual({
-      [ParentCallIdKey.name]: "call-new",
       [SessionCallbackKey.name]: {
         callId: "call-new",
         subagentName: "research",
@@ -550,7 +548,6 @@ describe("turn caller binding", () => {
         serializedContext: {},
       }),
     ).resolves.toEqual({
-      [ParentCallIdKey.name]: "call-new",
       [SessionCallbackKey.name]: {
         callId: "call-new",
         subagentName: "research",

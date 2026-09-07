@@ -3,12 +3,22 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
-import {
-  prepareAgentInvocationTrace,
-  settleAgentInvocationTrace,
-} from "#tracing/agent-invocation-coordinator.js";
+import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
+import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
 import { AgentSpanIdGenerator, deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { deriveTaskId } from "#tasks/task-id.js";
+
+const sessionState = {
+  "eve.runtime.workflowToolRuns": [
+    {
+      callId: "workflow",
+      hookToken: "workflow-hook",
+      runId: "workflow-run",
+      toolName: "coordinate",
+    },
+  ],
+};
 
 const RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
 
@@ -73,10 +83,11 @@ describe("agent invocation trace coordinator", () => {
         callId: "workflow",
         kind: "subagent-call",
         name: "research",
-        parentActionCallId: "workflow",
       },
+      ownerId: "workflow-run",
       serializedContext,
       sessionId: "session-1",
+      sessionState,
       turnId: "turn-1",
     });
     const restored = await deserializeContext(prepared.serializedContext);
@@ -99,15 +110,55 @@ describe("agent invocation trace coordinator", () => {
       store.deleteAction("outer");
     });
 
-    const prepared = prepare(await serializeContext(context), "workflow:background");
+    const prepared = prepareAgentInvocationTrace({
+      invocation: { callId: "workflow:background", kind: "subagent-call", name: "research" },
+      ownerId: "background-task",
+      serializedContext: serializeContext(context),
+      sessionId: "session-1",
+      taskId: deriveTaskId({
+        callId: "workflow",
+        parentSessionId: "session-1",
+        parentTurnId: "turn-1",
+      }),
+      turnId: "later-turn",
+    });
 
-    expect(prepared.dispatch.parentTraceContext?.spanId).toBeDefined();
+    expect(prepared.dispatch.parentTraceContext?.spanId).toBe(
+      deriveAgentActionSpanId("session-1", "turn-1", "workflow:background"),
+    );
     await expect(readInvocations(prepared.serializedContext)).resolves.toEqual([
       expect.objectContaining({
         callId: "workflow:background",
         parentActionCallId: "workflow",
       }),
     ]);
+    const failed = prepared.fail({
+      callId: "workflow:background",
+      isError: true,
+      kind: "subagent-result",
+      origin: "dispatch",
+      output: "unreachable",
+      subagentName: "research",
+    });
+    await expect(readInvocations(failed)).resolves.toEqual([
+      expect.objectContaining({
+        turnId: "turn-1",
+        terminal: expect.objectContaining({ outcome: "failed" }),
+      }),
+    ]);
+  });
+
+  it("does not infer an outer call from caller-chosen invocation IDs", async () => {
+    const prepared = prepareAgentInvocationTrace({
+      invocation: { callId: "workflow:unowned", kind: "subagent-call", name: "research" },
+      ownerId: "other-run",
+      serializedContext: await contextWithActionAnchor(),
+      sessionId: "session-1",
+      sessionState,
+      turnId: "turn-1",
+    });
+    expect(prepared.dispatch.parentTraceContext).toBeUndefined();
+    await expect(readInvocations(prepared.serializedContext)).resolves.toEqual([]);
   });
 
   it("records settlement on the matching invocation only", async () => {
@@ -156,10 +207,11 @@ function prepare(serializedContext: Record<string, unknown>, callId: string) {
       callId,
       kind: "subagent-call",
       name: "research",
-      parentActionCallId: "workflow",
     },
+    ownerId: "workflow-run",
     serializedContext,
     sessionId: "session-1",
+    sessionState,
     turnId: "turn-1",
   });
 }

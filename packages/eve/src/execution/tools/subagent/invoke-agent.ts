@@ -19,7 +19,6 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
-import { withAgentInvocationParent } from "#tracing/agent-invocation-request.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
@@ -104,10 +103,7 @@ export async function invokeAgent(
       kind: "request",
       from: run,
       replyTo: replies.token,
-      request: withAgentInvocationParent(
-        { input, invocationId, kind: "agent-invoke" as const },
-        ctx.callId,
-      ),
+      request: { input, invocationId, kind: "agent-invoke" },
     });
 
     const iterator = replies[Symbol.asyncIterator]();
