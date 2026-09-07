@@ -9,8 +9,7 @@ import { vercel } from "eve/sandbox/vercel";
  * - `bootstrap` runs once per sandbox template. It writes a known marker
  *   file into the workspace AND installs a custom CLI (`eve-greet`) onto the
  *   PATH, the way an author would provision tooling every later session
- *   inherits. The CLI is a Python script, so it also proves the base image's
- *   real Python runtime executes bootstrap-authored code.
+ *   inherits.
  * - `onSession` runs once per live session. It writes a per-session marker
  *   so an eval can prove session-scoped setup ran on top of the shared
  *   template.
@@ -20,9 +19,9 @@ import { vercel } from "eve/sandbox/vercel";
  * deployments (where it resolves to `vercel()`). Both run the published eve
  * base image: GHCR locally and VCR on Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG`
  * to `latest` so release PRs can run before their versioned image exists. The
- * image ships Python, Node, and git; the bootstrap below assumes
- * that real-binary environment and is not meant to run against the
- * dependency-free `just-bash` fallback.
+ * image ships Node and git; the bootstrap below assumes that real-binary
+ * environment and is not meant to run against the dependency-free `just-bash`
+ * fallback.
  *
  * `EVE_TEST_AUTHOR_SNAPSHOT_ID`, when set, overrides the backend with
  * `vercel({ source: { type: "snapshot", snapshotId } })` so the
@@ -46,90 +45,78 @@ export const SANDBOX_SESSION_MARKER_PATH = "/workspace/session-marker.txt";
 export const SANDBOX_SESSION_MARKER_TOKEN = "sandbox-onsession-ok-X5T";
 
 const FANOUT_SERVER_PORT = 43_100;
-const FANOUT_SERVER_PATH = "/workspace/eve-fanout-server.py";
+const FANOUT_SERVER_PATH = "/workspace/eve-fanout-server.mjs";
 const FANOUT_SERVER_LOG_PATH = "/workspace/eve-fanout-server.log";
 const FANOUT_BARRIER_SIZE = 10;
-const FANOUT_BARRIER_TIMEOUT_SECONDS = 15;
+const FANOUT_BARRIER_TIMEOUT_MILLISECONDS = 15_000;
 
 const CLI_SCRIPT = [
-  "#!/usr/bin/env python3",
-  "import sys",
-  'name = sys.argv[1] if len(sys.argv) > 1 else "world"',
-  `print(f"${SANDBOX_CLI_TOKEN}:{name}")`,
+  "#!/usr/bin/env node",
+  `const name = process.argv[2] ?? "world";`,
+  `console.log("${SANDBOX_CLI_TOKEN}:" + name);`,
   "",
 ].join("\n");
 
 const FANOUT_SERVER_SCRIPT = [
-  "import json",
-  "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer",
-  "from threading import Condition",
-  "from time import monotonic",
-  "from urllib.parse import parse_qs, urlparse",
+  'import http from "node:http";',
   "",
-  `BARRIER_SIZE = ${FANOUT_BARRIER_SIZE}`,
-  `BARRIER_TIMEOUT_SECONDS = ${FANOUT_BARRIER_TIMEOUT_SECONDS}`,
-  "barrier = Condition()",
-  "arrived = 0",
-  "released_count = None",
+  `const barrierSize = ${FANOUT_BARRIER_SIZE};`,
+  `const barrierTimeoutMilliseconds = ${FANOUT_BARRIER_TIMEOUT_MILLISECONDS};`,
+  "let arrived = 0;",
+  "let releasedCount = null;",
+  "const waiters = new Set();",
   "",
-  "class Handler(BaseHTTPRequestHandler):",
-  "    def do_GET(self):",
-  "        parsed = urlparse(self.path)",
-  "        if parsed.path == '/health':",
-  "            self.respond(200, {'ok': True})",
-  "            return",
-  "        if parsed.path != '/barrier':",
-  "            self.respond(404, {'error': 'not found'})",
-  "            return",
+  "function respond(response, status, body) {",
+  "  const encoded = JSON.stringify(body);",
+  '  response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(encoded) });',
+  "  response.end(encoded);",
+  "}",
   "",
-  "        query = parse_qs(parsed.query)",
-  "        label = query.get('label', [''])[0]",
-  "        search_query = query.get('q', [''])[0]",
-  "        if not label:",
-  "            self.respond(400, {'error': 'label is required'})",
-  "            return",
+  "function waitForBarrier() {",
+  "  if (releasedCount !== null) return Promise.resolve(releasedCount);",
+  "  return new Promise((resolve) => {",
+  "    let timeout;",
+  "    const waiter = (count) => {",
+  "      clearTimeout(timeout);",
+  "      resolve(count);",
+  "    };",
+  "    timeout = setTimeout(() => {",
+  "      waiters.delete(waiter);",
+  "      resolve(null);",
+  "    }, barrierTimeoutMilliseconds);",
+  "    waiters.add(waiter);",
+  "    arrived += 1;",
+  "    if (arrived !== barrierSize) return;",
+  "    releasedCount = arrived;",
+  "    for (const waiting of waiters) waiting(releasedCount);",
+  "    waiters.clear();",
+  "  });",
+  "}",
   "",
-  "        concurrent_calls_at_release = self.wait_for_barrier()",
-  "        if concurrent_calls_at_release is None:",
-  "            self.respond(504, {'error': f'timed out waiting for {BARRIER_SIZE} concurrent calls'})",
-  "            return",
-  "",
-  "        self.respond(200, {",
-  "            'label': label,",
-  "            'query': search_query,",
-  "            'concurrentCallsAtRelease': concurrent_calls_at_release,",
-  "        })",
-  "",
-  "    def wait_for_barrier(self):",
-  "        global arrived, released_count",
-  "        deadline = monotonic() + BARRIER_TIMEOUT_SECONDS",
-  "        with barrier:",
-  "            if released_count is not None:",
-  "                return released_count",
-  "            arrived += 1",
-  "            if arrived == BARRIER_SIZE:",
-  "                released_count = arrived",
-  "                barrier.notify_all()",
-  "                return released_count",
-  "            while released_count is None:",
-  "                remaining = deadline - monotonic()",
-  "                if remaining <= 0:",
-  "                    return None",
-  "                barrier.wait(remaining)",
-  "            return released_count",
-  "",
-  "    def log_message(self, format, *args):",
-  "        return",
-  "",
-  "    def respond(self, status, body):",
-  "        encoded = json.dumps(body).encode('utf-8')",
-  "        self.send_response(status)",
-  "        self.send_header('Content-Type', 'application/json')",
-  "        self.send_header('Content-Length', str(len(encoded)))",
-  "        self.end_headers()",
-  "        self.wfile.write(encoded)",
-  "",
-  `ThreadingHTTPServer(('127.0.0.1', ${FANOUT_SERVER_PORT}), Handler).serve_forever()`,
+  "const server = http.createServer(async (request, response) => {",
+  `  const url = new URL(request.url, "http://127.0.0.1:${FANOUT_SERVER_PORT}");`,
+  '  if (url.pathname === "/health") {',
+  "    respond(response, 200, { ok: true });",
+  "    return;",
+  "  }",
+  '  if (url.pathname !== "/barrier") {',
+  '    respond(response, 404, { error: "not found" });',
+  "    return;",
+  "  }",
+  '  const label = url.searchParams.get("label") ?? "";',
+  '  const searchQuery = url.searchParams.get("q") ?? "";',
+  "  if (!label) {",
+  '    respond(response, 400, { error: "label is required" });',
+  "    return;",
+  "  }",
+  "  const concurrentCallsAtRelease = await waitForBarrier();",
+  "  if (concurrentCallsAtRelease === null) {",
+  "    respond(response, 504, { error: `timed out waiting for ${barrierSize} concurrent calls` });",
+  "    return;",
+  "  }",
+  "  respond(response, 200, { label, query: searchQuery, concurrentCallsAtRelease });",
+  "});",
+  `server.listen(${FANOUT_SERVER_PORT}, "127.0.0.1");`,
   "",
 ].join("\n");
 
@@ -143,7 +130,7 @@ export default defineSandbox({
   backend,
   // Bump when the bootstrap output changes so the reusable template snapshot
   // is rebuilt rather than served stale.
-  revalidationKey: () => "agent-tools-sandbox-bootstrap-v3",
+  revalidationKey: () => "agent-tools-sandbox-bootstrap-v4",
   async bootstrap({ use }) {
     const sandbox = await use();
     await sandbox.writeTextFile({
@@ -172,7 +159,7 @@ export default defineSandbox({
     const startServer = await sandbox.run({
       command: [
         `if ! curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then`,
-        `  nohup python3 ${FANOUT_SERVER_PATH} >${FANOUT_SERVER_LOG_PATH} 2>&1 &`,
+        `  nohup node ${FANOUT_SERVER_PATH} >${FANOUT_SERVER_LOG_PATH} 2>&1 &`,
         "fi",
         "for attempt in $(seq 1 50); do",
         `  if curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then exit 0; fi`,

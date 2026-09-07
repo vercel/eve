@@ -13,9 +13,9 @@ export interface MicrosandboxSandboxCreateOptions {
   /**
    * OCI image used as the base runtime. eve prepares this image with
    * Bash, the framework workspace, and the sandbox user before authored
-   * bootstrap code runs. Install authored runtime tools such as Node,
-   * Python, or ripgrep in sandbox bootstrap or provide them through a
-   * custom image.
+   * bootstrap code runs. The default image includes Node, npm, pnpm, Git,
+   * curl, and ripgrep. Install additional runtimes such as Python in
+   * sandbox bootstrap or provide them through a custom image.
    *
    * @default The `ghcr.io/vercel/eve` tag matching the installed eve version, or `EVE_SANDBOX_IMAGE_TAG` when set.
    */
