@@ -25,6 +25,7 @@ import {
   type DurableDynamicCallbackPhase,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
+import { getDynamicToolSchemas } from "#context/dynamic-tool-schemas.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -89,6 +90,7 @@ export function replayDynamicTools(
   metadata: readonly CurrentDynamicToolMetadata[],
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
+    const schemas = getDynamicToolSchemas(entry);
     const approvalKeyReference = entry.callbacks.approvalKey;
     const approvalKey =
       approvalKeyReference === undefined
@@ -136,7 +138,7 @@ export function replayDynamicTools(
                 );
               },
             }),
-      inputSchema: toInputSchema(entry.inputSchema),
+      inputSchema: schemas.input ?? toInputSchema(entry.inputSchema),
       name: entry.name,
       execution: entry.execution,
       approval: buildReplayedApproval(entry),
@@ -160,7 +162,7 @@ export function replayDynamicTools(
               return key;
             },
           }),
-      outputSchema: toOutputSchema(entry.outputSchema),
+      outputSchema: schemas.output ?? toOutputSchema(entry.outputSchema),
       ...(toModelOutputReference === undefined
         ? {}
         : {
