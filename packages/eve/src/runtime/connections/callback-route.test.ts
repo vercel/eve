@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import {
+  handleAuthorizationCompleteRequest,
   handleConnectionCallbackRequest,
   handleLegacyConnectionCallbackRequest,
 } from "#execution/connections/callback-route.js";
@@ -55,7 +56,7 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("forwards a GET callback into resumeHook as parsed params with no request headers", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}?code=abc&state=xyz`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}?code=abc&state=xyz&x-vercel-protection-bypass=secret`;
     const response = await handleConnectionCallbackRequest(
       new Request(url, {
         headers: { "x-probe": "1" },
@@ -64,13 +65,9 @@ describe("handleConnectionCallbackRequest", () => {
       buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
     );
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/html");
-    const body = await response.text();
-    expect(body).toContain("Authorization complete");
-    expect(body).toContain("You can close this tab and return to your app.");
-    expect(body).toContain('aria-labelledby="authorization-title"');
-    expect(body).toContain('class="icon" aria-hidden="true"');
+    expect(response.status).toBe(303);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("location")).toBe("/eve/v1/connections/authorization-complete");
 
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
@@ -101,7 +98,8 @@ describe("handleConnectionCallbackRequest", () => {
       buildRouteContext({ name: "linear", token: "tok123" }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/eve/v1/connections/authorization-complete");
     expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
       kind: "deliver",
       payloads: [
@@ -116,12 +114,36 @@ describe("handleConnectionCallbackRequest", () => {
     });
   });
 
+  it("preserves a public route prefix in the clean completion redirect", async () => {
+    resumeHookMock.mockResolvedValueOnce(undefined);
+    const callbackPath = createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123");
+    const response = await handleConnectionCallbackRequest(
+      new Request(`https://app.example.com/eve/agents/support${callbackPath}?code=abc`),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "/eve/agents/support/eve/v1/connections/authorization-complete",
+    );
+  });
+
+  it("renders the completion page at a clean stable route", async () => {
+    const response = await handleAuthorizationCompleteRequest();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const body = await response.text();
+    expect(body).toContain("Authorization complete");
+    expect(body).toContain("You can close this tab and return to your app.");
+  });
+
   it("captures form-encoded POST bodies before resuming the hook", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
     const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}`;
     await handleConnectionCallbackRequest(
       new Request(url, {
-        body: "code=abc&state=xyz",
+        body: "code=abc&state=xyz&x-vercel-protection-bypass=secret",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         method: "POST",
       }),
@@ -139,7 +161,7 @@ describe("handleConnectionCallbackRequest", () => {
             callback: {
               params: { code: "abc", state: "xyz" },
               method: "POST",
-              body: "code=abc&state=xyz",
+              body: "code=abc&state=xyz&x-vercel-protection-bypass=secret",
             },
           },
         },

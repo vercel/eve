@@ -2,6 +2,7 @@ import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js"
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import {
+  handleAuthorizationCompleteRequest,
   handleConnectionCallbackRequest,
   handleLegacyConnectionCallbackRequest,
 } from "#execution/connections/callback-route.js";
@@ -27,6 +28,7 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
+  EVE_AUTHORIZATION_COMPLETE_ROUTE_PATH,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -119,6 +121,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await respond();
       }),
 
+      GET(EVE_AUTHORIZATION_COMPLETE_ROUTE_PATH, handleAuthorizationCompleteRequest),
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       GET(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),

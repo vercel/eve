@@ -21,8 +21,16 @@ export async function runProbe(t: EveEvalContext, probe: ProbeCase): Promise<voi
     const required = await waitForEvent(t, t, started, "authorization.required");
     const url = required.event.data.authorization?.url;
     if (url === undefined) throw new Error("Authorization probe produced no callback URL.");
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Authorization callback failed (${response.status}).`);
+    // Callback URLs no longer carry a deployment-protection bypass, so the
+    // request goes through the authenticated target client instead of a bare
+    // fetch that a protected deployment would redirect to SSO.
+    const callback = new URL(url);
+    const response = await t.target.fetch(`${callback.pathname}${callback.search}`, {
+      redirect: "manual",
+    });
+    if (response.status !== 303) {
+      throw new Error(`Authorization callback failed (${response.status}).`);
+    }
     await waitForEvent(t, required.session, undefined, "authorization.completed");
     await waitForMarker(t, required.session, undefined, "WORKFLOW-AUTH:authorized");
   }

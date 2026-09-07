@@ -34,7 +34,6 @@
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
-import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
 import type { JsonValue } from "#shared/json.js";
@@ -199,10 +198,8 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
   const token = authHookToken(sessionId);
-  return createWorkflowCallbackUrl(
-    baseUrl,
-    createEveConnectionCallbackRoutePath(name, attemptId, token),
-  );
+  const callbackPath = createEveConnectionCallbackRoutePath(name, attemptId, token);
+  return new URL(`${baseUrl.replace(/\/$/, "")}${callbackPath}`).toString();
 }
 
 /** Mints the identity and callback URL for one interactive authorization attempt. */
