@@ -1,6 +1,6 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import { mockModel, type MockModelRequest } from "eve/evals";
+import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
@@ -9,12 +9,17 @@ import {
   CONTENT_OUTPUT_LEAD_MARKER,
   CONTENT_OUTPUT_PAYLOAD_CANARY,
   CONTENT_OUTPUT_TAIL_MARKER,
-  SECOND_CHECKPOINT_MARKER,
   TASK_PRESERVED_MARKER,
   TASK_TAIL_SENTINEL,
 } from "../constants";
+import { assistantHasReport } from "../report-evidence";
+import { handoffReferences, reviewReferences } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
+// The compiled fixture's instructions and 13 advertised tools occupy ~2,823
+// tokens. Keep the original 640-token history pressure after reserving them.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_823;
+const TEST_HISTORY_BUDGET_TOKENS = 640;
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase =
@@ -24,7 +29,7 @@ type RegressionCase =
   | "task-survival";
 
 let activeCase: RegressionCase | undefined;
-const checkpointAdvanceCallCounts = new Map<RegressionCase, number>();
+const handoffCallCounts = new Map<RegressionCase, number>();
 const toolCallCounts = new Map<RegressionCase, number>();
 
 /** One entry per content-output-file-stub model call, rendered by {@link renderHistoryShape}. */
@@ -59,7 +64,7 @@ let requestCount = 0;
 
 const taskModel = mockModel({
   modelId: "compaction-regression-task-model",
-  respond(request) {
+  respond: withFullRequestUsage((request) => {
     // EVE_E2E_DUMP_CONTEXT=1 prints every request's messages — the context
     // exactly as the model sees it, so compaction, capping, and replay are
     // observable per step while iterating on these evals.
@@ -75,7 +80,7 @@ const taskModel = mockModel({
     const initialCase = findInitialCase(request);
     if (initialCase !== undefined && activeCase !== initialCase) {
       activeCase = initialCase;
-      checkpointAdvanceCallCounts.set(initialCase, 0);
+      handoffCallCounts.set(initialCase, 0);
       toolCallCounts.set(initialCase, 0);
     }
 
@@ -162,65 +167,46 @@ const taskModel = mockModel({
       };
     }
 
-    const marker = completionMarker(regressionCase);
+    const subject = regressionCase === "redundant-tool-calls" ? "repository" : "checkout";
+    const reviewId = reviewReferences[subject];
+    const handoffId = handoffReferences[subject];
 
-    // These are fixture markers, not compaction protocol fields. `marker` records the
-    // regression work tool; `SECOND_CHECKPOINT_MARKER` records the test-only tool
-    // whose output makes the harness cross the compaction threshold a second time.
-    // Completion evidence is detected in any assistant message: compaction may
-    // leave it as a summarization checkpoint or as an eviction trail line, and
-    // the model must not repeat work in either case. User messages are
-    // excluded because the eval instructions themselves quote the markers.
-    if (assistantEvidenceContains(request.messages, marker)) {
-      if (assistantEvidenceContains(request.messages, SECOND_CHECKPOINT_MARKER)) {
-        return `Done: ${marker}; ${SECOND_CHECKPOINT_MARKER}`;
+    if (assistantHasReport(request.messages, reviewId)) {
+      if (assistantHasReport(request.messages, handoffId)) {
+        return `The completed review is recorded as ${reviewId}. The release handoff is ready at ${handoffId}.`;
       }
 
-      const advanceCalls = checkpointAdvanceCallCounts.get(regressionCase) ?? 0;
-      if (advanceCalls >= MAX_TOOL_CALLS) {
-        return `Hard stop after ${MAX_TOOL_CALLS} checkpoint advances: ${marker}`;
+      const handoffCalls = handoffCallCounts.get(regressionCase) ?? 0;
+      if (handoffCalls >= MAX_TOOL_CALLS) {
+        return "The review is complete, but the release handoff could not be confirmed.";
       }
-
-      checkpointAdvanceCallCounts.set(regressionCase, advanceCalls + 1);
+      handoffCallCounts.set(regressionCase, handoffCalls + 1);
       return {
         toolCalls: [
           {
-            id: `advance-checkpoint-${advanceCalls + 1}`,
-            input: { regressionCase },
-            name: "advance-checkpoint",
+            id: `prepare-handoff-${handoffCalls + 1}`,
+            input: { subject, reviewId },
+            name: "prepare-handoff",
           },
         ],
       };
     }
 
-    const completedCalls = toolCallCounts.get(regressionCase) ?? 0;
-    if (completedCalls >= MAX_TOOL_CALLS) {
-      return `Hard stop after ${MAX_TOOL_CALLS} calls: ${marker}`;
+    const reviewCalls = toolCallCounts.get(regressionCase) ?? 0;
+    if (reviewCalls >= MAX_TOOL_CALLS) {
+      return "The review could not be confirmed, so a release handoff is not ready.";
     }
-
-    const attempt = completedCalls + 1;
-    toolCallCounts.set(regressionCase, attempt);
-
-    return regressionCase === "redundant-tool-calls"
-      ? {
-          toolCalls: [
-            {
-              id: `inspect-repository-${attempt}`,
-              input: { scope: "repository" },
-              name: "inspect-repository",
-            },
-          ],
-        }
-      : {
-          toolCalls: [
-            {
-              id: `perform-source-analysis-${attempt}`,
-              input: { approach: `attempt-${attempt}` },
-              name: "perform-source-analysis",
-            },
-          ],
-        };
-  },
+    toolCallCounts.set(regressionCase, reviewCalls + 1);
+    return {
+      toolCalls: [
+        {
+          id: `${subject}-review-${reviewCalls + 1}`,
+          input: { scope: subject },
+          name: subject === "repository" ? "inspect-repository" : "perform-source-analysis",
+        },
+      ],
+    };
+  }),
 });
 
 export default defineAgent({
@@ -232,7 +218,8 @@ export default defineAgent({
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent: 0.02,
+    thresholdPercent:
+      (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     maxInputTokensPerSession: 100_000,
@@ -250,23 +237,26 @@ function findInitialCase(request: MockModelRequest): RegressionCase | undefined 
 
 function regressionCaseFromText(text: string): RegressionCase | undefined {
   if (text.includes("[case: content-output-file-stub]")) return "content-output-file-stub";
-  if (text.includes("[case: redundant-tool-calls]")) return "redundant-tool-calls";
-  if (text.includes("[case: stale-todo-work]")) return "stale-todo-work";
+  if (text.toLowerCase().includes("review the storefront repository"))
+    return "redundant-tool-calls";
+  if (text.toLowerCase().includes("review the checkout implementation")) return "stale-todo-work";
   if (text.includes("[case: task-survival]")) return "task-survival";
   return undefined;
 }
 
-function completionMarker(
-  regressionCase: Exclude<RegressionCase, "content-output-file-stub" | "task-survival">,
-): string {
-  return regressionCase === "redundant-tool-calls"
-    ? "REPOSITORY_INSPECTION_COMPLETE"
-    : "SOURCE_ANALYSIS_COMPLETE";
-}
-
-function assistantEvidenceContains(
-  messages: MockModelRequest["messages"],
-  marker: string,
-): boolean {
-  return messages.some((message) => message.role === "assistant" && message.text.includes(marker));
+function withFullRequestUsage(respond: MockModelResponder): MockModelResponder {
+  return async (request) => {
+    const response = await respond(request);
+    const history = request.messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({ role: message.role, content: message.text }));
+    // Real providers include the tool catalog in reported input usage. The
+    // mock's default text-only estimate would hide that cost on later steps.
+    return {
+      ...(typeof response === "string" ? { text: response } : response),
+      usage: {
+        inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + Math.ceil(JSON.stringify(history).length / 4),
+      },
+    };
+  };
 }

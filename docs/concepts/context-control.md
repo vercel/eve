@@ -58,6 +58,10 @@ See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API,
 
 ## Compaction and clear
 
+Before a model call, eve checks the projected history together with the effective system instructions and advertised tool schemas. The check runs after `step.started` resolves dynamic capabilities. When the provider reports input usage, eve adds estimates for new messages and growth in the instructions and tool catalog to that count; unchanged schemas are not counted again.
+
+Compaction reserves space for those instructions and tools while reducing conversation history. It cannot shrink the instructions or tool catalog themselves, so keep them within the selected model's context window.
+
 User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic resolvers. System-role instructions remain outside history and continue to apply after either operation.
 
 Recalled memory also uses user-role messages, but eve keeps their attribution
