@@ -30,7 +30,7 @@ export function ensureWorkflowContinuationSecurity(session: HarnessSession): Har
 }
 
 export function readWorkflowContinuationSecurity(
-  session: HarnessSession,
+  session: Pick<HarnessSession, "state">,
 ): WorkflowSandboxContinuationSecurity | undefined {
   const stored = session.state?.[WORKFLOW_CONTINUATION_SECURITY_KEY];
   if (
@@ -51,7 +51,7 @@ export function readWorkflowContinuationSecurity(
 }
 
 export function getWorkflowContinuationSecurity(
-  session: HarnessSession,
+  session: Pick<HarnessSession, "state">,
 ): WorkflowSandboxContinuationSecurity {
   const security = readWorkflowContinuationSecurity(session);
   if (security === undefined) {

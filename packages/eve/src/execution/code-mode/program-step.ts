@@ -1,4 +1,4 @@
-import type { ToolSet } from "ai";
+import { jsonSchema, type ToolSet } from "ai";
 
 import { deserializeContext } from "#context/serialize.js";
 import { withContextScope } from "#context/run-step.js";
@@ -26,7 +26,11 @@ import { readDurableSession, type DurableSessionState } from "#execution/durable
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
-import type { CodeModeCallResolution, CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import type {
+  CodeModeCallResolution,
+  CodeModeToolCatalogEntry,
+  CodeModeWorkflowInput,
+} from "#execution/code-mode/schema.js";
 import type { MatchedAuthorizationCallback } from "#execution/authorization-callback-match.js";
 import {
   AuthorizationHookKey,
@@ -39,7 +43,6 @@ import {
   codeModeBridgeRequestLimit,
   claimsForCodeMode,
   createDiscoveryTools,
-  describeClaimedTool,
   isCodeModeAgentTool,
 } from "#harness/code-mode.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -91,14 +94,6 @@ export type CodeModeToolOutcome =
       readonly challenges: readonly AuthorizationChallenge[];
     };
 
-interface CodeModeProgramInput {
-  readonly callId: string;
-  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
-  readonly program: CodeModeWorkflowInput;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
 /**
  * Starts the generated program, or resumes it once every parked call settled.
  *
@@ -112,17 +107,22 @@ interface CodeModeProgramInput {
  * sandbox only resumes once the last one lands, and the intermediate
  * `continue` calls are pure bookkeeping on the continuation.
  */
-export async function runCodeModeProgramStep(
-  input: CodeModeProgramInput & {
-    readonly resume?: readonly {
-      readonly interrupt: WorkflowSandboxInterrupt;
-      readonly resolution: CodeModeCallResolution;
-    }[];
-  },
-): Promise<CodeModeProgramOutcome> {
+export async function runCodeModeProgramStep(input: {
+  readonly callId: string;
+  readonly program: CodeModeWorkflowInput;
+  readonly sessionState: DurableSessionState;
+  readonly resume?: readonly {
+    readonly interrupt: WorkflowSandboxInterrupt;
+    readonly resolution: CodeModeCallResolution;
+  }[];
+}): Promise<CodeModeProgramOutcome> {
   "use step";
 
-  const { hostTools, security } = await buildProgramHost(input);
+  const security = getWorkflowContinuationSecurity(await readDurableSession(input.sessionState));
+  const hostTools: ToolSet = { ...createDiscoveryTools(input.program.toolCatalog) };
+  for (const entry of input.program.toolCatalog) {
+    if (entry.target !== "direct") hostTools[entry.name] = createCodeModeToolStub(entry);
+  }
   try {
     let raw: unknown;
     if (input.resume === undefined) {
@@ -256,27 +256,11 @@ export async function executeCodeModeToolStep(input: {
   }
 }
 
-async function buildProgramHost(input: CodeModeProgramInput): Promise<{
-  readonly hostTools: ToolSet;
-  readonly security: ReturnType<typeof getWorkflowContinuationSecurity>;
-}> {
-  const { harnessTools, session } = await hydrateTurnTools(input);
-  const hostTools: Record<string, ToolSet[string]> = {};
-  for (const name of input.program.toolNames) {
-    const definition = harnessTools.get(name);
-    if (definition === undefined || !claimsForCodeMode(name, harnessTools)) continue;
-    hostTools[name] = createCodeModeToolStub(name, definition);
-  }
-  Object.assign(hostTools, createDiscoveryTools(input.program.toolCatalog));
-  return { hostTools: hostTools as ToolSet, security: getWorkflowContinuationSecurity(session) };
-}
-
-export function createCodeModeToolStub(
-  name: string,
-  definition: HarnessToolDefinition,
-): ToolSet[string] {
+export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {
   return {
-    ...describeClaimedTool(definition),
+    description: entry.description,
+    inputSchema: jsonSchema(entry.inputSchema),
+    outputSchema: entry.outputSchema === null ? undefined : jsonSchema(entry.outputSchema),
     execute: async (toolInput: unknown, options: unknown) => {
       const resolution = readWorkflowSandboxResolution(options) as
         | CodeModeCallResolution
@@ -285,9 +269,9 @@ export function createCodeModeToolStub(
       if (resolution?.status === "completed") return resolution.output;
       return requestWorkflowSandboxInterrupt({
         kind: CODE_MODE_CALL_INTERRUPT_KIND,
-        target: isCodeModeAgentTool(definition) ? "agent" : "tool",
+        target: entry.target === "agent" ? "agent" : "tool",
         toolInput,
-        toolName: name,
+        toolName: entry.name,
       } satisfies CodeModeCallInterrupt);
     },
   } as ToolSet[string];

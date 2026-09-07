@@ -117,7 +117,7 @@ describe("code-mode sandbox continuation contract", () => {
         }),
       );
       const hostTools = {
-        echo: createCodeModeToolStub("echo", definitions.get("echo")!),
+        echo: createCodeModeToolStub(program.toolCatalog.find((entry) => entry.name === "echo")!),
         ...createDiscoveryTools(program.toolCatalog),
       };
       const tool = await createWorkflowSandboxTool({
@@ -143,10 +143,10 @@ describe("code-mode sandbox continuation contract", () => {
         }),
         security,
       );
-      const names = program.toolCatalog.map(({ name, description, requiresDirectCall }) => ({
+      const names = program.toolCatalog.map(({ name, description, target }) => ({
         name,
         description,
-        requiresDirectCall,
+        requiresDirectCall: target === "direct",
       }));
       expect(resumed).toEqual({
         status: "completed",
@@ -155,8 +155,18 @@ describe("code-mode sandbox continuation contract", () => {
           after: names,
           result: "done",
           schemas: [
-            program.toolCatalog.find((entry) => entry.name === "gated"),
-            program.toolCatalog.find((entry) => entry.name === "provider"),
+            {
+              name: "gated",
+              description: "Needs approval",
+              inputSchema: { type: "object", properties: { value: { type: "string" } } },
+              requiresDirectCall: true,
+            },
+            {
+              name: "provider",
+              description: "Provider tool",
+              inputSchema: { type: "object" },
+              requiresDirectCall: true,
+            },
             { error: "unknown tool", name: "unknown" },
           ],
         },
@@ -169,11 +179,12 @@ describe("code-mode sandbox continuation contract", () => {
     const hostTools = Object.fromEntries(
       ["child", "sibling"].map((name) => [
         name,
-        createCodeModeToolStub(name, {
+        createCodeModeToolStub({
           name,
           description: name,
-          inputSchema: jsonSchema({ type: "object" }),
-          resultKind: name === "child" ? "subagent" : undefined,
+          inputSchema: { type: "object" },
+          outputSchema: null,
+          target: name === "child" ? "agent" : "tool",
         }),
       ]),
     ) as ToolSet;
@@ -404,10 +415,12 @@ describe("compiled sandbox suspension and failure boundaries", () => {
     const hostTools = {
       effect: { inputSchema: jsonSchema({ type: "object" }), execute: effect },
       cleanup: { inputSchema: jsonSchema({ type: "object" }), execute: cleanup },
-      pause: createCodeModeToolStub("pause", {
+      pause: createCodeModeToolStub({
         name: "pause",
         description: "Pause",
-        inputSchema: jsonSchema({ type: "object" }),
+        inputSchema: { type: "object" },
+        outputSchema: null,
+        target: "tool",
       }),
     };
     const sandbox = experimental_createCodeModeTool(hostTools, {

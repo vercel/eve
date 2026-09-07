@@ -1,4 +1,5 @@
-import { jsonSchema } from "ai";
+import { asSchema, jsonSchema, type ToolSet } from "ai";
+import * as serialization from "#context/serialize.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -56,7 +57,13 @@ vi.mock("#execution/node-step.js", () => ({
   createNodeHarnessTools: () => state.tools,
   buildRuntimeIdentity: () => ({ agentId: "test", eveVersion: "test" }),
 }));
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: async () => ({}) }));
+vi.mock("#execution/durable-session-store.js", () => ({
+  readDurableSession: async () => ({
+    state: {
+      "eve.harness.workflowContinuationSecurity": { version: 1, signingKey: "a".repeat(43) },
+    },
+  }),
+}));
 vi.mock("#execution/effective-agent-config.js", () => ({
   resolveEffectiveAgentRuntime: () => ({ turnAgent: {} }),
 }));
@@ -366,7 +373,7 @@ describe("executeCodeModeToolStep", () => {
   });
 });
 
-describe("runCodeModeProgramStep failure boundary", () => {
+describe("runCodeModeProgramStep", () => {
   const input = {
     callId: "program",
     event: { sequence: 1, stepIndex: 2, turnId: "turn" },
@@ -375,13 +382,100 @@ describe("runCodeModeProgramStep failure boundary", () => {
     program: {
       js: "return 1;",
       mode: "eager" as const,
-      toolNames: [],
       toolCatalog: [],
       maxSubagents: 100,
     },
   };
 
   afterEach(() => vi.restoreAllMocks());
+
+  it.each([false, true])(
+    "uses pinned stubs without restoring tool context (resume=%s)",
+    async (resume) => {
+      const restore = vi
+        .spyOn(serialization, "deserializeContext")
+        .mockRejectedValue(new Error("Tool context must not be restored"));
+      const execute = vi.fn().mockResolvedValue("result");
+      const created = vi
+        .spyOn(sandbox, "createWorkflowSandboxTool")
+        .mockResolvedValue({ execute } as never);
+      const continued = vi
+        .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
+        .mockResolvedValue("result" as never);
+      vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
+        status: "completed",
+        output: "done",
+      });
+      const interrupt = vi
+        .spyOn(sandbox, "requestWorkflowSandboxInterrupt")
+        .mockReturnValue("parked" as never);
+      const toolCatalog = [
+        {
+          name: "lookup",
+          description: "Pinned lookup",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "string" },
+          target: "tool" as const,
+        },
+        {
+          name: "researcher",
+          description: "Pinned agent",
+          inputSchema: { type: "object" },
+          outputSchema: null,
+          target: "agent" as const,
+        },
+        {
+          name: "gated",
+          description: "Direct only",
+          inputSchema: { type: "object" },
+          outputSchema: null,
+          target: "direct" as const,
+        },
+      ];
+      await expect(
+        runCodeModeProgramStep({
+          ...input,
+          program: { ...input.program, toolCatalog },
+          ...(resume
+            ? {
+                resume: [
+                  {
+                    interrupt: {} as never,
+                    resolution: { status: "completed" as const, output: null },
+                  },
+                ],
+              }
+            : {}),
+        }),
+      ).resolves.toEqual({ status: "completed", output: "done" });
+      expect(restore).not.toHaveBeenCalled();
+      const tools = (
+        resume ? continued.mock.calls[0]![0].tools : created.mock.calls[0]![0].hostTools
+      ) as ToolSet;
+      expect(Object.keys(tools).sort()).toEqual([
+        "describe_tools",
+        "lookup",
+        "researcher",
+        "search_tools",
+      ]);
+      expect(tools.lookup!.description).toBe("Pinned lookup");
+      expect(asSchema(tools.lookup!.inputSchema).jsonSchema).toEqual({ type: "object" });
+      expect(asSchema(tools.lookup!.outputSchema!).jsonSchema).toEqual({ type: "string" });
+      for (const name of ["lookup", "researcher"]) {
+        await tools[name]!.execute!({ query: "hello" } as never, {
+          toolCallId: name,
+          messages: [],
+          context: {},
+        });
+        expect(interrupt).toHaveBeenLastCalledWith({
+          kind: "eve.code-mode-call",
+          target: name === "lookup" ? "tool" : "agent",
+          toolName: name,
+          toolInput: { query: "hello" },
+        });
+      }
+    },
+  );
 
   it.each([false, true])("settles a program failure as data (resume=%s)", async (resume) => {
     const failure = Object.assign(new Error("invalid program"), { code: "RUN_USER_SOURCE_ERROR" });

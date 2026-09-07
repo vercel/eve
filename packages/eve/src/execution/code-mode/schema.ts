@@ -12,7 +12,8 @@ export interface CodeModeToolCatalogEntry {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: JsonObject;
-  readonly requiresDirectCall: boolean;
+  readonly outputSchema: JsonObject | null;
+  readonly target: "agent" | "tool" | "direct";
 }
 
 /**
@@ -24,7 +25,6 @@ export interface CodeModeWorkflowInput {
   readonly js: string;
   readonly mode: CodeModeMode;
   readonly maxSubagents: number;
-  readonly toolNames: readonly string[];
   readonly toolCatalog: readonly CodeModeToolCatalogEntry[];
 }
 
@@ -33,7 +33,6 @@ export function serializeCodeModeWorkflowInput(input: CodeModeWorkflowInput): Js
     js: input.js,
     mode: input.mode,
     maxSubagents: input.maxSubagents,
-    toolNames: [...input.toolNames],
     toolCatalog: input.toolCatalog.map((entry) => ({ ...entry })),
   };
 }
@@ -50,12 +49,6 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
     throw new TypeError('code_mode workflow input requires "mode" of "eager" or "lazy".');
   }
   if (
-    !Array.isArray(record.toolNames) ||
-    record.toolNames.some((name) => typeof name !== "string")
-  ) {
-    throw new TypeError('code_mode workflow input requires "toolNames" as a string array.');
-  }
-  if (
     typeof record.maxSubagents !== "number" ||
     !Number.isSafeInteger(record.maxSubagents) ||
     record.maxSubagents <= 0
@@ -70,7 +63,7 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
     if (
       typeof entry.name !== "string" ||
       typeof entry.description !== "string" ||
-      typeof entry.requiresDirectCall !== "boolean"
+      (entry.target !== "agent" && entry.target !== "tool" && entry.target !== "direct")
     ) {
       throw new TypeError("code_mode tool catalog entry is invalid.");
     }
@@ -78,14 +71,14 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
       name: entry.name,
       description: entry.description,
       inputSchema: parseJsonObject(entry.inputSchema),
-      requiresDirectCall: entry.requiresDirectCall,
+      outputSchema: entry.outputSchema === null ? null : parseJsonObject(entry.outputSchema),
+      target: entry.target,
     };
   });
   return {
     js: record.js,
     mode: record.mode,
     maxSubagents: record.maxSubagents,
-    toolNames: record.toolNames as string[],
     toolCatalog,
   };
 }

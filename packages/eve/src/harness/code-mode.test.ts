@@ -104,7 +104,7 @@ describe("applyCodeModeTool", () => {
 
   it("keeps eager tools callable directly and pins the program catalog into executeInput", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      ["add", tool("add")],
+      ["add", tool("add", { outputSchema: jsonSchema({ type: "number" }) })],
       ["gated", tool("gated", { approval: always() })],
       ["researcher", subagent("researcher")],
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
@@ -141,7 +141,11 @@ describe("applyCodeModeTool", () => {
     expect(parseCodeModeWorkflowInput(executeInput)).toMatchObject({
       js: "return 1;",
       mode: "eager",
-      toolNames: ["add", "researcher"],
+      toolCatalog: expect.arrayContaining([
+        expect.objectContaining({ name: "add", target: "tool", outputSchema: { type: "number" } }),
+        expect.objectContaining({ name: "researcher", target: "agent" }),
+        expect.objectContaining({ name: "gated", target: "direct" }),
+      ]),
     });
   });
 
@@ -205,7 +209,7 @@ describe("applyCodeModeTool", () => {
       );
       expect(input.toolCatalog.map((entry) => entry.name)).toEqual(Object.keys(tools).sort());
       expect(
-        input.toolCatalog.filter((entry) => !entry.requiresDirectCall).map((entry) => entry.name),
+        input.toolCatalog.filter((entry) => entry.target !== "direct").map((entry) => entry.name),
       ).toEqual(["add"]);
       expect(input.toolCatalog.find((entry) => entry.name === "gated")?.inputSchema).toEqual({
         type: "object",
@@ -244,7 +248,8 @@ describe("createDiscoveryTools", () => {
     name: "add",
     description: "Add numbers.",
     inputSchema: { type: "object" },
-    requiresDirectCall: false,
+    outputSchema: null,
+    target: "tool" as const,
   };
   const tools = createDiscoveryTools([entry]);
 
@@ -270,7 +275,15 @@ describe("createDiscoveryTools", () => {
   it("declares both known-tool descriptions and unknown-tool errors", async () => {
     const describe = tools[DESCRIBE_TOOLS_NAME];
     const result = await describe.execute({ names: ["add", "missing"] });
-    expect(result).toEqual([entry, { name: "missing", error: "unknown tool" }]);
+    expect(result).toEqual([
+      {
+        name: "add",
+        description: "Add numbers.",
+        inputSchema: { type: "object" },
+        requiresDirectCall: false,
+      },
+      { name: "missing", error: "unknown tool" },
+    ]);
     expect(await asSchema(describe.outputSchema).validate!(result)).toMatchObject({
       success: true,
       value: result,

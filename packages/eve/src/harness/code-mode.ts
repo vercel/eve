@@ -41,7 +41,7 @@ export type { CodeModeMode };
 /**
  * Exposes eligible tools through `code_mode`, retaining direct calls in eager mode.
  *
- * The discovery catalog and callable names are pinned into `executeInput`, so
+ * The tool catalog is pinned into `executeInput`, so
  * the durable body sees the same names and schemas after a resume. Nothing here
  * executes: the sandbox tool is built only to borrow its generated description.
  */
@@ -78,11 +78,19 @@ export async function applyCodeModeTool(input: {
     .sort()
     .map((name) => {
       const tool = input.tools[name]!;
+      let target: CodeModeToolCatalogEntry["target"] = "direct";
+      if (Object.hasOwn(hostTools, name)) {
+        target = isCodeModeAgentTool(input.harnessTools.get(name)!) ? "agent" : "tool";
+      }
       return {
         name,
         description: typeof tool.description === "string" ? tool.description : "",
         inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
-        requiresDirectCall: !Object.hasOwn(hostTools, name),
+        outputSchema:
+          tool.outputSchema === undefined
+            ? null
+            : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
+        target,
       };
     });
 
@@ -117,7 +125,6 @@ export async function applyCodeModeTool(input: {
         js: readProgram(toolInput),
         mode,
         maxSubagents,
-        toolNames: claimedToolNames,
         toolCatalog,
       } satisfies CodeModeWorkflowInput),
   });
@@ -157,6 +164,12 @@ export function isCodeModeAgentTool(definition: HarnessToolDefinition): boolean 
 
 /** Discovery covers the complete advertised catalog, independently of execution routing. */
 export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[]) {
+  const descriptions = catalog.map(({ name, description, inputSchema, target }) => ({
+    name,
+    description,
+    inputSchema,
+    requiresDirectCall: target === "direct",
+  }));
   const toolSummarySchema = z.object({
     name: z.string(),
     description: z.string(),
@@ -171,7 +184,7 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
       outputSchema: z.array(toolSummarySchema),
       execute: async ({ query }: { readonly query?: string }) => {
         const needle = query?.toLowerCase().trim() ?? "";
-        return catalog
+        return descriptions
           .filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(needle))
           .map(({ description, name, requiresDirectCall }) => ({
             description,
@@ -192,20 +205,11 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
       ),
       execute: async ({ names }: { readonly names: readonly string[] }) =>
         names.map((name) => {
-          const entry = catalog.find((candidate) => candidate.name === name);
+          const entry = descriptions.find((candidate) => candidate.name === name);
           return entry === undefined ? { error: "unknown tool", name } : entry;
         }),
     },
   } satisfies ToolSet;
-}
-
-/** Descriptor-only stand-in for a claimed tool; the body executes it in its own step. */
-export function describeClaimedTool(definition: HarnessToolDefinition): ToolSet[string] {
-  return {
-    description: definition.description,
-    inputSchema: definition.inputSchema,
-    outputSchema: definition.outputSchema,
-  } as ToolSet[string];
 }
 
 function readProgram(toolInput: unknown): string {

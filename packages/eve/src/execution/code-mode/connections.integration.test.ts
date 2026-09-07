@@ -147,7 +147,9 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
           js: "return await tools.linear__list_issues({});",
         }),
       );
-      expect(pinned.toolNames).toEqual(["linear__list_issues"]);
+      expect(
+        pinned.toolCatalog.filter((entry) => entry.target !== "direct").map((entry) => entry.name),
+      ).toEqual(["linear__list_issues"]);
       expect(pinned.mode).toBe(mode);
 
       const nested = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(next))));
