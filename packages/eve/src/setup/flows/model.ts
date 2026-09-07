@@ -123,7 +123,7 @@ export interface ModelFlowDeps {
   readProviderSelection: typeof readProviderSelection;
   /** The provider sub-flow behind the menu's provider row. */
   runProviderFlow: typeof runProviderFlow;
-  /** Ensures Codex owns a usable login before selecting ChatGPT. */
+  /** Ensures eve has a usable ChatGPT login before selecting the subscription. */
   ensureChatGptAuth: typeof ensureChatGptAuth;
   writeProviderSelection: typeof writeProviderSelection;
 }
@@ -290,7 +290,7 @@ export async function runModelFlow(input: {
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
   signal?: AbortSignal;
-  /** Gives Codex uncontested inherited stdio while it performs login. */
+  /** Gives ChatGPT sign-in exclusive terminal ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Live ChatGPT identity shown in this configuration flow only. */
   chatGptAccountLabel?: string;
@@ -503,7 +503,7 @@ export async function runModelFlow(input: {
     shouldAuthenticateChatGpt = true;
   }
   if (commitDraft && shouldAuthenticateChatGpt) {
-    await authenticateChatGpt(deps, input.withExclusiveTerminal);
+    await authenticateChatGpt(deps, input.withExclusiveTerminal, signal);
   }
 
   if (commitDraft && hasModelSettingsChanges(patch)) {
@@ -549,8 +549,9 @@ function routingForModelSelection(selection: string): ModelRouting {
 async function authenticateChatGpt(
   deps: ModelFlowDeps,
   withExclusiveTerminal: (<T>(task: () => Promise<T>) => Promise<T>) | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
-  const authenticate = (): Promise<void> => deps.ensureChatGptAuth();
+  const authenticate = (): Promise<void> => deps.ensureChatGptAuth({ signal });
   await (withExclusiveTerminal === undefined
     ? authenticate()
     : withExclusiveTerminal(authenticate));

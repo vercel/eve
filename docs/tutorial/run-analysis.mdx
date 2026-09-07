@@ -107,9 +107,14 @@ export default defineTool({
       ].join("\n"),
     });
     const root = sandbox.resolvePath(directory);
-    await sandbox.run({
+    const result = await sandbox.run({
       command: `cd ${JSON.stringify(root)} && /workspace/.venv/bin/python plot.py`,
     });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Chart generation failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
     const chart = `${root}/chart.png`;
     const png = await sandbox.readBinaryFile({ path: chart });
     if (!png || png.byteLength === 0) {
@@ -130,6 +135,8 @@ export default defineTool({
 ```
 
 The tool uses the Python environment installed in bootstrap. `matplotlib.use('Agg')` selects a renderer that writes PNGs without a desktop display.
+
+`sandbox.run()` returns an exit code even when the command fails. Check `exitCode` before returning a chart path. Throwing an error gives the model the failed command's output, including a missing Python executable or matplotlib import, so it can report the failure instead of claiming a chart exists.
 
 Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
 
