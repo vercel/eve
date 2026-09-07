@@ -197,7 +197,9 @@ The same mount shape works with an npm package, a workspace dependency, or a lin
 
 ### Use an extension in a workspace
 
-A workspace extension is a regular extension package kept in the same monorepo as its consumers. It is useful when several agents need the same capabilities, or when a private capability should evolve alongside the agents that use it.
+A workspace extension is a regular extension package kept in the same package-manager workspace as its consumers. It is useful when several agents need the same capabilities, or when a private capability should evolve alongside the agents that use it.
+
+A package-manager workspace is not necessarily an eve multi-agent project. The example below contains two independently deployable agent packages. For several peer agents deployed together from one eve project, see [Project Structure](./project-structure#multi-agent-project); the extension is still mounted separately by each agent.
 
 For example, a pnpm workspace can keep one extension next to two independently deployable agents:
 

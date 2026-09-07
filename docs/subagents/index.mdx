@@ -5,6 +5,8 @@ description: "Delegate work to root-agent copies or declared specialists with th
 
 eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
+A subagent is not a peer root agent in a multi-agent project. Peer agents are independently addressed and own separate channels, sessions, and public routes; see [Project Structure](/docs/project-structure#choose-peers-or-subagents).
+
 ## The built-in `agent` tool
 
 The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:

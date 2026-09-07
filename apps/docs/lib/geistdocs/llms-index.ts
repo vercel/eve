@@ -25,6 +25,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Build
 
+- [Project Structure](${EVE_ORIGIN}/docs/project-structure.md): Organize one or more independently addressed root agents, select them with the CLI, and deploy them together.
 - [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.

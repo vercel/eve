@@ -45,7 +45,9 @@ export default withEve(nextConfig, {
 });
 ```
 
-Named agents mount under `/eve/agents/<name>/eve/v1/*`. Call the matching agent from React with `agent`:
+Named agents mount under `/eve/agents/<name>/eve/v1/*`. This is a frontend-owned topology, distinct from the hostless multi-agent project whose peers use `/<name>/eve/v1/*`. See [Project Structure](../../project-structure#choose-a-project-shape) for the comparison.
+
+Call the matching agent from React with `agent`:
 
 ```tsx
 const support = useEveAgent({ agent: "support" });

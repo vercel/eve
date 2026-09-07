@@ -107,8 +107,8 @@ describe("docsRedirects", () => {
     ["/docs/introduction.md", "/docs/getting-started.md"],
     ["/docs/installation", "/docs/getting-started"],
     ["/docs/installation.md", "/docs/getting-started.md"],
-    ["/docs/project-structure", "/docs/getting-started"],
-    ["/docs/project-structure.md", "/docs/getting-started.md"],
+    ["/docs/getting-started/project-structure", "/docs/project-structure"],
+    ["/docs/getting-started/project-structure.md", "/docs/project-structure.md"],
     ["/docs/reference/http-api", "/docs/channels/eve"],
     ["/docs/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout", "/docs/getting-started"],
@@ -135,7 +135,7 @@ describe("rootMarkdownRedirects", () => {
   it.each([
     ["/getting-started.mdx", "/docs/getting-started.mdx"],
     ["/installation.md", "/docs/getting-started.md"],
-    ["/project-structure.mdx", "/docs/getting-started.mdx"],
+    ["/project-structure.mdx", "/docs/project-structure.mdx"],
     ["/tools/overview.md", "/docs/tools.md"],
     ["/channels/eve.mdx", "/docs/channels/eve.mdx"],
   ])("redirects observed root Markdown alias %s to %s", (source, destination) => {
