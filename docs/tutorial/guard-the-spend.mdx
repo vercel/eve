@@ -30,7 +30,7 @@ const THRESHOLD_GB = 50;
 
 export default defineTool({
   description: "Run a read-only SQL query against the analytics tables.",
-  inputSchema: z.object({ sql: z.string() }),
+  inputSchema: z.object({ sql: z.string().max(10_000) }),
   // Cost-based gate: only the expensive queries need a human yes.
   approval: ({ toolInput }) =>
     estimateScanGb(toolInput?.sql ?? "") > THRESHOLD_GB ? "user-approval" : "not-applicable",

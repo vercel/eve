@@ -18,7 +18,13 @@ import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/verce
 
 export const WORKFLOW_VIRTUAL_ENTRY_ID = "\0eve-workflow-entry";
 
+export interface AuthoredWorkflowModules {
+  readonly directiveModules: readonly string[];
+  readonly workflowModules: readonly string[];
+}
+
 export interface WorkflowBundleBuilderOptions {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   agentName: string;
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
