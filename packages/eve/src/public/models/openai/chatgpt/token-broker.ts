@@ -1,13 +1,10 @@
+import { createChatGptCredentialStore, type ChatGptCredentialStore } from "./credential-store.js";
 import {
-  extractCodexAccountIdFromToken,
-  extractCodexAccountLabelFromToken,
-  readCodexJwtExpirationMs,
-} from "./auth.js";
-import {
-  CodexAppServerClient,
-  type CodexAppServer,
-  type CodexAppServerOptions,
-} from "./codex-app-server.js";
+  CHATGPT_LOGIN_HINT,
+  ChatGptSignInRequiredError,
+  requestChatGptTokens,
+  type ChatGptCredentials,
+} from "./oauth.js";
 
 const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
 
@@ -34,13 +31,14 @@ export interface CodexTokenBroker {
   state(): ChatGptAuthState;
 }
 
-export interface CodexTokenBrokerOptions extends CodexAppServerOptions {
-  readonly appServer?: CodexAppServer;
+export interface CodexTokenBrokerOptions {
+  readonly store?: ChatGptCredentialStore;
+  readonly fetch?: typeof fetch;
   readonly now?: () => number;
 }
 
 export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): CodexTokenBroker {
-  const appServer = options.appServer ?? new CodexAppServerClient(options);
+  const store = options.store ?? createChatGptCredentialStore();
   const now = options.now ?? Date.now;
   let currentState: ChatGptAuthState = { kind: "checking" };
   let cached: ChatGptToken | undefined;
@@ -51,9 +49,6 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
       return getToken(input.reason);
     },
     async refreshState() {
-      if (currentState.kind === "signed-out" || currentState.kind === "reauth-required") {
-        appServer.restart?.();
-      }
       cached = undefined;
       try {
         await getToken("request");
@@ -90,43 +85,45 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
 
   async function resolveToken(forceRefresh: boolean): Promise<ChatGptToken> {
     try {
-      const status = await appServer.getAuthStatus({ refreshToken: forceRefresh });
-      if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
+      let credentials = await store.read();
+      if (!credentials) {
         cached = undefined;
         currentState = forceRefresh ? { kind: "reauth-required" } : { kind: "signed-out" };
-        throw new Error(
-          "ChatGPT subscription authentication is unavailable. Run `codex login`, then retry.",
-        );
+        throw new Error(`ChatGPT subscription is not signed in. ${CHATGPT_LOGIN_HINT}`);
       }
-      const token = tokenFrom(status.authToken);
-      if (!forceRefresh && !isFresh(token, now())) {
-        const refreshed = await appServer.getAuthStatus({ refreshToken: true });
-        if (refreshed.authMethod !== "chatgpt" || refreshed.authToken === undefined) {
-          cached = undefined;
-          currentState = { kind: "reauth-required" };
-          throw new Error(
-            "ChatGPT subscription authentication could not be refreshed. Run `codex login`, then retry.",
+      const rejectedToken = credentials.accessToken;
+      if (forceRefresh || !isFresh(tokenFrom(credentials), now())) {
+        credentials = await store.update(async (current) => {
+          if (!current) throw new ChatGptSignInRequiredError();
+          // A different eve process may already have rotated this refresh token.
+          if (
+            isFresh(tokenFrom(current), now()) &&
+            (!forceRefresh || current.accessToken !== rejectedToken)
+          )
+            return current;
+          return requestChatGptTokens(
+            { grant_type: "refresh_token", refresh_token: current.refreshToken },
+            {
+              fetch: options.fetch,
+              previous: current,
+              now,
+            },
           );
-        }
-        return accept(refreshed.authToken);
+        });
       }
+      const token = tokenFrom(credentials);
       cached = token;
       currentState = readyState(token);
       return token;
     } catch (error) {
-      if (currentState.kind === "checking" || currentState.kind === "ready") {
+      cached = undefined;
+      if (error instanceof ChatGptSignInRequiredError) currentState = { kind: "reauth-required" };
+      else if (currentState.kind !== "signed-out") {
         const reason = error instanceof Error ? error.message : String(error);
         currentState = { kind: "unavailable", reason };
       }
       throw error;
     }
-  }
-
-  function accept(rawToken: string): ChatGptToken {
-    const token = tokenFrom(rawToken);
-    cached = token;
-    currentState = readyState(token);
-    return token;
   }
 }
 
@@ -137,15 +134,12 @@ export function getDefaultCodexTokenBroker(): CodexTokenBroker {
   return defaultBroker;
 }
 
-function tokenFrom(token: string): ChatGptToken {
-  const accountId = extractCodexAccountIdFromToken(token);
-  const accountLabel = extractCodexAccountLabelFromToken(token);
-  const expiresAt = readCodexJwtExpirationMs(token);
+function tokenFrom(credentials: ChatGptCredentials): ChatGptToken {
   return {
-    token,
-    ...(accountId !== undefined && { accountId }),
-    ...(accountLabel !== undefined && { accountLabel }),
-    ...(expiresAt !== undefined && { expiresAt }),
+    token: credentials.accessToken,
+    expiresAt: credentials.expiresAt,
+    ...(credentials.accountId && { accountId: credentials.accountId }),
+    ...(credentials.accountLabel && { accountLabel: credentials.accountLabel }),
   };
 }
 
