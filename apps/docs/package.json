@@ -75,6 +75,7 @@
     "@resend/chat-sdk-adapter": "0.2.2",
     "@supermemory/eve": "0.1.1",
     "@tailwindcss/postcss": "4.3.0",
+    "@telemetry-dev/eve": "0.1.0",
     "@types/mdx": "2.0.13",
     "@types/node": "catalog:",
     "@types/pngjs": "^6.0.5",

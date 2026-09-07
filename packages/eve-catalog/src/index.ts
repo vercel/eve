@@ -924,6 +924,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "telemetry-dev",
+    name: "telemetry.dev",
+    kind: "instrumentation",
+    tagline: "Send agent traces to telemetry.dev with tokens, cost, and latency on every turn.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "jaeger",
     name: "Jaeger",
     kind: "instrumentation",
