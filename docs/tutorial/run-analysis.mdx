@@ -101,15 +101,22 @@ export default defineTool({
       ].join("\n"),
     });
     const root = sandbox.resolvePath("analysis");
-    await sandbox.run({
+    const result = await sandbox.run({
       command: `cd ${JSON.stringify(root)} && /workspace/.venv/bin/python plot.py`,
     });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Chart generation failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
     return { chart: `${root}/chart.png` };
   },
 });
 ```
 
 The tool uses the Python environment installed in bootstrap. `matplotlib.use('Agg')` selects a renderer that writes PNGs without a desktop display.
+
+`sandbox.run()` returns an exit code even when the command fails. Check `exitCode` before returning a chart path. Throwing an error gives the model the failed command's output, including a missing Python executable or matplotlib import, so it can report the failure instead of claiming a chart exists.
 
 Ask for a chart using the sample data from Step 3:
 
