@@ -1,6 +1,6 @@
 ---
 title: "Run Analysis"
-description: "Part 5 of the Build an Agent tutorial. Seed the warehouse schema into the sandbox workspace, then compute and chart beyond SQL."
+description: "Part 4 of the Build an Agent tutorial. Seed the sample database schema into the sandbox workspace, then compute and chart beyond SQL."
 ---
 
 SQL tells the analytics assistant the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for. It's an isolated bash environment with a `/workspace` filesystem, and every agent gets exactly one.
@@ -9,7 +9,7 @@ This takes two pieces. First seed reference files the model can read, then compu
 
 ## Seed the schema into the workspace
 
-Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+Mount the sample database schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
 
 ```text
 agent/sandbox/
@@ -21,8 +21,8 @@ agent/sandbox/
 ```sql
 -- agent/sandbox/workspace/schema.sql
 -- Reference only: table shapes the analyst can read before writing queries.
-CREATE TABLE orders     (id INT, customer_id INT, amount_cents INT, created_at DATE);
-CREATE TABLE customers  (id INT, name TEXT, plan TEXT, signed_up_at DATE);
+CREATE TABLE orders     (id INTEGER, customer_id INTEGER, amount_cents INTEGER, created_at TEXT);
+CREATE TABLE customers  (id INTEGER, name TEXT, plan TEXT);
 ```
 
 Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and seeds your files into it.
@@ -69,17 +69,17 @@ export default defineTool({
 
 This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
 
-Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
+Ask for a chart using the sample data from Step 3:
 
 ```text
-Plot total order revenue per customer.
+Plot daily order revenue in dollars for May 2026.
 ```
 
-The model queries for the numbers (the warehouse from Step 4, or the sample dataset if you skipped it), checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
+The model queries `run_sql` for daily totals, divides `amount_cents` by 100, and passes date/value points to `chart_series`. The sample data has four dates with revenue of $42, $15, $99, and $8. The chart uses the same data you queried in Step 3.
 
 ## Secrets stay out of the sandbox
 
-The sandbox has no `process.env` and no access to your app's secrets. Your warehouse token lives in the app runtime, and firewall brokering is the only path it takes to the warehouse host. It never enters the sandbox process.
+The sandbox has no `process.env` and no access to your app's secrets. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
 
 The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
 

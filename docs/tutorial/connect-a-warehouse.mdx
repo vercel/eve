@@ -1,11 +1,11 @@
 ---
-title: "Connect a Warehouse"
-description: "Part 4 of the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
+title: "Connect a Warehouse (Optional)"
+description: "Optional follow-up to the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
 ---
 
-The sample dataset got the analytics assistant running, but it's a stand-in. Now point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
+Complete [the tutorial with sample data](./first-agent) first. When you have a warehouse with an MCP server, you can connect it to the analytics assistant and let each user sign in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
 
-This step depends on Vercel Connect, which is in private beta. No Connect access? Keep the Step 3 sample dataset and read this step for the connection model. Steps 5 through 9 work against the sample dataset, so you can complete the tutorial without a warehouse.
+This step depends on Vercel Connect, which is in private beta. No Connect access? Keep the Step 3 sample dataset and read this step for the connection model. All eight tutorial steps work against the sample dataset, so you can complete the tutorial without a warehouse.
 
 The filename sets the runtime name. Put the file at `agent/connections/warehouse.ts` and it registers as `"warehouse"`, with its tools surfaced as `warehouse__<tool>`.
 
@@ -53,6 +53,6 @@ Right before each request to the MCP server, eve resolves the bearer and sends i
 
 If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [MCP connections](../connections/mcp).
 
-→ Next: [Run analysis](./run-analysis)
+→ Return to the tutorial: [Run analysis](./run-analysis)
 
 Learn more: [MCP connections](../connections/mcp) · [Authentication](../guides/auth-and-route-protection)

@@ -1,9 +1,9 @@
 ---
 title: "Team Playbooks"
-description: "Part 7 of the Build an Agent tutorial. Load the caller's team playbook with a dynamic skill keyed on the principal."
+description: "Part 6 of the Build an Agent tutorial. Load the caller's team playbook with a dynamic skill keyed on the principal."
 ---
 
-The glossary from [Step 6](./remember-definitions) is per-session. But your teams have standing analysis conventions for the analytics assistant (Growth runs cohort retention a particular way, Finance has its own revenue-recognition rules), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
+The glossary from [Step 5](./remember-definitions) is per-session. But your teams have standing analysis conventions for the analytics assistant (Growth runs cohort retention a particular way, Finance has its own revenue-recognition rules), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
 
 A skill is an on-demand procedure. The model pulls it in with `load_skill` only when a turn needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` resolver reads the session and returns a `defineSkill` (or nothing). Here you key that decision on the caller's identity in `ctx.session.auth`.
 
@@ -52,14 +52,14 @@ export default defineDynamic({
 
 ## See it route
 
-The team comes from authenticated claims, which the auth layer stamps on in [Step 9](./ship-it). Until then `ctx.session.auth.current` has no `team`, so the resolver returns `null` and no playbook loads. To verify routing now, stamp a team in local dev. Add a dev-only entry to `agent/channels/eve.ts` ahead of `localDev()`, and remove it before Step 9 wires real auth:
+The team comes from authenticated claims, which the auth layer stamps on in [Step 8](./ship-it). Until then `ctx.session.auth.current` has no `team`, so the resolver returns `null` and no playbook loads. To verify routing now, stamp a team in local dev. Add a dev-only entry to `agent/channels/eve.ts` ahead of `localDev()`, and remove it before Step 8 wires real auth:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
 import { localDev, placeholderAuth, vercelOidc, type AuthFn } from "eve/channels/auth";
 
-// Dev-only: stamp a team so Step 7's playbook resolver has something to read.
-// Remove before Step 9.
+// Dev-only: stamp a team so Step 6's playbook resolver has something to read.
+// Remove before Step 8.
 const devTeam: AuthFn<Request> = () =>
   process.env.NODE_ENV === "production"
     ? null

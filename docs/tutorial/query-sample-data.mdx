@@ -1,6 +1,6 @@
 ---
 title: "Query Sample Data"
-description: "Part 3 of the Build an Agent tutorial. Add a run_sql tool over the bundled sample dataset and watch the tool loop."
+description: "Part 3 of the Build an Agent tutorial. Add a run_sql tool over a local sample dataset and watch the tool loop."
 ---
 
 The analytics assistant can hold a conversation, but it can't see a single row of data. Give it a tool. A tool is the action primitive. Typed input goes in, your code runs, structured output comes back. The name the model sees is the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
@@ -14,27 +14,21 @@ npm install sql.js
 npm install --save-dev @types/sql.js
 ```
 
-`sql.js` loads its WebAssembly binary from the installed package at runtime. Keep the package external so the binary remains next to its JavaScript:
+`sql.js` loads its WebAssembly binary from the installed package at runtime. Keep the package external so the binary remains next to its JavaScript. Add this `build` property inside your existing `defineAgent({ ... })` in `agent/agent.ts`, keeping your configured `model` and its imports:
 
-```ts title="agent/agent.ts" {5-7}
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
-  build: {
-    externalDependencies: ["sql.js"],
-  },
-});
+```ts
+build: {
+  externalDependencies: ["sql.js"],
+},
 ```
 
 Restart the dev server after changing `externalDependencies`. eve reads this setting when the server starts.
 
 ## A tiny sample dataset
 
-Store a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
+Create `agent/lib/sample-db.ts` with the dataset below. These four orders and three customers supply the data for every remaining tutorial step. No database server, account, or connection string is needed. The dataset is recreated when the app restarts.
 
 ```ts title="agent/lib/sample-db.ts"
-// A toy SQLite-in-memory stand-in. Swap for your real warehouse in Step 4.
 import initSqlJs from "sql.js";
 
 const SEED = `
@@ -98,8 +92,10 @@ Restart the dev server with `npm run dev` and ask:
 Which customer has spent the most, and how much?
 ```
 
-Watch the loop play out in the TUI. The model emits a `run_sql` call, eve runs your `execute`, and the rows come back as a tool result. The model reads them and answers with a real number. eve drove the whole loop. All you supplied was the tool.
+Watch the loop play out in the TUI. The model emits a `run_sql` call, eve runs your `execute`, and the rows come back as a tool result. The model reads them and answers with a real number. The result is Globex with 9,900 cents ($99.00). The amounts are stored in cents, so divide by 100 when reporting dollars. eve drove the whole loop; you supplied the tool.
 
-→ Next: [Connect a warehouse](./connect-a-warehouse)
+Keep `run_sql` and the sample database for the rest of the tutorial. When you have your own data service, [Connect a warehouse](./connect-a-warehouse) explains the optional integration.
+
+→ Next: [Run analysis](./run-analysis)
 
 Learn more: [Tools](../tools)

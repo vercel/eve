@@ -3,14 +3,14 @@ title: "Your First Agent"
 description: "Part 1 of the Build an Agent tutorial. Scaffold the analytics assistant, give it an analyst persona, run it, and ask a question."
 ---
 
-The Build an Agent tutorial constructs one app end to end, a data analytics assistant. You ask in natural language, and over the next nine steps it learns to query a warehouse, run analysis in a sandbox, remember your team's metric definitions, and refuse to exceed your query budget without asking.
+The Build an Agent tutorial constructs one app end to end, a data analytics assistant. You ask in natural language, and over eight steps it learns to query sample data, run analysis in a sandbox, remember your team's metric definitions, and refuse to exceed your query budget without asking.
 
-Step 1 gets it talking. The scaffold bundles a small sample dataset, so your first question works with zero setup.
+Step 1 gets it talking. In Step 3 you create a small local dataset that you use throughout the tutorial. You can complete the tutorial without a warehouse or Vercel Connect account. [Connect a warehouse](./connect-a-warehouse) is an optional follow-up once your agent works.
 
 ## Prerequisites
 
 - Node 24 or newer and npm.
-- A model credential. The scaffold's default model goes through the [Vercel AI Gateway](../getting-started), so you need `AI_GATEWAY_API_KEY` (or `VERCEL_OIDC_TOKEN` pulled via `vercel link`). A direct provider model like `anthropic("claude-opus-4-8")` instead needs that provider's AI SDK package and key, here `@ai-sdk/anthropic` and `ANTHROPIC_API_KEY`.
+- A working model credential, configured through [Getting Started](../getting-started). Keep the model and credential you already tested there.
 
 If you have not run eve before, complete [Getting Started](../getting-started) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
 
@@ -21,24 +21,19 @@ npx eve@latest init analytics-assistant
 cd analytics-assistant
 ```
 
-The command writes the starter agent with eve's default model and built-in HTTP API
-channel (`agent/channels/eve.ts`), installs dependencies, initializes Git, and
-starts the development server. Stop the server before continuing with the edits
-below. It does not create a Vercel project or deploy. `init` creates the
+The command writes the starter agent and built-in HTTP API channel
+(`agent/channels/eve.ts`), installs dependencies, initializes Git, and offers
+to start the development server. Stop the server if you started it before
+continuing with the edits below. It does not create a Vercel project or deploy. `init` creates the
 `analytics-assistant/` directory, so `cd` into it before running further
 commands.
 
-## Set the model
+## Keep your configured model
 
-`agent/agent.ts` holds the model and config. Use a capable model for analysis work:
-
-```ts
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
-});
-```
+`agent/agent.ts` holds the model and config. Use the same model and credentials
+that worked in Getting Started. The tutorial does not require switching providers.
+If you need to configure this new project, use `/model` in the dev TUI before
+sending your first question.
 
 ## Give it an analyst persona
 
@@ -53,7 +48,7 @@ You are a senior data analyst. You answer questions about the team's data.
   the data, say so plainly.
 ```
 
-Instructions are identity and standing rules. On-demand procedures belong in skills (Step 7), and actions belong in tools (Step 3). See [Instructions](../instructions).
+Instructions are identity and standing rules. On-demand procedures belong in skills (Step 6), and actions belong in tools (Step 3). See [Instructions](../instructions).
 
 ## Run the agent
 
