@@ -109,6 +109,37 @@ describe("ChatGPT device sign-in", () => {
     expect(options.store.update).not.toHaveBeenCalled();
   });
 
+  it("does not save a login cancelled while waiting for the credential lock", async () => {
+    vi.useFakeTimers();
+    const options = setup();
+    options.fetch
+      .mockResolvedValueOnce(Response.json(device))
+      .mockResolvedValueOnce(
+        Response.json({ authorization_code: "code", code_verifier: "verifier" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 }),
+      );
+    const lock = Promise.withResolvers<void>();
+    const save = vi.fn();
+    vi.mocked(options.store.update).mockImplementationOnce(async (callback) => {
+      await lock.promise;
+      const credentials = await callback(undefined);
+      save(credentials);
+      return credentials;
+    });
+    const controller = new AbortController();
+    const result = ensureChatGptAuth({ ...options, signal: controller.signal }).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(2001);
+    expect(options.store.update).toHaveBeenCalledOnce();
+    controller.abort(new Error("cancelled while waiting"));
+    lock.resolve();
+    expect(String(await result)).toContain("cancelled while waiting");
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("reuses an existing eve login without opening a browser", async () => {
     const options = setup();
     await options.store.update(async () => ({
