@@ -60,11 +60,26 @@ async function db() {
 
 export async function runReadOnlySql(sql: string) {
   const database = await db();
-  const [result] = database.exec(sql);
-  if (!result) return { columns: [], rows: [] as unknown[][] };
-  return { columns: result.columns, rows: result.values };
+  const query = `SELECT * FROM (${sql.trim().replace(/;$/, "")}) LIMIT 501`;
+  const statement = database.prepare(query);
+  try {
+    // prepare() accepts the first statement; reject any unparsed trailing SQL.
+    if (statement.getSQL() !== query) {
+      throw new Error("Provide a single SELECT query.");
+    }
+    const columns = statement.getColumnNames();
+    const rows: unknown[][] = [];
+    while (rows.length < 501 && statement.step()) rows.push(statement.get());
+    return { columns, rows };
+  } finally {
+    statement.free();
+  }
 }
 ```
+
+The outer `SELECT` lets SQLite accept queries, including `WITH` queries, while rejecting writes and configuration statements. The helper prepares one statement, rejects trailing SQL, and reads at most 501 rows. The extra row lets the tool report that its 500-row output was truncated. It frees the statement even when a query fails.
+
+This is an in-memory tutorial database. A row limit does not bound the work needed to compute a query; use database-enforced read-only permissions and query timeouts when adapting the tool to a production database.
 
 ## Define the run_sql tool
 
@@ -78,7 +93,7 @@ export default defineTool({
     "Run a read-only SQL query against the analytics tables (orders, customers) " +
     "and return the columns and rows.",
   inputSchema: z.object({
-    sql: z.string().describe("A single read-only SELECT statement."),
+    sql: z.string().max(10_000).describe("A single read-only SELECT statement."),
   }),
   async execute({ sql }) {
     const { columns, rows } = await runReadOnlySql(sql);
