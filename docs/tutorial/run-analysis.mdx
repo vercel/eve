@@ -25,7 +25,47 @@ CREATE TABLE orders     (id INTEGER, customer_id INTEGER, amount_cents INTEGER, 
 CREATE TABLE customers  (id INTEGER, name TEXT, plan TEXT);
 ```
 
-Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and seeds your files into it.
+Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. A `workspace/` folder seeds your files without requiring a sandbox definition. Add one next to install the chart dependencies.
+
+## Install the chart dependencies
+
+Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. eve also supports [microsandbox](../sandbox#microsandbox) on compatible hosts. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container or VM yet.
+
+The default eve images for Docker, microsandbox, and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({
+  async bootstrap({ use }) {
+    const sandbox = await use();
+    const commands = [
+      "sudo apt-get update && sudo apt-get install -y python3 python3-venv",
+      "python3 -m venv /workspace/.venv",
+      "/workspace/.venv/bin/python -m pip install matplotlib==3.10.8",
+      "/workspace/.venv/bin/python -c \"import matplotlib.pyplot; print('Chart dependencies ready')\"",
+    ];
+    for (const command of commands) {
+      const result = await sandbox.run({ command });
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Chart setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+        );
+      }
+    }
+  },
+});
+```
+
+Bootstrap runs when eve builds the sandbox template, and sessions inherit the installed environment. The first build needs network access to Ubuntu package repositories and PyPI. Keep the default network policy while following this example; a custom `deny-all` or allow-list policy must permit these downloads during bootstrap. The same definition uses Vercel Sandbox after deployment to Vercel.
+
+Restart `npm run dev` after adding the definition. Before asking for a chart, send this message in the TUI:
+
+```text
+Run /workspace/.venv/bin/python -c "import matplotlib; print(matplotlib.__version__)" in the sandbox.
+```
+
+The command should print `3.10.8`. If setup fails, check the dev server's sandbox logs for the failing command. Resolve the package download or backend error before continuing.
 
 ## Compute and chart in the sandbox
 
@@ -61,13 +101,15 @@ export default defineTool({
       ].join("\n"),
     });
     const root = sandbox.resolvePath("analysis");
-    await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
+    await sandbox.run({
+      command: `cd ${JSON.stringify(root)} && /workspace/.venv/bin/python plot.py`,
+    });
     return { chart: `${root}/chart.png` };
   },
 });
 ```
 
-This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
+The tool uses the Python environment installed in bootstrap. `matplotlib.use('Agg')` selects a renderer that writes PNGs without a desktop display.
 
 Ask for a chart using the sample data from Step 3:
 
