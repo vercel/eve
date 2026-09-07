@@ -2,7 +2,7 @@
  * Stamps callbacks passed to authored `defineTool()` calls with durable replay
  * descriptors. Each callback body is hoisted into a module-suffix function and
  * the live callback is stamped with that function plus the lexical values its
- * body references; identity `(toolName, phase)` is assigned at resolve time.
+ * body references; the session, scope, and resolver bind its identity at resolve time.
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";

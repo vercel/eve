@@ -34,7 +34,11 @@ describe("session command inbox integration", () => {
           },
           continuationToken: token,
         }),
-      ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+      ).resolves.toEqual({
+        sessionId: run.runId,
+        status: "accepted",
+        deliveryId: "legacy-delivery",
+      });
       await expect(run.returnValue).resolves.toBe("legacy-compatible");
     } finally {
       const status = await run.status;
@@ -65,7 +69,11 @@ describe("session command inbox integration", () => {
           },
           continuationToken: token,
         }),
-      ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+      ).resolves.toEqual({
+        sessionId: run.runId,
+        status: "accepted",
+        deliveryId: "mid-cohort-delivery",
+      });
       await expect(run.returnValue).resolves.toBe("mid-cohort-compatible");
     } finally {
       const status = await run.status;

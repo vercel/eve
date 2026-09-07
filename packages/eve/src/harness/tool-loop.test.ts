@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -2329,15 +2330,23 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
+    ctx.set(SessionIdKey, "test-session");
+    const owner = {
+      sessionId: "test-session",
+      scope: "step" as const,
+      resolverSlug: "tfl",
+      entryKey: "tfl__getLineStatus",
+      name: "tfl__getLineStatus",
+    };
     registerDurableDynamicCallback({
       callback: () => ({ ok: true }),
       phase: "execute",
-      toolName: "tfl__getLineStatus",
+      owner,
     });
     registerDurableDynamicCallback({
       callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
       phase: "approvalRequest",
-      toolName: "tfl__getLineStatus",
+      owner,
     });
     ctx.set(StepDynamicToolMetadataKey, [
       {
@@ -12247,6 +12256,78 @@ describe("createToolLoopHarness", () => {
       });
     });
 
+    it.each(["plain", "client context", "compaction", "projected history"])(
+      "keeps framework context before the turn input across durable steps (%s)",
+      async (scenario) => {
+        const withClientContext = scenario === "client context";
+        if (scenario === "compaction") {
+          vi.mocked(shouldCompact).mockReturnValueOnce(true);
+          vi.mocked(compactMessages).mockImplementationOnce(async (messages) => messages.slice(2));
+        }
+        const toolCall = {
+          type: "tool-call" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          input: { a: 20, b: 22 },
+        };
+        const toolResult = {
+          type: "tool-result" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          output: "42",
+        };
+        setupMockAgent({
+          finishReason: "tool-calls",
+          response: {
+            messages: [
+              { role: "assistant", content: [toolCall] },
+              { role: "tool", content: [toolResult] },
+            ],
+          },
+          text: "",
+          toolCalls: [toolCall],
+          toolResults: [{ ...toolResult, input: toolCall.input }],
+        });
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+        const runStep = createToolLoopHarness(
+          createTestConfig("conversation", undefined, {
+            historyProjector:
+              scenario === "projected history"
+                ? ({ messages }) =>
+                    messages.filter((message) => message.content !== "Previous answer")
+                : undefined,
+          }),
+        );
+        const initial = setHarnessEmissionState(
+          createTestSession({
+            history: [
+              { role: "user", content: "Previous request" },
+              { role: "assistant", content: "Previous answer" },
+            ],
+          }),
+          { sessionStarted: true, sequence: 1, stepIndex: 0, turnId: "turn_1" },
+        );
+        const input = { context: ["Current channel context"], message: "Add 20 and 22." };
+        const first = await contextStorage.run(ctx, () =>
+          runStep(
+            initial,
+            withClientContext ? attachClientContext(input, ["Client context"]) : input,
+          ),
+        );
+        expect(first.next).toBe(runStep);
+        const firstPrompt = structuredClone(getLastAgentSettings().messages);
+        setupMockAgent(defaultModelResult());
+        const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
+        await contextStorage.run(ctx, () => runStep(restored));
+        const nextPrompt = getLastAgentSettings().messages;
+        expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
+        expect(
+          nextPrompt.filter((message) => message.content === "Task status: analysis in progress"),
+        ).toHaveLength(1);
+      },
+    );
+
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
       vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);
@@ -12776,5 +12857,126 @@ describe("appendMissingToolResultMessages", () => {
         responseMessages: [toolMessage],
       }),
     ).toEqual([toolMessage]);
+  });
+});
+
+describe("boundary event failures", () => {
+  it.each(["turn.started", "step.started"] as const)(
+    "parks a failed %s and accepts the next turn",
+    async (boundary) => {
+      const events: UnstampedMessageStreamEvent[] = [];
+      let denied = true;
+      const emit: HarnessEmitFn = async (event) => {
+        events.push(event);
+        if (denied && event.type === boundary)
+          throw new BoundaryHookError(new Error("admission denied"));
+      };
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+        message: "Denied request",
+      });
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({ isError: true, output: "admission denied" });
+      expect(result.session.outputSchema).toBeUndefined();
+      expect(ToolLoopAgent).not.toHaveBeenCalled();
+      expect(events.filter((event) => event.type === "turn.failed")).toMatchObject([
+        { data: { turnId: "turn_0", sequence: 0, code: "EVENT_HANDLER_FAILED" } },
+      ]);
+      expect(events.map((event) => event.type)).toContain("session.waiting");
+      expect(events.map((event) => event.type)).not.toContain("session.failed");
+      expect(getHarnessEmissionState(result.session.state)).toEqual({
+        sessionStarted: true,
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "",
+      });
+      denied = false;
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ role: "assistant", content: "recovered" }] },
+        text: "recovered",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const recovered = await runStep(
+        JSON.parse(JSON.stringify(result.session)) as HarnessSession,
+        { message: "Try again" },
+      );
+      expect(recovered.next).toBeNull();
+      expect(events.filter((event) => event.type === "turn.completed")).toMatchObject([
+        { data: { turnId: "turn_1", sequence: 1 } },
+      ]);
+      expect(events.filter((event) => event.type === "session.started")).toHaveLength(1);
+    },
+  );
+
+  it("fails the current later step without invoking another model", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "step.started")
+        throw new BoundaryHookError(new Error("step budget exhausted"));
+    };
+    const session = setHarnessEmissionState(createTestSession(), {
+      sessionStarted: true,
+      sequence: 2,
+      stepIndex: 3,
+      turnId: "turn_2",
+    });
+    const result = await createToolLoopHarness(createTestConfig("conversation", emit))(session);
+    expect(result.next).toBeNull();
+    expect(events[1]).toMatchObject({
+      type: "step.failed",
+      data: { stepIndex: 3, turnId: "turn_2" },
+    });
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("lets a failed failure handler escalate", async () => {
+    const emit: HarnessEmitFn = async (event) => {
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
+      if (event.type === "turn.failed") throw new Error("failure handler failed");
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toThrow("failure handler failed");
+  });
+
+  it("keeps task failures terminal", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "turn.started") throw new BoundaryHookError(new Error("task denied"));
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("task", emit))(createTestSession(), { message: "Hi" }),
+    ).rejects.toThrow("task denied");
+    expect(events.map((event) => event.type)).not.toContain("session.waiting");
+  });
+
+  it("keeps runtime preamble failures terminal", async () => {
+    const failure = new Error("memory recall failed");
+    const emit: HarnessEmitFn = async (event) => {
+      if (event.type === "turn.started") throw failure;
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toBe(failure);
+  });
+
+  it("preserves explicit cancellation from a boundary handler", async () => {
+    const cancellation = new TurnCancelledError();
+    const emit: HarnessEmitFn = async () => {
+      throw cancellation;
+    };
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).rejects.toBe(cancellation);
   });
 });

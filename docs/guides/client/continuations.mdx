@@ -52,6 +52,17 @@ console.log((await response.result()).message);
 `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId`; it never follows or creates a replacement.
 
+`send()` correlates its response with the message accepted by the server. If the
+saved cursor is behind, it skips earlier turns and advances past them before
+collecting the new result, including when another turn is active or queued. You
+do not need to drain the stream before sending. Upgrade the server alongside the
+client: a server that omits the accepted delivery identity causes `send()` to
+throw instead of returning an ambiguous result.
+
+If a configured reconnect limit ends the stream before the accepted turn reaches
+a boundary, collecting its response throws. A partial stream is not a completed
+result.
+
 ## Waiting, completed, and reset sessions
 
 A session that emits `session.waiting` accepts another message through the same

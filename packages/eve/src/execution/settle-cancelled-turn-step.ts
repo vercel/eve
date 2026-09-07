@@ -1,6 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { TurnDeliveryIdsKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -104,7 +105,7 @@ export async function settleCancelledTurnStep(input: {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
           // Stamp once: the persisted chunk and the hooks must agree on the id.
-          const stamped = stampMessageStreamEvent(transformed);
+          const stamped = stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
           await writer.write(encodeMessageStreamEvent(stamped));
           void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({

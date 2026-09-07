@@ -87,7 +87,7 @@ function durableCallbacks(tool: unknown): StampedCallbacks {
 
 // Clear resolve-time registrations between tests so each assertion observes only its module.
 beforeEach(() => {
-  const sym = Symbol.for("eve:dynamic-tool-callbacks");
+  const sym = Symbol.for("eve:scoped-dynamic-tool-callbacks");
   const reg = (globalThis as Record<symbol, Map<string, Function> | undefined>)[sym];
   if (reg) reg.clear();
 });
