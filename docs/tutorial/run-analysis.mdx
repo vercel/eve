@@ -61,13 +61,20 @@ export default defineTool({
       ].join("\n"),
     });
     const root = sandbox.resolvePath("analysis");
-    await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
+    const result = await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Chart generation failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
     return { chart: `${root}/chart.png` };
   },
 });
 ```
 
 This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
+
+`sandbox.run()` returns an exit code even when the command fails. Check `exitCode` before returning a chart path. Throwing an error gives the model the failed command's output, including a missing Python executable or matplotlib import, so it can report the failure instead of claiming a chart exists.
 
 Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
 
