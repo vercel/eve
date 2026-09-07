@@ -118,6 +118,12 @@ const { response } = await client.sessions.create({
 });
 const turn = await response.result();
 if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
+if (turn.inputRequests.length > 0) {
+  const prompts = turn.inputRequests.map((request) => request.prompt).join("\n");
+  throw new Error(
+    `Session ${turn.sessionId} needs your input before it can create the chart:\n${prompts}`,
+  );
+}
 
 const chartOutput = z.object({ pngBase64: z.string().min(1).max(1_398_104) });
 let saved = false;
@@ -152,6 +158,8 @@ node save-chart.ts http://localhost:2000
 ```
 
 Open the saved `chart.png` in your image viewer. This creates a separate session from your TUI conversation and overwrites an existing `chart.png`. A failed tool call or a turn without a chart fails the script instead of claiming a file was saved.
+
+This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
 
 The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
 
