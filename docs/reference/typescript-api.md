@@ -191,9 +191,9 @@ Sign in directly from eve; the Codex CLI is not required:
 2. Complete sign-in in the browser. If the browser does not open, use the URL printed in the terminal.
 3. Return to eve after the terminal confirms that your subscription is connected. Normal token expiry is refreshed automatically.
 
-eve stores this session in `~/.eve/auth/chatgpt.json` with owner-only file permissions. It is separate from any Codex login and is never written to your project. Keep this file private. To remove the local eve login, stop your eve processes and delete the file. Existing Codex users must sign in once through eve after upgrading.
+eve stores this session in `~/.eve/auth/chatgpt.json` with owner-only file permissions on Unix. It is separate from any Codex login and is never written to your project. Keep this file private. To remove the local eve login, stop your eve processes and delete the file. Existing Codex users must sign in once through eve after upgrading.
 
-Over SSH, or if localhost port 1455 is occupied, eve shows a device code instead. Open the displayed link in a browser and enter the code. Device sign-in requires enabling device code authorization in **ChatGPT Settings → Security**. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner.
+Over SSH, or if localhost port 1455 is occupied, eve shows a device code instead. Open the displayed link in a browser and enter the code. Device sign-in requires enabling device code authorization in **ChatGPT Settings → Security**, or having a workspace admin enable it in workspace permissions. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner.
 
 ChatGPT subscription credentials are local user credentials. `eve deploy` blocks agents whose active model is `chatgpt()` because those credentials are not uploaded to a deployment. Use an environment branch with a deployable model, or switch to an AI Gateway model before deploying.
 

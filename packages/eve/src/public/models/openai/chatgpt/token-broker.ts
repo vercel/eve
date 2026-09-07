@@ -88,7 +88,8 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
       let credentials = await store.read();
       if (!credentials) {
         cached = undefined;
-        currentState = forceRefresh ? { kind: "reauth-required" } : { kind: "signed-out" };
+        if (forceRefresh) throw new ChatGptSignInRequiredError();
+        currentState = { kind: "signed-out" };
         throw new Error(`ChatGPT subscription is not signed in. ${CHATGPT_LOGIN_HINT}`);
       }
       const rejectedToken = credentials.accessToken;

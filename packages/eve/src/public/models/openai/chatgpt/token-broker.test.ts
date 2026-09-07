@@ -117,6 +117,14 @@ describe("ChatGPT token broker", () => {
     });
   });
 
+  it("preserves the sign-in hint when credentials disappear before a rejected request retries", async () => {
+    const store = memoryStore();
+    vi.mocked(store.read).mockResolvedValue(undefined);
+    const broker = createCodexTokenBroker({ store });
+    await expect(broker.getToken({ reason: "rejected" })).rejects.toThrow("/model");
+    expect(broker.state()).toEqual({ kind: "reauth-required" });
+  });
+
   it("reports revoked credentials without exposing the provider response", async () => {
     const broker = createCodexTokenBroker({
       store: memoryStore(),
