@@ -102,7 +102,8 @@
  *             directory and let consumers observe a partial package.
  *   rule 40 — Wire schemas, frozen fixtures, snapshots, and adjacent migration
  *             pairs are immutable protocol data. Encoders, version selection,
- *             chain assembly, and realm normalization remain editable policy.
+ *             chain assembly, and realm normalization may change only in PRs
+ *             that do not add a wire version.
  *             Every schema and migration pair must carry a colocated test.
  *             The session-inbox registry must be contiguous, name every schema
  *             module, and identify its highest version as current. Wire versions
@@ -131,6 +132,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { extractMigration, generateCatalog } from "./migratew.mjs";
+import { checkWireChanges } from "./guard-wire-changes.mjs";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const require = createRequire(import.meta.url);
@@ -950,6 +952,7 @@ async function checkRule40WireContracts() {
   );
   try {
     await generateCatalog(REPO_ROOT, "session-inbox", true);
+    await checkWireChanges(REPO_ROOT);
   } catch (error) {
     violations.push({
       rule: 40,

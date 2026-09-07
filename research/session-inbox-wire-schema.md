@@ -354,8 +354,13 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - Rule 40 freezes adjacent migration pairs and their tests, and rejects policy
   imports from those transforms. It compares each shipped schema and its local
   dependencies with `origin/main`, and separately protects frozen fixtures and
-  snapshots. Encoder implementations and assertions may change without changing
-  the historical protocol contract.
+  snapshots. PRs adding a wire version may change only new migration/test pairs
+  and generated files within `wire/`; they cannot edit the interface, runners,
+  encoder, decoder, generator, or guard. Machinery fixes must ship separately
+  first. This scope check includes local untracked files and compares against
+  the merge base with `origin/main`; missing base history is an error. Without
+  a new version, encoder implementations and assertions may change while
+  preserving the historical protocol contract.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
   deterministic registry checks cover future stamped-version changes. The

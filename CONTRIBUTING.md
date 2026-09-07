@@ -278,3 +278,10 @@ also sync automatically. Commit the generated files with the two authored
 files. CI checks freshness with `pnpm run migratew --check` and runs the
 scaffolder tests through `pnpm guard:invariants`. Do not edit registrations or
 historical migrations by hand. See [the wire contract](research/session-inbox-wire-schema.md).
+
+A PR adding a wire version may change only new migration/test pairs and
+generated files within `wire/`. CI rejects changes to the interface, runners,
+encoder, decoder, generator, or guard in the same PR. Ship machinery changes
+separately first. The guard compares against the merge base with `origin/main`,
+including staged, unstaged, and untracked files when run locally. It enforces
+the resulting files, not whether the scaffolding command was used.

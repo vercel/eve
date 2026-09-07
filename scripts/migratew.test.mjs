@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { stripTypeScriptTypes } from "node:module";
 import { discover, extractMigration, generateCatalog, scaffold } from "./migratew.mjs";
+import { checkWireChanges } from "./guard-wire-changes.mjs";
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "eve-migratew-"));
@@ -17,6 +19,125 @@ async function fixture(t) {
   );
   return { root, wire, migrations: join(wire, "session-inbox/migrations") };
 }
+
+async function gitFixture(t) {
+  const files = await fixture(t);
+  const git = (...args) => execFileSync("git", args, { cwd: files.root, stdio: "pipe" });
+  const commit = () =>
+    git(
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-m",
+      "fixture",
+    );
+  await mkdir(join(files.wire, "session-inbox/generated"));
+  await writeFile(join(files.wire, "session-inbox/migration.ts"), "// interface\n");
+  await writeFile(join(files.migrations, ".gitkeep"), "");
+  git("init", "--initial-branch=main");
+  git("add", ".");
+  commit();
+  git("switch", "-c", "ruiconti/migration-test");
+  return { ...files, git, commit };
+}
+
+test("allows a scaffolded version addition before and after committing", async (t) => {
+  const { root, git, commit } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  await checkWireChanges(root, "main");
+  git("add", ".");
+  await checkWireChanges(root, "main");
+  commit();
+  await checkWireChanges(root, "main");
+  await generateCatalog(root, "session-inbox", true);
+});
+
+test("rejects interface edits alongside an untracked, staged, or committed new version", async (t) => {
+  const { root, wire, git, commit } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  await writeFile(join(wire, "session-inbox/migration.ts"), "// changed interface\n");
+  await assert.rejects(checkWireChanges(root, "main"), /Forbidden changes:\n.*migration\.ts/);
+  git("add", ".");
+  await assert.rejects(checkWireChanges(root, "main"), /Forbidden changes:\n.*migration\.ts/);
+  commit();
+  await assert.rejects(checkWireChanges(root, "main"), /Forbidden changes:\n.*migration\.ts/);
+});
+
+test("rejects runner, encoder, decoder, generator, and guard changes with a new version", async (t) => {
+  const { root, wire } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  const paths = [
+    "packages/eve/src/execution/wire/session-inbox/migrations.ts",
+    "packages/eve/src/execution/wire/session-inbox-encoder.ts",
+    "packages/eve/src/execution/wire/session-inbox-wire.ts",
+    "packages/eve/src/execution/wire/new-helper.ts",
+    "packages/eve/src/execution/durable-session-migrations/chain.ts",
+    "scripts/migratew.mjs",
+    "scripts/migratew.test.mjs",
+    "scripts/guard-wire-changes.mjs",
+    "scripts/guard-invariants.mjs",
+  ];
+  await mkdir(join(wire, "../durable-session-migrations"));
+  await mkdir(join(root, "scripts"));
+  for (const path of paths) {
+    await writeFile(join(root, path), "// machinery\n");
+    await assert.rejects(checkWireChanges(root, "main"), (error) => error.message.includes(path));
+    await rm(join(root, path));
+  }
+});
+
+test("rejects machinery deletions and renames with a new version", async (t) => {
+  const { root, wire } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  await rename(join(wire, "session-inbox/migration.ts"), join(wire, "session-inbox/renamed.ts"));
+  await assert.rejects(checkWireChanges(root, "main"), /migration\.ts/);
+  await rm(join(wire, "session-inbox/renamed.ts"));
+  await assert.rejects(checkWireChanges(root, "main"), /migration\.ts/);
+});
+
+test("allows machinery-only fixes but rejects edits to existing pairs with a new version", async (t) => {
+  const { root, wire, migrations, git, commit } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  git("add", ".");
+  commit();
+  git("branch", "--force", "main", "HEAD");
+  await writeFile(join(wire, "session-inbox/migration.ts"), "// machinery fix\n");
+  await checkWireChanges(root, "main");
+  // Historical immutability is checked separately; this check only governs new versions.
+  await writeFile(join(migrations, "v1-to-v2.test.ts"), "// changed test\n");
+  await checkWireChanges(root, "main");
+  await scaffold(root, "session-inbox");
+  await assert.rejects(checkWireChanges(root, "main"), /v1-to-v2\.test\.ts/);
+});
+
+test("uses the branch merge base even when main has advanced to the same new version", async (t) => {
+  const { root, wire, git, commit } = await gitFixture(t);
+  git("switch", "main");
+  await scaffold(root, "session-inbox");
+  git("add", ".");
+  commit();
+  git("switch", "ruiconti/migration-test");
+  await scaffold(root, "session-inbox");
+  await writeFile(join(wire, "session-inbox/migration.ts"), "// changed interface\n");
+  await assert.rejects(checkWireChanges(root, "main"), /migration\.ts/);
+});
+
+test("requires base history instead of silently skipping the scope check", async (t) => {
+  const { root } = await gitFixture(t);
+  await assert.rejects(checkWireChanges(root, "missing-main"), /Fetch the base branch/);
+});
+
+test("allows callers and documentation to change alongside a new wire version", async (t) => {
+  const { root } = await gitFixture(t);
+  await scaffold(root, "session-inbox");
+  await writeFile(join(root, "CONTRIBUTING.md"), "New protocol documentation\n");
+  await writeFile(join(root, "packages/eve/src/execution/caller.ts"), "// use the new protocol\n");
+  await checkWireChanges(root, "main");
+});
 
 test("scaffolds only a migration and test, and automatically registers the next version", async (t) => {
   const { root, wire, migrations } = await fixture(t);
