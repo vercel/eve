@@ -516,8 +516,13 @@ describe("exported agent telemetry contract", () => {
         parsed.every((span) => Number(span.attributes["agent.trace.schema.version"]) === 4),
       ).toBe(true);
       for (const span of parsed) {
+        expect(span.attributes["resource.name"]).toBe(span.name);
+        expect(span.attributes["operation.name"]).toBe(
+          span.attributes["gen_ai.operation.name"] ?? span.name,
+        );
         expect(span.attributes).not.toHaveProperty("agent.session.id");
         expect(span.attributes).not.toHaveProperty("vercel.session_id");
+        expect(span.attributes["gen_ai.conversation.id"]).toBe("parent");
       }
       expect(
         parsed
@@ -590,6 +595,10 @@ describe("exported agent telemetry contract", () => {
       const metadata = new TextDecoder().decode(
         JsonTraceSerializer.serializeRequest(runtime.metadata.getFinishedSpans())!,
       );
+      const metadataSpans = parseLocalTraceSegment(metadata, traceId);
+      expect(metadataSpans.map((span) => [span.name, span.attributes["resource.name"]])).toEqual(
+        parsed.map((span) => [span.name, span.name]),
+      );
       expect(metadata).not.toContain("private ");
       if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
       else expect(new TextDecoder().decode(bytes)).toContain("private failure");
@@ -641,6 +650,15 @@ describe("exported agent telemetry contract", () => {
       "initiator-user",
     ]);
     expect(new Set(spans.map((span) => span.spanContext().traceId)).size).toBe(2);
+    for (const span of spans) {
+      expect(span.parentSpanContext).toBeUndefined();
+      expect(span.attributes).toMatchObject({
+        "agent.trace.schema.version": 4,
+        "gen_ai.conversation.id": "parent",
+        "operation.name": "invoke_agent",
+        "resource.name": "invoke_agent parent",
+      });
+    }
     await runtime.shutdown();
   });
 
@@ -731,6 +749,54 @@ describe("exported agent telemetry contract", () => {
         registered.mockRestore();
         await runtime.shutdown();
       }
+    },
+  );
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "exports a queryable %s activation outcome without relying on span events",
+    async (outcome) => {
+      const runtime = createRuntime();
+      const ctx = contextFor("private");
+      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "private" });
+      const binding = bindInstrumentationRuntime(runtime, ctx, {
+        agentName: "parent",
+        rootSessionId: "parent",
+        sessionId: "parent",
+      })!;
+      await contextStorage.run(ctx, async () => {
+        await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+        const identity = {
+          idempotencyKey: turnIdempotencyKey("parent", "turn_0"),
+          sessionId: "parent",
+          turnId: "turn_0",
+        };
+        await hooks.publish(
+          outcome === "failed"
+            ? { ...identity, type: "turn.failed", error: new Error("private failure") }
+            : { ...identity, type: outcome === "completed" ? "turn.completed" : "turn.cancelled" },
+        );
+        await hooks.publish({
+          idempotencyKey: sessionIdempotencyKey("parent"),
+          sessionId: "parent",
+          turnId: "turn_0",
+          type: "session.waiting",
+        });
+      });
+      await runtime.forceFlush();
+      const spans = runtime.metadata.getFinishedSpans();
+      const bytes = JsonTraceSerializer.serializeRequest(
+        spans.map((span) => ({
+          ...span,
+          events: [],
+          spanContext: () => span.spanContext(),
+        })),
+      )!;
+      const serialized = new TextDecoder().decode(bytes);
+      const [activation] = parseLocalTraceSegment(serialized, spans[0]!.spanContext().traceId);
+      expect(activation?.attributes["agent.turn.outcome"]).toBe(outcome);
+      expect(activation?.statusCode).toBe(outcome === "failed" ? 2 : 0);
+      expect(serialized).not.toContain("private failure");
+      await runtime.shutdown();
     },
   );
 });

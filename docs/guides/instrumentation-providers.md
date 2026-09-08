@@ -153,6 +153,11 @@ export default otelIntegration({
 });
 ```
 
+Custom destinations receive the schema v4 agent trace contract. Follow
+[Query exported traces](./instrumentation#query-exported-traces) to find
+activations, join sessions across traces, and account for Datadog, Honeycomb,
+and Sentry ingestion differences.
+
 Add `agent/instrumentation/otel.ts` when you need process-wide settings or want to control which content eve writes to OpenTelemetry spans:
 
 ```ts title="agent/instrumentation/otel.ts"
