@@ -65,8 +65,7 @@ export default [false, true].map((laterTurn) =>
         satisfies((count: number) => count > 1, "background completion wakes the parent"),
       );
       const final = turns.at(-1)!;
-      final.messageIncludes("REVIEW_COMPLETE");
-      for (let sheet = 1; sheet <= 5; sheet += 1) final.messageIncludes(`SHEET_REVIEWED_${sheet}`);
+      for (let sheet = 1; sheet <= 5; sheet += 1) final.messageIncludes(`Sheet ${sheet}`);
 
       const parentEvents = turns.flatMap((turn) => turn.events);
       const calls = parentEvents.flatMap((event) =>
@@ -87,6 +86,7 @@ export default [false, true].map((laterTurn) =>
         child.expectOk();
         child.calledTool("review_sheet", { count: 1 });
         child.noFailedActions();
+        child.event("step.failed", { count: 0 });
         child.eventsSatisfy("reviewer uses the real matrix model", usesMatrixModel);
         return reviewSchema.parse(
           child.toolCalls.find((call) => call.name === "review_sheet")?.output,
@@ -106,9 +106,32 @@ export default [false, true].map((laterTurn) =>
         turn.noFailedActions();
         turn.eventsSatisfy("parent uses the real matrix model", usesMatrixModel);
         turn.event("compaction.completed", { count: 0 });
+        turn.event("step.failed", { count: 0 });
       }
 
       const completed = parentEvents.filter((event) => event.type === "step.completed");
+      const firstInputTokens = completed[0]?.data.usage?.inputTokens;
+      await t.require(
+        firstInputTokens,
+        satisfies(
+          (tokens: number | undefined) => tokens !== undefined && tokens >= 4_096,
+          "review packet is large enough to exercise conversation caching",
+        ),
+      );
+      // Allow cache block rounding while requiring reuse of the conversation, not just the system prompt.
+      for (let index = 1; index < completed.length; index += 1) {
+        const previousInput = completed[index - 1]!.data.usage?.inputTokens;
+        const usage = completed[index]!.data.usage;
+        t.log(`Parent request ${index + 1}: ${JSON.stringify({ previousInput, ...usage })}`);
+        t.check(
+          usage?.cacheReadTokens,
+          satisfies(
+            (cached: number | undefined) =>
+              cached !== undefined && previousInput !== undefined && cached >= previousInput * 0.9,
+            `request ${index + 1} reads at least 90% of the preceding input from the provider cache`,
+          ),
+        );
+      }
       const records = readFileSync(promptRecordsPath(started.sessionId), "utf8")
         .trim()
         .split("\n")
@@ -136,29 +159,6 @@ export default [false, true].map((laterTurn) =>
               record.instructions === previous.instructions &&
               previous.messages.every((message, offset) => message === record.messages[offset]),
             `request ${index + 1} preserves the preceding prompt prefix`,
-          ),
-        );
-      }
-
-      const firstInputTokens = completed[0]?.data.usage?.inputTokens;
-      await t.require(
-        firstInputTokens,
-        satisfies(
-          (tokens: number | undefined) => tokens !== undefined && tokens >= 4_096,
-          "review packet is large enough to exercise conversation caching",
-        ),
-      );
-      // Allow cache block rounding while requiring reuse of the conversation, not just the system prompt.
-      for (let index = 1; index < completed.length; index += 1) {
-        const previousInput = completed[index - 1]!.data.usage?.inputTokens;
-        const usage = completed[index]!.data.usage;
-        t.log(`Parent request ${index + 1}: ${JSON.stringify({ previousInput, ...usage })}`);
-        t.check(
-          usage?.cacheReadTokens,
-          satisfies(
-            (cached: number | undefined) =>
-              cached !== undefined && previousInput !== undefined && cached >= previousInput * 0.9,
-            `request ${index + 1} reads at least 90% of the preceding input from the provider cache`,
           ),
         );
       }
@@ -231,5 +231,5 @@ function reviewPacket(): string {
       ),
     ].join("\n"),
   ).join("\n\n");
-  return `Purchasing packet ${randomUUID()}.\nAlice has five independent purchasing sheets for Bob's team. Launch five reviewer subagents in parallel, one per sheet, and collect their results. Send each reviewer only its sheet number; the review_sheet tool has the corresponding records. Acknowledge admission briefly while they work. Report REVIEW_COMPLETE and all five SHEET_REVIEWED markers once their completion notifications arrive.\n\n${records}`;
+  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Tell each reviewer which sheet to check using review_sheet. Let Alice know when the reviews are underway. As they finish, collect their findings and give Bob a short summary with a line labelled Sheet 1 through Sheet 5.\n\n${records}`;
 }

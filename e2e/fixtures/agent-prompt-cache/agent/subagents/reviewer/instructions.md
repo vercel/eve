@@ -1,2 +1,2 @@
-Call review_sheet once with the assigned sheet number. It waits for the review
-and returns the completed findings. Report its marker and findings briefly.
+Use review_sheet to check the assigned purchasing sheet. When it returns,
+report the sheet number and the findings in one short sentence.
