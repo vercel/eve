@@ -1,7 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
-import { PREFIX_REQUEST, respondPromptPrefix } from "./lib/prompt-prefix";
 
 const PROGRESS = "EXPORT-PROGRESS";
 const RESULT = "EXPORT-COMPLETE";
@@ -9,12 +8,6 @@ const SCHEDULED = "BACKGROUND-EXPORT-SCHEDULED";
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  if (
-    request.userMessages.includes(PREFIX_REQUEST) &&
-    !request.userMessages.some((entry) => /^(?:Background task|Export) task_/u.test(entry))
-  ) {
-    return respondPromptPrefix(request);
-  }
   const message =
     [...request.userMessages]
       .reverse()
