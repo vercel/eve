@@ -173,15 +173,12 @@ see the activation name and attributes after its session coordinates are
 available. Sampling must be deterministic for the same trace and operation
 because durable reconstruction can evaluate it again.
 
-Use `agent.turn.outcome` to distinguish completed, failed, and cancelled
-activations. A failed action can be handled by the agent without failing its
-activation; see [Exported span names and outcomes](#exported-span-names-and-outcomes).
+Use `agent.turn.outcome` to distinguish completed, failed, and cancelled activations. A failed action can be handled by the agent without failing its activation; see [Exported span names and outcomes](#exported-span-names-and-outcomes).
 
 Activation spans retain `gen_ai.usage.input_tokens` and
 `gen_ai.usage.output_tokens` alongside `agent.usage.*` totals for that activation.
 Model spans carry `gen_ai.usage.*`; step and dispatch spans report
-`agent.usage.*`. Activation totals summarize that activation's own model calls,
-while caller spans can summarize delegated usage. Do not sum usage across these levels.
+`agent.usage.*`. Activation totals summarize that activation's own model calls, while caller spans can summarize delegated usage. Do not sum usage across these levels.
 
 Nested dispatch spans are materialized when the child settles and handed to
 span processors; successful materialization removes their completed records
@@ -206,15 +203,9 @@ Principal IDs require a content-visible audience and a resolved trace decision t
 
 ## Query exported traces
 
-Use a trace to investigate one activation's work. Use session and conversation
-attributes to find the other activations. Exporting to Datadog, Honeycomb, or
-Sentry does not turn a conversation into one continuous waterfall.
+Use a trace to investigate one activation's work. Use session and conversation attributes to find the other activations. Exporting to Datadog, Honeycomb, or Sentry does not turn a conversation into one continuous waterfall.
 
-This workflow applies to schema v4 from the [instrumentation provider
-layout](./instrumentation-providers). Configure third-party exporters through
-`otelIntegration()` so they receive the same framework spans as local tracing
-and Agent Runs. The legacy `instrumentation.ts` setup emits the [authored trace
-hierarchy](#authored-trace-hierarchy), not this contract.
+This workflow applies to schema v4 from the [instrumentation provider layout](./instrumentation-providers). Configure third-party exporters through `otelIntegration()` so they receive the same framework spans as local tracing and Agent Runs. The legacy `instrumentation.ts` setup emits the [authored trace hierarchy](#authored-trace-hierarchy), not this contract.
 
 ### Find an activation or conversation
 
@@ -233,8 +224,7 @@ trace ID. Child activations link to their caller with `eve.link.type=agent.dispa
 remote workflows keep their own execution lineage, so use conversation IDs and
 caller links for cross-deployment correlation.
 
-For example, the built-in `agent` tool dispatches research into a new workflow
-and trace, and the next user turn starts another trace:
+For example, the built-in `agent` tool dispatches research into a new workflow and trace, and the next user turn starts another trace:
 
 ```text
 Trace A
@@ -256,32 +246,15 @@ invoke_agent support                 session=S, turn=turn_1, conversation=S
     chat <model>
 ```
 
-The conversation filter finds all three retained traces. eve initializes the
-conversation ID once and carries it through the existing parent context for
-local dispatch and `eve.conversation.id` baggage for remote dispatch. Remote
-session creation does not carry execution lineage or add authorization
-requirements for tracing. Existing authentication, principal forwarding,
-and root-session limits remain unchanged.
+The conversation filter finds all three retained traces. eve initializes the conversation ID once and carries it through the existing parent context for local dispatch and `eve.conversation.id` baggage for remote dispatch. Remote session creation does not carry execution lineage or add authorization requirements for tracing. Existing authentication, principal forwarding, and root-session limits remain unchanged.
 
-`traceparent` carries the caller's trace and span IDs for the causal link;
-adopting it as the child's parent would instead keep both in the same trace.
-Resolved trace-policy decisions and trusted remote content ceilings continue
-across this boundary independently of correlation, and an unsampled caller
-cannot be widened into a sampled child. No synthetic session span is needed.
+`traceparent` carries the caller's trace and span IDs for the causal link; adopting it as the child's parent would instead keep both in the same trace. Resolved trace-policy decisions and trusted remote content ceilings continue across this boundary independently of correlation, and an unsampled caller cannot be widened into a sampled child. No synthetic session span is needed.
 
-Activation duration is elapsed time for that activation, including waits inside
-it, not the lifetime of the conversation or CPU time. Idle time between ended
-activations is not part of their durations. For token totals, choose one level:
-filter to `chat` model spans and sum `gen_ai.usage.*`, or filter to activations
-and sum their `agent.usage.input_tokens` and `agent.usage.output_tokens`. Exclude
-caller summaries from the activation total. Query cache usage on model spans.
-Do not add model, step, activation, and caller counters together.
+Activation duration is elapsed time for that activation, including waits inside it, not the lifetime of the conversation or CPU time. Idle time between ended activations is not part of their durations. For token totals, choose one level: filter to `chat` model spans and sum `gen_ai.usage.*`, or filter to activations and sum their `agent.usage.input_tokens` and `agent.usage.output_tokens`. Exclude caller summaries from the activation total. Query cache usage on model spans. Do not add model, step, activation, and caller counters together.
 
 ### Datadog
 
-eve supplies explicit [operation and resource
-names](#exported-span-names-and-outcomes). Use correlation attributes to find
-activations across traces.
+eve supplies explicit [operation and resource names](#exported-span-names-and-outcomes). Use correlation attributes to find activations across traces.
 
 For service `v`, search APM spans for activations:
 
@@ -296,48 +269,21 @@ service:v @agent.session.id:SESSION_ID
 @gen_ai.conversation.id:CONVERSATION_ID
 ```
 
-Datadog's built-in search fields are `operation_name` and `resource_name`,
-without `@`; custom span attributes use `@`. With the naming attributes
-preserved, `operation_name:invoke_agent resource_name:"invoke_agent v"` selects
-that named activation without a caller exclusion. Omit `service:v` when finding
-the whole conversation across remote services. Use span search rather than
-only a service's primary-operation view.
+Datadog's built-in search fields are `operation_name` and `resource_name`, without `@`; custom span attributes use `@`. With the naming attributes preserved, `operation_name:invoke_agent resource_name:"invoke_agent v"` selects that named activation without a caller exclusion. Omit `service:v` when finding the whole conversation across remote services. Use span search rather than only a service's primary-operation view.
 
-APM export does not by itself configure a backend's separate LLM observability
-product.
+APM export does not by itself configure a backend's separate LLM observability product.
 
 ### Honeycomb and Sentry
 
-In [Honeycomb's Query Builder](https://docs.honeycomb.io/investigate/query/build/),
-filter the same session or conversation attributes, group activations by
-session or trace ID, and open the trace waterfall for one activation. Use the
-OTel span name and `gen_ai.operation.name`; Datadog's operation/resource split
-is not required for this workflow.
+In [Honeycomb's Query Builder](https://docs.honeycomb.io/investigate/query/build/), filter the same session or conversation attributes, group activations by session or trace ID, and open the trace waterfall for one activation. Use the OTel span name and `gen_ai.operation.name`; Datadog's operation/resource split is not required for this workflow.
 
-For Sentry, use an approved OTel export path and filter the indexed span
-attributes by the same session or conversation ID. Sentry's [direct OTLP
-intake](https://docs.sentry.io/concepts/otlp/direct/traces/) is currently in open
-beta: it drops span events and displays span links without making those links
-searchable or aggregatable. Use `agent.turn.outcome`, OTel status, and scalar
-correlation attributes rather than relying on turn events or links. Preserve
-eve's ownership of the OTel provider; do not register a second provider merely
-to add a destination.
+For Sentry, use an approved OTel export path and filter the indexed span attributes by the same session or conversation ID. Sentry's [direct OTLP intake](https://docs.sentry.io/concepts/otlp/direct/traces/) is currently in open beta: it drops span events and displays span links without making those links searchable or aggregatable. Use `agent.turn.outcome`, OTel status, and scalar correlation attributes rather than relying on turn events or links. Preserve eve's ownership of the OTel provider; do not register a second provider merely to add a destination.
 
 ### Sampling and completeness
 
-A session can contain both retained and missing activation traces. Head
-sampling, backend retention, destination filtering, and exporter failures all
-affect what a conversation query returns. Preserve the schema and correlation
-attributes in Collector transforms and destination policies, and configure
-indexing and retention for the queries above.
+A session can contain both retained and missing activation traces. Head sampling, backend retention, destination filtering, and exporter failures all affect what a conversation query returns. Preserve the schema and correlation attributes in Collector transforms and destination policies, and configure indexing and retention for the queries above.
 
-Do not interpret a missing activation as a missing execution, or sampled trace
-counts and token sums as an exact session ledger. A backend may receive
-descendants before the activation span finishes and exports; a temporarily
-missing root is not necessarily a broken parent ID. After deployment, verify a
-two-turn conversation and a delegation in the actual destination, including
-names, conversation grouping across services, separate trace roots, caller
-links, and outcome attributes.
+Do not interpret a missing activation as a missing execution, or sampled trace counts and token sums as an exact session ledger. A backend may receive descendants before the activation span finishes and exports; a temporarily missing root is not necessarily a broken parent ID. After deployment, verify a two-turn conversation and a delegation in the actual destination, including names, conversation grouping across services, separate trace roots, caller links, and outcome attributes.
 
 ## Runtime context
 
