@@ -35,7 +35,7 @@ import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
-import { createInputRequestedEvent } from "#protocol/message.js";
+import { createActionsRequestedEvent, createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -1511,7 +1511,7 @@ describe("turnStep", () => {
     expect(observed).toEqual(expected);
   });
 
-  it("routes remote task HITL only to the parent callback", async () => {
+  it("projects inherited task tool activity while routing HITL only to the parent callback", async () => {
     const inputRequested = vi.fn();
     const remoteTaskAdapter: ChannelAdapter = {
       kind: "remote-task-test",
@@ -1543,6 +1543,21 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
       return async (stepSession): Promise<StepResult> => {
+        await input.handleEvent?.(
+          createActionsRequestedEvent({
+            actions: [
+              {
+                callId: "tool-call-1",
+                input: { query: "activity" },
+                kind: "tool-call",
+                toolName: "search_slack",
+              },
+            ],
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          }),
+        );
         await input.handleEvent?.(
           createInputRequestedEvent({
             requests: [
@@ -1621,7 +1636,15 @@ describe("turnStep", () => {
       }),
     );
     expect(inputRequested).not.toHaveBeenCalled();
-    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      expect.objectContaining({
+        body: expect.stringContaining(
+          '"action":{"id":"action:work:child:tool-call-1","kind":"tool","name":"search_slack","parentWorkId":"work:child","rootTurnId":"turn-root"',
+        ),
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
       expect.objectContaining({ body: expect.stringContaining('"kind":"blocker.started"') }),
