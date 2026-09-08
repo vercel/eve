@@ -136,7 +136,6 @@ async function reportAuthorization(
         replyTo: acknowledged.token,
         request: {
           kind: "authorization-request",
-          stepAuthorization: true,
           event: {
             kind: "subagent-authorization-event",
             callId: run.from.callId,

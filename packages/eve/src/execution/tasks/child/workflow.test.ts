@@ -113,14 +113,13 @@ const workflowAgentRequest = {
   },
 } satisfies WorkflowToolRunMessage;
 
-function authorizationRequest(attemptId: string, completed = false): WorkflowToolRunMessage {
+function authorizationRequest(attemptId: string, completed = false) {
   const data = { attemptId, name: "github", sequence: 0, stepIndex: 0, turnId: "turn-parent" };
   return {
     ...bufferedAgentRequest,
     replyTo: `ack-${attemptId}`,
     request: {
       kind: "authorization-request",
-      stepAuthorization: true,
       event: {
         kind: "subagent-authorization-event",
         callId: "tool-call-1",
@@ -131,7 +130,7 @@ function authorizationRequest(attemptId: string, completed = false): WorkflowToo
           : createAuthorizationRequiredEvent({ ...data, description: "Sign in" }),
       },
     },
-  };
+  } satisfies WorkflowToolRunMessage;
 }
 
 function queueOwnerRequest(value: WorkflowToolRunMessage) {
@@ -203,6 +202,26 @@ describe("taskRunWorkflow", () => {
         mocks.resumeHookStep.mock.invocationCallOrder[i]!,
       );
     }
+  });
+
+  it("forwards child-agent auth without treating it as the workflow's own request", async () => {
+    const message = authorizationRequest("child");
+    message.request.event.childSessionId = "child-session";
+    queueCommand({ kind: "ready" });
+    queueOwnerRequest(message);
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+
+    await taskRunWorkflow(workflowInput);
+
+    expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
+      request: message.request,
+      taskId: initialView.taskId,
+      token: workflowInput.parentContinuationToken,
+    });
+    expect(mocks.resumeHookStep).not.toHaveBeenCalled();
+    expect(
+      mocks.appendTaskViewStep.mock.calls.some(([input]) => input.view.status === "input_required"),
+    ).toBe(false);
   });
 
   it("acknowledges buffered auth when dispatch is rejected without forwarding it", async () => {

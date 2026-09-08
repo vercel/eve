@@ -329,7 +329,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       return;
     }
     const { request, replyTo } = message;
-    if (request.kind === "authorization-request" && request.stepAuthorization === true) {
+    if (
+      request.kind === "authorization-request" &&
+      request.event.childSessionId === message.from.runId
+    ) {
       await handleStepAuthorization(request, replyTo);
       return;
     }

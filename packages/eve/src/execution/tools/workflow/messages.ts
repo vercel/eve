@@ -25,7 +25,6 @@ export type WorkflowToolAgentRequest = AgentInvocationRequest | AgentSettlementR
  * directly, so the owner only re-emits it.
  */
 export interface WorkflowToolAuthorizationRequest {
-  readonly stepAuthorization?: boolean;
   readonly event: SubagentAuthorizationEventHookPayload;
   readonly kind: "authorization-request";
 }
