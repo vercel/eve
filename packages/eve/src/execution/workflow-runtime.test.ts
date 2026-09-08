@@ -213,6 +213,24 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
+  it("acknowledges the exact delivery accepted by the session inbox", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+    const delivery = { channelKind: "eve", channelName: "eve", deliveryId: "accepted-delivery" };
+    const result = await buildRuntime().dispatchSession({
+      command: { kind: "send", payload: { message: "hello" }, delivery },
+      sessionId: "session-1",
+    });
+    expect(result).toEqual({
+      sessionId: "session-1",
+      status: "accepted",
+      deliveryId: delivery.deliveryId,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionCommandHookToken("session-1"),
+      expect.objectContaining({ delivery }),
+    );
+  });
+
   it.each([
     { command: { kind: "send" as const, payload: {} }, status: "session_not_active" },
     { command: { kind: "compact" as const }, status: "no_active_session" },

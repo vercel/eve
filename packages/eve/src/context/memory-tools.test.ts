@@ -10,6 +10,7 @@ import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/
 import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
+import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import { defineMemory } from "#public/memory/index.js";
 import { always } from "#public/tools/approval/index.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
@@ -95,11 +96,7 @@ describe("memory provider tools", () => {
       name: "profile__save",
     });
 
-    const registry = Reflect.get(globalThis, Symbol.for("eve:dynamic-tool-callbacks")) as Map<
-      string,
-      Map<string, unknown>
-    >;
-    registry.get("profile__save")?.clear();
+    clearDurableDynamicCallbacks(ctx.require(SessionIdKey));
     deployedVersion = 2;
     ctx.set(TurnMemoryLocksKey, createContext("user_2").require(TurnMemoryLocksKey));
 

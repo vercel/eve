@@ -22,6 +22,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
   SessionTraceSeedKey,
+  TurnDeliveryIdsKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -1160,6 +1161,93 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => async (stepSession) => {
+      await input.handleEvent?.({
+        type: "session.waiting",
+        data: { continuationToken: "continuation_test", wait: "next-user-message" },
+      });
+      return { next: null, session: stepSession };
+    });
+    const delivery = (ids: string[]): Parameters<typeof turnStep>[0]["input"] => ({
+      kind: "deliver",
+      payloads: ids.map((message) => ({ message })),
+      deliveryMetadata: ids.map((deliveryId, payloadIndex) => ({
+        channelKind: "eve",
+        channelName: "eve",
+        deliveryId,
+        payloadIndex,
+      })),
+    });
+
+    const first = await turnStep({
+      input: delivery(["delivery-a", "delivery-b"]),
+      parentWritable: createTestWritable("first"),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(first.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-a", "delivery-b"]);
+    const resumed = await turnStep({
+      input: undefined,
+      parentWritable: createTestWritable("resumed"),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+    expect(resumed.serializedContext[TurnDeliveryIdsKey.name]).toEqual([
+      "delivery-a",
+      "delivery-b",
+    ]);
+    const next = await turnStep({
+      input: delivery(["delivery-c"]),
+      parentWritable: createTestWritable("next"),
+      serializedContext: resumed.serializedContext,
+      sessionState: resumed.sessionState,
+    });
+    expect(next.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-c"]);
+    for (const [namespace, deliveryIds] of [
+      ["first", ["delivery-a", "delivery-b"]],
+      ["resumed", ["delivery-a", "delivery-b"]],
+      ["next", ["delivery-c"]],
+    ] as const) {
+      const events = (workflowWritesByNamespace.get(namespace) ?? []).map((chunk) =>
+        JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+      );
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "session.waiting",
+          meta: expect.objectContaining({ deliveryIds }),
+        }),
+      ]);
+    }
+  });
+
   it("defers before mutation when an inline step reaches another deployment", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
     const sessionState = createStubSessionState();
@@ -1578,15 +1666,27 @@ describe("turnStep", () => {
       input: {
         kind: "deliver",
         payloads: [{ message: "cancel this turn" }],
+        deliveryMetadata: [
+          {
+            channelKind: "eve",
+            channelName: "eve",
+            deliveryId: "cancelled-delivery",
+            payloadIndex: 0,
+          },
+        ],
       },
       parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
+      serializedContext: {
+        ...createSerializedContext(),
+        [TurnDeliveryIdsKey.name]: ["previous-delivery"],
+      },
       sessionState: createStubSessionState(),
     });
 
     expect(result).toMatchObject({
       action: "cancelled",
       serializedContext: {
+        [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,

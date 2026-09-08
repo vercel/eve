@@ -102,6 +102,7 @@ interface CompactionHeuristicInput {
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
+  readonly tokenEstimateAdjustment: number;
 }
 
 /**
@@ -146,7 +147,12 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
   // capping can be a near no-op when the older region holds few large
   // results, and accepting one on a looser ruler would let shouldCompact
   // re-fire every step without compaction ever making progress.
-  const evaluation = evaluateThreshold(capped, input.config, "should-compact");
+  const evaluation = evaluateThreshold(
+    capped,
+    input.config,
+    "should-compact",
+    input.tokenEstimateAdjustment,
+  );
   return evaluation.type === "within-limit"
     ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
@@ -162,9 +168,10 @@ function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
   ruler: "estimate" | "should-compact",
+  tokenEstimateAdjustment = 0,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
   const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead;
+  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
@@ -197,8 +204,22 @@ export async function compactMessages(
       return keepNonToolResultMessages(recent);
     }
 
+    // Capping preserves most of the measured prompt. Retain any known
+    // underestimate while crediting only the estimated tokens it removes.
+    // A new summary replaces that prompt, so it uses its own estimate below.
+    const tokenEstimateAdjustment = Math.max(
+      0,
+      getInputTokenCount(messages, config) - estimateTokens(messages),
+    );
     for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
+      const outcome = heuristic({
+        config,
+        conversation,
+        older,
+        previousCheckpoint,
+        recent,
+        tokenEstimateAdjustment,
+      });
       if (outcome.type === "within-limit") {
         return outcome.messages;
       }

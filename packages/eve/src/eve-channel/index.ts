@@ -358,7 +358,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         return Response.json(
-          { ok: true, sessionId: result.sessionId, status: "accepted" },
+          {
+            ok: true,
+            sessionId: result.sessionId,
+            status: "accepted",
+            deliveryId: result.deliveryId,
+          },
           {
             headers: {
               "cache-control": "no-store",

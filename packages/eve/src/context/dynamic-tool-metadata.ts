@@ -11,7 +11,7 @@ interface DynamicToolMetadataBase {
   readonly entryKey: string;
 }
 
-/** Current schema: callback identity is the surrounding tool name and phase. */
+/** Callback identity is supplied by the surrounding session, scope, and resolver metadata. */
 export interface CurrentDynamicToolMetadata extends DynamicToolMetadataBase {
   readonly callbacks: DurableDynamicToolCallbacks;
 }

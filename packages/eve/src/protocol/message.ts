@@ -61,6 +61,8 @@ export interface StepCompletedProviderMetadata {
  * or replaying a finished session — yields the same values every time.
  */
 export interface MessageStreamEventMeta {
+  /** Server-issued message delivery identities, retained across the turn's workflow steps. */
+  readonly deliveryIds?: readonly string[];
   /** ISO-8601 emission time. */
   readonly at: string;
   /**
@@ -1693,13 +1695,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+export function stampMessageStreamEvent(
+  event: UnstampedMessageStreamEvent,
+  deliveryIds?: readonly string[],
+): MessageStreamEvent {
+  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+    at: new Date().toISOString(),
+    id: createEventId(),
+  };
+  if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
   return {
     ...event,
-    meta: {
-      at: new Date().toISOString(),
-      id: createEventId(),
-    },
+    meta,
   };
 }
 
