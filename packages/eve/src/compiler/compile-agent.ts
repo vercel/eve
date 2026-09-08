@@ -92,9 +92,10 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
   readonly startPath: string;
+  readonly workspace?: import("#compiler/workspace-context.js").CompileWorkspaceContext;
 }): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
-  const result = await writeAgentCompilation(discovered, input.artifactLocations);
+  const result = await writeAgentCompilation(discovered, input.artifactLocations, input.workspace);
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
 }
@@ -122,12 +123,14 @@ async function discoverAgentForCompilation(
 async function writeAgentCompilation(
   discovered: DiscoveredAgentCompilation,
   artifactLocations: CompilerArtifactLocations,
+  workspace?: import("#compiler/workspace-context.js").CompileWorkspaceContext,
 ): Promise<CompileAgentResult> {
   const writtenArtifacts = await writeCompilerArtifacts({
     appRoot: discovered.project.appRoot,
     artifactLocations,
     diagnostics: discovered.diagnostics,
     manifest: discovered.manifest,
+    workspace,
   });
 
   return {

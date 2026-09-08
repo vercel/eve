@@ -284,7 +284,7 @@ async function buildApplicationInWorkspace(
   profiler: ApplicationBuildProfiler | undefined,
 ): Promise<string> {
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
-    prepareProductionApplicationHost(workspace),
+    prepareProductionApplicationHost(workspace, options.workspace),
   );
   const isVercelBuild = Boolean(process.env.VERCEL);
 

@@ -102,6 +102,7 @@ import {
 export interface CompileAgentManifestOptions {
   readonly diagnostics?: CompilerDiagnostic[];
   readonly sourceRegistries?: readonly AgentSourceRegistry[];
+  readonly workspace?: import("#compiler/workspace-context.js").CompileWorkspaceContext;
 }
 
 interface NodeCompileInput {
@@ -130,6 +131,7 @@ export async function compileAgentManifest(
   const context: ManifestCompileContext = {
     modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
     registries,
+    workspace: options.workspace,
   };
   const diagnostics = options.diagnostics ?? [];
   const compiler = new AgentGraphCompiler(context, registries, diagnostics);

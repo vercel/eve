@@ -9,7 +9,7 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
-import { expectObjectRecord } from "#internal/authored-module.js";
+import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -289,6 +289,10 @@ async function resolveRuntimeRemoteAgent(input: {
     resolvedExportValue,
     `Expected remote agent source "${input.sourceRef.logicalPath}" to export an object.`,
   );
+  const runtimeDefinition =
+    input.sourceRef.workspaceMember === undefined
+      ? resolvedRecord
+      : await resolveWorkspaceRemoteTarget(resolvedRecord, input.sourceRef);
 
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
@@ -317,25 +321,46 @@ async function resolveRuntimeRemoteAgent(input: {
     url: await resolveRemoteAgentUrl({
       bakedUrl: input.sourceRef.url,
       logicalPath: input.sourceRef.logicalPath,
-      resolvedUrl: resolvedRecord.url,
+      resolvedUrl: runtimeDefinition.url,
     }),
   };
 
-  if (typeof resolvedRecord.auth === "function") {
-    resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  if (typeof runtimeDefinition.auth === "function") {
+    resolvedRemoteAgent.auth = runtimeDefinition.auth as ResolvedRuntimeRemoteAgentNode["auth"];
   }
 
-  if (resolvedRecord.forwardPrincipal === true) {
+  if (runtimeDefinition.forwardPrincipal === true) {
     resolvedRemoteAgent.forwardPrincipal = true;
   }
 
-  const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);
+  const headers = resolveRemoteAgentHeaders(runtimeDefinition.headers);
 
   if (headers !== undefined) {
     resolvedRemoteAgent.headers = headers;
   }
 
   return resolvedRemoteAgent;
+}
+
+async function resolveWorkspaceRemoteTarget(
+  definition: Record<string, unknown>,
+  sourceRef: CompiledRemoteAgentNode,
+): Promise<Record<string, unknown>> {
+  if (typeof definition.resolveTarget !== "function" || sourceRef.workspaceMember === undefined) {
+    throw new Error(
+      `Workspace subagents source "${sourceRef.logicalPath}" is missing resolveTarget(member).`,
+    );
+  }
+  const message = `Workspace subagents source "${sourceRef.logicalPath}" resolveTarget(member) must return an object with url and optional auth or headers.`;
+  const target = expectObjectRecord(
+    await (definition.resolveTarget as (member: unknown) => unknown)(sourceRef.workspaceMember),
+    message,
+  );
+  expectOnlyKnownKeys(target, ["auth", "headers", "url"], message);
+  return {
+    ...target,
+    forwardPrincipal: definition.forwardPrincipal,
+  };
 }
 
 async function resolveRemoteAgentUrl(input: {

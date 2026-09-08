@@ -14,6 +14,7 @@ describe("workspace glob helpers", () => {
     ["apps/**", "apps/web/nested", true],
     ["packages/*/fixtures", "packages/eve/fixtures", true],
     ["packages/*/fixtures", "packages/eve/test/fixtures", false],
+    ["apps/{web,docs}", "apps/docs", true],
   ] as const)("checks whether pattern %j claims %j", (pattern, relativePath, expected) => {
     expect(workspacePatternClaimsRelativePath(pattern, relativePath)).toBe(expected);
   });
