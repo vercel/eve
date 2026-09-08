@@ -16,22 +16,24 @@ import {
  */
 export interface LocalTracesProcessor extends SpanProcessor {
   /**
-   * Settles pending writes and releases this session's active traces.
+   * Settles pending writes and releases this conversation's active traces.
    */
-  releaseSession(sessionId: string): Promise<boolean>;
+  releaseConversation(conversationId: string): Promise<boolean>;
 }
 
 /**
- * Reports whether a processor tracks which session owns which trace, so eve can
- * tell it when that session is done.
+ * Reports whether a processor tracks which conversation owns which trace, so
+ * eve can tell it when that conversation is done.
  *
  * Anything standing between eve and the spool has to answer for the spool, so
  * this is the check a wrapper uses to decide whether it must forward the call.
  *
  * @internal
  */
-export function hasSessionRelease(processor: SpanProcessor): processor is LocalTracesProcessor {
-  return typeof (processor as Partial<LocalTracesProcessor>).releaseSession === "function";
+export function hasConversationRelease(
+  processor: SpanProcessor,
+): processor is LocalTracesProcessor {
+  return typeof (processor as Partial<LocalTracesProcessor>).releaseConversation === "function";
 }
 
 /**
@@ -40,7 +42,7 @@ export function hasSessionRelease(processor: SpanProcessor): processor is LocalT
  * `EVE_TRACES=off` removes the writer but keeps the processor: eve still has
  * to observe spans to track which session owns which trace.
  *
- * Internal because of `releaseSession`, which eve's runtime drives off session
+ * Internal because of `releaseConversation`, which eve's runtime drives off session
  * lifecycle. The authored surface is `localTraces()`, which wraps this in an
  * `OtelIntegration`.
  */
@@ -78,12 +80,12 @@ export function createLocalTracesProcessor(
     forceFlush,
     onEnd: (span) => processor.onEnd(span),
     onStart: (span, parentContext) => processor.onStart(span, parentContext),
-    async releaseSession(sessionId) {
+    async releaseConversation(conversationId) {
       // Settle pending segment writes before dropping liveness: a sweep already
       // running reads the same live set, so releasing first would expose the
       // trace to eviction while it is still being written.
       await forceFlush();
-      if (!processor.releaseSession(sessionId)) return false;
+      if (!processor.releaseConversation(conversationId)) return false;
       requestPrune();
       return true;
     },
@@ -113,7 +115,7 @@ function inertLocalTracesProcessor(): LocalTracesProcessor {
     forceFlush: async () => undefined,
     onEnd: () => undefined,
     onStart: () => undefined,
-    releaseSession: async () => false,
+    releaseConversation: async () => false,
     shutdown: async () => undefined,
   };
 }

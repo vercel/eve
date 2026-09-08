@@ -17,7 +17,6 @@ export function agentActivationAttributes(input: {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,
     "agent.name": input.agentName,
-    ...agentLineageAttributes(input.turn),
     "agent.subagent.name": input.turn.subagentName,
     "agent.turn.id": input.turnId,
     "agent.turn.sequence": input.turn.sequence,
@@ -29,17 +28,6 @@ export function agentActivationAttributes(input: {
       sessionId: input.sessionId,
     }),
   };
-}
-
-export function agentLineageAttributes(turn: AgentTurnTraceState): Record<string, string> {
-  const attributes: Record<string, string> = {
-    "agent.root_run.id": turn.rootSessionId,
-  };
-  if (turn.parentLineage !== undefined) {
-    attributes["agent.parent_run.id"] = turn.parentLineage.sessionId;
-    attributes["agent.parent_call.id"] = turn.parentLineage.callId;
-  }
-  return attributes;
 }
 
 /** Flattens merged runtime context into AI SDK-compatible span attributes. */

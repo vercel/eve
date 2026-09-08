@@ -1,6 +1,8 @@
 import { trace } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
+import { contextStorage } from "#context/container.js";
+import { ConversationIdKey } from "#context/keys.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
@@ -13,9 +15,10 @@ import { createLogger, formatError } from "#internal/logging.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
-import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
+import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
+import { readConversationId } from "#tracing/conversation-context.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 
@@ -71,7 +74,7 @@ export function installInstrumentationRuntime(input: {
 
     const releasable = input.collected.pipeline.spanProcessors
       .filter(isSpanProcessor)
-      .filter(hasSessionRelease);
+      .filter(hasConversationRelease);
     if (releasable.length > 0) serialAfter.push(sessionReleaseProvider(releasable));
   }
 
@@ -115,12 +118,14 @@ function sessionReleaseProvider(
   processors: readonly LocalTracesProcessor[],
 ): InstrumentationProviderDefinition {
   const release = async (event: { readonly sessionId: string }): Promise<void> => {
-    await Promise.all(processors.map((processor) => processor.releaseSession(event.sessionId)));
+    const conversationId =
+      readConversationId(contextStorage.getStore()?.get(ConversationIdKey)) ?? event.sessionId;
+    await Promise.all(processors.map((processor) => processor.releaseConversation(conversationId)));
   };
   return {
     events: { "session.completed": release, "session.failed": release },
-    name: "eve.session-release",
-    stateNamespace: "internal:session-release",
+    name: "eve.conversation-release",
+    stateNamespace: "internal:conversation-release",
   };
 }
 

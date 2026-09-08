@@ -16,7 +16,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #ownedTraceIds = new Set<string>();
   readonly #completedTraceIds = new Set<string>();
   readonly #rememberedTraceIds = new Set<string>();
-  readonly #traceOwners = new Map<string, string>();
+  readonly #traceConversations = new Map<string, string>();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
   }
@@ -27,13 +27,13 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
 
   onStart(span: unknown, parentContext: unknown): void {
     if (!isSpanLike(span)) return;
-    const sessionId = span.attributes["agent.session.id"];
-    if (typeof sessionId === "string") {
+    const conversationId = span.attributes["gen_ai.conversation.id"];
+    if (typeof conversationId === "string") {
       const traceId = span.spanContext().traceId;
       const known = this.#ownedTraceIds.has(traceId) || this.#rememberedTraceIds.has(traceId);
       if (!known) {
         this.#ownedTraceIds.add(traceId);
-        this.#traceOwners.set(traceId, sessionId);
+        this.#traceConversations.set(traceId, conversationId);
       }
     }
     if (!this.#accepts(span)) return;
@@ -46,7 +46,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     const traceId = span.spanContext().traceId;
     if (
       isAgentActivationSpan({ name: span.name ?? "", attributes: span.attributes }) &&
-      this.#traceOwners.get(traceId) === span.attributes["agent.session.id"]
+      this.#traceConversations.get(traceId) === span.attributes["gen_ai.conversation.id"]
     ) {
       this.#completedTraceIds.add(traceId);
     }
@@ -62,7 +62,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (this.#completedTraceIds.size === 0) return false;
     for (const traceId of this.#completedTraceIds) {
       this.#ownedTraceIds.delete(traceId);
-      this.#traceOwners.delete(traceId);
+      this.#traceConversations.delete(traceId);
       this.#rememberedTraceIds.add(traceId);
     }
     this.#completedTraceIds.clear();
@@ -73,15 +73,15 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     return true;
   }
 
-  /** Releases only traces owned by this session. */
-  releaseSession(sessionId: string): boolean {
+  /** Releases only traces owned by this conversation. */
+  releaseConversation(conversationId: string): boolean {
     let released = false;
-    for (const [traceId, owner] of this.#traceOwners) {
-      if (owner !== sessionId) continue;
+    for (const [traceId, traceConversationId] of this.#traceConversations) {
+      if (traceConversationId !== conversationId) continue;
       released = true;
       this.#ownedTraceIds.delete(traceId);
       this.#completedTraceIds.delete(traceId);
-      this.#traceOwners.delete(traceId);
+      this.#traceConversations.delete(traceId);
     }
     return released;
   }

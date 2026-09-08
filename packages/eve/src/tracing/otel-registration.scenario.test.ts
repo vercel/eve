@@ -48,7 +48,7 @@ describe("registerOtelPipeline", () => {
         attributes: Record<string, unknown>,
       ) => ({
         decision:
-          name === "invoke_agent researcher" && attributes["agent.session.id"] === "session-1"
+          name === "invoke_agent researcher" && attributes["gen_ai.conversation.id"] === "session-1"
             ? 2
             : 0,
       }),
@@ -60,13 +60,13 @@ describe("registerOtelPipeline", () => {
     });
     const operation = {
       name: "invoke_agent researcher",
-      attributes: { "agent.session.id": "session-1" },
+      attributes: { "gen_ai.conversation.id": "session-1" },
     };
     expect(runtime.samplesTrace("a".repeat(32), operation)).toBe(true);
     expect(
       runtime.samplesTrace("b".repeat(32), {
         ...operation,
-        attributes: { "agent.session.id": "other" },
+        attributes: { "gen_ai.conversation.id": "other" },
       }),
     ).toBe(false);
     runtimeTrace

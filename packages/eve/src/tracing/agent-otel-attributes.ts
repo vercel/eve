@@ -7,8 +7,9 @@ export function agentTraceIdentityAttributes(input: {
 }): Record<string, string | number> {
   return {
     "agent.trace.schema.version": AGENT_TRACE_SCHEMA_VERSION,
-    "agent.session.id": input.sessionId,
-    "vercel.session_id": input.sessionId,
     "gen_ai.conversation.id": resolveConversationId(input.rootSessionId),
+    ...(process.env.VERCEL_ENV === undefined
+      ? undefined
+      : { "vercel.session_id": input.sessionId }),
   };
 }

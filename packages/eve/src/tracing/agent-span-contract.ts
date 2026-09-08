@@ -39,9 +39,9 @@ export function isAgentActivationSpan(span: AgentSpanRecord): boolean {
 }
 
 export function agentTurnIdentity(span: AgentSpanRecord): string | undefined {
-  const sessionId = span.attributes["agent.session.id"];
+  const conversationId = span.attributes["gen_ai.conversation.id"];
   const turnId = span.attributes["agent.turn.id"];
   return typeof turnId === "string"
-    ? `${typeof sessionId === "string" ? sessionId : ""}\0${turnId}`
+    ? `${typeof conversationId === "string" ? conversationId : ""}\0${turnId}`
     : undefined;
 }

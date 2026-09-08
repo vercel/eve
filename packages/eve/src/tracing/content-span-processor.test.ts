@@ -319,16 +319,16 @@ describe("contentFilteringProcessor", () => {
   });
 
   it("preserves local trace session release through the wrapper", async () => {
-    const releaseSession = vi.fn(async () => true);
+    const releaseConversation = vi.fn(async () => true);
     const downstream: SpanProcessor & {
-      releaseSession(sessionId: string): Promise<boolean>;
-    } = { ...recordingProcessor(), releaseSession };
+      releaseConversation(sessionId: string): Promise<boolean>;
+    } = { ...recordingProcessor(), releaseConversation };
     const processor = contentFilteringProcessor(
       downstream,
       composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-    ) as SpanProcessor & { releaseSession(sessionId: string): Promise<boolean> };
+    ) as SpanProcessor & { releaseConversation(sessionId: string): Promise<boolean> };
 
-    await expect(processor.releaseSession("session-1")).resolves.toBe(true);
-    expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+    await expect(processor.releaseConversation("session-1")).resolves.toBe(true);
+    expect(releaseConversation).toHaveBeenCalledExactlyOnceWith("session-1");
   });
 });

@@ -198,11 +198,10 @@ function turnSubagent(
   byId: ReadonlyMap<string, LocalTraceSpan>,
 ): ConversationSubagent | undefined {
   const subagentName = stringAttribute(turn, "agent.subagent.name");
-  if (subagentName !== undefined || stringAttribute(turn, "agent.parent_run.id") !== undefined) {
+  if (subagentName !== undefined) {
     const name = subagentName ?? stringAttribute(turn, "gen_ai.agent.name");
     return {
       name: name === undefined ? undefined : stripTerminalControls(name),
-      parentCallId: stringAttribute(turn, "agent.parent_call.id"),
     };
   }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);

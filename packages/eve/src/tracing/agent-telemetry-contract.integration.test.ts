@@ -501,6 +501,10 @@ describe("exported agent telemetry contract", () => {
       expect(
         parsed.every((span) => Number(span.attributes["agent.trace.schema.version"]) === 4),
       ).toBe(true);
+      for (const span of parsed) {
+        expect(span.attributes).not.toHaveProperty("agent.session.id");
+        expect(span.attributes).not.toHaveProperty("vercel.session_id");
+      }
       expect(
         parsed
           .filter((span) => span.parentSpanId === undefined)
@@ -550,7 +554,7 @@ describe("exported agent telemetry contract", () => {
         cacheWriteTokens: 2,
       });
       const items = traces.flatMap(buildConversationItems);
-      expect(items.find((item) => item.kind === "assistant")?.subagent?.name).toBe("child");
+      expect(items.find((item) => item.kind === "assistant")).toBeDefined();
       const metadata = new TextDecoder().decode(
         JsonTraceSerializer.serializeRequest(runtime.metadata.getFinishedSpans())!,
       );

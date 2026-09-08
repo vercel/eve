@@ -99,7 +99,7 @@ describe("trace retention by live work", () => {
       const span = {
         name: "invoke_agent test",
         attributes: {
-          "agent.session.id": "session",
+          "gen_ai.conversation.id": "session",
           "agent.turn.id": `turn-${index}`,
           "gen_ai.operation.name": "invoke_agent",
         },

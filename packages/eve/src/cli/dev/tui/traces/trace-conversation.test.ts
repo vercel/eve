@@ -35,7 +35,7 @@ function span(
 function trace(spans: readonly LocalTraceSpan[]): LocalTrace {
   return {
     endTimeNs: spans.reduce((m, s) => (s.endTimeNs > m ? s.endTimeNs : m), 0n),
-    sessionIds: [],
+    conversationIds: [],
     spans,
     startTimeNs: spans.reduce((m, s) => (s.startTimeNs < m ? s.startTimeNs : m), BASE),
     traceId: "t".repeat(32),
@@ -212,8 +212,6 @@ describe("buildConversationItems", () => {
             attributes: {
               ...item.attributes,
               "agent.subagent.name": "research",
-              "agent.parent_run.id": "parent",
-              "agent.parent_call.id": "call-child",
             },
           }
         : item,
@@ -221,7 +219,6 @@ describe("buildConversationItems", () => {
     const items = buildConversationItems(trace(spans));
     expect(items.length).toBeGreaterThan(0);
     expect(items.every((item) => item.subagent?.name === "research")).toBe(true);
-    expect(items[0]?.subagent?.parentCallId).toBe("call-child");
   });
 
   it("interleaves a subagent's cards between the parent's dispatch and reply", () => {

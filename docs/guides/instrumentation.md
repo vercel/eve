@@ -56,7 +56,7 @@ Three more fields control what the AI SDK records inside those spans (see the AI
 
 eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
-eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` stays fixed at the original conversation ID across local and remote sessions, including independent remote root workflows. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting.
+In the provider layout, eve stamps each span with `gen_ai.conversation.id`, which stays fixed across local and remote activations, including independent remote root workflows. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting. On Vercel, `vercel.session_id` additionally identifies the current Workflow run.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
@@ -156,8 +156,7 @@ The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 | `agent.channel.delivery` | Processing one inbound delivery                          |
 | `agent.channel.request`  | Optional HTTP request span in the provider layout        |
 
-Schema v4 removes the session-long `agent.session` root. Session-owned spans carry `agent.trace.schema.version=4`,
-`agent.session.id`, `vercel.session_id`, and `gen_ai.conversation.id`.
+Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.
 Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use
 `agent.action` with `agent.invocation.role=caller`; the built-in `agent` tool
 executes under `execute_tool agent`. Turn IDs such as `turn_0` are local to a session,

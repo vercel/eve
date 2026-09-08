@@ -29,8 +29,8 @@ interface SpanExtent {
 }
 
 /**
- * Resolves an exact trace/session id or an unambiguous prefix. One session id
- * can match several traces, since a long session windows into more than one.
+ * Resolves an exact trace/conversation id or an unambiguous prefix. One
+ * conversation ID can match several traces, since each turn is separate.
  */
 export function resolveLocalTraces(
   traces: readonly LocalTrace[],
@@ -41,16 +41,16 @@ export function resolveLocalTraces(
   const references = raw === normalized ? [raw] : [raw, normalized];
   const exactTrace = traces.find((trace) => references.includes(trace.traceId));
   if (exactTrace !== undefined) return [exactTrace];
-  const exactSessions = traces.filter((trace) =>
-    trace.sessionIds.some((sessionId) => references.includes(sessionId)),
+  const exactConversations = traces.filter((trace) =>
+    trace.conversationIds.some((conversationId) => references.includes(conversationId)),
   );
-  if (exactSessions.length > 0) return orderWindows(exactSessions);
+  if (exactConversations.length > 0) return orderWindows(exactConversations);
 
   const matches = traces.filter((trace) =>
     references.some(
       (candidate) =>
         trace.traceId.startsWith(candidate) ||
-        trace.sessionIds.some((sessionId) => sessionId.startsWith(candidate)),
+        trace.conversationIds.some((conversationId) => conversationId.startsWith(candidate)),
     ),
   );
   if (matches.length === 0) {
@@ -59,8 +59,8 @@ export function resolveLocalTraces(
     );
   }
   if (matches.length === 1) return matches;
-  const sessions = new Set(matches.map((trace) => trace.sessionId ?? trace.traceId));
-  if (sessions.size > 1) throw ambiguousTraceError(matches, reference);
+  const conversations = new Set(matches.map((trace) => trace.conversationId ?? trace.traceId));
+  if (conversations.size > 1) throw ambiguousTraceError(matches, reference);
   return orderWindows(matches);
 }
 
@@ -86,7 +86,7 @@ export async function runTraceListCommand(
         traces.map((trace) => ({
           agentName: trace.agentName ?? null,
           durationMs: durationMs(trace.startTimeNs, trace.endTimeNs),
-          sessionId: trace.sessionId ?? null,
+          conversationId: trace.conversationId ?? null,
           spanCount: trace.spans.length,
           startedAt: toDate(trace.startTimeNs).toISOString(),
           traceId: trace.traceId,
@@ -104,13 +104,13 @@ export async function runTraceListCommand(
 
   const rows = traces.map((trace) => [
     trace.traceId,
-    sanitizeForTerminal(trace.sessionId ?? "unknown"),
+    sanitizeForTerminal(trace.conversationId ?? "unknown"),
     sanitizeForTerminal(trace.agentName ?? "unknown"),
     toDate(trace.startTimeNs).toISOString(),
     formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
     String(trace.spans.length),
   ]);
-  const headers = ["TRACE", "SESSION", "AGENT", "STARTED", "DURATION", "SPANS"];
+  const headers = ["TRACE", "CONVERSATION", "AGENT", "STARTED", "DURATION", "SPANS"];
   const widths = headers.map((header, index) =>
     Math.max(header.length, ...rows.map((row) => row[index]!.length)),
   );
@@ -167,7 +167,7 @@ function traceHeaderRows(trace: LocalTrace): { label: string; value: string }[] 
   const summary = summarizeLocalTrace(trace.spans);
   return [
     { label: "Trace ID", value: trace.traceId },
-    { label: "Session ID", value: trace.sessionId ?? "unknown" },
+    { label: "Conversation ID", value: trace.conversationId ?? "unknown" },
     { label: "Agent", value: trace.agentName ?? "unknown" },
     { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
     {
@@ -197,8 +197,8 @@ function serializeTraceForJson(trace: LocalTrace): Record<string, unknown> {
   return {
     agentName: trace.agentName ?? null,
     durationMs: durationMs(trace.startTimeNs, trace.endTimeNs),
-    sessionId: trace.sessionId ?? null,
-    sessionIds: trace.sessionIds,
+    conversationId: trace.conversationId ?? null,
+    conversationIds: trace.conversationIds,
     spanCount: trace.spans.length,
     spans: trace.spans.map((span) => ({
       attributes: span.attributes,
@@ -347,9 +347,9 @@ function ambiguousTraceError(traces: readonly LocalTrace[], reference: string): 
       `"${sanitizeForTerminal(reference)}" matches ${traces.length} local traces:`,
       ...traces.map(
         (trace) =>
-          `  ${trace.traceId}  ${sanitizeForTerminal(trace.sessionId ?? "unknown session")}`,
+          `  ${trace.traceId}  ${sanitizeForTerminal(trace.conversationId ?? "unknown conversation")}`,
       ),
-      "Pass a longer prefix or the full trace/session id.",
+      "Pass a longer prefix or the full trace/conversation id.",
     ].join("\n"),
   );
 }

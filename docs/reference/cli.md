@@ -304,7 +304,7 @@ eve traces --verbose       # expand every span with all attributes and events
 eve traces --json          # dump the full trace as JSON
 ```
 
-Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, a `gen_ai.conversation.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
 
 Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
@@ -312,7 +312,7 @@ Every subagent activation starts its own trace. The first child's `invoke_agent`
 
 Each `agent()` call inside an authored workflow has its own `agent.action` caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `agent.action` and `execute_tool` spans. Only agent execution uses `invoke_agent`.
 
-A durable session produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the session id shows every trace it produced, oldest first.
+A durable conversation produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the conversation ID shows every trace it produced, oldest first.
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 

@@ -408,7 +408,7 @@ describe("createAgentOtelInstrumentation", () => {
             span.attributes["gen_ai.operation.name"] ?? span.name,
           );
           expect(span.attributes["agent.trace.schema.version"]).toBe(4);
-          expect(span.attributes["agent.session.id"]).toBe("session-1");
+          expect(span.attributes["gen_ai.conversation.id"]).toBe("session-1");
         }
         expect(parsed.some((span) => span.name === "agent.session")).toBe(false);
         const turns = parsed.filter((span) => span.name === "invoke_agent weather");
@@ -597,14 +597,14 @@ describe("createAgentOtelInstrumentation", () => {
       },
     ]);
     expect(invocation.attributes).toMatchObject({
-      "agent.parent_call.id": "call-child",
-      "agent.parent_run.id": "parent-session",
-      "agent.root_run.id": "root-session",
-      "agent.session.id": "child-session",
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
-      "vercel.session_id": "child-session",
     });
+    expect(invocation.attributes).not.toHaveProperty("agent.parent_call.id");
+    expect(invocation.attributes).not.toHaveProperty("agent.parent_run.id");
+    expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
+    expect(invocation.attributes).not.toHaveProperty("agent.session.id");
+    expect(invocation.attributes).not.toHaveProperty("vercel.session_id");
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {
@@ -884,11 +884,9 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.channel.kind": "channel:slack",
       "agent.channel.name": "slack",
       "agent.channel.request.id": "iad1::request-1",
-      "agent.session.id": "session-1",
       "agent.turn.id": "turn_0",
       "agent.turn.sequence": 0,
       "gen_ai.conversation.id": "session-1",
-      "vercel.session_id": "session-1",
     });
 
     await contextStorage.run(ctx, async () => {
@@ -985,7 +983,6 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.attributes).toMatchObject({
       "gen_ai.conversation.id": "parent-session",
       "gen_ai.operation.name": "invoke_agent",
-      "vercel.session_id": "remote-session",
     });
     expect(turn.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
@@ -1041,9 +1038,7 @@ describe("createAgentOtelInstrumentation", () => {
     for (const span of [turn, step, model, action, tool]) {
       expect(span.attributes).not.toHaveProperty("agent.channel.audience");
       expect(span.attributes).toMatchObject({
-        "agent.session.id": "session-1",
         "gen_ai.conversation.id": "session-1",
-        "vercel.session_id": "session-1",
       });
     }
     expect(byName(spans, "ai.streamText")).toHaveLength(0);
@@ -1226,7 +1221,7 @@ describe("createAgentOtelInstrumentation", () => {
       await runtime.provider.forceFlush();
 
       const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
-      expect(turn.attributes["vercel.session_id"]).toBe(`session-${audience}`);
+      expect(turn.attributes).not.toHaveProperty("vercel.session_id");
     },
   );
 
@@ -1825,7 +1820,7 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.approval.response": expect.stringContaining("approve"),
       "operation.name": "agent.approval",
       "resource.name": "agent.approval",
-      "agent.session.id": "session-1",
+      "gen_ai.conversation.id": "session-1",
       "agent.step.index": 0,
       "agent.turn.id": "turn-1",
     });
@@ -2419,7 +2414,6 @@ describe("createAgentOtelInstrumentation", () => {
       expect(turn.parentSpanContext).toBeUndefined();
       expect(turn.attributes).toMatchObject({
         "gen_ai.conversation.id": "session-1",
-        "vercel.session_id": "session-1",
       });
     }
     const firstModel = byName(firstRuntime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
@@ -2504,9 +2498,8 @@ describe("createAgentOtelInstrumentation", () => {
       "invoke_agent weather",
     )[0]!;
     expect(replayTurn.spanContext()).toEqual(firstTurn.spanContext());
-    expect(replayTurn.attributes["vercel.session_id"]).toBe(
-      firstTurn.attributes["vercel.session_id"],
-    );
+    expect(replayTurn.attributes).not.toHaveProperty("vercel.session_id");
+    expect(firstTurn.attributes).not.toHaveProperty("vercel.session_id");
   });
 
   it("bounds a long session to one trace per turn", async () => {
@@ -2531,7 +2524,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(new Set(turns.map((turn) => turn.spanContext().traceId))).toHaveLength(turnCount);
     for (const turn of turns) {
       expect(turn.parentSpanContext).toBeUndefined();
-      expect(turn.attributes["vercel.session_id"]).toBe("session-1");
+      expect(turn.attributes).not.toHaveProperty("vercel.session_id");
     }
   });
 
@@ -2558,7 +2551,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const childTurn = byName(spans, "invoke_agent weather").find(
-      (span) => span.attributes["agent.session.id"] === "child-1",
+      (span) => span.attributes["agent.subagent.name"] === "researcher",
     )!;
 
     expect(childTurn.spanContext().traceId).not.toBe(caller.traceId);
@@ -2571,10 +2564,11 @@ describe("createAgentOtelInstrumentation", () => {
     ]);
     expect(childTurn.attributes["agent.subagent.name"]).toBe("researcher");
     expect(childTurn.attributes["gen_ai.conversation.id"]).toBe("session-1");
-    expect(childTurn.attributes["vercel.session_id"]).toBe("child-1");
-    expect(childTurn.attributes).not.toHaveProperty("agent.parent.call_id");
-    expect(childTurn.attributes).not.toHaveProperty("agent.parent.session.id");
-    expect(childTurn.attributes).not.toHaveProperty("agent.parent.turn.id");
+    expect(childTurn.attributes).not.toHaveProperty("agent.parent_call.id");
+    expect(childTurn.attributes).not.toHaveProperty("agent.parent_run.id");
+    expect(childTurn.attributes).not.toHaveProperty("agent.root_run.id");
+    expect(childTurn.attributes).not.toHaveProperty("agent.session.id");
+    expect(childTurn.attributes).not.toHaveProperty("vercel.session_id");
     expect(byName(spans, "agent.session")).toHaveLength(0);
   });
 
@@ -2623,10 +2617,10 @@ describe("createAgentOtelInstrumentation", () => {
     const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
     expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
     expect(turn.attributes).toMatchObject({
-      "agent.session.id": "child-1",
       "gen_ai.conversation.id": "session-1",
-      "vercel.session_id": "child-1",
     });
+    expect(turn.attributes).not.toHaveProperty("agent.session.id");
+    expect(turn.attributes).not.toHaveProperty("vercel.session_id");
     expect(turn.parentSpanContext).toBeUndefined();
   });
 
@@ -2668,8 +2662,8 @@ describe("createAgentOtelInstrumentation", () => {
     for (const turn of turns) {
       expect(turn.attributes).toMatchObject({
         "gen_ai.conversation.id": "session-1",
-        "vercel.session_id": "child-1",
       });
+      expect(turn.attributes).not.toHaveProperty("vercel.session_id");
     }
   });
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { ConversationIdKey } from "#context/keys.js";
 import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
@@ -104,12 +105,12 @@ describe("installInstrumentationRuntime", () => {
   it.each(["session.completed", "session.failed"] as const)(
     "releases local trace liveness after %s",
     async (type) => {
-      const releaseSession = vi.fn(async () => true);
+      const releaseConversation = vi.fn(async () => true);
       const processor = {
         forceFlush: vi.fn(async () => undefined),
         onEnd: vi.fn(),
         onStart: vi.fn(),
-        releaseSession,
+        releaseConversation,
         shutdown: vi.fn(async () => undefined),
       };
       const runtime = installInstrumentationRuntime({
@@ -126,9 +127,11 @@ describe("installInstrumentationRuntime", () => {
         ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
       };
 
-      await contextStorage.run(new ContextContainer(), () => hooks.publish(event));
+      const context = new ContextContainer();
+      context.set(ConversationIdKey, "conversation-1");
+      await contextStorage.run(context, () => hooks.publish(event));
 
-      expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+      expect(releaseConversation).toHaveBeenCalledExactlyOnceWith("conversation-1");
     },
   );
 
