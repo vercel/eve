@@ -207,5 +207,5 @@ function reviewPacket(): string {
       ),
     ].join("\n"),
   ).join("\n\n");
-  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Tell each reviewer which sheet to check using review_sheet. Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${records}`;
+  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Each reviewer only needs its sheet number, for example: "Review sheet 1." Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${records}`;
 }
