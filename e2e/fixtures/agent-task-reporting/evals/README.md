@@ -3,8 +3,9 @@
 This fixture measures whether pending-cohort guidance suppresses a required user
 response after an intermediate task wake.
 
-`consolidated-report.eval.ts` retains eight reporting/compaction trials, then runs
-20 trials with the pending instruction and 20 without it. Each comparison trial
+`consolidated-report.eval.ts` runs eight reporting/compaction trials.
+`pending-response.eval.ts` runs 20 trials with the pending instruction and 20
+without it, interleaved. Each comparison trial
 starts the same three warehouse lookups, observes an intermediate completion,
 asks an unrelated arithmetic question, and waits for the combined inventory
 report. The comparison trials do not request compaction.
