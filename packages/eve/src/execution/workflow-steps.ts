@@ -284,7 +284,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
   }
 
-  if (ctx.get(TurnTaskDeliveryKey) === "none") {
+  const taskDeliveryPhase = ctx.get(TurnTaskDeliveryKey);
+  if (taskDeliveryPhase === "none" || taskDeliveryPhase === "initiating") {
     const taskContext = resolveInitiatingTaskContext({
       state: durableSession.state,
       turnId: activeTurnId(initialEmissionState),

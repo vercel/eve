@@ -71,6 +71,7 @@ import {
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -12297,7 +12298,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it.each(["plain", "client context", "compaction", "projected history"])(
-      "keeps framework context before the turn input across durable steps (%s)",
+      "persists framework context and appends changed state across durable steps (%s)",
       async (scenario) => {
         const withClientContext = scenario === "client context";
         if (scenario === "compaction") {
@@ -12357,6 +12358,11 @@ describe("createToolLoopHarness", () => {
         );
         expect(first.next).toBe(runStep);
         const firstPrompt = structuredClone(getLastAgentSettings().messages);
+        expect(first.session.history).toContainEqual({
+          role: "user",
+          content: "Task status: analysis in progress",
+        });
+        ctx.set(TurnTaskStateKey, "Task status: analysis completed");
         setupMockAgent(defaultModelResult());
         const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
         await contextStorage.run(ctx, () => runStep(restored));
@@ -12365,8 +12371,34 @@ describe("createToolLoopHarness", () => {
         expect(
           nextPrompt.filter((message) => message.content === "Task status: analysis in progress"),
         ).toHaveLength(1);
+        expect(nextPrompt.at(-1)).toEqual({
+          role: "user",
+          content: "Task status: analysis completed",
+        });
       },
     );
+
+    it("records removal of the last dynamic skill without dropping its earlier announcement", async () => {
+      const ctx = new ContextContainer();
+      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      setupMockAgent(defaultModelResult());
+      const first = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Check the policy." }),
+      );
+      ctx.set(PendingSkillAnnouncementKey, "");
+      setupMockAgent(defaultModelResult());
+      const next = await contextStorage.run(ctx, () =>
+        runStep(first.session, { message: "Continue." }),
+      );
+      expect(next.session.history.slice(0, first.session.history.length)).toEqual(
+        first.session.history,
+      );
+      expect(getLastAgentSettings().messages).toContainEqual({
+        role: "user",
+        content: "Available skills\nNo dynamic skills are currently available.",
+      });
+    });
 
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
@@ -12426,10 +12458,11 @@ describe("createToolLoopHarness", () => {
           runStep(createTestSession(), { message: "Check for alerts." }),
         );
 
-        const { instructions } = getLastAgentSettings();
-        expect(instructions).toEqual({
-          role: "system",
-          content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+        const { instructions, messages } = getLastAgentSettings();
+        expect(instructions).toBe("You are a test assistant.");
+        expect(messages).toContainEqual({
+          role: "user",
+          content: CONDITIONAL_DELIVERY_INSTRUCTION,
         });
       },
     );
@@ -12472,11 +12505,12 @@ describe("createToolLoopHarness", () => {
         runStep(createTestSession(), { message: "Start the background work." }),
       );
 
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toEqual({
-        role: "system",
-        content: `You are a test assistant.\n\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
-      });
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages.slice(0, 2)).toEqual([
+        { role: "user", content: '[Task state]\n{"tasks":[]}' },
+        { role: "user", content: TASK_DELIVERY_INITIATING_INSTRUCTION },
+      ]);
     });
 
     it("routes later-turn initiating task context through user messages", async () => {
@@ -12516,10 +12550,11 @@ describe("createToolLoopHarness", () => {
         runStep(createTestSession(), { message: "[Task state]" }),
       );
 
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toEqual({
-        role: "system",
-        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages).toContainEqual({
+        role: "user",
+        content: CONDITIONAL_DELIVERY_INSTRUCTION,
       });
     });
 

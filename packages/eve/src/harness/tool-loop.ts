@@ -1095,16 +1095,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    // Keep the insertion point stable when a later durable step reconstructs
-    // the model-only prompt, preserving the full prompt prefix within the turn.
+    // Keep ephemeral client context at the same position across durable steps.
     let turnClientContext = storedClientContext;
-    if (
-      clientContext !== undefined ||
-      (storedClientContext === undefined && preparedTurnInput.length > 0)
-    ) {
+    if (clientContext !== undefined) {
       turnClientContext = {
         insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
-        messages: clientContext ?? storedClientContext?.messages ?? [],
+        messages: clientContext,
         turnId,
       };
     }
@@ -1241,36 +1237,39 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
-    // AI SDK rejects role:"system" in `messages`; currentMessages also keeps
-    // later turn-local context out of the stable system prompt cache prefix.
-    // Insert that context before the current delivery so the triggering user
-    // message remains the model's latest request.
-    const currentMessages = createCurrentMessages(projectedMessages, {
-      currentTurnMessages:
-        turnClientContext === undefined
-          ? preparedTurnInput
-          : messages.slice(turnClientContext.insertionIndex),
+    // Persist framework announcements before the new input, or after earlier
+    // tool results on a continuation, so later requests retain the full prefix.
+    const currentMessages = createCurrentMessages(messages, {
+      currentTurnMessages: preparedTurnInput,
+      projectedMessages,
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(emissionState.sequence, skillAnnouncement);
+      if (skillAnnouncement !== undefined) {
+        currentMessages.add(
+          skillAnnouncement || "Available skills\nNo dynamic skills are currently available.",
+        );
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
-        currentMessages.add(emissionState.sequence, taskState);
+        currentMessages.add(taskState);
       }
     }
     if (deliveryPolicy.instruction !== undefined) {
-      currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
+      currentMessages.add(deliveryPolicy.instruction, {
+        label: deliveryPolicy.instruction.startsWith("Background task")
+          ? "Background task"
+          : undefined,
+      });
     }
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
-      currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
+      currentMessages.add(pendingApprovals, { cacheFriendly: false });
     }
+    const promptMessages = currentMessages.history;
 
     // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
     // only. Session history remains ref-only across future step boundaries.
@@ -1861,9 +1860,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emissionState,
       durableModelPromptMessageCount:
         turnClientContext === undefined || turnClientContext.messages.length === 0
-          ? projectedMessages.length
+          ? projectedMessages.length + promptMessages.length - messages.length
           : undefined,
-      promptMessages: messages,
+      promptMessages,
       result,
       runStep,
       session,

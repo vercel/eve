@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ModelMessage } from "ai";
 
 import { createCurrentMessages } from "#harness/current-messages.js";
 
@@ -27,14 +28,18 @@ describe("createCurrentMessages", () => {
     expect(current.systemMessages).toEqual([{ role: "system", content: "system" }]);
   });
 
-  it("keeps first-turn context in instructions and routes later context as user messages", () => {
+  it("persists framework context as user messages from the first turn", () => {
     const current = createCurrentMessages([]);
 
-    current.add(0, "first");
-    current.add(1, "later");
+    current.add("first");
+    current.add("later");
 
-    expect(current.systemMessages).toEqual([{ role: "system", content: "first" }]);
-    expect(current.nonSystemMessages).toEqual([{ role: "user", content: "later" }]);
+    expect(current.systemMessages).toEqual([]);
+    expect(current.nonSystemMessages).toEqual([
+      { role: "user", content: "first" },
+      { role: "user", content: "later" },
+    ]);
+    expect(current.history).toEqual(current.nonSystemMessages);
   });
 
   it("inserts later context before the current turn input", () => {
@@ -47,8 +52,8 @@ describe("createCurrentMessages", () => {
       { currentTurnMessages },
     );
 
-    current.add(1, "task state");
-    current.add(1, "delivery guidance");
+    current.add("task state");
+    current.add("delivery guidance");
 
     expect(current.nonSystemMessages).toEqual([
       { role: "user", content: "history" },
@@ -56,6 +61,43 @@ describe("createCurrentMessages", () => {
       { role: "user", content: "delivery guidance" },
       { role: "user", content: "channel context" },
       { role: "user", content: "current request" },
+    ]);
+  });
+
+  it("retains earlier snapshots and appends only changes, including a return to an earlier state", () => {
+    let history: readonly ModelMessage[] = [{ role: "user", content: "request" }];
+    for (const state of ["working", "working", "available", "working"]) {
+      const current = createCurrentMessages(history);
+      current.add(`[Task state]\n${state}`);
+      expect(current.history.slice(0, history.length)).toEqual(history);
+      history = current.history;
+    }
+    expect(history.map((message) => message.content)).toEqual([
+      "request",
+      "[Task state]\nworking",
+      "[Task state]\navailable",
+      "[Task state]\nworking",
+    ]);
+  });
+
+  it("persists additions without storing client context or replacing projected history", () => {
+    const hidden = { role: "user" as const, content: "hidden by projection" };
+    const input = { role: "user" as const, content: "request" };
+    const current = createCurrentMessages([hidden, input], {
+      currentTurnMessages: [input],
+      projectedMessages: [{ role: "user", content: "ephemeral client context" }, input],
+    });
+    current.add("[Task state]\nworking");
+    current.addSystem({ role: "system", content: "turn-scoped instructions" });
+    expect(current.history).toEqual([
+      hidden,
+      { role: "user", content: "[Task state]\nworking" },
+      input,
+    ]);
+    expect(current.nonSystemMessages).toEqual([
+      { role: "user", content: "ephemeral client context" },
+      { role: "user", content: "[Task state]\nworking" },
+      input,
     ]);
   });
 
@@ -82,7 +124,7 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.add(1, "task state");
+    current.add("task state");
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
@@ -91,7 +133,7 @@ describe("createCurrentMessages", () => {
   it("keeps hierarchy-sensitive context in instructions when requested", () => {
     const current = createCurrentMessages([]);
 
-    current.add(1, "authoritative", { cacheFriendly: false });
+    current.add("authoritative", { cacheFriendly: false });
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "authoritative" }]);
     expect(current.nonSystemMessages).toEqual([]);

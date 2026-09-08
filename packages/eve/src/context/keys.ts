@@ -95,7 +95,7 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
 );
-/** Framework-authored task state supplied to the model without altering user-message history. */
+/** Latest task snapshot for the harness to append when its visible state changes. */
 export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;

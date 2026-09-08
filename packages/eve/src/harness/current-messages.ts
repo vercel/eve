@@ -2,10 +2,12 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
+  readonly label?: string;
 }
 
 interface CurrentMessagesOptions {
   readonly currentTurnMessages?: readonly ModelMessage[];
+  readonly projectedMessages?: readonly ModelMessage[];
 }
 
 /** Model-call messages with cache-friendly placement for turn-local context. */
@@ -13,17 +15,19 @@ export function createCurrentMessages(
   history: readonly ModelMessage[],
   options: CurrentMessagesOptions = {},
 ): {
+  readonly history: readonly ModelMessage[];
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
-  add(turnSequence: number, message: string, options?: AddCurrentMessageOptions): void;
+  add(message: string, options?: AddCurrentMessageOptions): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
+  const durableMessages = [...history];
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: ModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
   let currentTurnInsertionIndex: number | undefined;
 
-  for (const message of history) {
+  for (const message of options.projectedMessages ?? history) {
     if (currentTurnInsertionIndex === undefined && currentTurnMessages.has(message)) {
       currentTurnInsertionIndex = nonSystemMessages.length;
     }
@@ -34,6 +38,8 @@ export function createCurrentMessages(
     }
   }
   let userInsertionIndex = currentTurnInsertionIndex ?? nonSystemMessages.length;
+  const currentInputIndex = history.findIndex((message) => currentTurnMessages.has(message));
+  let historyInsertionIndex = currentInputIndex === -1 ? history.length : currentInputIndex;
   // The AI SDK collects approval responses only from the tail tool message.
   // Appending user-role context there would skip the approved tool's
   // execution and send the provider a tool call with no result.
@@ -41,10 +47,22 @@ export function createCurrentMessages(
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
   return {
-    add(turnSequence, message, { cacheFriendly = true } = {}) {
-      if (turnSequence > 0 && cacheFriendly === true && canAppendUserMessages) {
-        nonSystemMessages.splice(userInsertionIndex, 0, { role: "user", content: message });
+    add(message, { cacheFriendly = true, label = message.split("\n")[0] ?? message } = {}) {
+      if (cacheFriendly) {
+        const latest = nonSystemMessages.findLast(
+          (entry) =>
+            entry.role === "user" &&
+            typeof entry.content === "string" &&
+            entry.content.startsWith(label),
+        );
+        if (latest?.content === message) return;
+      }
+      if (cacheFriendly && canAppendUserMessages) {
+        const entry = { role: "user" as const, content: message };
+        nonSystemMessages.splice(userInsertionIndex, 0, entry);
+        durableMessages.splice(historyInsertionIndex, 0, entry);
         userInsertionIndex += 1;
+        historyInsertionIndex += 1;
       } else {
         systemMessages.push({ role: "system", content: message });
       }
@@ -54,6 +72,9 @@ export function createCurrentMessages(
     },
     get nonSystemMessages() {
       return [...nonSystemMessages];
+    },
+    get history() {
+      return [...durableMessages];
     },
     get systemMessages() {
       return [...systemMessages];
