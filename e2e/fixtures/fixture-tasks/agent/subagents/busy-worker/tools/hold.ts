@@ -7,8 +7,7 @@ export default defineTool({
   approval: ({ toolInput }) =>
     toolInput?.marker === "EXCLUSIVITY" ? "user-approval" : "not-applicable",
   execute: async ({ marker }) => {
-    const startedAt = Date.now();
     if (marker === "HOLD") await new Promise((resolve) => setTimeout(resolve, 5_000));
-    return { marker, released: true, startedAt, completedAt: Date.now() };
+    return { marker, released: true };
   },
 });

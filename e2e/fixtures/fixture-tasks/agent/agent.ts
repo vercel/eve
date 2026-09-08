@@ -7,8 +7,6 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
-import { PREFIX_REQUEST, respondPromptPrefix } from "./lib/prompt-prefix";
-
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
@@ -21,7 +19,6 @@ function respond(
   if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
     return batchingBenchmark(request);
   }
-  if (request.userMessages.includes(PREFIX_REQUEST)) return respondPromptPrefix(request);
   if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
     const taskState = latestTaskState(request.userMessages);
     if (taskState !== undefined) return handleRedundantReviewWake(taskState);
