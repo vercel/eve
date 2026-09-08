@@ -5,10 +5,14 @@ description: "Delegate work to root-agent copies or declared specialists with th
 
 eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
-## Per-call execution for declared subagents
+## Select models and budgets per task
 
-A declared local subagent can opt into model selection by listing `delegationModels`
-in its `defineAgent` configuration. Its default model must be static. For example:
+Let the parent choose how much intelligence to spend on a delegation: repeated
+extraction may use a cheaper model, while a difficult review may use a stronger
+model with more reasoning. Both can use the same worker and tools.
+
+A declared local subagent opts in by listing allowed AI Gateway model IDs in
+`delegationModels`. Its default model must be static. For example:
 
 ```ts
 export default defineAgent({
@@ -23,13 +27,20 @@ The parent can then call that subagent with:
 
 ```ts
 worker({
-  message: "Read the assigned transcripts and save your findings.",
+  message:
+    "Extract the dates from /workspace/documents/report.txt and save them to /workspace/results/dates.json.",
   execution: {
     model: "google/gemini-2.5-flash",
     maxCostUsd: 0.25,
   },
 });
 ```
+
+Use parent instructions or skills to explain model strengths, task requirements
+and budget tradeoffs. The parent selects from the allowlist; eve does not infer
+the best model, supply live pricing guidance, or automatically route the request.
+Adopting a new model means updating the catalog and guidance, not adding another
+worker implementation. Different fresh delegations can choose different models.
 
 `execution.reasoning` optionally selects an existing eve reasoning level; model
 support still applies. Omit `execution` to keep authored settings. It is only

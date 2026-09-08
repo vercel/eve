@@ -1,13 +1,21 @@
 ---
-issue: "No issue filed; local implementation proposal"
+issue: "https://github.com/vercel/eve/pull/3162"
 status: in-progress
 last_updated: "2026-09-08"
 ---
 
-# Per-call delegation execution
+# Model-directed delegation
 
-One general worker should support inexpensive extraction and deeper investigation
-without separate domain agents or a replacement task scheduler.
+A parent agent should choose how much intelligence to spend on each delegated task.
+Repeated extraction and ambiguous reasoning can use the same worker with different
+models, reasoning effort and cost ceilings, rather than separate model-specific
+subagent definitions.
+
+Authors supply an allowed catalog of AI Gateway model IDs. Instructions or skills
+can describe their strengths and selection criteria; the parent chooses per call.
+New models can be adopted by updating the authored catalog and guidance without
+restructuring the worker or task lifecycle. This proposal does not discover models,
+benchmark them, or automatically route requests by price or complexity.
 
 ```ts
 // subagents/worker/agent.ts
@@ -38,5 +46,4 @@ supported in the initial opt-in surface.
 
 Verification must cover compiler round-trip, fresh selection, invalid options,
 budget clamping, continuation, native workflow transport and actual child model
-calls before integration. The application using it is intentionally separate from
-the earlier Signals agent and must import no implementation from that agent.
+calls before integration.

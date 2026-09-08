@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Allow local subagents to opt into per-call model, reasoning and cost selection with `delegationModels`. Fresh calls can supply `execution`; existing children retain their configuration and requested cost ceilings cannot raise inherited quotas.
+Let parent agents choose a model, reasoning effort and cost ceiling for each task delegated to an opted-in local subagent. Authors configure allowed models with `delegationModels`; calls without overrides keep their defaults, and requested budgets cannot raise inherited or authored limits.

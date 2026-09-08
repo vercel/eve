@@ -34,15 +34,31 @@ export const SUBAGENT_EXECUTION_SCHEMA = z.strictObject({
   model: z.string().min(1),
   reasoning: z
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .describe(
+      "Choose reasoning effort for this task using the selected model's supported levels. Omit to retain the worker's authored reasoning setting.",
+    )
     .optional(),
-  maxCostUsd: z.number().finite().positive().optional(),
+  maxCostUsd: z
+    .number()
+    .finite()
+    .positive()
+    .describe(
+      "Optional child-session model cost ceiling in USD. Choose a budget appropriate to the assignment; it cannot raise inherited or authored limits and is not a reservation from a shared budget.",
+    )
+    .optional(),
 });
 
 export function createSubagentInputSchema(models: readonly string[]) {
   return SUBAGENT_TOOL_INPUT_SCHEMA.extend({
-    execution: SUBAGENT_EXECUTION_SCHEMA.extend({ model: z.enum(models) })
+    execution: SUBAGENT_EXECUTION_SCHEMA.extend({
+      model: z
+        .enum(models)
+        .describe(
+          "Choose an allowed model appropriate to the task's complexity, quality requirements, latency and cost, using available instructions or skills. No automatic routing is performed.",
+        ),
+    })
       .describe(
-        "Optional execution settings for a new child only. Omit when resuming with agentId. Cost can only lower inherited limits. Reasoning support depends on the model.",
+        "Select model, reasoning effort and budget for a new delegation. Omit to use the worker's defaults. Do not supply when resuming with agentId; an existing child retains its configuration.",
       )
       .optional(),
   });
