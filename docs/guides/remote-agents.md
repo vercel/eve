@@ -141,19 +141,9 @@ Forwarding is explicit on both sides. The receiver names which forwarders it tru
 
 Remote tracing uses ordinary `traceparent` propagation. Trace context is not an authorization grant: it cannot assert eve parent lineage, change `rootSessionId`, or remove the normal root-session token cap.
 
-eve also carries the original `gen_ai.conversation.id` in `eve.conversation.id`
-baggage so you can find related traces across local and remote agents. This
-observability identifier does not require principal forwarding or shared
-execution lineage; it grants no session access and does not change trace-content
-policy. Only session-create requests with a callback may supply this baggage;
-top-level requests ignore it and establish their own conversation ID. Callback
-metadata is caller-supplied correlation, not verified identity.
+eve also carries the original `gen_ai.conversation.id` in `eve.conversation.id` baggage so you can find related traces across local and remote agents. This observability identifier does not require principal forwarding or shared execution lineage; it grants no session access and does not change trace-content policy. Only session-create requests with a callback may supply this baggage; top-level requests ignore it and establish their own conversation ID. Callback metadata is caller-supplied correlation, not verified identity.
 
-eve replaces configured `traceparent` and conversation baggage only when it
-has a framework value to send. Incoming baggage has an 8 KiB limit; the audience
-and conversation readers share whitespace, percent-decoding, and duplicate-key
-validation. Conversation IDs are limited to 1 KiB and exclude control characters
-and line separators.
+eve replaces configured `traceparent` and conversation baggage only when it has a framework value to send. Incoming baggage has an 8 KiB limit; the audience and conversation readers share whitespace, percent-decoding, and duplicate-key validation. Conversation IDs are limited to 1 KiB and exclude control characters and line separators.
 
 > ⚠️ **Upgrade both deployments before resuming persistent remote sessions.** A sender with continuation forwarding includes `forwardedPrincipal` on each authenticated follow-up. A receiver that supports forwarding only on session creation rejects that continuation with HTTP 400. eve does not retry without the field because that would run the follow-up as the transport service principal and silently change caller authority. The parent retains the child handle after this failure, so you can retry the same session after upgrading the receiver.
 
