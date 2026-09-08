@@ -1,5 +1,5 @@
 import type { Migration } from "#execution/wire/session-inbox/migration.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox-contract.js";
 
 export const v5ToV6 = {
   from: 5,
@@ -8,7 +8,7 @@ export const v5ToV6 = {
   down(wire) {
     if (wire.kind !== "cancel") return { ...wire, version: 5 };
     if (wire.tasks === true) {
-      throw new SessionInboxWireError(
+      throw new SessionInboxIncompatibleError(
         "Cannot encode session-owned task cancellation for wire version 5.",
       );
     }

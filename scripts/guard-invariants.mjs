@@ -631,7 +631,13 @@ const PURE_MIGRATION_IMPORTS = new Map([
       ["Wire", "type"],
     ]),
   ],
-  ["#execution/wire/session-inbox-contract.js", new Map([["SessionInboxWireError", "value"]])],
+  [
+    "#execution/wire/session-inbox-contract.js",
+    new Map([
+      ["SessionInboxWireError", "value"],
+      ["SessionInboxIncompatibleError", "value"],
+    ]),
+  ],
   ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
   ["#shared/guards.js", new Map([["isObject", "value"]])],
 ]);

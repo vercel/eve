@@ -8,6 +8,7 @@ import type { Wire } from "#execution/wire/session-inbox/migration.js";
 import { downgradeSessionInbox } from "#execution/wire/session-inbox/migrations.js";
 import {
   SessionInboxWireError,
+  SessionInboxIncompatibleError,
   isSessionInboxWireVersion,
   type SessionInboxWireTarget,
   type SessionInboxWireVersion,
@@ -60,9 +61,10 @@ function encode(
     }
     return legacy;
   } catch (error) {
-    throw new SessionInboxWireError(
-      `Cannot encode session inbox command for wire version ${target.version}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = `Cannot encode session inbox command for wire version ${target.version}: ${error instanceof Error ? error.message : String(error)}`;
+    if (error instanceof SessionInboxIncompatibleError)
+      throw new SessionInboxIncompatibleError(message);
+    throw new SessionInboxWireError(message);
   }
 }
 

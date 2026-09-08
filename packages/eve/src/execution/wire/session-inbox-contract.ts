@@ -49,3 +49,13 @@ export class SessionInboxWireError extends Error {
     this.name = "SessionInboxWireError";
   }
 }
+
+/** A valid operation that the receiving session's protocol cannot represent. */
+export class SessionInboxIncompatibleError extends SessionInboxWireError {
+  readonly code = "SESSION_INBOX_INCOMPATIBLE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionInboxIncompatibleError";
+  }
+}

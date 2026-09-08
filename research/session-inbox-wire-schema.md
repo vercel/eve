@@ -276,6 +276,13 @@ For a rejected invocation, `wakeTaskAgentRequestParentStep` instead replies to
 `"agent-reply"` with a `SESSION_INBOX_INCOMPATIBLE` dispatch error. The worker
 can settle with that error instead of waiting for a child that was never started.
 
+Unsupported session-owned task cancellation raises `SessionInboxIncompatibleError`,
+a `SessionInboxWireError` with code `SESSION_INBOX_INCOMPATIBLE`. The HTTP cancel
+route returns 409 with that code and explains that no cancellation was sent.
+Clients receive the existing `ClientError` with the code, status, and message;
+direct runtime callers receive the coded exception. Malformed wire payloads and
+transport failures retain their unexpected-error handling.
+
 A saved address gives the same protection without a metadata lookup:
 `resumeSessionInbox({ sessionId: "session-1", version: 4 }, workerCommand)`
 encodes v4 directly. Changing that saved version to `3` rejects before delivery.

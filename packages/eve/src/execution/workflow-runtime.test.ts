@@ -248,6 +248,31 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).resolves.toEqual({ status });
   });
 
+  it("rejects unsupported task cancellation without delivering or terminating the target", async () => {
+    getHookByTokenMock.mockResolvedValue({
+      ...currentSessionHook(sessionCommandHookToken("session-1")),
+      metadata: { sessionInboxWireVersion: 5 },
+    });
+    const runtime = buildRuntime();
+    await expect(
+      runtime.dispatchSession({
+        command: { kind: "cancel", tasks: true },
+        sessionId: "session-1",
+      }),
+    ).rejects.toMatchObject({ code: "SESSION_INBOX_INCOMPATIBLE" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(cancelRunMock).not.toHaveBeenCalled();
+
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+    await expect(
+      runtime.dispatchSession({
+        command: { kind: "cancel" },
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+  });
+
   it("re-throws unexpected errors from `resumeHook`", async () => {
     const failure = new Error("transient backing-store outage");
     resumeHookMock.mockRejectedValue(failure);
