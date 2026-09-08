@@ -27,7 +27,6 @@ import {
   ScheduleIdKey,
   SessionCallbackKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -195,6 +194,7 @@ import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellati
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
+import { resolveInitiatingTaskContext } from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
@@ -1252,9 +1252,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
         currentMessages.add(skillAnnouncement, { historyKey: "availableSkills" });
       }
-      const taskState = ctx.get(TurnTaskStateKey);
-      if (taskState !== undefined) {
-        currentMessages.add(taskState, { historyKey: "taskState" });
+      if (ctx.get(TurnTaskDeliveryKey) === "initiating") {
+        const taskContext = resolveInitiatingTaskContext({ state: session.state, turnId });
+        if (taskContext !== undefined) {
+          currentMessages.add(taskContext.context, { historyKey: "taskState" });
+        }
       }
     }
     if (deliveryPolicy.instruction !== undefined) {

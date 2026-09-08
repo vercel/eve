@@ -32,7 +32,6 @@ import {
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
@@ -69,6 +68,8 @@ import {
   hasPendingInputBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
+import { recordSessionTask } from "#tasks/session-index.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
@@ -263,6 +264,20 @@ function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession 
     sessionId: "test-session",
     ...overrides,
   };
+}
+
+const analysisTaskAnnouncement =
+  '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}';
+
+function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
+  return recordSessionTask(session, {
+    createdByTurnId: activeTurnId(getHarnessEmissionState(session.state)),
+    executor: { data: {}, kind: "workflow-tool" },
+    metadata: { kind: "report-probe", name: taskId },
+    taskId,
+    taskInboxToken: `token-${taskId}`,
+    taskRunId: `run-${taskId}`,
+  });
 }
 
 function createTestConfig(
@@ -12338,7 +12353,7 @@ describe("createToolLoopHarness", () => {
           toolResults: [{ ...toolResult, input: toolCall.input }],
         });
         const ctx = new ContextContainer();
-        ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+        ctx.set(TurnTaskDeliveryKey, "initiating");
         const runStep = createToolLoopHarness(
           createTestConfig("conversation", undefined, {
             historyProjector:
@@ -12360,7 +12375,7 @@ describe("createToolLoopHarness", () => {
         const input = { context: ["Current channel context"], message: "Add 20 and 22." };
         const first = await contextStorage.run(ctx, () =>
           runStep(
-            initial,
+            recordBackgroundTask(initial),
             withClientContext ? attachClientContext(input, ["Client context"]) : input,
           ),
         );
@@ -12368,24 +12383,25 @@ describe("createToolLoopHarness", () => {
         const firstPrompt = structuredClone(getLastAgentSettings().messages);
         expect(first.session.history).toContainEqual({
           role: "user",
-          content: "Task status: analysis in progress",
+          content: analysisTaskAnnouncement,
         });
         const nextState = changed
-          ? "Task status: analysis completed"
-          : "Task status: analysis in progress";
+          ? '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"},{"name":"verification","status":"pending","taskId":"verification"}]}'
+          : analysisTaskAnnouncement;
         const nextContext = await deserializeContext(
           JSON.parse(JSON.stringify(serializeContext(ctx))),
         );
-        nextContext.set(TurnTaskStateKey, nextState);
         setupMockAgent(defaultModelResult());
         const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
-        await contextStorage.run(nextContext, () => runStep(restored));
+        await contextStorage.run(nextContext, () =>
+          runStep(changed ? recordBackgroundTask(restored, "verification") : restored),
+        );
         const nextPrompt = getLastAgentSettings().messages;
         expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
         expect(
-          nextPrompt.filter((message) => message.content === "Task status: analysis in progress"),
+          nextPrompt.filter((message) => message.content === analysisTaskAnnouncement),
         ).toHaveLength(1);
-        expect(nextContext.get(HistoryStateKey)).toEqual({ taskState: nextState });
+        expect(nextContext.get(HistoryStateKey)).toMatchObject({ taskState: nextState });
         if (changed) {
           expect(nextPrompt.at(-1)).toEqual({ role: "user", content: nextState });
         } else {
@@ -12396,7 +12412,7 @@ describe("createToolLoopHarness", () => {
 
     it("does not advance history state when the model call fails", async () => {
       const ctx = new ContextContainer();
-      ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
       setupMockAgentError(new Error("Model unavailable"));
@@ -12407,7 +12423,7 @@ describe("createToolLoopHarness", () => {
       expect(ctx.get(HistoryStateKey)).toBeUndefined();
       expect(failed.session.history).not.toContainEqual({
         role: "user",
-        content: "Task status: analysis in progress",
+        content: "Available skills\n- policy: Tenant policy",
       });
 
       setupMockAgent(defaultModelResult());
@@ -12416,14 +12432,16 @@ describe("createToolLoopHarness", () => {
       );
       expect(retried.session.history).toContainEqual({
         role: "user",
-        content: "Task status: analysis in progress",
+        content: "Available skills\n- policy: Tenant policy",
       });
-      expect(ctx.get(HistoryStateKey)).toEqual({ taskState: "Task status: analysis in progress" });
+      expect(ctx.get(HistoryStateKey)).toEqual({
+        availableSkills: "Available skills\n- policy: Tenant policy",
+      });
     });
 
     it("does not advance history state when recording the step result fails", async () => {
       const ctx = new ContextContainer();
-      ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const failure = new Error("Failed to finish the turn");
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", async (event) => {
@@ -12437,7 +12455,7 @@ describe("createToolLoopHarness", () => {
       ).rejects.toBe(failure);
       expect(getLastAgentSettings().messages).toContainEqual({
         role: "user",
-        content: "Task status: analysis in progress",
+        content: "Available skills\n- policy: Tenant policy",
       });
       expect(ctx.get(HistoryStateKey)).toBeUndefined();
     });
@@ -12447,14 +12465,13 @@ describe("createToolLoopHarness", () => {
       async (replacement) => {
         const ctx = new ContextContainer();
         const availableSkills = "Available skills\n- policy: Tenant policy";
-        const taskState = "Task status: analysis in progress";
+        const taskState = analysisTaskAnnouncement;
         ctx.set(PendingSkillAnnouncementKey, availableSkills);
-        ctx.set(TurnTaskStateKey, taskState);
         ctx.set(TurnTaskDeliveryKey, "initiating");
         const runStep = createToolLoopHarness(createTestConfig("conversation"));
         setupMockAgent(defaultModelResult());
         const first = await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "Check progress." }),
+          runStep(recordBackgroundTask(createTestSession()), { message: "Check progress." }),
         );
         const expectedState = {
           availableSkills,
@@ -12614,16 +12631,17 @@ describe("createToolLoopHarness", () => {
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const ctx = new ContextContainer();
       ctx.set(TurnTaskDeliveryKey, "initiating");
-      ctx.set(TurnTaskStateKey, '[Task state]\n{"tasks":[]}');
 
       await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Start the background work." }),
+        runStep(recordBackgroundTask(createTestSession()), {
+          message: "Start the background work.",
+        }),
       );
 
       const { instructions, messages } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
       expect(messages.slice(0, 2)).toEqual([
-        { role: "user", content: '[Task state]\n{"tasks":[]}' },
+        { role: "user", content: analysisTaskAnnouncement },
         { role: "user", content: TASK_DELIVERY_INITIATING_INSTRUCTION },
       ]);
     });
@@ -12632,9 +12650,8 @@ describe("createToolLoopHarness", () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const ctx = new ContextContainer();
-      const taskState = '[Task state]\n{"tasks":[]}';
+      const taskState = analysisTaskAnnouncement;
       ctx.set(TurnTaskDeliveryKey, "initiating");
-      ctx.set(TurnTaskStateKey, taskState);
       const session = setHarnessEmissionState(createTestSession(), {
         sequence: 1,
         sessionStarted: true,
@@ -12643,7 +12660,7 @@ describe("createToolLoopHarness", () => {
       });
 
       await contextStorage.run(ctx, () =>
-        runStep(session, { message: "Start the background work." }),
+        runStep(recordBackgroundTask(session), { message: "Start the background work." }),
       );
 
       const { instructions, messages } = getLastAgentSettings();
@@ -12654,6 +12671,26 @@ describe("createToolLoopHarness", () => {
         { role: "user", content: "Start the background work." },
       ]);
     });
+
+    it.each(["none", "pending", "settled"] as const)(
+      "does not inject initiating task state during the %s phase",
+      async (phase) => {
+        setupMockAgent(defaultModelResult());
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskDeliveryKey, phase);
+        await contextStorage.run(ctx, () =>
+          createToolLoopHarness(createTestConfig("conversation"))(
+            recordBackgroundTask(createTestSession()),
+            { message: "Check progress." },
+          ),
+        );
+        expect(getLastAgentSettings().messages).not.toContainEqual({
+          role: "user",
+          content: analysisTaskAnnouncement,
+        });
+        expect(ctx.get(HistoryStateKey)?.taskState).toBeUndefined();
+      },
+    );
 
     it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
       setupMockAgent(defaultModelResult());

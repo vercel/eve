@@ -95,8 +95,6 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
 );
-/** Latest task snapshot for the harness to append to history. */
-export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
   readonly availableSkills?: string;
