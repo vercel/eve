@@ -193,5 +193,5 @@ function reviewPacket(): string {
       (sheet, index) => `Sheet ${index + 1}: ${sheet.title}\n${sheet.question}\n\n${sheet.notes}`,
     )
     .join("\n\n");
-  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Give each reviewer its sheet number and the question for that sheet. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${sheets}`;
+  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Each reviewer has access to the stored sheets and their review questions, so the sheet number is enough for its assignment. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${sheets}`;
 }
