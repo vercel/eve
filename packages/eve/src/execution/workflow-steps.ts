@@ -31,7 +31,6 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   TurnTaskDeliveryKey,
   TurnDeliveryIdsKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -80,8 +79,10 @@ import { createDurableSessionState, readDurableSession } from "#execution/durabl
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
+  clearTaskStateAnnouncement,
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
+  updateTaskStateAnnouncement,
 } from "#tasks/delivery-context.js";
 import {
   readRetainedBackgroundToolResult,
@@ -125,7 +126,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const ctx = await deserializeContext(input.serializedContext);
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
-    ctx.delete(TurnTaskStateKey);
+    clearTaskStateAnnouncement(ctx);
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
@@ -292,7 +293,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
     if (taskContext !== undefined) {
       ctx.set(TurnTaskDeliveryKey, taskContext.phase);
-      ctx.set(TurnTaskStateKey, taskContext.context);
+      updateTaskStateAnnouncement(ctx, taskContext.context);
     }
   }
 

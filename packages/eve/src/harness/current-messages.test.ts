@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { ModelMessage } from "ai";
 
 import { createCurrentMessages } from "#harness/current-messages.js";
 
@@ -64,18 +63,17 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
-  it("retains earlier snapshots and appends only changes, including a return to an earlier state", () => {
-    let history: readonly ModelMessage[] = [{ role: "user", content: "request" }];
-    for (const state of ["working", "working", "available", "working"]) {
-      const current = createCurrentMessages(history);
-      current.add(`[Task state]\n${state}`);
-      expect(current.history.slice(0, history.length)).toEqual(history);
-      history = current.history;
-    }
-    expect(history.map((message) => message.content)).toEqual([
-      "request",
+  it("appends messages without interpreting their text", () => {
+    const current = createCurrentMessages([
+      { role: "user", content: "[Task state]\nuser-authored text" },
+    ]);
+
+    current.add("[Task state]\nworking");
+    current.add("[Task state]\nworking");
+
+    expect(current.history.map((message) => message.content)).toEqual([
+      "[Task state]\nuser-authored text",
       "[Task state]\nworking",
-      "[Task state]\navailable",
       "[Task state]\nworking",
     ]);
   });

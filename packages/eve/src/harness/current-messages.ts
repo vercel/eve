@@ -2,7 +2,6 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
-  readonly label?: string;
 }
 
 interface CurrentMessagesOptions {
@@ -18,7 +17,7 @@ export function createCurrentMessages(
   readonly history: readonly ModelMessage[];
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
-  add(message: string, options?: AddCurrentMessageOptions): void;
+  add(message: string, options?: AddCurrentMessageOptions): "history" | "system";
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
@@ -47,25 +46,17 @@ export function createCurrentMessages(
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
   return {
-    add(message, { cacheFriendly = true, label = message.split("\n")[0] ?? message } = {}) {
-      if (cacheFriendly) {
-        const latest = nonSystemMessages.findLast(
-          (entry) =>
-            entry.role === "user" &&
-            typeof entry.content === "string" &&
-            entry.content.startsWith(label),
-        );
-        if (latest?.content === message) return;
-      }
+    add(message, { cacheFriendly = true } = {}) {
       if (cacheFriendly && canAppendUserMessages) {
         const entry = { role: "user" as const, content: message };
         nonSystemMessages.splice(userInsertionIndex, 0, entry);
         durableMessages.splice(historyInsertionIndex, 0, entry);
         userInsertionIndex += 1;
         historyInsertionIndex += 1;
-      } else {
-        systemMessages.push({ role: "system", content: message });
+        return "history";
       }
+      systemMessages.push({ role: "system", content: message });
+      return "system";
     },
     addSystem(messages) {
       systemMessages.push(...(Array.isArray(messages) ? messages : [messages]));

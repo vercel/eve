@@ -9,7 +9,7 @@ import {
   preparePersistedStepDynamicToolMetadata,
 } from "#context/dynamic-tool-lifecycle.js";
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
-import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import { updateDynamicSkillAnnouncement } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
   SessionKey,
@@ -17,7 +17,6 @@ import {
   SessionDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -27,6 +26,7 @@ import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { updateTaskStateAnnouncement } from "#tasks/delivery-context.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -152,6 +152,7 @@ const pendingApprovalInputRequest: InputRequest = {
   prompt: "Approve tool call: bash",
   requestId: approvalRequest.approvalId,
 };
+const runtimeContextAnnouncement = "[Runtime context]\nInjected on the resume step.";
 
 function createPendingApprovalSession(
   history?: readonly ModelMessage[],
@@ -836,12 +837,20 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
   // and the provider rejected the prompt with a tool call that had no output.
   it.each(
     [
-      { key: PendingSkillAnnouncementKey, label: "dynamic skill announcement" },
-      { key: TurnTaskStateKey, label: "task state" },
+      {
+        label: "dynamic skill announcement",
+        setup: (ctx: ContextContainer) =>
+          updateDynamicSkillAnnouncement(ctx, runtimeContextAnnouncement),
+      },
+      {
+        label: "task state",
+        setup: (ctx: ContextContainer) =>
+          updateTaskStateAnnouncement(ctx, runtimeContextAnnouncement),
+      },
     ].flatMap((context) => [false, true].map((restoredAnchor) => ({ ...context, restoredAnchor }))),
   )(
     "executes the approved tool when $label is injected on the resume step (restored anchor: $restoredAnchor)",
-    async ({ key, restoredAnchor }) => {
+    async ({ setup, restoredAnchor }) => {
       const siblingCall = {
         input: { command: "whoami" },
         toolCallId: "call-sibling",
@@ -864,12 +873,13 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         session: createBaseSession(),
       });
       const ctx = new ContextContainer();
-      ctx.set(key, "[Runtime context]\nInjected on the resume step.");
+      setup(ctx);
       const execute = vi.fn(async () => "/workspace");
       const model = createModel();
+      const runStep = createToolLoopHarness(createConfig(model, execute));
 
       const result = await contextStorage.run(ctx, () =>
-        createToolLoopHarness(createConfig(model, execute))(
+        runStep(
           setHarnessEmissionState(
             restoredAnchor
               ? setTurnClientContextState(session, {
@@ -911,6 +921,15 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         content: [{ text: "The command returned /workspace.", type: "text" }],
         role: "assistant",
       });
+
+      const continued = await contextStorage.run(ctx, () =>
+        runStep(result.session, { message: "Continue." }),
+      );
+      expect(
+        continued.session.history.filter(
+          (message) => message.content === runtimeContextAnnouncement,
+        ),
+      ).toHaveLength(1);
     },
   );
 

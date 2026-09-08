@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer } from "#context/container.js";
 import { CONDITIONAL_DELIVERY_INSTRUCTION } from "#shared/empty-delivery.js";
 import {
-  TASK_DELIVERY_INSTRUCTION_LABEL,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
-import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
+import {
+  markDeliveryInstructionPersisted,
+  prepareDeliveryInstruction,
+  requeueDeliveryInstruction,
+  resolveDeliveryPolicy,
+} from "#tasks/delivery-policy.js";
 
 describe("resolveDeliveryPolicy", () => {
   it.each([
@@ -33,20 +38,6 @@ describe("resolveDeliveryPolicy", () => {
         taskDeliveryPhase,
       });
       expect(policy).toMatchObject({ allowsEmptyDelivery, instruction });
-    },
-  );
-
-  it.each(["initiating", "pending", "settled"] as const)(
-    "groups %s instructions under the task-delivery history label",
-    (taskDeliveryPhase) => {
-      const policy = resolveDeliveryPolicy({
-        hasScheduleProvenance: false,
-        hasOutputSchema: false,
-        isChild: false,
-        isFirstTurn: false,
-        taskDeliveryPhase,
-      });
-      expect(policy.historyLabel).toBe(TASK_DELIVERY_INSTRUCTION_LABEL);
     },
   );
 
@@ -76,8 +67,49 @@ describe("resolveDeliveryPolicy", () => {
       }),
     ).toEqual({
       allowsEmptyDelivery: false,
-      historyLabel: TASK_DELIVERY_INSTRUCTION_LABEL,
       instruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
     });
+  });
+
+  it("queues an instruction once, then queues it again when the policy changes", () => {
+    const ctx = new ContextContainer();
+    const initiating = resolveDeliveryPolicy({
+      hasOutputSchema: false,
+      hasScheduleProvenance: false,
+      isChild: false,
+      isFirstTurn: true,
+      taskDeliveryPhase: "initiating",
+    });
+    const pending = resolveDeliveryPolicy({
+      hasOutputSchema: false,
+      hasScheduleProvenance: false,
+      isChild: false,
+      isFirstTurn: false,
+      taskDeliveryPhase: "pending",
+    });
+
+    expect(prepareDeliveryInstruction(ctx, initiating)).toBe(TASK_DELIVERY_INITIATING_INSTRUCTION);
+    markDeliveryInstructionPersisted(ctx, TASK_DELIVERY_INITIATING_INSTRUCTION);
+    expect(prepareDeliveryInstruction(ctx, initiating)).toBeUndefined();
+    expect(prepareDeliveryInstruction(ctx, pending)).toBe(TASK_DELIVERY_PENDING_INSTRUCTION);
+  });
+
+  it("requeues the current instruction after history is replaced", () => {
+    const ctx = new ContextContainer();
+    const policy = resolveDeliveryPolicy({
+      hasOutputSchema: false,
+      hasScheduleProvenance: false,
+      isChild: false,
+      isFirstTurn: false,
+      taskDeliveryPhase: "settled",
+    });
+
+    const instruction = prepareDeliveryInstruction(ctx, policy);
+    expect(instruction).toBe(TASK_DELIVERY_SETTLED_INSTRUCTION);
+    if (instruction === undefined) throw new TypeError("Expected a delivery instruction.");
+    markDeliveryInstructionPersisted(ctx, instruction);
+    requeueDeliveryInstruction(ctx);
+
+    expect(prepareDeliveryInstruction(ctx, policy)).toBe(TASK_DELIVERY_SETTLED_INSTRUCTION);
   });
 });

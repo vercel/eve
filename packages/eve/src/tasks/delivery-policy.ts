@@ -1,6 +1,7 @@
+import type { AlsContext } from "#context/container.js";
+import { ContextKey } from "#context/key.js";
 import { CONDITIONAL_DELIVERY_INSTRUCTION } from "#shared/empty-delivery.js";
 import {
-  TASK_DELIVERY_INSTRUCTION_LABEL,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
@@ -8,9 +9,17 @@ import {
 
 export interface DeliveryPolicy {
   readonly allowsEmptyDelivery: boolean;
-  readonly historyLabel?: string;
   readonly instruction?: string;
 }
+
+interface DeliveryInstructionState {
+  readonly current: string;
+  readonly pending: boolean;
+}
+
+const DeliveryInstructionStateKey = new ContextKey<DeliveryInstructionState>(
+  "eve.deliveryInstructionState",
+);
 
 const POLICIES = {
   conditional: {
@@ -19,18 +28,15 @@ const POLICIES = {
   },
   initiating: {
     allowsEmptyDelivery: false,
-    historyLabel: TASK_DELIVERY_INSTRUCTION_LABEL,
     instruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
   },
   normal: { allowsEmptyDelivery: false },
   pending: {
     allowsEmptyDelivery: true,
-    historyLabel: TASK_DELIVERY_INSTRUCTION_LABEL,
     instruction: TASK_DELIVERY_PENDING_INSTRUCTION,
   },
   settled: {
     allowsEmptyDelivery: false,
-    historyLabel: TASK_DELIVERY_INSTRUCTION_LABEL,
     instruction: TASK_DELIVERY_SETTLED_INSTRUCTION,
   },
 } as const satisfies Record<string, DeliveryPolicy>;
@@ -55,4 +61,36 @@ export function resolveDeliveryPolicy(input: {
   if (input.taskDeliveryPhase === "initiating") return POLICIES.initiating;
   // Ordinary turns retain the agent's normal response contract.
   return POLICIES.normal;
+}
+
+export function prepareDeliveryInstruction(
+  ctx: AlsContext,
+  policy: DeliveryPolicy,
+): string | undefined {
+  const instruction = policy.instruction;
+  if (instruction === undefined) {
+    ctx.delete(DeliveryInstructionStateKey);
+    return undefined;
+  }
+
+  const state = ctx.get(DeliveryInstructionStateKey);
+  if (state?.current !== instruction) {
+    ctx.set(DeliveryInstructionStateKey, { current: instruction, pending: true });
+    return instruction;
+  }
+  return state.pending ? state.current : undefined;
+}
+
+export function markDeliveryInstructionPersisted(ctx: AlsContext, instruction: string): void {
+  const state = ctx.get(DeliveryInstructionStateKey);
+  if (state?.current === instruction && state.pending) {
+    ctx.set(DeliveryInstructionStateKey, { current: instruction, pending: false });
+  }
+}
+
+export function requeueDeliveryInstruction(ctx: AlsContext): void {
+  const state = ctx.get(DeliveryInstructionStateKey);
+  if (state !== undefined) {
+    ctx.set(DeliveryInstructionStateKey, { ...state, pending: true });
+  }
 }
