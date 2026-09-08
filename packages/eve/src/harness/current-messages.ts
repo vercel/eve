@@ -17,7 +17,7 @@ export function createCurrentMessages(
   readonly history: readonly ModelMessage[];
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
-  add(message: string, options?: AddCurrentMessageOptions): "history" | "system";
+  add(message: string, options?: AddCurrentMessageOptions): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
@@ -53,10 +53,9 @@ export function createCurrentMessages(
         durableMessages.splice(historyInsertionIndex, 0, entry);
         userInsertionIndex += 1;
         historyInsertionIndex += 1;
-        return "history";
+      } else {
+        systemMessages.push({ role: "system", content: message });
       }
-      systemMessages.push({ role: "system", content: message });
-      return "system";
     },
     addSystem(messages) {
       systemMessages.push(...(Array.isArray(messages) ? messages : [messages]));

@@ -1,25 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import {
-  getPendingDynamicSkillAnnouncement,
-  markDynamicSkillAnnouncementPersisted,
-  updateDynamicSkillAnnouncement,
-} from "#context/dynamic-skill-lifecycle.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { ReadFileStateKey } from "#execution/tools/file-state.js";
 import { TodoStateKey } from "#execution/tools/todo.js";
-import {
-  getPendingTaskStateAnnouncement,
-  markTaskStateAnnouncementPersisted,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
-  updateTaskStateAnnouncement,
-} from "#tasks/delivery-context.js";
-import {
-  markDeliveryInstructionPersisted,
-  prepareDeliveryInstruction,
-  resolveDeliveryPolicy,
-} from "#tasks/delivery-policy.js";
 
 function run(setup: (ctx: ContextContainer) => void): {
   ctx: ContextContainer;
@@ -55,31 +39,5 @@ describe("preserveFrameworkStateOnCompaction", () => {
   it("returns no messages when there is no todo list", () => {
     const { messages } = run(() => {});
     expect(messages).toEqual([]);
-  });
-
-  it("requeues current framework announcements", () => {
-    const ctx = new ContextContainer();
-    const skillAnnouncement = "Available skills\n- policy: Tenant policy";
-    const taskState = '[Task state]\n{"status":"pending"}';
-    const policy = resolveDeliveryPolicy({
-      hasOutputSchema: false,
-      hasScheduleProvenance: false,
-      isChild: false,
-      isFirstTurn: false,
-      taskDeliveryPhase: "pending",
-    });
-    updateDynamicSkillAnnouncement(ctx, skillAnnouncement);
-    markDynamicSkillAnnouncementPersisted(ctx, skillAnnouncement);
-    updateTaskStateAnnouncement(ctx, taskState);
-    markTaskStateAnnouncementPersisted(ctx, taskState);
-    const instruction = prepareDeliveryInstruction(ctx, policy);
-    expect(instruction).toBe(TASK_DELIVERY_PENDING_INSTRUCTION);
-    markDeliveryInstructionPersisted(ctx, TASK_DELIVERY_PENDING_INSTRUCTION);
-
-    contextStorage.run(ctx, () => preserveFrameworkStateOnCompaction());
-
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBe(skillAnnouncement);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBe(taskState);
-    expect(prepareDeliveryInstruction(ctx, policy)).toBe(TASK_DELIVERY_PENDING_INSTRUCTION);
   });
 });

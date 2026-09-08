@@ -1,20 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer } from "#context/container.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
-  clearTaskStateAnnouncement,
-  getPendingTaskStateAnnouncement,
-  markTaskStateAnnouncementPersisted,
-  requeueTaskStateAnnouncement,
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
   TASK_DELIVERY_CONTEXT_LABEL,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
-  updateTaskStateAnnouncement,
 } from "#tasks/delivery-context.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
@@ -97,37 +91,6 @@ describe("resolveInitiatingTaskContext", () => {
         turnId: "turn_1",
       }),
     ).toBeUndefined();
-  });
-});
-
-describe("task state announcements", () => {
-  it("queues only changed task snapshots", () => {
-    const ctx = new ContextContainer();
-    const working = '[Task state]\n{"status":"working"}';
-    const available = '[Task state]\n{"status":"available"}';
-
-    updateTaskStateAnnouncement(ctx, working);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBe(working);
-    markTaskStateAnnouncementPersisted(ctx, working);
-
-    updateTaskStateAnnouncement(ctx, working);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBeUndefined();
-
-    updateTaskStateAnnouncement(ctx, available);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBe(available);
-  });
-
-  it("requeues after history replacement and clears at a new delivery", () => {
-    const ctx = new ContextContainer();
-    const state = '[Task state]\n{"status":"working"}';
-
-    updateTaskStateAnnouncement(ctx, state);
-    markTaskStateAnnouncementPersisted(ctx, state);
-    requeueTaskStateAnnouncement(ctx);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBe(state);
-
-    clearTaskStateAnnouncement(ctx);
-    expect(getPendingTaskStateAnnouncement(ctx)).toBeUndefined();
   });
 });
 

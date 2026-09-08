@@ -24,10 +24,7 @@ import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-
 import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import {
-  preserveFrameworkStateOnCompaction,
-  requeueFrameworkPromptAnnouncements,
-} from "#execution/compaction.js";
+import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import {
@@ -116,7 +113,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
-    onHistoryCleared: requeueFrameworkPromptAnnouncements,
     onCompaction: preserveFrameworkStateOnCompaction,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({

@@ -26,6 +26,7 @@ import {
   ScheduleIdKey,
   SessionCallbackKey,
   TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -46,10 +47,7 @@ import {
   buildResponseAuthorizationTools,
 } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
-import {
-  getPendingDynamicSkillAnnouncement,
-  markDynamicSkillAnnouncementPersisted,
-} from "#context/dynamic-skill-lifecycle.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
@@ -195,15 +193,7 @@ import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semanti
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import {
-  markDeliveryInstructionPersisted,
-  prepareDeliveryInstruction,
-  resolveDeliveryPolicy,
-} from "#tasks/delivery-policy.js";
-import {
-  getPendingTaskStateAnnouncement,
-  markTaskStateAnnouncementPersisted,
-} from "#tasks/delivery-context.js";
+import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
@@ -600,7 +590,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         history: [],
         state: clearMemorySessionState(session.state),
       };
-      config.onHistoryCleared?.();
       await emit?.(
         createContextClearedEvent({
           sequence: emissionState.sequence,
@@ -1256,26 +1245,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
-      const skillAnnouncement = getPendingDynamicSkillAnnouncement(ctx);
-      if (skillAnnouncement !== undefined) {
-        if (currentMessages.add(skillAnnouncement) === "history") {
-          markDynamicSkillAnnouncementPersisted(ctx, skillAnnouncement);
-        }
+      const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
+      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
+        currentMessages.add(skillAnnouncement);
       }
-      const taskState = getPendingTaskStateAnnouncement(ctx);
+      const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
-        if (currentMessages.add(taskState) === "history") {
-          markTaskStateAnnouncementPersisted(ctx, taskState);
-        }
+        currentMessages.add(taskState);
       }
-      const deliveryInstruction = prepareDeliveryInstruction(ctx, deliveryPolicy);
-      if (
-        deliveryInstruction !== undefined &&
-        currentMessages.add(deliveryInstruction) === "history"
-      ) {
-        markDeliveryInstructionPersisted(ctx, deliveryInstruction);
-      }
-    } else if (deliveryPolicy.instruction !== undefined) {
+    }
+    if (deliveryPolicy.instruction !== undefined) {
       currentMessages.add(deliveryPolicy.instruction);
     }
     const pendingApprovals = renderPendingApprovalsInstruction(

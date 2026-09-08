@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import {
-  getPendingDynamicSkillAnnouncement,
-  markDynamicSkillAnnouncementPersisted,
-  requeueDynamicSkillAnnouncement,
+  PendingSkillAnnouncementKey,
   dispatchDynamicSkillEvent,
 } from "#context/dynamic-skill-lifecycle.js";
 import { DynamicSkillManifestKey, SessionIdKey, SandboxKey } from "#context/keys.js";
@@ -83,50 +81,6 @@ function makeSkill(description: string, markdown = description): SkillPackageDef
 }
 
 describe("dispatchDynamicSkillEvent", () => {
-  it("reconstructs an untracked manifest once", async () => {
-    const { ctx } = createCtx();
-    ctx.set(DynamicSkillManifestKey, {
-      tenant: [{ description: "Tenant policy", name: "tenant" }],
-    });
-    const event = { type: "step.started", data: {} } as UnstampedMessageStreamEvent;
-
-    await dispatchDynamicSkillEvent({ ctx, event, messages: [], resolvers: [] });
-    const announcement = getPendingDynamicSkillAnnouncement(ctx);
-    expect(announcement).toContain("tenant: Tenant policy");
-    if (announcement === undefined) throw new TypeError("Expected a pending announcement.");
-    markDynamicSkillAnnouncementPersisted(ctx, announcement);
-
-    await dispatchDynamicSkillEvent({ ctx, event, messages: [], resolvers: [] });
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBeUndefined();
-  });
-
-  it("queues an announcement only when the visible skill manifest changes", async () => {
-    const { ctx } = createCtx();
-    const resolver = createResolver("tenant", () => makeSkill("Tenant policy"));
-
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent(),
-      messages: [],
-      resolvers: [resolver],
-    });
-    const announcement = getPendingDynamicSkillAnnouncement(ctx);
-    expect(announcement).toBeDefined();
-    if (announcement === undefined) throw new TypeError("Expected a pending announcement.");
-    markDynamicSkillAnnouncementPersisted(ctx, announcement);
-
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent(),
-      messages: [],
-      resolvers: [resolver],
-    });
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBeUndefined();
-
-    requeueDynamicSkillAnnouncement(ctx);
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBe(announcement);
-  });
-
   it("clears removed dynamic skills from the durable announcement", async () => {
     const { ctx, sandbox } = createCtx();
     let enabled = true;
@@ -141,7 +95,7 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [resolver],
     });
 
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toContain("tenant: Tenant policy");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("tenant: Tenant policy");
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       tenant: [{ description: "Tenant policy", name: "tenant" }],
     });
@@ -155,17 +109,8 @@ describe("dispatchDynamicSkillEvent", () => {
     });
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBeUndefined();
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
     expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant"]);
-
-    enabled = true;
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent(),
-      messages: [],
-      resolvers: [resolver],
-    });
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toContain("tenant: Tenant policy");
   });
 
   it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {
@@ -191,7 +136,7 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [tenant, support],
     });
 
-    const announcement = getPendingDynamicSkillAnnouncement(ctx);
+    const announcement = ctx.get(PendingSkillAnnouncementKey);
     expect(announcement).not.toContain("tenant: Tenant policy");
     expect(announcement).toContain("support: Support policy");
   });
@@ -212,7 +157,7 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       custom: [{ description: "Talk like a dog", name: "talk-like-a-dog" }],
     });
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toContain("talk-like-a-dog: Talk like a dog");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
     expect(
       sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/")),
     ).toBe(true);
@@ -236,7 +181,7 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       crm__playbooks: [{ description: "Triage an account", name: "crm__triage" }],
     });
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toContain("crm__triage: Triage an account");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("crm__triage: Triage an account");
     expect(
       sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/crm__triage/")),
     ).toBe(true);
@@ -301,6 +246,6 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(sandbox.writes).toEqual([]);
     expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
-    expect(getPendingDynamicSkillAnnouncement(ctx)).toBeUndefined();
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBeUndefined();
   });
 });

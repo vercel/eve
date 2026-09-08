@@ -7,7 +7,8 @@ export const PREFIX_REQUEST =
 export const WORKER_COUNT = 5;
 export const promptCheckpointSchema = z.object({
   prefix: z.array(z.string()),
-  userMessageCount: z.number().int().nonnegative(),
+  acceptedWorkers: z.number().int().nonnegative(),
+  completedWorkers: z.number().int().nonnegative(),
 });
 
 export function respondPromptPrefix(request: MockModelRequest): MockModelResponse | string {
@@ -23,12 +24,32 @@ export function respondPromptPrefix(request: MockModelRequest): MockModelRespons
     if (changedAt !== -1) return `task-prompt-prefix-changed at message ${changedAt}`;
   }
 
-  if (checkpoints.at(-1)?.userMessageCount !== request.userMessages.length) {
+  const acceptedWorkers = request.toolResults.filter(
+    (result) => result.name === "busy-worker",
+  ).length;
+  const completedWorkerIds = new Set(
+    request.userMessages
+      .filter(
+        (message) => message.startsWith("Background task ") && message.includes(" is completed."),
+      )
+      .flatMap((message) =>
+        [...message.matchAll(/PROMPT-CACHE-WORKER-([1-5])/gu)].map((match) => match[1]),
+      ),
+  );
+  const checkpoint = checkpoints.at(-1);
+  if (
+    checkpoint?.acceptedWorkers !== acceptedWorkers ||
+    checkpoint.completedWorkers !== completedWorkerIds.size
+  ) {
     return {
       toolCalls: [
         {
           name: "capture_prompt",
-          input: { prefix: currentPrefix, userMessageCount: request.userMessages.length },
+          input: {
+            prefix: currentPrefix,
+            acceptedWorkers,
+            completedWorkers: completedWorkerIds.size,
+          },
         },
         ...(checkpoints.length === 0
           ? Array.from({ length: WORKER_COUNT }, (_, index) => ({
@@ -41,15 +62,6 @@ export function respondPromptPrefix(request: MockModelRequest): MockModelRespons
     };
   }
 
-  const completedWorkerIds = new Set(
-    request.userMessages
-      .filter(
-        (message) => message.startsWith("Background task ") && message.includes(" is completed."),
-      )
-      .flatMap((message) =>
-        [...message.matchAll(/PROMPT-CACHE-WORKER-([1-5])/gu)].map((match) => match[1]),
-      ),
-  );
   return completedWorkerIds.size === WORKER_COUNT
     ? "task-prompt-prefix-complete"
     : "task-prompt-prefix-waiting";

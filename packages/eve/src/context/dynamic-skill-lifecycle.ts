@@ -13,8 +13,7 @@ import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { AlsContext, ContextContainer } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
+import type { ContextContainer } from "#context/container.js";
 import {
   type DurableDynamicSkillMetadata,
   DynamicSkillManifestKey,
@@ -76,36 +75,23 @@ async function formatDynamicSkillAnnouncement(input: {
   return formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ?? "";
 }
 
-const DynamicSkillAnnouncementKey = new ContextKey<string>("eve.dynamicSkillAnnouncement");
-const PersistedDynamicSkillAnnouncementKey = new ContextKey<string>(
-  "eve.persistedDynamicSkillAnnouncement",
-);
+// ---------------------------------------------------------------------------
+// Single entry detection
+// ---------------------------------------------------------------------------
 
-export function getPendingDynamicSkillAnnouncement(ctx: AlsContext): string | undefined {
-  const announcement = ctx.get(DynamicSkillAnnouncementKey);
-  return announcement !== undefined &&
-    announcement.length > 0 &&
-    announcement !== ctx.get(PersistedDynamicSkillAnnouncementKey)
-    ? announcement
-    : undefined;
-}
+// ---------------------------------------------------------------------------
+// Context key for pending announcements
+// ---------------------------------------------------------------------------
 
-export function updateDynamicSkillAnnouncement(ctx: AlsContext, announcement: string): void {
-  ctx.set(DynamicSkillAnnouncementKey, announcement);
-  if (announcement.length === 0) {
-    ctx.set(PersistedDynamicSkillAnnouncementKey, announcement);
-  }
-}
+import { ContextKey } from "#context/key.js";
 
-export function requeueDynamicSkillAnnouncement(ctx: AlsContext): void {
-  ctx.delete(PersistedDynamicSkillAnnouncementKey);
-}
-
-export function markDynamicSkillAnnouncementPersisted(ctx: AlsContext, announcement: string): void {
-  if (ctx.get(DynamicSkillAnnouncementKey) === announcement) {
-    ctx.set(PersistedDynamicSkillAnnouncementKey, announcement);
-  }
-}
+/**
+ * Durable pending skill announcement text. Set by
+ * {@link dispatchDynamicSkillEvent} whenever the dynamic skill manifest
+ * changes. Read by the tool-loop to inject the announcement into model
+ * context.
+ */
+export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSkillAnnouncement");
 
 // ---------------------------------------------------------------------------
 // Event dispatch
@@ -125,10 +111,16 @@ export async function dispatchDynamicSkillEvent(input: {
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
 
-  if (ctx.get(DynamicSkillAnnouncementKey) === undefined) {
+  // Build phase: rebuild announcement from durable manifest when the
+  // virtual key is empty (step boundary crossed). Sandbox files persist;
+  // only the announcement needs rebuilding.
+  if (ctx.get(PendingSkillAnnouncementKey) === undefined) {
     const manifest = ctx.get(DynamicSkillManifestKey);
-    if (manifest !== undefined) {
-      updateDynamicSkillAnnouncement(ctx, await formatDynamicSkillAnnouncement({ ctx, manifest }));
+    if (manifest !== undefined && Object.keys(manifest).length > 0) {
+      ctx.setVirtualContext(
+        PendingSkillAnnouncementKey,
+        await formatDynamicSkillAnnouncement({ ctx, manifest }),
+      );
     }
   }
 
@@ -241,6 +233,8 @@ export async function dispatchDynamicSkillEvent(input: {
   }
 
   ctx.set(DynamicSkillManifestKey, newManifest);
-  const announcement = await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest });
-  updateDynamicSkillAnnouncement(ctx, announcement);
+  ctx.setVirtualContext(
+    PendingSkillAnnouncementKey,
+    await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
+  );
 }

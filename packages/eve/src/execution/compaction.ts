@@ -1,19 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import { loadContext } from "#context/container.js";
-import { requeueDynamicSkillAnnouncement } from "#context/dynamic-skill-lifecycle.js";
 import { clearReadFileState } from "#execution/tools/file-state.js";
 import { getTodoCompactionMessage } from "#execution/tools/todo.js";
-import { requeueTaskStateAnnouncement } from "#tasks/delivery-context.js";
-import { requeueDeliveryInstruction } from "#tasks/delivery-policy.js";
-
-/** Requeues framework announcements after durable history is replaced. */
-export function requeueFrameworkPromptAnnouncements(): void {
-  const ctx = loadContext();
-  requeueDynamicSkillAnnouncement(ctx);
-  requeueTaskStateAnnouncement(ctx);
-  requeueDeliveryInstruction(ctx);
-}
 
 /**
  * Re-applies framework-owned state preservation after the harness compacts
@@ -28,7 +16,6 @@ export function requeueFrameworkPromptAnnouncements(): void {
  * durable context state.
  */
 export function preserveFrameworkStateOnCompaction(): readonly ModelMessage[] {
-  requeueFrameworkPromptAnnouncements();
   clearReadFileState();
   const todo = getTodoCompactionMessage();
   return todo === undefined ? [] : [todo];

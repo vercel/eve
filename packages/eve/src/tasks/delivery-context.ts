@@ -1,14 +1,8 @@
-import type { AlsContext } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
-import { TurnTaskStateKey } from "#context/keys.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
-const PersistedTaskStateAnnouncementKey = new ContextKey<string>(
-  "eve.persistedTaskStateAnnouncement",
-);
 
 export const TASK_DELIVERY_INITIATING_INSTRUCTION = `Background task reporting: launch acknowledgement
 The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists background tasks accepted so far from the current turn. They continue independently after this turn.
@@ -34,32 +28,6 @@ Incorrect: "Still waiting for the remaining task."
 Correct: ${EMPTY_DELIVERY_SENTINEL}`;
 
 export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
-
-export function updateTaskStateAnnouncement(ctx: AlsContext, context: string): void {
-  ctx.set(TurnTaskStateKey, context);
-}
-
-export function clearTaskStateAnnouncement(ctx: AlsContext): void {
-  ctx.delete(TurnTaskStateKey);
-  ctx.delete(PersistedTaskStateAnnouncementKey);
-}
-
-export function getPendingTaskStateAnnouncement(ctx: AlsContext): string | undefined {
-  const announcement = ctx.get(TurnTaskStateKey);
-  return announcement !== undefined && announcement !== ctx.get(PersistedTaskStateAnnouncementKey)
-    ? announcement
-    : undefined;
-}
-
-export function markTaskStateAnnouncementPersisted(ctx: AlsContext, announcement: string): void {
-  if (ctx.get(TurnTaskStateKey) === announcement) {
-    ctx.set(PersistedTaskStateAnnouncementKey, announcement);
-  }
-}
-
-export function requeueTaskStateAnnouncement(ctx: AlsContext): void {
-  ctx.delete(PersistedTaskStateAnnouncementKey);
-}
 
 /** Returns model context and cohort phase for tasks started by the same parent turn as this delivery. */
 export function resolveTaskDeliveryContext(input: {
