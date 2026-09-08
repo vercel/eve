@@ -11,12 +11,15 @@ export const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const CHATGPT_LOGIN_HINT =
   "Open `/model` in `eve dev` and select ChatGPT subscription to sign in.";
 
-export interface ChatGptCredentials {
-  readonly accessToken: string;
+export interface ChatGptRefreshCredentials {
   readonly refreshToken: string;
-  readonly expiresAt: number;
   readonly accountId?: string;
   readonly accountLabel?: string;
+}
+
+export interface ChatGptCredentials extends ChatGptRefreshCredentials {
+  readonly accessToken: string;
+  readonly expiresAt: number;
 }
 
 export class ChatGptSignInRequiredError extends Error {
@@ -30,7 +33,7 @@ export async function requestChatGptTokens(
   options: {
     fetch?: typeof fetch;
     signal?: AbortSignal;
-    previous?: ChatGptCredentials;
+    previous?: ChatGptRefreshCredentials;
     now?: () => number;
   } = {},
 ): Promise<ChatGptCredentials> {

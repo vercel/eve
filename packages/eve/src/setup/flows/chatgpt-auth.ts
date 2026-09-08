@@ -3,7 +3,8 @@ import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
-  createChatGptCredentialStore,
+  ChatGptInvalidStoredSessionError,
+  getDefaultChatGptCredentialStore,
   type ChatGptCredentialStore,
 } from "#public/models/openai/chatgpt/credential-store.js";
 import {
@@ -37,9 +38,15 @@ interface ChatGptAuthOptions {
 /** Signs in directly with OpenAI; credentials belong to eve, independently of Codex. */
 export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promise<void> {
   const broker = options.broker ?? getDefaultCodexTokenBroker();
+  const store = options.store ?? getDefaultChatGptCredentialStore();
   options.signal?.throwIfAborted();
   const state = await broker.refreshState();
   if (state.kind === "ready") return;
+  try {
+    await store.read();
+  } catch (error) {
+    if (!(error instanceof ChatGptInvalidStoredSessionError)) throw error;
+  }
   const controller = new AbortController();
   const cancel = (): void => controller.abort(new WizardCancelledError());
   process.once("SIGINT", cancel);
@@ -56,10 +63,13 @@ export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promi
       ? await deviceLogin({ ...options, signal, log, open })
       : await browserLogin({ ...options, signal, log, open });
     signal.throwIfAborted();
-    await (options.store ?? createChatGptCredentialStore()).update(async () => {
-      signal.throwIfAborted();
-      return tokens;
-    });
+    await store.update(
+      async () => {
+        signal.throwIfAborted();
+        return tokens;
+      },
+      { replace: true },
+    );
     const refreshed = await broker.refreshState();
     if (refreshed.kind !== "ready")
       throw new Error("ChatGPT sign-in could not be verified. Retry from /model.");

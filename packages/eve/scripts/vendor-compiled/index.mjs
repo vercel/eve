@@ -48,6 +48,7 @@ import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
+import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
@@ -75,6 +76,7 @@ export const MODULES = [
   jose,
   jsoncParser,
   jsonSchema,
+  justSecrets,
   marked,
   mcp,
   modelContextProtocolServer,

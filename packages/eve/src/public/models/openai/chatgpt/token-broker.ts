@@ -1,9 +1,13 @@
-import { createChatGptCredentialStore, type ChatGptCredentialStore } from "./credential-store.js";
+import {
+  getDefaultChatGptCredentialStore,
+  type ChatGptCredentialStore,
+} from "./credential-store.js";
 import {
   CHATGPT_LOGIN_HINT,
   ChatGptSignInRequiredError,
   requestChatGptTokens,
   type ChatGptCredentials,
+  type ChatGptRefreshCredentials,
 } from "./oauth.js";
 
 const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
@@ -38,7 +42,7 @@ export interface CodexTokenBrokerOptions {
 }
 
 export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): CodexTokenBroker {
-  const store = options.store ?? createChatGptCredentialStore();
+  const store = options.store ?? getDefaultChatGptCredentialStore();
   const now = options.now ?? Date.now;
   let currentState: ChatGptAuthState = { kind: "checking" };
   let cached: ChatGptToken | undefined;
@@ -92,14 +96,15 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
         currentState = { kind: "signed-out" };
         throw new Error(`ChatGPT subscription is not signed in. ${CHATGPT_LOGIN_HINT}`);
       }
-      const rejectedToken = credentials.accessToken;
+      const rejectedToken = tokenFrom(credentials)?.token;
       if (forceRefresh || !isFresh(tokenFrom(credentials), now())) {
         credentials = await store.update(async (current) => {
           if (!current) throw new ChatGptSignInRequiredError();
           // A different eve process may already have rotated this refresh token.
           if (
+            "accessToken" in current &&
             isFresh(tokenFrom(current), now()) &&
-            (!forceRefresh || current.accessToken !== rejectedToken)
+            (!forceRefresh || tokenFrom(current)?.token !== rejectedToken)
           )
             return current;
           return requestChatGptTokens(
@@ -113,6 +118,7 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
         });
       }
       const token = tokenFrom(credentials);
+      if (!token) throw new Error(`ChatGPT access token is unavailable. ${CHATGPT_LOGIN_HINT}`);
       cached = token;
       currentState = readyState(token);
       return token;
@@ -135,7 +141,10 @@ export function getDefaultCodexTokenBroker(): CodexTokenBroker {
   return defaultBroker;
 }
 
-function tokenFrom(credentials: ChatGptCredentials): ChatGptToken {
+function tokenFrom(
+  credentials: ChatGptCredentials | ChatGptRefreshCredentials,
+): ChatGptToken | undefined {
+  if (!("accessToken" in credentials)) return undefined;
   return {
     token: credentials.accessToken,
     expiresAt: credentials.expiresAt,
@@ -151,6 +160,9 @@ function readyState(token: ChatGptToken): ChatGptAuthState {
   };
 }
 
-function isFresh(token: ChatGptToken, now: number): boolean {
-  return token.expiresAt === undefined || token.expiresAt - TOKEN_REFRESH_WINDOW_MS > now;
+function isFresh(token: ChatGptToken | undefined, now: number): boolean {
+  return (
+    token !== undefined &&
+    (token.expiresAt === undefined || token.expiresAt - TOKEN_REFRESH_WINDOW_MS > now)
+  );
 }

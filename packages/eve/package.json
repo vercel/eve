@@ -506,6 +506,7 @@
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",
+    "just-secrets": "0.0.2",
     "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",
