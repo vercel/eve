@@ -146,11 +146,11 @@ export async function transformWorkflowDirectives(input: {
   const replacements: { end: number; start: number; text: string }[] = [];
   const suffixes: string[] = [];
   let hasStepRegistration = false;
-  // Authored bundles resolve eve's package exports; the test harness resolves source aliases.
-  const [workflowStepImport, stepExecutionImport] =
-    input.authored === true
-      ? ["eve/internal/workflow-step", "eve/internal/workflow-step-execution"]
-      : ["#execution/tools/workflow/step.js", "#execution/tools/workflow/step-execution.js"];
+  // The driver bundle resolves eve aliases itself; app-bundled step registrations need the export.
+  const workflowStepImport = "#execution/tools/workflow/step.js";
+  const stepExecutionImport = input.authored
+    ? "eve/internal/workflow-step-execution"
+    : "#execution/tools/workflow/step-execution.js";
 
   for (const fn of functions) {
     if (fn.directive === "use step") {

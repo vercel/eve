@@ -395,6 +395,10 @@ describe("applyWorkflowTransform for authored application modules", () => {
         },
       },
     });
+    // The driver bundle resolves eve source aliases even when the app has no eve dependency.
+    expect(transformed.code).toContain(
+      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+    );
     expect(transformed.code).toContain(
       'var planDeploy = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy:eve-authorization"));',
     );
@@ -438,6 +442,10 @@ describe("applyWorkflowTransform for authored application modules", () => {
       appRoot,
     );
 
+    // Step registrations are bundled by the app, which resolves eve's package export.
+    expect(transformed.code).toContain(
+      'import { withWorkflowStepAuthorization } from "eve/internal/workflow-step-execution";',
+    );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./agent/tools/deploy//planDeploy:eve-authorization", withWorkflowStepAuthorization(planDeploy));',
     );

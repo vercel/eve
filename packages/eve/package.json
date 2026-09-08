@@ -290,11 +290,6 @@
       "import": "./dist/src/public/context/index.js",
       "default": "./dist/src/public/context/index.js"
     },
-    "./internal/workflow-step": {
-      "types": "./dist/src/execution/tools/workflow/step.d.ts",
-      "import": "./dist/src/execution/tools/workflow/step.js",
-      "default": "./dist/src/execution/tools/workflow/step.js"
-    },
     "./internal/workflow-step-execution": {
       "types": "./dist/src/execution/tools/workflow/step-execution.d.ts",
       "import": "./dist/src/execution/tools/workflow/step-execution.js",
