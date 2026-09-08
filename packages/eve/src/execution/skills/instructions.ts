@@ -34,6 +34,7 @@ export function formatAvailableSkillsSection(
   const lines = [
     "Available skills",
     "Listed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.",
+    'Later user-role "Available skills" messages announce dynamic skills that are also available and override same-named static skills. Use the latest such announcement for the current dynamic skill list.',
     "If the user names a skill or the request clearly matches one of the descriptions below, call load_skill before proceeding.",
     "If multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.",
     "If activation fails, say so briefly and continue with the best available alternative.",
