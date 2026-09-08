@@ -110,7 +110,6 @@ describe("connection tools in code mode", () => {
       parent.set(SessionIdKey, "session");
       const first = await step(parent, 0);
       expect(Object.keys(first.modelTools).sort()).toEqual(["code_mode", "connection_search"]);
-      expect(first.claimedToolNames).toEqual([]);
       await contextStorage.run(parent, () =>
         first.modelTools.connection_search!.execute!({ keywords: "issues" } as never, {
           context: {},
@@ -121,7 +120,6 @@ describe("connection tools in code mode", () => {
 
       const next = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(parent))));
       const second = await step(next, 1);
-      expect(second.claimedToolNames).toEqual(claimed ? ["linear__list_issues"] : []);
       expect(Object.keys(second.modelTools).sort()).toEqual(
         claimed
           ? ["code_mode", "connection_search"]

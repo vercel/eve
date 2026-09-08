@@ -111,7 +111,6 @@ describe("applyCodeModeTool", () => {
       tools,
     });
 
-    expect(applied.claimedToolNames).toEqual(["add", "researcher"]);
     expect(Object.keys(applied.modelTools).sort()).toEqual([CODE_MODE_TOOL_NAME, "gated"]);
     expect(applied.modelTools.add).toBeUndefined();
     expect(applied.modelTools.researcher).toBeUndefined();
@@ -174,7 +173,6 @@ describe("applyCodeModeTool", () => {
 
       tools: buildToolSet({ tools: harnessTools }),
     });
-    expect(applied.claimedToolNames).toEqual([]);
     expect(applied.harnessTools.has(CODE_MODE_TOOL_NAME)).toBe(true);
     expect(Object.keys(applied.modelTools)).toEqual(["gated", "code_mode"]);
   });
@@ -204,7 +202,14 @@ describe("applyCodeModeTool", () => {
       type: "object",
       properties: { q: { type: "string" } },
     });
-    expect(applied.claimedToolNames).toEqual(["add"]);
+    expect(Object.keys(applied.modelTools)).toEqual([
+      "gated",
+      "background",
+      "provider",
+      "connection_search",
+      "task_cancel",
+      CODE_MODE_TOOL_NAME,
+    ]);
     expect(applied.modelTools.gated).toBeDefined();
     expect(applied.modelTools.background).toBeDefined();
     expect(applied.modelTools.provider).toBeDefined();

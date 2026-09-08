@@ -103,7 +103,6 @@ function nested(
   return executeCodeModeToolStep({
     authorizationHookToken: "nested-auth",
     authorizationResults,
-    callId: "outer",
     event: { sequence: 1, stepIndex: 2, turnId: "turn" },
     serializedContext: {},
     sessionState: {} as never,
@@ -339,7 +338,7 @@ describe("executeCodeModeToolStep", () => {
         ...buildToolSet({ tools: new Map([["code_mode", state.tools.get("code_mode")!]]) }),
       },
     });
-    expect(applied.claimedToolNames).toEqual(["lookup"]);
+    expect(applied.modelTools).not.toHaveProperty("lookup");
     await expect(nested("lookup")).resolves.toEqual({ status: "completed", output: "step" });
   });
 
@@ -367,7 +366,6 @@ describe("executeCodeModeToolStep", () => {
 
       tools: buildToolSet({ tools: harnessTools }),
     });
-    expect(result.claimedToolNames).toEqual(["lookup"]);
     expect(Object.keys(result.modelTools)).toEqual(["code_mode"]);
     await expect(nested("lookup")).resolves.toEqual({ status: "completed", output: "discovered" });
   });
@@ -376,8 +374,6 @@ describe("executeCodeModeToolStep", () => {
 describe("runCodeModeProgramStep", () => {
   const input = {
     callId: "program",
-    event: { sequence: 1, stepIndex: 2, turnId: "turn" },
-    serializedContext: {},
     sessionState: {} as never,
     program: {
       js: "return 1;",
@@ -476,6 +472,41 @@ describe("runCodeModeProgramStep", () => {
       }
     },
   );
+
+  it("applies every batch resolution to the updated continuation in order", async () => {
+    const interrupts = [0, 1, 2].map((revision) => ({ revision }) as never);
+    const resolutions = [
+      { status: "completed" as const, output: "first" },
+      { status: "failed" as const, error: "second failed" },
+      { status: "completed" as const, output: "third" },
+    ];
+    const continued = vi
+      .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
+      .mockResolvedValue("raw" as never);
+    vi.spyOn(sandbox, "unwrapWorkflowSandboxResult")
+      .mockResolvedValueOnce({ status: "interrupted", interrupt: interrupts[1]! })
+      .mockResolvedValueOnce({ status: "interrupted", interrupt: interrupts[2]! })
+      .mockResolvedValueOnce({ status: "completed", output: "done" });
+    vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockImplementation((interrupt) => [
+      interrupt,
+    ]);
+
+    await expect(
+      runCodeModeProgramStep({
+        ...input,
+        resume: resolutions.map((resolution) => ({ interrupt: interrupts[0]!, resolution })),
+      }),
+    ).resolves.toEqual({ status: "completed", output: "done" });
+
+    expect(
+      continued.mock.calls.map(([call]) => ({
+        interrupt: call.interrupt,
+        resolution: call.resolution,
+      })),
+    ).toEqual(
+      resolutions.map((resolution, index) => ({ interrupt: interrupts[index], resolution })),
+    );
+  });
 
   it.each([false, true])("settles a program failure as data (resume=%s)", async (resume) => {
     const failure = Object.assign(new Error("invalid program"), { code: "RUN_USER_SOURCE_ERROR" });

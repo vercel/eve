@@ -29,12 +29,9 @@ export async function codeModeWorkflow(
 
   const program = parseCodeModeWorkflowInput(rawInput);
   const run = readCodeModeRunContext(ctx);
-  const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
   const base = {
     callId: ctx.callId,
-    event: { sequence, stepIndex, turnId },
     program,
-    serializedContext: run.serializedContext,
     sessionState: run.sessionState,
   };
   let outcome: CodeModeProgramOutcome = await runCodeModeProgramStep(base);
@@ -89,7 +86,6 @@ async function settleNestedCall(
       return { interrupt, resolution: { status: "completed", output } };
     }
     const resolution = await executeCodeModeTool(ctx, {
-      callId: ctx.callId,
       event: { sequence, stepIndex, turnId },
       serializedContext: run.serializedContext,
       sessionState: run.sessionState,

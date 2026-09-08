@@ -26,7 +26,6 @@ vi.mock("#execution/code-mode/program-step.js", () => ({ executeCodeModeToolStep
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: mocks.publish }));
 
 const input = {
-  callId: "outer",
   event: { sequence: 1, stepIndex: 2, turnId: "turn" },
   serializedContext: {},
   sessionState: {} as never,

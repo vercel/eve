@@ -43,47 +43,38 @@ export async function applyCodeModeTool(input: {
   readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<{
-  readonly claimedToolNames: readonly string[];
   readonly harnessTools: HarnessToolMap;
   readonly modelTools: ToolSet;
 }> {
   const codeModeDefinition = input.harnessTools.get(CODE_MODE_TOOL_NAME);
   const codeModeModelTool = input.tools[CODE_MODE_TOOL_NAME];
   if (codeModeDefinition === undefined || codeModeModelTool === undefined) {
-    return { claimedToolNames: [], harnessTools: input.harnessTools, modelTools: input.tools };
+    return { harnessTools: input.harnessTools, modelTools: input.tools };
   }
 
   const maxSubagents = input.maxSubagents ?? DEFAULT_CODE_MODE_MAX_SUBAGENTS;
-  const hostTools: Record<string, ToolSet[string]> = {};
-  const modelTools: Record<string, ToolSet[string]> = {};
+  const modelTools: ToolSet = {};
+  const toolCatalog: CodeModeToolCatalogEntry[] = [];
   for (const [name, tool] of Object.entries(input.tools)) {
+    let target: CodeModeToolCatalogEntry["target"] = "direct";
     if (claimsForCodeMode(name, input.harnessTools)) {
-      hostTools[name] = tool;
+      target = isCodeModeAgentTool(input.harnessTools.get(name)!) ? "agent" : "tool";
     } else if (name !== CODE_MODE_TOOL_NAME) {
       modelTools[name] = tool;
     }
-  }
-  const claimedToolNames = Object.keys(hostTools).sort();
-  const toolCatalog: CodeModeToolCatalogEntry[] = Object.keys(input.tools)
-    .sort()
-    .map((name) => {
-      const tool = input.tools[name]!;
-      let target: CodeModeToolCatalogEntry["target"] = "direct";
-      if (Object.hasOwn(hostTools, name)) {
-        target = isCodeModeAgentTool(input.harnessTools.get(name)!) ? "agent" : "tool";
-      }
-      return {
-        name,
-        description: typeof tool.description === "string" ? tool.description : "",
-        inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
-        outputSchema:
-          tool.outputSchema === undefined
-            ? null
-            : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
-        target,
-      };
+    toolCatalog.push({
+      name,
+      description: typeof tool.description === "string" ? tool.description : "",
+      inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
+      outputSchema:
+        tool.outputSchema === undefined
+          ? null
+          : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
+      target,
     });
+  }
 
+  toolCatalog.sort((left, right) => (left.name < right.name ? -1 : 1));
   const discoveryTools = createDiscoveryTools(toolCatalog);
   const generated = await createWorkflowSandboxTool({
     bridgeRequestLimit: codeModeBridgeRequestLimit(maxSubagents),
@@ -112,7 +103,7 @@ export async function applyCodeModeTool(input: {
         toolCatalog,
       } satisfies CodeModeWorkflowInput),
   });
-  return { claimedToolNames, harnessTools, modelTools: modelTools as ToolSet };
+  return { harnessTools, modelTools };
 }
 
 /**
@@ -215,7 +206,7 @@ function discoveryDescription(
     "",
     ORCHESTRATION_INSTRUCTION,
     "",
-    `Available tools: ${names.sort().join(", ")}.`,
+    `Available tools: ${names.join(", ")}.`,
     DISCOVERY_INSTRUCTION,
   ].join("\n");
 }

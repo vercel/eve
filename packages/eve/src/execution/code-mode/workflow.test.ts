@@ -136,10 +136,10 @@ describe("codeModeWorkflow", () => {
     runProgram.mockResolvedValueOnce(completed(42));
     await expect(codeModeWorkflow(program, context())).resolves.toBe(42);
     expect(runProgram).toHaveBeenCalledTimes(1);
-    expect(runProgram.mock.calls[0]?.[0]).toMatchObject({
+    expect(runProgram.mock.calls[0]?.[0]).toEqual({
       callId: "outer",
       program,
-      serializedContext: { ctx: true },
+      sessionState: { sessionId: "s1" },
     });
     expect(runProgram.mock.calls[0]?.[0]).not.toHaveProperty("resume");
   });
@@ -153,12 +153,17 @@ describe("codeModeWorkflow", () => {
     await expect(codeModeWorkflow(program, context())).resolves.toBe(3);
     expect(executeTool).toHaveBeenCalledWith(
       expect.objectContaining({
+        serializedContext: { ctx: true },
+        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
         toolCallId: "add-call",
         toolInput: { a: 1, b: 2 },
         toolName: "add",
       }),
     );
-    expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+    expect(runProgram.mock.calls[1]?.[0]).toEqual({
+      callId: "outer",
+      program,
+      sessionState: { sessionId: "s1" },
       resume: [{ interrupt: { marker: "add" }, resolution: { status: "completed", output: 3 } }],
     });
     expect(invokeAgent).not.toHaveBeenCalled();

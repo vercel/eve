@@ -139,27 +139,21 @@ export async function runCodeModeProgramStep(input: {
         } as never,
       );
     } else {
-      const [first, ...rest] = input.resume;
-      if (first === undefined) {
+      let current = input.resume[0]?.interrupt;
+      if (current === undefined) {
         throw new Error("code_mode resume requires at least one resolution.");
       }
-      // Each `continue` returns a fresh interrupt whose signed ledger includes
-      // the resolution just applied; the next one must be fed that interrupt,
-      // not the original park. The program only runs on the final resolution.
-      let current = first.interrupt;
-      raw = await continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
-        continuationSecurity: security,
-        interrupt: current,
-        resolution: first.resolution,
-        tools: hostTools,
-      });
-      for (const { resolution } of rest) {
-        const advanced = await unwrapWorkflowSandboxResult(raw, security);
-        if (advanced.status !== "interrupted") {
-          throw new Error("code_mode resumed before every parked call was resolved.");
+      // Each resolution extends the signed ledger. Advance from that updated
+      // continuation; the program runs only after the last parked call settles.
+      for (const [index, { resolution }] of input.resume.entries()) {
+        if (index > 0) {
+          const advanced = await unwrapWorkflowSandboxResult(raw, security);
+          if (advanced.status !== "interrupted") {
+            throw new Error("code_mode resumed before every parked call was resolved.");
+          }
+          current =
+            getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
         }
-        current = getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
         raw = await continueWorkflowSandboxInterrupt({
           bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
           continuationSecurity: security,
@@ -192,7 +186,6 @@ export async function runCodeModeProgramStep(input: {
 }
 
 export interface CodeModeToolCall {
-  readonly callId: string;
   readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
