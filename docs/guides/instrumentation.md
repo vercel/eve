@@ -81,13 +81,15 @@ and outcome fields. Content providers additionally receive only eve's known
 message, context, input-response, and output-schema fields; adapter-specific
 payload fields are never projected.
 
-The built-in OpenTelemetry provider maps each pair to an
-`agent.channel.delivery` consumer span. When the delivery starts a turn, the
-delivery span is a child of that turn's `invoke_agent` activation. Multiple
-deliveries attach to the same activation without changing its identity. When
-`traceChannelRequests: true` creates an inbound HTTP server span, the delivery
-span links to it with `eve.link.type=channel.request` rather than using the
-short-lived request span as its parent.
+For a single delivery that starts a turn, the built-in OpenTelemetry provider
+records the channel kind, channel name, delivery ID, optional request ID, and
+captured input on that turn's `invoke_agent` activation. When
+`traceChannelRequests: true` creates an inbound HTTP server span, the activation
+links to it with `eve.link.type=channel.request`.
+
+An `agent.channel.delivery` consumer span is emitted only when a delivery has no
+activation to describe it, including a delivery consumed inline or failed
+before a turn starts, or when multiple deliveries coalesce into one turn.
 
 ## Callback delivery errors
 
@@ -153,7 +155,7 @@ The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 | `agent.action`           | Durable action lifecycle, including dispatch and waiting |
 | `execute_tool <tool>`    | In-process tool execution beneath its action             |
 | `agent.approval`         | Approval waiting beneath its action                      |
-| `agent.channel.delivery` | Processing one inbound delivery                          |
+| `agent.channel.delivery` | Exceptional delivery not represented by one activation   |
 | `agent.channel.request`  | Optional HTTP request span in the provider layout        |
 
 Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.

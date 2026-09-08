@@ -516,8 +516,16 @@ describe("exported agent telemetry contract", () => {
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
       )!;
+      const parentActivation = parsed.find(
+        (span) => span.name === "invoke_agent parent" && isAgentTurnSpan(span),
+      )!;
       expect(activation.parentSpanId).toBeUndefined();
       expect(activation.traceId).not.toBe(caller.traceId);
+      expect(parentActivation.attributes).toMatchObject({
+        "agent.channel.delivery.id": "delivery",
+        "agent.channel.kind": "http",
+        "agent.channel.name": "web",
+      });
       const childSpan = exported.find((span) => span.spanContext().spanId === activation.spanId)!;
       expect(activation.attributes).toMatchObject({
         "gen_ai.usage.input_tokens": 10,
@@ -538,7 +546,6 @@ describe("exported agent telemetry contract", () => {
           "agent.action",
           "agent.action",
           "agent.approval",
-          "agent.channel.delivery",
           "agent.step",
           "agent.step",
           "chat test",

@@ -13,6 +13,8 @@ import type {
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
+import { contextStorage } from "#context/container.js";
+import { ActiveChannelDeliveriesKey } from "#context/keys.js";
 import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
@@ -123,6 +125,30 @@ export function createAgentChannelDeliveryInstrumentation(input: {
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
     const traceContext = turn?.context ?? state.traceContext;
     if (!isSampledTrace(traceContext)) return;
+    if (
+      event.turnId !== undefined &&
+      turn !== undefined &&
+      isOnlyActiveDelivery(event.sessionId, event.turnId, event.delivery.deliveryId)
+    ) {
+      await input.stateStore.updateTurn(event.sessionId, event.turnId, (current) => ({
+        ...current,
+        channelDelivery: {
+          channelKind: event.delivery.channelKind,
+          channelName: event.delivery.channelName,
+          deliveryId: event.delivery.deliveryId,
+          ...(state.inputAttribute === undefined
+            ? undefined
+            : { inputAttribute: state.inputAttribute }),
+          ...(event.delivery.requestId === undefined
+            ? undefined
+            : { requestId: event.delivery.requestId }),
+          ...(state.requestTraceContext === undefined
+            ? undefined
+            : { requestTraceContext: state.requestTraceContext }),
+        },
+      }));
+      return;
+    }
     const parent = turn?.context ?? state.parent;
     const requestLink = state.requestTraceContext;
     const startSpan = () =>
@@ -192,6 +218,17 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     "channel.delivery.failed": onTerminal,
     "channel.delivery.started": onStarted,
   };
+}
+
+function isOnlyActiveDelivery(sessionId: string, turnId: string, deliveryId: string): boolean {
+  const active = contextStorage.getStore()?.get(ActiveChannelDeliveriesKey);
+  const delivery = active?.[0];
+  return (
+    active?.length === 1 &&
+    delivery?.sessionId === sessionId &&
+    delivery.turnId === turnId &&
+    delivery.delivery.deliveryId === deliveryId
+  );
 }
 
 function readState(value: unknown): ChannelDeliverySpanState | undefined {

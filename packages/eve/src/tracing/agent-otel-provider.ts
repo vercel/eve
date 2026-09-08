@@ -3,6 +3,7 @@ import {
   SpanKind,
   context,
   type Context,
+  type Link,
   type Span,
   type SpanContext,
   type Tracer,
@@ -13,7 +14,7 @@ import { contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
-import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import type { AgentTraceStateStore, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import {
   contentAttribute,
   genAiInputMessagesAttribute,
@@ -329,15 +330,7 @@ export function createAgentOtelInstrumentation(
                   turn,
                 }),
                 kind: SpanKind.INTERNAL,
-                links:
-                  turn.caller === undefined
-                    ? undefined
-                    : [
-                        {
-                          context: turn.caller,
-                          attributes: { "eve.link.type": "agent.dispatch" },
-                        },
-                      ],
+                links: agentActivationLinks(turn),
                 root: true,
                 startTime: turn.startTimeMs,
               },
@@ -639,6 +632,23 @@ export function createAgentOtelInstrumentation(
     }
     modelSpans.delete(event.scope);
   }
+}
+
+function agentActivationLinks(turn: AgentTurnTraceState): Link[] | undefined {
+  const links: Link[] = [];
+  if (turn.caller !== undefined) {
+    links.push({
+      context: turn.caller,
+      attributes: { "eve.link.type": "agent.dispatch" },
+    });
+  }
+  if (turn.channelDelivery?.requestTraceContext !== undefined) {
+    links.push({
+      context: turn.channelDelivery.requestTraceContext,
+      attributes: { "eve.link.type": "channel.request" },
+    });
+  }
+  return links.length === 0 ? undefined : links;
 }
 
 function sessionIdForEvent(event: InstrumentationEvent): string {

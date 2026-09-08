@@ -15,7 +15,7 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionTraceSeedKey } from "#context/keys.js";
+import { ActiveChannelDeliveriesKey, SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
@@ -856,31 +856,34 @@ describe("createAgentOtelInstrumentation", () => {
         turnId: "turn_0",
         type: "turn.started",
       });
+      ctx.set(ActiveChannelDeliveriesKey, [
+        {
+          agentName: started.agentName,
+          delivery: started.delivery,
+          policyAgentName: started.agentName,
+          rootSessionId: started.rootSessionId,
+          sequence: 0,
+          sessionId: started.sessionId,
+          turnId: "turn_0",
+        },
+      ]);
       await runtime.hooks.publish(completed);
       await completeTurn(runtime.hooks, "session-1", "turn_0");
     });
 
     const spans = runtime.exporter.getFinishedSpans();
-    const delivery = spans.find((span) => span.name === "agent.channel.delivery")!;
-    expect(delivery.attributes).toMatchObject({
-      "operation.name": "agent.channel.delivery",
-      "resource.name": "agent.channel.delivery",
-    });
     const turn = spans.find((span) => span.name === "invoke_agent support")!;
-    expect(delivery.kind).toBe(SpanKind.CONSUMER);
+    expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
     expect(turn.parentSpanContext).toBeUndefined();
-    expect(delivery.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
-    expect(turn.spanContext().traceId).toBe(delivery.spanContext().traceId);
-    expect(delivery.links).toEqual([
+    expect(turn.links).toEqual([
       expect.objectContaining({
         attributes: { "eve.link.type": "channel.request" },
         context: expect.objectContaining(requestTraceContext),
       }),
     ]);
-    expect(delivery.attributes).toMatchObject({
+    expect(turn.attributes).toMatchObject({
       "agent.channel.delivery.id": "delivery-1",
       "agent.channel.delivery.input": JSON.stringify({ message: "private" }),
-      "agent.channel.delivery.outcome": "completed",
       "agent.channel.kind": "channel:slack",
       "agent.channel.name": "slack",
       "agent.channel.request.id": "iad1::request-1",
@@ -888,18 +891,6 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.turn.sequence": 0,
       "gen_ai.conversation.id": "session-1",
     });
-
-    await contextStorage.run(ctx, async () => {
-      await runtime.hooks.publish(started);
-      await runtime.hooks.publish(completed);
-      await completeTurn(runtime.hooks, "session-1", "turn_0");
-    });
-    const replayed = runtime.exporter
-      .getFinishedSpans()
-      .filter((span) => span.name === "agent.channel.delivery");
-    expect(replayed).toHaveLength(2);
-    expect(replayed[1]!.spanContext().spanId).toBe(replayed[0]!.spanContext().spanId);
-    expect(replayed[1]!.spanContext().traceId).not.toBe(replayed[0]!.spanContext().traceId);
   });
 
   it("links the remote caller when delivery starts before the session event", async () => {
@@ -948,6 +939,18 @@ describe("createAgentOtelInstrumentation", () => {
         turnId: "turn-remote",
         type: "turn.started",
       });
+      ctx.set(
+        ActiveChannelDeliveriesKey,
+        deliveries.map((delivery) => ({
+          agentName: "weather",
+          delivery,
+          policyAgentName: "weather",
+          rootSessionId: "parent-session",
+          sequence: 0,
+          sessionId: "remote-session",
+          turnId: "turn-remote",
+        })),
+      );
       for (const delivery of deliveries) {
         await runtime.hooks.publish({
           delivery,

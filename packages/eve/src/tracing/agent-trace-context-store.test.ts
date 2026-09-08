@@ -22,6 +22,14 @@ describe("ContextAgentTraceStateStore", () => {
         rootSessionId: "session-1",
       });
       store.setTurn("session-1", "turn-1", {
+        channelDelivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-1",
+          inputAttribute: '{"message":"hello"}',
+          requestId: "request-1",
+          requestTraceContext: { ...spanContext("5", "6"), isRemote: true },
+        },
         context: spanContext("1", "3"),
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
@@ -40,6 +48,14 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        channelDelivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-1",
+          inputAttribute: '{"message":"hello"}',
+          requestId: "request-1",
+          requestTraceContext: { ...spanContext("5", "6"), isRemote: true },
+        },
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,

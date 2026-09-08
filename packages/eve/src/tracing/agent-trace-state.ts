@@ -24,6 +24,7 @@ export interface AgentSessionTraceState {
 
 export interface AgentTurnTraceState {
   readonly caller?: SpanContext;
+  readonly channelDelivery?: AgentTurnChannelDeliveryTraceState;
   readonly context: SpanContext;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
@@ -34,6 +35,15 @@ export interface AgentTurnTraceState {
   readonly terminal?:
     | { readonly error: unknown; readonly type: InstrumentationTurnFailedEvent["type"] }
     | { readonly type: InstrumentationTurnSettledEvent["type"] };
+}
+
+export interface AgentTurnChannelDeliveryTraceState {
+  readonly channelKind: string;
+  readonly channelName: string;
+  readonly deliveryId: string;
+  readonly inputAttribute?: string;
+  readonly requestId?: string;
+  readonly requestTraceContext?: SpanContext;
 }
 
 export interface AgentActionTraceState {

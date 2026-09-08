@@ -57,6 +57,16 @@ export function serializeAgentTraceContextState(state: AgentTraceContextState): 
         {
           ...value,
           caller: value.caller === undefined ? undefined : serializeSpanContext(value.caller),
+          channelDelivery:
+            value.channelDelivery === undefined
+              ? undefined
+              : {
+                  ...value.channelDelivery,
+                  requestTraceContext:
+                    value.channelDelivery.requestTraceContext === undefined
+                      ? undefined
+                      : serializeSpanContext(value.channelDelivery.requestTraceContext),
+                },
           context: serializeSpanContext(value.context),
           terminal:
             value.terminal === undefined
@@ -100,6 +110,7 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
   }
   return {
     caller: isSpanContext(value.caller) ? value.caller : undefined,
+    channelDelivery: deserializeTurnChannelDelivery(value.channelDelivery),
     context: value.context,
     modelUsage: deserializeModelUsage(value.modelUsage),
     parentLineage: deserializeParentLineage(value.parentLineage),
@@ -108,6 +119,27 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
     terminal: deserializeTurnTerminal(value.terminal),
+  };
+}
+
+function deserializeTurnChannelDelivery(value: unknown): AgentTurnTraceState["channelDelivery"] {
+  if (
+    !isRecord(value) ||
+    typeof value.channelKind !== "string" ||
+    typeof value.channelName !== "string" ||
+    typeof value.deliveryId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    channelKind: value.channelKind,
+    channelName: value.channelName,
+    deliveryId: value.deliveryId,
+    inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
+    requestId: typeof value.requestId === "string" ? value.requestId : undefined,
+    requestTraceContext: isSpanContext(value.requestTraceContext)
+      ? value.requestTraceContext
+      : undefined,
   };
 }
 
