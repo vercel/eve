@@ -72,6 +72,7 @@ export type TaskAgentInvocationDispatchResult =
 export async function dispatchAgentInvocation(input: {
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
+  readonly instrumentationCallId?: string;
   readonly replyTo: string;
   readonly request: AgentInvocationRequest;
   readonly serializedContext: Record<string, unknown>;
@@ -217,6 +218,7 @@ export async function dispatchAgentInvocation(input: {
       channelMetadata: prepared.channelMetadata,
       currentSession: session,
       fanoutSize: prepared.fanoutSize,
+      instrumentationCallId: input.instrumentationCallId,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,

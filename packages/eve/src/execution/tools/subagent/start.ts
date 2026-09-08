@@ -1,5 +1,5 @@
 import type { ActivityObserverConfig } from "#channel/types.js";
-import type { LocalDevRequestProvenance } from "#context/keys.js";
+import { ConversationIdKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
@@ -17,7 +17,12 @@ import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch
 import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
-import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
+import {
+  readActionTraceContext,
+  readSessionTraceContext,
+} from "#tracing/agent-trace-context-store.js";
+import type { SubagentParentContext } from "#subagents/invocation.js";
+import { readConversationId } from "#tracing/conversation-context.js";
 
 export type SubagentStartTarget =
   | {
@@ -42,10 +47,10 @@ export async function startSubagent(input: {
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
+  readonly instrumentationCallId?: string;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
@@ -55,13 +60,23 @@ export async function startSubagent(input: {
   readonly taskId?: string;
   readonly target: SubagentStartTarget;
 }): Promise<DispatchOutcome> {
+  const actionCallId = input.instrumentationCallId;
   const storedParentTraceContext =
+    (actionCallId === undefined
+      ? undefined
+      : readActionTraceContext(
+          input.serializedContext,
+          input.session.sessionId,
+          input.batchEvent.turnId,
+          actionCallId,
+        )) ??
     readActionTraceContext(
       input.serializedContext,
       input.session.sessionId,
       input.batchEvent.turnId,
       input.target.action.callId,
-    ) ?? input.parentTraceContext;
+    ) ??
+    readSessionTraceContext(input.serializedContext, input.session.sessionId);
   const forwardedTracePolicy = readForwardedTraceAssertion(
     storedParentTraceContext?.forwardedTracePolicy,
   );
@@ -77,13 +92,26 @@ export async function startSubagent(input: {
             forwardedTracePolicy,
           ),
         };
+  const parent: SubagentParentContext = {
+    conversationId:
+      readConversationId(input.serializedContext[ConversationIdKey.name]) ??
+      input.session.rootSessionId ??
+      input.session.sessionId,
+    lineage: {
+      callId: input.target.action.callId,
+      rootSessionId: input.session.rootSessionId ?? input.session.sessionId,
+      sessionId: input.session.sessionId,
+      turn: { id: input.batchEvent.turnId, sequence: input.batchEvent.sequence },
+    },
+    continuationToken: input.parentContinuationToken,
+    traceContext: parentTraceContext,
+  };
 
   switch (input.target.kind) {
     case "local":
       return startLocalSubagent({
         action: input.target.action,
         auth: input.auth,
-        batchEvent: input.batchEvent,
         bundle: input.bundle,
         capabilities: input.capabilities,
         channelMetadata: input.channelMetadata,
@@ -92,8 +120,7 @@ export async function startSubagent(input: {
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
+        parent,
         activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
@@ -104,15 +131,13 @@ export async function startSubagent(input: {
       return startRemoteSubagent({
         action: input.target.action,
         auth: input.auth,
-        batchEvent: input.batchEvent,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
         originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
+        parent,
         activityObserver: input.activityObserver,
         session: input.session,
         taskId: input.taskId,

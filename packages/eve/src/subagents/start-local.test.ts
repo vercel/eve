@@ -1,24 +1,71 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { buildSubagentRunInput, createSession, waitForCommandHookOwner } = vi.hoisted(() => ({
-  buildSubagentRunInput: vi.fn(() => ({
-    childContinuationToken: "child-token",
-    runInput: { input: { message: "work" } },
-  })),
-  createSession: vi.fn(async () => ({ sessionId: "child-session" })),
-  waitForCommandHookOwner: vi.fn(async () => ({ runId: "child-session" })),
-}));
-
-vi.mock("#subagents/tool.js", () => ({ buildSubagentRunInput }));
-vi.mock("#execution/workflow-runtime.js", () => ({
-  createWorkflowRuntime: () => ({ createSession }),
-  waitForCommandHookOwner,
-}));
-
+import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { startLocalSubagent } from "#subagents/start-local.js";
+import { buildSubagentRunInput } from "#subagents/tool.js";
+
+const createSessionMock = vi.fn();
+
+vi.mock("#execution/workflow-runtime.js", () => ({
+  createWorkflowRuntime: vi.fn(() => ({ createSession: createSessionMock })),
+  waitForCommandHookOwner: vi.fn(),
+}));
+vi.mock("#subagents/tool.js", () => ({
+  buildSubagentRunInput: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  createSessionMock.mockResolvedValue({
+    events: new ReadableStream(),
+    sessionId: "candidate-session",
+  });
+  vi.mocked(buildSubagentRunInput).mockReturnValue({
+    childContinuationToken: "child-token",
+    runInput: {} as never,
+  });
+  vi.mocked(waitForCommandHookOwner).mockResolvedValue({ runId: "winning-session" });
+});
 
 describe("startLocalSubagent", () => {
-  beforeEach(() => vi.clearAllMocks());
+  it("uses the session that wins continuation ownership", async () => {
+    const outcome = await startLocalSubagent({
+      action: {
+        callId: "call-1",
+        name: "research",
+        nodeId: "subagents/research",
+        subagentName: "research",
+      } as never,
+      auth: null,
+      bundle: { compiledArtifactsSource: {} } as never,
+      capabilities: undefined,
+      channelMetadata: undefined,
+      currentSession: {} as never,
+      fanoutSize: 1,
+      initiatorAuth: null,
+      parent: {
+        continuationToken: "parent-token",
+        lineage: {
+          callId: "call-1",
+          rootSessionId: "parent-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+      },
+      sandboxSessionId: "parent-session",
+      session: {} as never,
+      source: { description: "Research", type: "local" },
+    });
+
+    expect(createWorkflowRuntime).toHaveBeenCalledOnce();
+    expect(outcome).toMatchObject({
+      address: {
+        continuationToken: "child-token",
+        sessionId: "winning-session",
+      },
+      kind: "called",
+    });
+  });
 
   it("passes an inherited task activity observer through unchanged", async () => {
     const activityObserver = {
@@ -36,31 +83,35 @@ describe("startLocalSubagent", () => {
     await startLocalSubagent({
       action: {
         callId: "call-1",
-        input: { message: "Search Slack" },
-        kind: "subagent-call",
         name: "slack",
         nodeId: "subagents/slack",
         subagentName: "slack",
-      },
+      } as never,
       activityObserver,
       auth: null,
-      batchEvent: { sequence: 0, turnId: "parent-turn" },
-      bundle: { compiledArtifactsSource: {}, graph: {} },
+      bundle: { compiledArtifactsSource: {} } as never,
       capabilities: undefined,
       channelMetadata: undefined,
-      currentSession: { sessionId: "parent-session" },
+      currentSession: {} as never,
       fanoutSize: 1,
       initiatorAuth: null,
-      parentContinuationToken: "parent-token",
-      parentTraceContext: undefined,
-      sandboxSessionId: "sandbox-session",
-      session: { sessionId: "parent-session" },
+      parent: {
+        continuationToken: "parent-token",
+        lineage: {
+          callId: "call-1",
+          rootSessionId: "parent-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+      },
+      sandboxSessionId: "parent-session",
+      session: {} as never,
       source: { description: "Search Slack", type: "local" },
-    } as never);
+    });
 
     expect(buildSubagentRunInput).toHaveBeenCalledWith(
       expect.objectContaining({ activityObserver }),
     );
-    expect(createSession).toHaveBeenCalledOnce();
+    expect(createSessionMock).toHaveBeenCalledOnce();
   });
 });

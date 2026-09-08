@@ -6,62 +6,108 @@ import { formatTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 
 const EVE_AUDIENCE_KEY = "eve.audience";
 const CEILING_PROPERTY_KEY = "ceiling";
+const MAX_BAGGAGE_BYTES = 8192;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+interface BaggageProperty {
+  readonly key: string;
+  readonly value?: string;
+}
+
+interface BaggageMember {
+  readonly value: string;
+  readonly properties: readonly BaggageProperty[];
+}
 
 export type ForwardedTraceBaggage = "absent" | "malformed" | ForwardedTraceAssertion;
 
-/** Reads Eve's audience member without interpreting or rejecting unrelated baggage. */
+/** Reads eve's audience member without interpreting unrelated baggage. */
 export function readForwardedAudienceBaggage(value: string | null): ForwardedTraceBaggage {
-  if (value === null) return "absent";
-  const members = baggageMembers(value).filter(isEveAudienceMember);
-  if (members.length === 0) return "absent";
-  if (members.length !== 1) return "malformed";
-  return parseEveAudienceMember(members[0]!);
+  const member = readBaggageMember(value, EVE_AUDIENCE_KEY);
+  if (typeof member === "string") return member;
+  const originAudience = member.value;
+  if (originAudience !== "public" && originAudience !== "private" && originAudience !== "unknown") {
+    return "malformed";
+  }
+  const property = member.properties[0];
+  if (member.properties.length !== 1 || property?.key !== CEILING_PROPERTY_KEY) return "malformed";
+  const ceiling = property.value === undefined ? undefined : parseCeiling(property.value);
+  return ceiling === undefined ? "malformed" : { ceiling, originAudience };
 }
 
-/** Replaces any authored Eve audience member while preserving unrelated baggage entries. */
+/** Replaces any authored eve audience member while preserving unrelated baggage entries. */
 export function writeForwardedAudienceBaggage(
   value: string | undefined,
   assertion: ForwardedTraceAssertion | undefined,
 ): string | undefined {
-  const retained = baggageMembers(value ?? "").filter((member) => !isEveAudienceMember(member));
-  if (assertion !== undefined) {
-    retained.push(
-      `${EVE_AUDIENCE_KEY}=${assertion.originAudience};${CEILING_PROPERTY_KEY}=${formatTraceContentCeiling(assertion.ceiling)}`,
-    );
+  return replaceBaggageMember(
+    value,
+    EVE_AUDIENCE_KEY,
+    assertion === undefined
+      ? undefined
+      : `${assertion.originAudience};${CEILING_PROPERTY_KEY}=${formatTraceContentCeiling(assertion.ceiling)}`,
+  );
+}
+
+/** Recognized members are singular; malformed or oversized input fails closed. */
+export function readBaggageMember(
+  value: string | null,
+  key: string,
+): BaggageMember | "absent" | "malformed" {
+  if (value === null) return "absent";
+  if (value.length > MAX_BAGGAGE_BYTES || encoder.encode(value).byteLength > MAX_BAGGAGE_BYTES) {
+    return "malformed";
   }
-  return retained.length > 0 ? retained.join(",") : undefined;
+  const members = baggageMembers(value).filter((member) => baggageKey(member) === key);
+  if (members.length === 0) return "absent";
+  if (members.length !== 1) return "malformed";
+  const [head, ...segments] = members[0]!.split(";");
+  const pair = parsePair(head!);
+  if (pair?.value === undefined) return "malformed";
+  const properties: BaggageProperty[] = [];
+  for (const segment of segments) {
+    const property = parsePair(segment);
+    if (property === undefined) return "malformed";
+    properties.push(property);
+  }
+  return { value: pair.value, properties };
+}
+
+/** Replaces a member with an encoded value and optional properties; undefined removes it. */
+export function replaceBaggageMember(
+  value: string | undefined,
+  key: string,
+  member: string | undefined,
+): string | undefined {
+  const retained = baggageMembers(value ?? "").filter((entry) => baggageKey(entry) !== key);
+  if (member !== undefined) {
+    const result = [...retained, `${key}=${member}`].join(",");
+    if (encoder.encode(result).byteLength <= MAX_BAGGAGE_BYTES) return result;
+  }
+  return retained.join(",") || undefined;
 }
 
 function baggageMembers(value: string): string[] {
   return value.split(",").map(trimOws).filter(Boolean);
 }
 
-function parseEveAudienceMember(member: string): ForwardedTraceAssertion | "malformed" {
-  const segments = member.split(";");
-  if (segments.length !== 2) return "malformed";
-
-  const audiencePair = parsePair(segments[0]!);
-  if (audiencePair === undefined || audiencePair.key !== EVE_AUDIENCE_KEY) return "malformed";
-  const originAudience = audiencePair.value;
-  if (originAudience !== "public" && originAudience !== "private" && originAudience !== "unknown") {
-    return "malformed";
-  }
-
-  const ceilingPair = parsePair(segments[1]!);
-  if (ceilingPair === undefined || ceilingPair.key !== CEILING_PROPERTY_KEY) return "malformed";
-  const ceiling = parseCeiling(ceilingPair.value);
-  return ceiling === undefined ? "malformed" : { ceiling, originAudience };
-}
-
-function parsePair(segment: string): { readonly key: string; readonly value: string } | undefined {
+function parsePair(segment: string): BaggageProperty | undefined {
   const separator = segment.indexOf("=");
-  if (separator <= 0 || segment.indexOf("=", separator + 1) !== -1) return undefined;
-  const key = trimOws(segment.slice(0, separator));
+  const key = trimOws(separator < 0 ? segment : segment.slice(0, separator));
+  if (!/^[!#$%&'*+\-.^_`|~\w]+$/u.test(key)) return undefined;
+  if (separator < 0) return { key };
   const value = trimOws(segment.slice(separator + 1));
-  if (key.length === 0 || value.length === 0) return undefined;
-  if (key !== segment.slice(0, separator).trim()) return undefined;
-  if (value !== segment.slice(separator + 1).trim()) return undefined;
-  return { key, value };
+  if (
+    !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/u.test(value) ||
+    /%(?![\da-f]{2})/iu.test(value)
+  ) {
+    return undefined;
+  }
+  const bytes = Uint8Array.from(value.match(/%[\da-f]{2}|./giu) ?? [], (octet) =>
+    octet.startsWith("%") ? Number.parseInt(octet.slice(1), 16) : octet.charCodeAt(0),
+  );
+  return { key, value: decoder.decode(bytes) };
 }
 
 function parseCeiling(value: string): TraceContentCeiling | undefined {
@@ -78,13 +124,8 @@ function trimOws(value: string): string {
   return value.replace(/^[\t ]+|[\t ]+$/gu, "");
 }
 
-function baggageKey(member: string): string | undefined {
+function baggageKey(member: string): string {
   const pair = member.split(";", 1)[0]!;
   const separator = pair.indexOf("=");
-  return separator > 0 ? pair.slice(0, separator).trim() : undefined;
-}
-
-function isEveAudienceMember(member: string): boolean {
-  const pair = member.split(";", 1)[0]!;
-  return (baggageKey(member) ?? pair.trim()) === EVE_AUDIENCE_KEY;
+  return (separator < 0 ? pair : pair.slice(0, separator)).trim();
 }

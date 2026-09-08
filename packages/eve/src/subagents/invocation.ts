@@ -1,5 +1,13 @@
 import type { StepInput } from "#harness/types.js";
+import type { SessionParent, SessionTraceContext } from "#channel/types.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
+
+export interface SubagentParentContext {
+  readonly conversationId?: string;
+  readonly lineage: SessionParent;
+  readonly continuationToken?: string;
+  readonly traceContext?: SessionTraceContext;
+}
 
 /**
  * Narrowed form of {@link StepInput} whose `message` is always a plain string.

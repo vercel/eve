@@ -325,6 +325,7 @@ async function publishTurnStarted(input: {
     channelAudience: input.channelAudience ?? "public",
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
+    parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
     sessionId: input.sessionId,

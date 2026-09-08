@@ -4,6 +4,8 @@ import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
+import type { SessionTurn } from "#channel/types.js";
+import type { SubagentParentContext } from "#subagents/invocation.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
 
@@ -33,6 +35,22 @@ function makeAction(): RuntimeSubagentDispatchRequest {
   };
 }
 
+function makeParent(
+  session: HarnessSession,
+  turn: SessionTurn,
+  options: Omit<SubagentParentContext, "lineage"> = {},
+): SubagentParentContext {
+  return {
+    lineage: {
+      callId: "call-1",
+      rootSessionId: session.rootSessionId ?? session.sessionId,
+      sessionId: session.sessionId,
+      turn,
+    },
+    ...options,
+  };
+}
+
 function buildRuntimeSubagentRunInput(
   input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
 ): ReturnType<typeof buildSubagentRunInput> {
@@ -56,10 +74,10 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       capabilities: { requestInput: true },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.capabilities).toEqual({ requestInput: true });
@@ -69,9 +87,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.capabilities).toBeUndefined();
@@ -81,9 +99,9 @@ describe("buildSubagentRunInput", () => {
     const { childContinuationToken, runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 5, turnId: "turn-17" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-17", sequence: 5 }),
     });
 
     expect(runInput.adapter.kind).toBe(SUBAGENT_ADAPTER_KIND);
@@ -108,10 +126,13 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentContinuationToken: "turn-inbox",
       session: makeSession(),
+      parent: makeParent(
+        makeSession(),
+        { id: "turn-0", sequence: 0 },
+        { continuationToken: "turn-inbox" },
+      ),
     });
 
     expect(runInput.adapter.state).toMatchObject({
@@ -123,11 +144,14 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentContinuationToken: "invocation-reply-hook",
       session: makeSession(),
       taskId: "task-1",
+      parent: makeParent(
+        makeSession(),
+        { id: "turn-0", sequence: 0 },
+        { continuationToken: "invocation-reply-hook" },
+      ),
     });
 
     expect(runInput.adapter.state).toMatchObject({
@@ -145,10 +169,10 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       channelMetadata: projection,
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.channelMetadata).toEqual(projection);
@@ -158,9 +182,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.channelMetadata).toBeUndefined();
@@ -180,10 +204,13 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentTraceContext,
       session: makeSession(),
+      parent: makeParent(
+        makeSession(),
+        { id: "turn-0", sequence: 0 },
+        { traceContext: parentTraceContext },
+      ),
     });
 
     expect(runInput.parentTraceContext).toEqual(parentTraceContext);
@@ -198,9 +225,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 1, turnId: "turn-99" },
       initiatorAuth: null,
       session: nestedSession,
+      parent: makeParent(nestedSession, { id: "turn-99", sequence: 1 }),
     });
 
     expect(runInput.parent).toEqual({
@@ -215,11 +242,16 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: {
         ...makeSession(),
       },
+      parent: makeParent(
+        {
+          ...makeSession(),
+        },
+        { id: "turn-0", sequence: 0 },
+      ),
     });
 
     expect(runInput.limits).toEqual({
@@ -237,9 +269,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action,
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
@@ -251,11 +283,11 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: schema, type: "local" },
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
@@ -268,11 +300,11 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildSubagentRunInput({
       action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: declared, type: "local" },
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toEqual(requested);
@@ -283,19 +315,22 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
-      parentTraceContext: traceContext,
       session: makeSession(),
+      parent: makeParent(
+        makeSession(),
+        { id: "turn-0", sequence: 0 },
+        { traceContext: traceContext },
+      ),
     });
     expect(runInput.parentTraceContext).toEqual(traceContext);
 
     const untraced = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
     expect(untraced.runInput.parentTraceContext).toBeUndefined();
   });
@@ -307,11 +342,11 @@ describe("buildSubagentRunInput", () => {
         description: "Runtime action event description.",
       },
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.message).toBe(
@@ -339,9 +374,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action,
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.message).toBe(
@@ -362,11 +397,11 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildSubagentRunInput({
       action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       selfAgent: true,
       session: makeSession(),
       source: { outputSchema: schema, type: "runtime" },
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
@@ -377,9 +412,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toBeUndefined();
@@ -393,9 +428,9 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action,
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.input.outputSchema).toBeUndefined();
@@ -411,10 +446,10 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action,
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
       selfAgent: true,
       session,
+      parent: makeParent(session, { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.adapter.state).toMatchObject({
@@ -429,10 +464,10 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       graph: makeInheritingGraph(makeAction().nodeId),
       initiatorAuth: null,
       session,
+      parent: makeParent(session, { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.adapter.state).toMatchObject({
@@ -445,11 +480,14 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       graph: makeInheritingGraph(makeAction().nodeId),
       initiatorAuth: null,
       sandboxSessionId: "root-sandbox-session",
       session: { ...makeSession(), sessionId: "intermediate-child-session" },
+      parent: makeParent(
+        { ...makeSession(), sessionId: "intermediate-child-session" },
+        { id: "turn-0", sequence: 0 },
+      ),
     });
 
     expect(runInput.adapter.state).toMatchObject({
@@ -461,10 +499,10 @@ describe("buildSubagentRunInput", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
-      batchEvent: { sequence: 0, turnId: "turn-0" },
       graph: makeInheritingGraph(makeAction().nodeId),
       initiatorAuth: null,
       session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
     expect(runInput.adapter.state).toMatchObject({ sandboxSessionId: "parent-session" });

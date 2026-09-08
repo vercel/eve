@@ -273,6 +273,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
       decision: readInstrumentationDecision(value.decision),
+      parentLineage: deserializeParentLineage(value.parentLineage),
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     } satisfies AgentSessionTraceState;
   });
@@ -285,6 +286,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
       context: value.context,
       modelUsage: deserializeModelUsage(value.modelUsage),
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
+      parentLineage: deserializeParentLineage(value.parentLineage),
       parentSpanId: value.parentSpanId,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
       sequence: typeof value.sequence === "number" ? value.sequence : 0,
@@ -337,6 +339,23 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,
     stepIndex: value.stepIndex,
+    turnId: value.turnId,
+  };
+}
+
+function deserializeParentLineage(value: unknown): AgentSessionTraceState["parentLineage"] {
+  if (
+    !isRecord(value) ||
+    typeof value.callId !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.turnId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    callId: value.callId,
+    sessionId: value.sessionId,
+    subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
     turnId: value.turnId,
   };
 }

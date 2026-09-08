@@ -1,11 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import {
+  readBaggageMember,
+  readForwardedAudienceBaggage,
+  writeForwardedAudienceBaggage,
+} from "#protocol/baggage.js";
 
 const PUBLIC_OUTPUTS = {
   ceiling: { recordInputs: false, recordOutputs: true },
   originAudience: "public",
 } as const;
+
+describe("baggage member parsing", () => {
+  it.each(["eve.audience", "eve.conversation.id"])("uses the same wire rules for %s", (key) => {
+    expect(readBaggageMember(`${key} = public%2Fone+two ; flag ; source=a%3Db`, key)).toEqual({
+      value: "public/one+two",
+      properties: [{ key: "flag" }, { key: "source", value: "a=b" }],
+    });
+    expect(readBaggageMember(`${key}=a,${key}=a`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=%ZZ`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=value\n`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=value,vendor=${"a".repeat(8192)}`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=%FF`, key)).toEqual({ value: "\ufffd", properties: [] });
+    expect(readBaggageMember(`${key}=%EF%BB%BFvalue`, key)).toEqual({
+      value: "\ufeffvalue",
+      properties: [],
+    });
+  });
+
+  it("decodes audience and property values before applying the policy schema", () => {
+    expect(readForwardedAudienceBaggage("eve.audience=%70ublic;ceiling=%691o0")).toEqual({
+      originAudience: "public",
+      ceiling: { recordInputs: true, recordOutputs: false },
+    });
+  });
+});
 
 describe("readForwardedAudienceBaggage", () => {
   it.each([

@@ -31,8 +31,9 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { resolveConversationId } from "#tracing/conversation-context.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
+import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import {
   readGatewayCost,
   setAgentInvocationUsage,
@@ -230,7 +231,7 @@ export function createAgentOtelInstrumentation(
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
               ...agentSpanNamingAttributes("agent.step"),
-              ...runtimeContextAttributes(event.runtimeContext),
+              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
             },
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
@@ -311,12 +312,13 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": agentName,
+                  ...runtimeAttributes.agentLineageAttributes(turn),
                   "agent.session.id": event.sessionId,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
                   "gen_ai.agent.name": agentName,
-                  "gen_ai.conversation.id": event.sessionId,
+                  "gen_ai.conversation.id": resolveConversationId(event.sessionId),
                   "gen_ai.operation.name": "invoke_agent",
                   ...agentSpanNamingAttributes(agentSpanName(agentName), "invoke_agent"),
                 },
@@ -378,7 +380,7 @@ export function createAgentOtelInstrumentation(
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
           ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
-          ...runtimeContextAttributes(event.runtimeContext),
+          ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
         },
       },
       attempt.context,

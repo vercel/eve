@@ -10,6 +10,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { SubagentParentContext } from "#subagents/invocation.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -17,7 +18,6 @@ const log = createLogger("execution.subagent-start-remote");
 export async function startRemoteSubagent(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly auth: Parameters<typeof startRemoteAgentSession>[0]["auth"];
-  readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
   readonly originAudience: ChannelAudience;
@@ -26,8 +26,7 @@ export async function startRemoteSubagent(input: {
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
   >;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
-  readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
+  readonly parent: SubagentParentContext;
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskId?: string;
@@ -39,7 +38,7 @@ export async function startRemoteSubagent(input: {
     kind: "remote-agent",
     name: action.remoteAgentName,
     parentSessionId: input.session.sessionId,
-    parentTurnId: input.batchEvent.turnId,
+    parentTurnId: input.parent.lineage.turn.id,
   });
 
   // Preflight resolution failures happen before ownership exists, so they
@@ -75,7 +74,7 @@ export async function startRemoteSubagent(input: {
     name: action.remoteAgentName,
     nodeId: action.nodeId,
     parentSessionId: input.session.sessionId,
-    parentTurnId: input.batchEvent.turnId,
+    parentTurnId: input.parent.lineage.turn.id,
   });
   const credentialResolver = {
     resolverId:
@@ -88,11 +87,10 @@ export async function startRemoteSubagent(input: {
       action,
       auth: input.auth,
       callbackBaseUrl,
-      callbackToken: input.parentContinuationToken,
       originAudience: input.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
-      parentTraceContext: input.parentTraceContext,
+      parent: input.parent,
       activityObserver,
       remote: resolvedRemote,
       session: input.session,

@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
+  ConversationIdKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
+  ParentSessionKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -87,19 +89,16 @@ function initializeRemoteSession(
     idGenerator: new AgentSpanIdGenerator(),
     prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
   });
-  initializeSessionInstrumentation({
-    agentName: "remote-agent",
-    ctx,
-    parentTraceContext: {
-      forwardedTracePolicy: {
-        ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
-        originAudience,
-      },
-      spanId: "c".repeat(16),
-      traceFlags: 1,
-      traceId: "d".repeat(32),
+  ctx.set(ParentTraceContextKey, {
+    forwardedTracePolicy: {
+      ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
+      originAudience,
     },
+    spanId: "c".repeat(16),
+    traceFlags: 1,
+    traceId: "d".repeat(32),
   });
+  initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
   return ctx;
 }
 
@@ -225,19 +224,16 @@ describe("initializeSessionInstrumentation", () => {
       idGenerator: new AgentSpanIdGenerator(),
       prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
     });
-    initializeSessionInstrumentation({
-      agentName: "remote-agent",
-      ctx,
-      parentTraceContext: {
-        forwardedTracePolicy: {
-          ceiling: { recordInputs: false, recordOutputs: true },
-          originAudience: "public",
-        },
-        spanId: "c".repeat(16),
-        traceFlags: 1,
-        traceId: "d".repeat(32),
+    ctx.set(ParentTraceContextKey, {
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "public",
       },
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
     });
+    initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
 
     const messageCount = await bindSessionInstrumentation({
       agentName: "remote-agent",
@@ -322,7 +318,6 @@ describe("initializeSessionInstrumentation", () => {
     initializeSessionInstrumentation({
       agentName: "local-subagent",
       ctx,
-      parentTraceContext: ctx.get(ParentTraceContextKey),
     });
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
@@ -335,9 +330,25 @@ describe("initializeSessionInstrumentation", () => {
 
 describe("bindInstrumentationRuntime", () => {
   it("returns no worker controls when no runtime is loaded", () => {
-    expect(
-      bindInstrumentationRuntime(undefined, new ContextContainer(), boundSession),
-    ).toBeUndefined();
+    const ctx = new ContextContainer();
+    expect(bindInstrumentationRuntime(undefined, ctx, boundSession)).toBeUndefined();
+    expect(ctx.get(ConversationIdKey)).toBeUndefined();
+  });
+
+  it("uses the effective parent root to initialize correlation without replacing it", () => {
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call",
+      sessionId: "parent",
+      rootSessionId: "effective-root",
+      turn: { id: "turn", sequence: 0 },
+    });
+    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });
+    bindInstrumentationRuntime(runtime, ctx, boundSession);
+    expect(ctx.get(ConversationIdKey)).toBe("effective-root");
+    ctx.set(ConversationIdKey, "original-conversation");
+    bindInstrumentationRuntime(runtime, ctx, boundSession);
+    expect(ctx.get(ConversationIdKey)).toBe("original-conversation");
   });
 
   it("reads the channel audience when the step runs", async () => {
