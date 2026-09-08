@@ -170,6 +170,44 @@ describe("durable callback capture validation", () => {
       'Dynamic tool "captured" callback "execute" has a non-serializable capture',
     );
   });
+
+  it("falls back to the tool name when presentation callbacks are not durable", () => {
+    const entry = defineTool({
+      description: "labeled tool",
+      inputSchema: { type: "object" },
+      label: {
+        complete: () => "Completed label",
+        delta: () => "Delta label",
+        start: () => "Starting label",
+      },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: {} },
+    });
+
+    expect(validateDurableDynamicToolCallbacks("labeled", entry, callbackOwner("labeled"))).toEqual(
+      { execute: { closure: {} } },
+    );
+  });
+
+  it("still requires durable behavioral callbacks", () => {
+    const entry = defineTool({
+      approval: () => "user-approval",
+      description: "guarded tool",
+      inputSchema: { type: "object" },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: {} },
+    });
+
+    expect(() =>
+      validateDurableDynamicToolCallbacks("guarded", entry, callbackOwner("guarded")),
+    ).toThrow(
+      'Dynamic tool "guarded" callback "approvalRequest" does not have a durable descriptor',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
