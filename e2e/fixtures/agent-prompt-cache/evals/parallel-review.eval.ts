@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { defineEval, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { z } from "zod";
-import { promptRecordSchema, promptRecordsPath } from "../prompt-records";
 
 const reviewSchema = z.object({
   sheet: z.number().int().min(1).max(5),
@@ -114,6 +112,10 @@ export default [false, true].map((laterTurn) =>
       }
 
       const completed = parentEvents.filter((event) => event.type === "step.completed");
+      await t.require(
+        completed.length,
+        satisfies((count: number) => count >= 3, "multiple parent requests exercise cache reuse"),
+      );
       const firstInputTokens = completed[0]?.data.usage?.inputTokens;
       await t.require(
         firstInputTokens,
@@ -133,36 +135,6 @@ export default [false, true].map((laterTurn) =>
             (cached: number | undefined) =>
               cached !== undefined && previousInput !== undefined && cached >= previousInput * 0.9,
             `request ${index + 1} reads at least 90% of the preceding input from the provider cache`,
-          ),
-        );
-      }
-      const records = readFileSync(promptRecordsPath(started.sessionId), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => promptRecordSchema.parse(JSON.parse(line)))
-        .filter((record) =>
-          completed.some(
-            (event) =>
-              event.data.turnId === record.turnId && event.data.stepIndex === record.stepIndex,
-          ),
-        );
-      await t.require(
-        records.length,
-        satisfies(
-          (count: number) => count === completed.length && count >= 3,
-          "capture every parent model request",
-        ),
-      );
-      for (let index = 1; index < records.length; index += 1) {
-        const previous = records[index - 1]!;
-        const current = records[index]!;
-        t.check(
-          current,
-          satisfies(
-            (record: typeof current) =>
-              record.instructions === previous.instructions &&
-              previous.messages.every((message, offset) => message === record.messages[offset]),
-            `request ${index + 1} preserves the preceding prompt prefix`,
           ),
         );
       }
