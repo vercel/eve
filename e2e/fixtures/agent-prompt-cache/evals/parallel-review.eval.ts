@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { defineEval, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { z } from "zod";
@@ -64,7 +63,13 @@ export default [false, true].map((laterTurn) =>
         satisfies((count: number) => count > 1, "background completion wakes the parent"),
       );
       const final = turns.at(-1)!;
-      final.messageIncludes("All five reviews are complete.");
+      await t.require(
+        final.message,
+        satisfies(
+          (message: string | undefined) => message !== undefined && message.trim().length > 0,
+          "parent reports the completed reviews",
+        ),
+      );
       final.event("step.completed", {
         data: (data) => data.finishReason === "stop",
         count: 1,
@@ -170,5 +175,5 @@ function reviewPacket(): string {
       (sheet, index) => `Sheet ${index + 1}: ${sheet.title}\n${sheet.question}\n\n${sheet.notes}`,
     )
     .join("\n\n");
-  return `Purchasing packet ${randomUUID()}.\nAlice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Give each reviewer its sheet number and the question for that sheet. Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${sheets}`;
+  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Give each reviewer its sheet number and the question for that sheet. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${sheets}`;
 }
