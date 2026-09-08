@@ -14,7 +14,7 @@ describe("task cancellation parent notification", () => {
         expect(result.taskRunStatus).toBe("cancelled");
         expect(result.view.status).toBe("cancelled");
         expect(result.notification).toMatchObject({
-          kind: "send",
+          kind: "deliver",
           payload: {
             message: `Background task ${result.view.taskId} (slow-cancel) is cancelled.`,
             task: { views: [result.view] },
