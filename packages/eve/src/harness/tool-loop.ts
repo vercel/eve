@@ -99,7 +99,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
+import { createCurrentMessages, hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -1112,6 +1112,36 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = setTurnClientContextState(session, turnClientContext);
     }
 
+    const taskDeliveryPhase = store?.get(TurnTaskDeliveryKey);
+    const deliveryPolicy = resolveDeliveryPolicy({
+      hasScheduleProvenance:
+        emissionState.sequence === 0 && store?.get(ScheduleIdKey) !== undefined,
+      hasOutputSchema: session.outputSchema !== undefined,
+      isChild: store?.get(ParentSessionKey) !== undefined,
+      isFirstTurn: emissionState.sequence === 0,
+      taskDeliveryPhase,
+    });
+    const taskContext = store?.get(TurnTaskStateKey);
+    const taskPrompt = [taskContext, deliveryPolicy.instruction].filter(Boolean).join("\n\n");
+    const persistTaskPrompt =
+      taskDeliveryPhase !== undefined &&
+      taskDeliveryPhase !== "none" &&
+      !hasTailApprovalResponse(messages) &&
+      !hasUnansweredToolCall(messages);
+    const appendTaskPrompt = () => {
+      if (!persistTaskPrompt || taskPrompt.length === 0) return;
+      const content = `[Background task guidance]\n${taskPrompt}`;
+      const previous = messages.findLast(
+        (message) =>
+          message.role === "user" &&
+          typeof message.content === "string" &&
+          message.content.startsWith("[Background task guidance]\n"),
+      );
+      // Keep the original placement on subsequent steps and turns. The
+      // approval-response tail must remain available to the AI SDK unchanged.
+      if (previous?.content !== content) messages.push({ role: "user", content });
+    };
+    appendTaskPrompt();
     messages = [...messages, ...preparedTurnInput];
 
     const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
@@ -1200,6 +1230,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         };
         session = setTurnClientContextState(session, turnClientContext);
       }
+      appendTaskPrompt();
     }
     projectedMessages = normalizeModelMessages(
       projectHistory(createModelMessages(messages), session.state),
@@ -1223,16 +1254,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx }),
       ),
     );
-
-    const isFirstTurn = emissionState.sequence === 0;
-    const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;
-    const deliveryPolicy = resolveDeliveryPolicy({
-      hasScheduleProvenance,
-      hasOutputSchema: session.outputSchema !== undefined,
-      isChild: ctx?.get(ParentSessionKey) !== undefined,
-      isFirstTurn,
-      taskDeliveryPhase: ctx?.get(TurnTaskDeliveryKey),
-    });
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1258,11 +1279,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         currentMessages.add(emissionState.sequence, skillAnnouncement);
       }
       const taskState = ctx.get(TurnTaskStateKey);
-      if (taskState !== undefined) {
+      if (taskState !== undefined && !persistTaskPrompt) {
         currentMessages.add(emissionState.sequence, taskState);
       }
     }
-    if (deliveryPolicy.instruction !== undefined) {
+    if (deliveryPolicy.instruction !== undefined && !persistTaskPrompt) {
       currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
     }
     const pendingApprovals = renderPendingApprovalsInstruction(

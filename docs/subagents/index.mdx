@@ -7,6 +7,8 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 ## The built-in `agent` tool
 
+Background-task guidance is recorded in conversation history when it changes, rather than added temporarily to the system prompt. Subsequent steps retain its original position; compaction can restore current guidance if it was removed. This preserves task-reporting behavior and does not change dispatch timing or batch notifications. Pending tool approvals retain their separate trusted runtime instructions.
+
 The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:
 
 ```ts

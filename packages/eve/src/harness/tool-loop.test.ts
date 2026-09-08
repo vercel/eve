@@ -12432,12 +12432,85 @@ describe("createToolLoopHarness", () => {
         runStep(createTestSession(), { message: "Start the background work." }),
       );
 
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toEqual({
-        role: "system",
-        content: `You are a test assistant.\n\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages).toContainEqual({
+        role: "user",
+        content: `[Background task guidance]\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
       });
     });
+
+    it.each([false, true])(
+      "preserves task prompt prefixes across steps and restores after compaction=%s",
+      async (compact) => {
+        const toolCall = {
+          type: "tool-call" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          input: { a: 20, b: 22 },
+        };
+        const toolResult = {
+          type: "tool-result" as const,
+          toolCallId: "cache-call",
+          toolName: "add",
+          output: "42",
+        };
+        const keepGoing = () =>
+          setupMockAgent({
+            finishReason: "tool-calls",
+            response: {
+              messages: [
+                { role: "assistant", content: [toolCall] },
+                { role: "tool", content: [toolResult] },
+              ],
+            },
+            text: "",
+            toolCalls: [toolCall],
+            toolResults: [{ ...toolResult, input: toolCall.input }],
+          });
+        const runStep = createToolLoopHarness(createTestConfig("conversation"));
+        const ctx = new ContextContainer();
+        keepGoing();
+        const first = await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "Start work" }),
+        );
+        const before = structuredClone(getLastAgentSettings());
+        ctx.set(TurnTaskDeliveryKey, "initiating");
+        ctx.set(
+          TurnTaskStateKey,
+          '[Task state]\n{"tasks":[{"taskId":"task_A","status":"pending"}]}',
+        );
+        keepGoing();
+        const launched = await contextStorage.run(ctx, () => runStep(first.session));
+        const after = structuredClone(getLastAgentSettings());
+        expect(after.instructions).toEqual(before.instructions);
+        expect(after.messages.slice(0, before.messages.length)).toEqual(before.messages);
+        expect(launched.session.history).toContainEqual(
+          after.messages.find(
+            (m) =>
+              typeof m.content === "string" && m.content.startsWith("[Background task guidance]"),
+          ),
+        );
+        if (compact) {
+          vi.mocked(shouldCompact).mockReturnValueOnce(true);
+          vi.mocked(compactMessages).mockResolvedValueOnce([
+            { role: "user", content: "Compacted work so far" },
+          ]);
+        }
+        setupMockAgent(defaultModelResult());
+        const restored = JSON.parse(JSON.stringify(launched.session)) as HarnessSession;
+        await contextStorage.run(ctx, () => runStep(restored));
+        const next = getLastAgentSettings();
+        expect(next.instructions).toEqual(before.instructions);
+        expect(
+          next.messages.filter(
+            (m) =>
+              typeof m.content === "string" && m.content.startsWith("[Background task guidance]"),
+          ),
+        ).toHaveLength(1);
+        if (!compact) expect(next.messages.slice(0, after.messages.length)).toEqual(after.messages);
+      },
+    );
 
     it("routes later-turn initiating task context through user messages", async () => {
       setupMockAgent(defaultModelResult());
@@ -12459,9 +12532,11 @@ describe("createToolLoopHarness", () => {
 
       const { instructions, messages } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
-      expect(messages.slice(-3)).toEqual([
-        { role: "user", content: taskState },
-        { role: "user", content: TASK_DELIVERY_INITIATING_INSTRUCTION },
+      expect(messages.slice(-2)).toEqual([
+        {
+          role: "user",
+          content: `[Background task guidance]\n${taskState}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
+        },
         { role: "user", content: "Start the background work." },
       ]);
     });
@@ -12476,10 +12551,11 @@ describe("createToolLoopHarness", () => {
         runStep(createTestSession(), { message: "[Task state]" }),
       );
 
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toEqual({
-        role: "system",
-        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages).toContainEqual({
+        role: "user",
+        content: `[Background task guidance]\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
       });
     });
 
@@ -12523,7 +12599,7 @@ describe("createToolLoopHarness", () => {
         const { instructions, messages } = getLastAgentSettings();
         expect(instructions).toBe("You are a test assistant.");
         expect(messages.slice(-2)).toEqual([
-          { role: "user", content: instruction },
+          { role: "user", content: `[Background task guidance]\n${instruction}` },
           { role: "user", content: "Background task task_1 is completed." },
         ]);
       },
