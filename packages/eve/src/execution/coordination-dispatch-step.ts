@@ -74,6 +74,7 @@ export async function dispatchCoordinationStep(
         initiatorAuth: prepared.initiatorAuth,
         owner: input.workflowToolRunOwner,
         parentSession: prepared.parentSession,
+        sandbox: entry.task.sandbox === true ? prepared.sandbox : undefined,
         session: nextSession,
         task: entry.task,
       });

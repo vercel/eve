@@ -144,27 +144,8 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-const TEST_SANDBOX_BACKEND: SandboxBackend = {
-  name: "eve-test-memory",
-  async create(input) {
-    const sandbox = mockSandbox({ id: input.sessionKey });
-    return {
-      session: sandbox.session,
-      useSessionFn: async () => sandbox.session,
-      captureState: async () => ({
-        backendName: TEST_SANDBOX_BACKEND.name,
-        metadata: {},
-        sessionKey: input.sessionKey,
-      }),
-      delete: async (options) => await sandbox.access.delete?.(options),
-      shutdown: async () => undefined,
-      stop: async () => undefined,
-    };
-  },
-  prewarm: async () => ({ reused: true }),
-};
-
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const sandboxBackend = createTestSandboxBackend();
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
@@ -172,7 +153,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     modules: [
       {
         loadNamespace: async () => ({
-          default: defineSandbox({ backend: TEST_SANDBOX_BACKEND }),
+          default: defineSandbox({ backend: sandboxBackend }),
         }),
         logicalPath: "sandbox.ts",
       },
@@ -277,6 +258,34 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     skills,
     tools,
   };
+}
+
+function createTestSandboxBackend(): SandboxBackend {
+  const sandboxes = new Map<string, MockSandbox>();
+  const backend: SandboxBackend = {
+    name: "eve-test-memory",
+    async create(input) {
+      const sandbox = sandboxes.get(input.sessionKey) ?? mockSandbox({ id: input.sessionKey });
+      sandboxes.set(input.sessionKey, sandbox);
+      return {
+        session: sandbox.session,
+        useSessionFn: async () => sandbox.session,
+        captureState: async () => ({
+          backendName: backend.name,
+          metadata: {},
+          sessionKey: input.sessionKey,
+        }),
+        delete: async (options) => {
+          await sandbox.access.delete?.(options);
+          sandboxes.delete(input.sessionKey);
+        },
+        shutdown: async () => undefined,
+        stop: async () => undefined,
+      };
+    },
+    prewarm: async () => ({ reused: true }),
+  };
+  return backend;
 }
 
 // Exported for the internal active-session-context helper.

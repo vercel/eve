@@ -12,7 +12,6 @@ import {
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
-  SandboxKey,
 } from "#context/keys.js";
 import { ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
@@ -49,6 +48,10 @@ import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import {
+  captureWorkflowSandboxReference,
+  type WorkflowSandboxReferenceData,
+} from "#execution/sandbox/workflow-reference.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
@@ -94,6 +97,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
   readonly sandboxSessionId: string;
+  readonly sandbox?: WorkflowSandboxReferenceData;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: RuntimeSession;
@@ -129,6 +133,8 @@ export async function prepareCoordinationDispatch(input: {
     ctx,
     durableSession,
     plan: () => planDispatch({ requests }),
+    planSharesSandbox: ({ plan }) =>
+      plan.some((entry) => entry.kind === "workflow-task" && entry.task.sandbox === true),
     serializedContext: input.serializedContext,
   });
   if (event === pending.event) {
@@ -202,13 +208,20 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  let sandbox: WorkflowSandboxReferenceData | undefined;
   if (input.planSharesSandbox?.({ bundle, plan }) === true) {
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        await ctx.require(SandboxKey).get();
-        return { result: undefined, session: enrichedSession };
+        return {
+          result: await captureWorkflowSandboxReference({
+            ctx,
+            session: enrichedSession,
+          }),
+          session: enrichedSession,
+        };
       });
       session = scoped.session;
+      sandbox = scoped.result;
     } finally {
       ctx.clearVirtualContext();
     }
@@ -228,6 +241,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     parentSession: ctx.get(ParentSessionKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    sandbox,
     activityObserver: resolvePreparedActivity(
       ctx.get(ActivityObserverKey),
       session,

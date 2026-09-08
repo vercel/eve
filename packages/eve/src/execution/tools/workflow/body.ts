@@ -1,9 +1,13 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { registerSerializationClass } from "#compiled/@workflow/core/class-serialization.js";
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "#compiled/@workflow/serde/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { agent } from "#execution/tools/subagent/invoke-agent.js";
+import { openWorkflowSandboxStep } from "#execution/sandbox/workflow-session-step.js";
+import type { WorkflowSandboxReferenceData } from "#execution/sandbox/workflow-reference.js";
+import { agent as invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import { ask as askForInput, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
@@ -22,6 +26,7 @@ export interface WorkflowBodyDefinition {
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
   readonly resultKind?: "subagent" | "tool";
+  readonly sandbox?: WorkflowSandboxReferenceData;
   readonly session: SessionContext["session"];
   readonly stepIndex: number;
   readonly taskId?: string;
@@ -43,6 +48,96 @@ type WorkflowToolExecute = (
   ctx: WorkflowToolContext,
   task?: TaskExec,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
+
+interface WorkflowToolRuntimeContextData {
+  readonly abortSignal: AbortSignal;
+  readonly callId: string;
+  readonly sandbox?: WorkflowSandboxReferenceData;
+  readonly session: SessionContext["session"];
+  readonly toolName: string;
+}
+
+class WorkflowToolRuntimeContext implements ToolContext, WorkflowToolContext {
+  readonly abortSignal: AbortSignal;
+  readonly callId: string;
+  readonly sandbox?: WorkflowSandboxReferenceData;
+  readonly session: SessionContext["session"];
+  readonly toolName: string;
+
+  constructor(data: WorkflowToolRuntimeContextData) {
+    this.abortSignal = data.abortSignal;
+    this.callId = data.callId;
+    this.sandbox = data.sandbox;
+    this.session = data.session;
+    this.toolName = data.toolName;
+  }
+
+  static [WORKFLOW_SERIALIZE](
+    instance: WorkflowToolRuntimeContext,
+  ): WorkflowToolRuntimeContextData {
+    return {
+      abortSignal: instance.abortSignal,
+      callId: instance.callId,
+      sandbox: instance.sandbox,
+      session: instance.session,
+      toolName: instance.toolName,
+    };
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: WorkflowToolRuntimeContextData): WorkflowToolRuntimeContext {
+    return new WorkflowToolRuntimeContext(data);
+  }
+
+  agent(input: Parameters<WorkflowToolContext["agent"]>[0]): Promise<JsonValue> {
+    return invokeAgent(this, input);
+  }
+
+  ask(request: Parameters<WorkflowToolContext["ask"]>[0]): ReturnType<WorkflowToolContext["ask"]> {
+    return askForInput(this, request);
+  }
+
+  async getSandbox() {
+    try {
+      getStepMetadata();
+    } catch {
+      throw new Error(
+        `ctx.getSandbox() is available in defineWorkflowTool() only inside a "use step" function. Tool "${this.toolName}" called it from its durable workflow body.`,
+      );
+    }
+    if (this.sandbox === undefined) {
+      throw new Error(
+        `ctx.getSandbox() requires sandbox: true on defineWorkflowTool() for tool "${this.toolName}".`,
+      );
+    }
+    return await openWorkflowSandboxStep({
+      abortSignal: this.abortSignal,
+      reference: this.sandbox,
+    });
+  }
+
+  getSkill(): never {
+    return this.unavailable("getSkill()", "skills are read through the session sandbox");
+  }
+
+  getToken(): never {
+    return this.unavailable(
+      "getToken()",
+      'read credentials from the environment inside a "use step" helper',
+    );
+  }
+
+  requireAuth(): never {
+    return this.unavailable("requireAuth()", "a workflow body cannot park on authorization");
+  }
+
+  private unavailable(member: string, hint: string): never {
+    throw new Error(
+      `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${this.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
+    );
+  }
+}
+
+registerSerializationClass("class//eve//WorkflowToolRuntimeContext", WorkflowToolRuntimeContext);
 
 /** Executes one registered workflow body and reports progress to its owner. */
 export async function executeWorkflowBody(
@@ -129,25 +224,13 @@ function createWorkflowBodyContext(
   input: WorkflowBodyInput,
   signal: AbortSignal,
 ): ToolContext & WorkflowToolContext {
-  const unavailable = (member: string, hint: string): never => {
-    throw new Error(
-      `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
-    );
-  };
-  const ctx: ToolContext & WorkflowToolContext = {
-    agent: (input) => agent(ctx, input),
-    ask: (request) => ask(ctx, request),
+  return new WorkflowToolRuntimeContext({
     abortSignal: signal,
     callId: input.callId,
-    getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
-    getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
-    getToken: () =>
-      unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
-    requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
+    sandbox: input.sandbox,
     session: input.session,
     toolName: input.toolName,
-  };
-  return ctx;
+  });
 }
 
 function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {

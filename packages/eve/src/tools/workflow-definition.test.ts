@@ -17,12 +17,12 @@ describe("defineWorkflowTool", () => {
       async execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
+        expectTypeOf(ctx.getSandbox).toEqualTypeOf<WorkflowToolContext["getSandbox"]>();
         // @ts-expect-error Workflow bodies do not have turn-owned token access.
         void ctx.getToken;
-        // @ts-expect-error Workflow bodies do not have a session sandbox.
-        void ctx.getSandbox;
         return { deployed: input.service };
       },
+      sandbox: true,
       toModelOutput(output) {
         expectTypeOf(output).toEqualTypeOf<{ deployed: string }>();
         return { type: "text", value: output.deployed };
@@ -82,6 +82,49 @@ describe("defineWorkflowTool", () => {
     expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
       "requires a compiled workflow executor",
     );
+  });
+
+  it("validates and preserves the sandbox opt-in", () => {
+    const execute = Object.assign(async () => 1, {
+      workflowId: "workflow//test//execute",
+    });
+    expect(
+      normalizeToolDefinition(
+        defineWorkflowTool({
+          description: "Workflow",
+          execute,
+          inputSchema: {},
+          sandbox: true,
+        }),
+        "Invalid tool.",
+      ),
+    ).toMatchObject({ definition: { sandbox: true }, kind: "tool" });
+
+    expect(() =>
+      normalizeToolDefinition(
+        defineWorkflowTool({
+          description: "Workflow",
+          execute,
+          inputSchema: {},
+          sandbox: false,
+        } as never),
+        "Invalid tool.",
+      ),
+    ).toThrow('Expected "sandbox" to be true');
+  });
+
+  it("rejects sandbox opt-in on ordinary tools", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        defineTool({
+          description: "Ordinary",
+          execute: async () => 1,
+          inputSchema: {},
+          sandbox: true,
+        } as never),
+        "Invalid tool.",
+      ),
+    ).toThrow('Unknown key "sandbox"');
   });
 
   it.each(["defineTool", "bare object"])("rejects a workflow executor in %s", (kind) => {

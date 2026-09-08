@@ -189,6 +189,10 @@ export default {
       entry: "dist/private.js",
       outputPath: "private",
     },
+    {
+      entry: "dist/class-serialization.js",
+      outputPath: "class-serialization",
+    },
   ],
   copyDeclarations,
 };

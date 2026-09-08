@@ -11,6 +11,7 @@ interface SerializedWorkflowTaskDefinition {
   readonly executeInput?: import("#shared/json.js").JsonValue;
   readonly nodeId?: string;
   readonly resultKind?: "subagent" | "tool";
+  readonly sandbox?: true;
   readonly workflowId: string;
 }
 
@@ -43,6 +44,7 @@ export function buildWorkflowTaskFromInterrupt(
     input: toolInput,
     kind: "workflow-task",
     resultKind: task.resultKind,
+    sandbox: task.sandbox,
     toolName,
     workflowId: task.workflowId,
   };

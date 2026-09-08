@@ -136,6 +136,7 @@ export const runtimeWorkflowTaskRequestSchema = z
     kind: z.literal("workflow-task"),
     nodeId: z.string().optional(),
     resultKind: z.enum(["subagent", "tool"]).optional(),
+    sandbox: z.literal(true).optional(),
     toolName: z.string(),
     workflowId: z.string(),
   })

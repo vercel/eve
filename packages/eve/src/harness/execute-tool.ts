@@ -67,6 +67,8 @@ export interface HarnessToolDefinition {
    */
   readonly rootOnly?: boolean;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
+  /** Whether this workflow tool receives step-scoped sandbox access. */
+  readonly sandbox?: true;
   readonly toModelOutput?: (output: unknown) => unknown;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
