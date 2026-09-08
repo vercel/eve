@@ -192,7 +192,9 @@ Agent Runs activation metadata includes bounded principal summaries:
 - `agent.principal.current.type` and `agent.principal.current.id` describe the current caller.
 - `agent.principal.initiator.type` and `agent.principal.initiator.id` describe the authenticated principal that created the root session. The initiator remains fixed when later turns have a different caller.
 
-Types are limited to `user`, `service`, `runtime`, `app`, `anonymous`, `local-dev`, `none`, and `other`. Types are emitted for every audience. Principal IDs follow the existing trace-content audience policy: public turns include them, private and hosted-unknown turns omit them, and unknown turns under `eve dev` include them. A `none` principal has no ID. Empty IDs and IDs larger than 1 KiB of UTF-8 data are omitted, not truncated; authentication records are unchanged. eve does not copy other authentication fields, such as claims, email attributes, issuers, or subjects, into these summaries.
+Types are limited to `user`, `service`, `runtime`, `app`, `anonymous`, `local-dev`, `unknown`, `none`, and `other`. Types are emitted for every audience when a principal is present. An absent type means no authentication context was set; `none` means an explicitly null principal and has no ID. The auth layer's `unknown` type stays `unknown`; unrecognized authored types become `other`.
+
+Principal IDs require a content-visible audience and a resolved trace decision that allows both `recordInputs` and `recordOutputs`. Public turns and unknown turns under `eve dev` can include IDs; private and hosted-unknown turns omit them. A user-configured trace policy or forwarded content ceiling that denies either direction omits both principal IDs before turn state is stored or sampled. Empty IDs and IDs larger than 1 KiB of UTF-8 data are omitted, not truncated; authentication records are unchanged. eve does not copy other authentication fields, such as claims, email attributes, issuers, or subjects, into these summaries.
 
 ## Runtime context
 

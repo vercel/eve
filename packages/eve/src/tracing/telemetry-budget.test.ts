@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { telemetryByteLength, truncateTelemetryText } from "#tracing/telemetry-budget.js";
+import {
+  boundedPrincipalId,
+  telemetryByteLength,
+  truncateTelemetryText,
+} from "#tracing/telemetry-budget.js";
+
+describe("boundedPrincipalId", () => {
+  it.each(["x".repeat(1024), String.fromCodePoint(0x1f600).repeat(256)])(
+    "preserves a principal ID at the UTF-8 byte limit",
+    (id) => expect(boundedPrincipalId(id)).toBe(id),
+  );
+
+  it.each([undefined, null, 123, "", "x".repeat(1025), String.fromCodePoint(0x1f600).repeat(257)])(
+    "omits malformed, empty, or oversized IDs",
+    (id) => expect(boundedPrincipalId(id)).toBeUndefined(),
+  );
+});
 
 describe("trace text bounds", () => {
   it("counts UTF-8 bytes without splitting characters", () => {

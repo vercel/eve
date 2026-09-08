@@ -218,7 +218,7 @@ describe("initializeSessionInstrumentation", () => {
   });
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
-    const ctx = createContext("private");
+    const ctx = createContext("public");
     const runtime = createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
       emit: true,
       recordInputs: true,
@@ -399,7 +399,7 @@ describe("bindInstrumentationRuntime", () => {
   it("binds provider hooks to the step-entry agent and channel", async () => {
     const boundHooks: InstrumentationHooks = { capturesContent: false, publish: vi.fn() };
     const forTrace = vi.fn(() => boundHooks);
-    const ctx = createContext("public");
+    const ctx = createContext("private");
     ctx.set(ChannelInstrumentationKey, {
       channelType: "slack",
       kind: "channel:test",
@@ -421,12 +421,25 @@ describe("bindInstrumentationRuntime", () => {
   });
 
   it.each([
-    ["public", true],
-    ["private", false],
+    ["public", undefined, true],
+    ["private", undefined, false],
+    ["public", { action: "drop" }, false],
+    ["public", { action: "record", recordInputs: false, recordOutputs: true }, false],
+    ["public", { action: "record", recordInputs: true, recordOutputs: false }, false],
+    ["public", { action: "record", recordInputs: false, recordOutputs: false }, false],
+    ["public", { action: "record", recordInputs: true, recordOutputs: true }, true],
   ] as const)(
-    "prepares %s turn traces with audience-appropriate principal summaries",
-    async (audience, includesId) => {
+    "prepares %s turn traces with decision %j and permitted principal summaries",
+    async (audience, decision, includesId) => {
       const ctx = createContext(audience);
+      if (decision !== undefined) {
+        ctx.set(SessionTraceSeedKey, {
+          decision,
+          spanId: "1".repeat(16),
+          traceFlags: decision.action === "drop" ? 0 : 1,
+          traceId: "2".repeat(32),
+        });
+      }
       ctx.set(AuthKey, {
         attributes: { email: "current@example.com" },
         authenticator: "api-key",

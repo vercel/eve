@@ -1,7 +1,7 @@
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
@@ -82,4 +82,12 @@ function flattenContextAttribute(
       flattenContextAttribute(attributes, `${key}.${nestedKey}`, nestedValue);
     }
   }
+}
+
+function setOptionalAttribute(
+  attributes: Record<string, string>,
+  key: string,
+  value: string | undefined,
+): void {
+  if (value !== undefined) attributes[key] = value;
 }

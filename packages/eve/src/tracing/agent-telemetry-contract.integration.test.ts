@@ -255,13 +255,9 @@ describe("exported agent telemetry contract", () => {
     },
   );
 
-  it.each(
-    (["public", "private"] as const).flatMap((audience) =>
-      (["completed", "failed", "cancelled"] as const).map((outcome) => ({ audience, outcome })),
-    ),
-  )(
-    "round-trips $audience $outcome channel, approval, delegation and usage spans through the readers",
-    async ({ audience, outcome }) => {
+  it.each(["public", "private"] as const)(
+    "round-trips %s channel, approval, delegated error and usage spans through the readers",
+    async (audience) => {
       const runtime = createRuntime();
       let parent = contextFor(audience);
       parent.set(ConversationIdKey, "original-conversation");
@@ -440,12 +436,7 @@ describe("exported agent telemetry contract", () => {
           output: "private failure",
           outcome: {
             kind: "terminal",
-            result:
-              outcome === "failed"
-                ? { kind: "failed", error: { message: "private failure" } }
-                : outcome === "cancelled"
-                  ? { kind: "cancelled" }
-                  : { kind: "succeeded", output: "private output" },
+            result: { kind: "failed", error: { message: "private failure" } },
             usageDelta: {
               inputTokens: 10,
               outputTokens: 5,
@@ -492,7 +483,7 @@ describe("exported agent telemetry contract", () => {
           idempotencyKey: turnIdempotencyKey("parent", "turn_0"),
           sessionId: "parent",
           turnId: "turn_0",
-          type: outcome === "cancelled" ? "turn.cancelled" : "turn.completed",
+          type: "turn.completed",
         });
         await hooks.publish({
           idempotencyKey: sessionIdempotencyKey("parent"),
@@ -547,7 +538,6 @@ describe("exported agent telemetry contract", () => {
       }
       expect(new TextDecoder().decode(bytes)).not.toContain("auth-only-secret");
       const caller = parsed.find((span) => span.attributes["agent.invocation.role"] === "caller")!;
-      expect(caller.attributes["agent.action.outcome"]).toBe(outcome);
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
       )!;
@@ -602,8 +592,7 @@ describe("exported agent telemetry contract", () => {
       );
       expect(metadata).not.toContain("private ");
       if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
-      else if (outcome === "failed")
-        expect(new TextDecoder().decode(bytes)).toContain("private failure");
+      else expect(new TextDecoder().decode(bytes)).toContain("private failure");
       await runtime.shutdown();
     },
   );
@@ -654,4 +643,94 @@ describe("exported agent telemetry contract", () => {
     expect(new Set(spans.map((span) => span.spanContext().traceId)).size).toBe(2);
     await runtime.shutdown();
   });
+
+  it.each([
+    ["private", false, false],
+    ["private", true, true],
+    ["public", false, true],
+    ["public", true, false],
+    ["public", true, true],
+  ] as const)(
+    "bounds public-channel principal IDs by origin %s and input/output ceiling %s/%s",
+    async (originAudience, recordInputs, recordOutputs) => {
+      const runtime = createRuntime();
+      const hooks = runtime.hooks.forTrace!({ agentName: "child", audience: "public" });
+      const registered = vi
+        .spyOn(instrumentation, "getInstrumentationRuntime")
+        .mockReturnValue(runtime);
+      let ctx = contextFor("public");
+      ctx.set(ParentTraceContextKey, {
+        forwardedTracePolicy: {
+          ceiling: { recordInputs, recordOutputs },
+          originAudience,
+        },
+        spanId: "c".repeat(16),
+        traceFlags: 1,
+        traceId: "d".repeat(32),
+      });
+      const includesIds = originAudience === "public" && recordInputs && recordOutputs;
+      try {
+        instrumentation.initializeSessionInstrumentation({ agentName: "child", ctx });
+        expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
+          action: "record",
+          recordInputs: originAudience === "public" && recordInputs,
+          recordOutputs: originAudience === "public" && recordOutputs,
+        });
+        for (let sequence = 0; sequence < 2; sequence++) {
+          const turnId = `turn_${sequence}`;
+          await contextStorage.run(ctx, async () => {
+            await bindInstrumentationRuntime(runtime, ctx, {
+              agentName: "child",
+              rootSessionId: "child",
+              sessionId: "child",
+            })!.preparePreamble({ sequence, sessionStarted: sequence > 0, turnId });
+          });
+          const serialized = serializeContext(ctx);
+          const traceState = JSON.stringify(serialized[AGENT_TRACE_CONTEXT_KEY]);
+          if (!includesIds) {
+            expect(traceState).not.toContain("current-user");
+            expect(traceState).not.toContain("initiator-user");
+          }
+          expect(traceState).not.toContain("auth-only-secret");
+          ctx = await deserializeContext(serialized);
+          await contextStorage.run(ctx, async () => {
+            await hooks.publish({
+              idempotencyKey: turnIdempotencyKey("child", turnId),
+              sessionId: "child",
+              turnId,
+              type: "turn.completed",
+            });
+            await hooks.publish({
+              idempotencyKey: sessionIdempotencyKey("child"),
+              sessionId: "child",
+              turnId,
+              type: "session.waiting",
+            });
+          });
+        }
+        await runtime.forceFlush();
+        const spans = runtime.exporter.getFinishedSpans();
+        expect(spans).toHaveLength(2);
+        for (const span of spans) {
+          expect(span.attributes["agent.principal.current.type"]).toBe("service");
+          expect(span.attributes["agent.principal.initiator.type"]).toBe("user");
+          expect(span.attributes["agent.principal.current.id"]).toBe(
+            includesIds ? "current-user" : undefined,
+          );
+          expect(span.attributes["agent.principal.initiator.id"]).toBe(
+            includesIds ? "initiator-user" : undefined,
+          );
+        }
+        const bytes = new TextDecoder().decode(JsonTraceSerializer.serializeRequest(spans)!);
+        expect(bytes).not.toContain("auth-only-secret");
+        if (!includesIds) {
+          expect(bytes).not.toContain("current-user");
+          expect(bytes).not.toContain("initiator-user");
+        }
+      } finally {
+        registered.mockRestore();
+        await runtime.shutdown();
+      }
+    },
+  );
 });

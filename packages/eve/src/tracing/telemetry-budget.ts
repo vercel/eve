@@ -1,5 +1,14 @@
 export const TELEMETRY_PRINCIPAL_ID_BYTES = 1024;
 
+export function boundedPrincipalId(value: unknown): string | undefined {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= TELEMETRY_PRINCIPAL_ID_BYTES &&
+    telemetryByteLength(value) <= TELEMETRY_PRINCIPAL_ID_BYTES
+    ? value
+    : undefined;
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MARKER = "... [truncated]";

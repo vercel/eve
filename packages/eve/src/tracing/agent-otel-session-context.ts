@@ -23,6 +23,7 @@ import {
 } from "#tracing/agent-span-contract.js";
 import { agentActivationAttributes } from "#tracing/agent-otel-runtime-context.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -91,8 +92,8 @@ export function createAgentOtelSessionContext(
     const turn: AgentTurnTraceState = {
       caller: caller === undefined ? undefined : adoptedSpanContext(caller),
       context: turnContext,
-      currentPrincipal: event.currentPrincipal,
-      initiatorPrincipal: event.initiatorPrincipal,
+      currentPrincipal: applyPrincipalTraceDecision(event.currentPrincipal, session.decision),
+      initiatorPrincipal: applyPrincipalTraceDecision(event.initiatorPrincipal, session.decision),
       parentLineage: event.parentLineage ?? session.parentLineage,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,

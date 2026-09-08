@@ -291,15 +291,25 @@ export interface InstrumentationTraceSeed extends InstrumentationTraceContext {
   readonly decision?: InstrumentationDecision;
 }
 
-export type InstrumentationPrincipalType =
-  | "anonymous"
-  | "app"
-  | "local-dev"
-  | "none"
-  | "other"
-  | "runtime"
-  | "service"
-  | "user";
+export const INSTRUMENTATION_PRINCIPAL_TYPES = [
+  "anonymous",
+  "app",
+  "local-dev",
+  "none",
+  "other",
+  "runtime",
+  "service",
+  "unknown",
+  "user",
+] as const;
+
+export type InstrumentationPrincipalType = (typeof INSTRUMENTATION_PRINCIPAL_TYPES)[number];
+
+export function isInstrumentationPrincipalType(
+  value: unknown,
+): value is InstrumentationPrincipalType {
+  return INSTRUMENTATION_PRINCIPAL_TYPES.some((type) => type === value);
+}
 
 export interface InstrumentationPrincipalSummary {
   readonly id?: string;

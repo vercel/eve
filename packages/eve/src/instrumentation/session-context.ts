@@ -35,7 +35,7 @@ export function readInstrumentationSessionContext(context: AlsContext) {
     parent,
     parentLineage: resolveParentLineage(parent, channel, context.get(SessionCallbackKey)),
     parentTraceContext: context.get(ParentTraceContextKey),
-    principals: readInstrumentationPrincipals(context, audience),
+    principals: readInstrumentationPrincipals(context, audience, traceSeed?.decision),
     traceSeed,
   };
 }

@@ -10,7 +10,8 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { boundedTraceError } from "#tracing/bounded-error.js";
-import { TELEMETRY_PRINCIPAL_ID_BYTES, telemetryByteLength } from "#tracing/telemetry-budget.js";
+import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
+import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
 
@@ -149,11 +150,9 @@ function deserializeTurnChannelDelivery(value: unknown): AgentTurnTraceState["ch
 function deserializePrincipalSummary(
   value: unknown,
 ): AgentTurnTraceState["currentPrincipal"] | undefined {
-  if (!isRecord(value) || !isPrincipalType(value.type)) return undefined;
-  return {
-    id: readPrincipalId(value.id),
-    type: value.type,
-  };
+  if (!isRecord(value) || !isInstrumentationPrincipalType(value.type)) return undefined;
+  const id = value.type === "none" ? undefined : boundedPrincipalId(value.id);
+  return id === undefined ? { type: value.type } : { id, type: value.type };
 }
 
 function deserializeAction(value: unknown): AgentActionTraceState | undefined {
@@ -300,15 +299,6 @@ function deserializeError(value: unknown): Error | undefined {
   return error;
 }
 
-function readPrincipalId(value: unknown): string | undefined {
-  return typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= TELEMETRY_PRINCIPAL_ID_BYTES &&
-    telemetryByteLength(value) <= TELEMETRY_PRINCIPAL_ID_BYTES
-    ? value
-    : undefined;
-}
-
 function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {
   return (
     value === "load-skill" ||
@@ -325,21 +315,6 @@ function isActionOutcome(value: unknown): value is AgentActionTraceTerminalState
     value === "completed" ||
     value === "failed" ||
     value === "rejected"
-  );
-}
-
-function isPrincipalType(
-  value: unknown,
-): value is NonNullable<AgentTurnTraceState["currentPrincipal"]>["type"] {
-  return (
-    value === "anonymous" ||
-    value === "app" ||
-    value === "local-dev" ||
-    value === "none" ||
-    value === "other" ||
-    value === "runtime" ||
-    value === "service" ||
-    value === "user"
   );
 }
 

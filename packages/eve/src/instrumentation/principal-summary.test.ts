@@ -12,6 +12,10 @@ const principal = {
 };
 
 describe("summarizeInstrumentationPrincipal", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("omits oversized IDs without truncating or changing authentication records", () => {
     const oversized = { ...principal, principalId: "x".repeat(1025) };
     expect(summarizeInstrumentationPrincipal(oversized, "public")).toEqual({ type: "other" });
@@ -39,6 +43,9 @@ describe("summarizeInstrumentationPrincipal", () => {
     expect(
       summarizeInstrumentationPrincipal({ ...principal, principalType: "runtime" }, "public"),
     ).toEqual({ id: "secret-user-id", type: "runtime" });
+    expect(
+      summarizeInstrumentationPrincipal({ ...principal, principalType: "unknown" }, "public"),
+    ).toEqual({ id: "secret-user-id", type: "unknown" });
   });
 
   it("omits IDs when the audience is not content-visible", () => {
@@ -68,8 +75,4 @@ describe("summarizeInstrumentationPrincipal", () => {
     expect(JSON.stringify(summary)).not.toContain("private@example.com");
     expect(JSON.stringify(summary)).not.toContain("secret-subject");
   });
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
 });
