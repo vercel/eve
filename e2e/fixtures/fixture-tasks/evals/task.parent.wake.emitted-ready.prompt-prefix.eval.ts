@@ -1,9 +1,13 @@
-import type { EveEvalTurn } from "eve/evals";
+import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { z } from "zod";
 import { PREFIX_REQUEST, WORKER_COUNT } from "../agent/lib/prompt-prefix";
 import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
+
+const WAITING = "task-prompt-prefix-waiting";
+const COMPLETE = "task-prompt-prefix-complete";
+const holdIntervalSchema = z.object({ startedAt: z.number(), completedAt: z.number() });
 
 export default [false, true].map((laterTurn) =>
   defineTaskEval({
@@ -18,65 +22,32 @@ export default [false, true].map((laterTurn) =>
     },
     async test(t) {
       if (laterTurn) (await t.send("Say ready.")).expectOk();
+
       const started = await t.send(PREFIX_REQUEST);
       started.expectOk();
-      await t.require(
-        started.message,
-        satisfies(
-          (message: string | undefined) => message === "task-prompt-prefix-waiting",
-          "prompt prefix survives parallel task admission",
-        ),
-      );
+      await requirePromptStatus(t, started, [WAITING], "parallel task admission");
       started.calledSubagent("busy-worker", { count: WORKER_COUNT });
       started.eventsSatisfy("five workers launched in the same model step", (events) => {
-        const steps = events
+        const launchSteps = events
           .filter((event) => event.type === "actions.requested")
           .flatMap((event) =>
             event.data.actions
               .filter((action) => action.kind === "tool-call" && action.toolName === "busy-worker")
               .map(() => `${event.data.turnId}:${event.data.stepIndex}`),
           );
-        return steps.length === WORKER_COUNT && new Set(steps).size === 1;
+        return launchSteps.length === WORKER_COUNT && new Set(launchSteps).size === 1;
       });
-      const taskIds = started.events.flatMap((event) =>
-        event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-          ? [event.data.backgroundTask.taskId]
-          : [],
-      );
+
+      const taskIds = backgroundTaskIds(started);
       await t.require(
         taskIds,
         satisfies(
-          (ids: readonly string[]) =>
-            ids.length === WORKER_COUNT && new Set(ids).size === WORKER_COUNT,
+          (ids: readonly string[]) => hasDistinctCount(ids, WORKER_COUNT),
           "five distinct background task receipts",
         ),
       );
 
-      let session: TaskEvalSessionDriver = t;
-      let turn: EveEvalTurn = started;
-      const parentTurns = [started];
-      for (
-        let attempt = 0;
-        attempt < WORKER_COUNT * 2 && !(turn.message ?? "").includes("task-prompt-prefix-complete");
-        attempt++
-      ) {
-        const live = t.target.watchTurn(started.sessionId, {
-          startIndex: requireSessionStreamIndex(session, "Parallel task completion"),
-        });
-        turn = await live.result();
-        parentTurns.push(turn);
-        turn.expectOk();
-        await t.require(
-          turn.message,
-          satisfies(
-            (message: string | undefined) =>
-              message === "task-prompt-prefix-waiting" || message === "task-prompt-prefix-complete",
-            "prompt prefix survives a task completion wake",
-          ),
-        );
-        session = live.session;
-      }
-      turn.messageIncludes("task-prompt-prefix-complete");
+      const parentTurns = await waitForAllWorkers(t, started);
       for (const taskId of taskIds) {
         t.event("message.received", {
           count: 1,
@@ -88,29 +59,29 @@ export default [false, true].map((laterTurn) =>
           },
         });
       }
-      const calls = parentTurns.flatMap((parent) =>
-        parent.events.flatMap((event) =>
+
+      const workerCalls = parentTurns.flatMap((turn) =>
+        turn.events.flatMap((event) =>
           event.type === "subagent.called" && event.data.name === "busy-worker" ? [event.data] : [],
         ),
       );
       await t.require(
-        calls,
+        workerCalls.map((call) => call.childSessionId),
         satisfies(
-          (entries: typeof calls) =>
-            entries.length === WORKER_COUNT &&
-            new Set(entries.map((entry) => entry.childSessionId)).size === WORKER_COUNT,
+          (sessionIds: readonly string[]) => hasDistinctCount(sessionIds, WORKER_COUNT),
           "five distinct child sessions",
         ),
       );
+
       const children = await Promise.all(
-        calls.map((call) => t.target.watchTurn(call.childSessionId).result()),
+        workerCalls.map((call) => t.target.watchTurn(call.childSessionId).result()),
       );
       const intervals = children.map((child) => {
         child.expectOk();
         child.calledTool("hold", { count: 1 });
-        return z
-          .object({ startedAt: z.number(), completedAt: z.number() })
-          .parse(child.toolCalls.find((call) => call.name === "hold")?.output);
+        return holdIntervalSchema.parse(
+          child.toolCalls.find((call) => call.name === "hold")?.output,
+        );
       });
       await t.require(
         intervals,
@@ -126,3 +97,52 @@ export default [false, true].map((laterTurn) =>
     },
   }),
 );
+
+function backgroundTaskIds(turn: EveEvalTurn): string[] {
+  return turn.events.flatMap((event) =>
+    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
+      ? [event.data.backgroundTask.taskId]
+      : [],
+  );
+}
+
+function hasDistinctCount(values: readonly string[], count: number): boolean {
+  return values.length === count && new Set(values).size === count;
+}
+
+async function requirePromptStatus(
+  t: EveEvalContext,
+  turn: EveEvalTurn,
+  expected: readonly string[],
+  boundary: string,
+): Promise<void> {
+  await t.require(
+    turn.message,
+    satisfies(
+      (message: string | undefined) => message !== undefined && expected.includes(message),
+      `prompt prefix survives ${boundary}`,
+    ),
+  );
+}
+
+async function waitForAllWorkers(t: EveEvalContext, started: EveEvalTurn): Promise<EveEvalTurn[]> {
+  let session: TaskEvalSessionDriver = t;
+  let turn = started;
+  const turns = [started];
+
+  for (let attempt = 0; attempt < WORKER_COUNT * 2 && turn.message !== COMPLETE; attempt += 1) {
+    const live = t.target.watchTurn(started.sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Parallel task completion"),
+    });
+    turn = await live.result();
+    turn.expectOk();
+    await requirePromptStatus(t, turn, [WAITING, COMPLETE], "a task completion wake");
+    turns.push(turn);
+    session = live.session;
+  }
+
+  if (turn.message !== COMPLETE) {
+    throw new Error(`Parent did not collect all ${WORKER_COUNT} background task results.`);
+  }
+  return turns;
+}

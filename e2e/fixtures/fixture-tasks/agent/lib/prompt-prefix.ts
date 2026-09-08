@@ -5,24 +5,32 @@ import { z } from "zod";
 export const PREFIX_REQUEST =
   "Launch five background workers in parallel and collect their results.";
 export const WORKER_COUNT = 5;
-export const prefixSchema = z.object({ context: z.string(), prefix: z.array(z.string()) });
+export const promptCheckpointSchema = z.object({
+  prefix: z.array(z.string()),
+  userMessageCount: z.number().int().nonnegative(),
+});
 
 export function respondPromptPrefix(request: MockModelRequest): MockModelResponse | string {
-  const captures = request.toolResults
+  const checkpoints = request.toolResults
     .filter((result) => result.name === "capture_prompt")
-    .map((result) => prefixSchema.parse(result.output));
-  const prefix = request.messages.map(fingerprint);
-  for (const capture of captures) {
-    const changed = capture.prefix.findIndex((hash, index) => hash !== prefix[index]);
-    if (changed !== -1) return `task-prompt-prefix-changed at message ${changed}`;
+    .map((result) => promptCheckpointSchema.parse(result.output));
+  const currentPrefix = request.messages.map(fingerprint);
+
+  for (const checkpoint of checkpoints) {
+    const changedAt = checkpoint.prefix.findIndex(
+      (messageHash, index) => messageHash !== currentPrefix[index],
+    );
+    if (changedAt !== -1) return `task-prompt-prefix-changed at message ${changedAt}`;
   }
 
-  const context = fingerprint(request.messages.filter((message) => message.role === "user"));
-  if (captures.at(-1)?.context !== context) {
+  if (checkpoints.at(-1)?.userMessageCount !== request.userMessages.length) {
     return {
       toolCalls: [
-        { name: "capture_prompt", input: { context, prefix } },
-        ...(captures.length === 0
+        {
+          name: "capture_prompt",
+          input: { prefix: currentPrefix, userMessageCount: request.userMessages.length },
+        },
+        ...(checkpoints.length === 0
           ? Array.from({ length: WORKER_COUNT }, (_, index) => ({
               id: `prompt-prefix-worker-${index + 1}`,
               name: "busy-worker",
@@ -33,7 +41,7 @@ export function respondPromptPrefix(request: MockModelRequest): MockModelRespons
     };
   }
 
-  const completed = new Set(
+  const completedWorkerIds = new Set(
     request.userMessages
       .filter(
         (message) => message.startsWith("Background task ") && message.includes(" is completed."),
@@ -42,7 +50,7 @@ export function respondPromptPrefix(request: MockModelRequest): MockModelRespons
         [...message.matchAll(/PROMPT-CACHE-WORKER-([1-5])/gu)].map((match) => match[1]),
       ),
   );
-  return completed.size === WORKER_COUNT
+  return completedWorkerIds.size === WORKER_COUNT
     ? "task-prompt-prefix-complete"
     : "task-prompt-prefix-waiting";
 }

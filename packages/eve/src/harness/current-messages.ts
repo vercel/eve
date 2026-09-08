@@ -10,7 +10,7 @@ interface CurrentMessagesOptions {
   readonly projectedMessages?: readonly ModelMessage[];
 }
 
-/** Model-call messages with cache-friendly placement for turn-local context. */
+/** Builds the model view and durable history for one step. */
 export function createCurrentMessages(
   history: readonly ModelMessage[],
   options: CurrentMessagesOptions = {},

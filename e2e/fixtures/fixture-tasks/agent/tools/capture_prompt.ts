@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
-import { prefixSchema } from "../lib/prompt-prefix";
+import { promptCheckpointSchema } from "../lib/prompt-prefix";
 
 export default defineTool({
-  description: "Retain model-request fingerprints across durable steps and parent wakes.",
-  inputSchema: prefixSchema,
+  description: "Save the current prompt so the next model call can compare against it.",
+  inputSchema: promptCheckpointSchema,
   execute: async (input) => input,
 });

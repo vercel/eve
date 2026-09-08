@@ -1858,7 +1858,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emissionState,
       durableModelPromptMessageCount:
         turnClientContext === undefined || turnClientContext.messages.length === 0
-          ? projectedMessages.length + promptMessages.length - messages.length
+          ? modelMessages.length
           : undefined,
       promptMessages,
       result,
