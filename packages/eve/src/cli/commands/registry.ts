@@ -39,11 +39,11 @@ import {
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
-  addRegistryMappings,
   assertCanInstallWebChat,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
+export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
 export interface AddCommandOptions {
   skipInstall?: boolean;
@@ -645,25 +645,6 @@ export async function runAddCommand(
       resumeCommand: setupResumeCommand(item),
     });
     return reportCompletion(logger, item, completion, options);
-  });
-}
-/** Adds registry namespace mappings to the project's package.json. */
-export async function runRegistryAddCommand(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  mappings: readonly string[],
-): Promise<void> {
-  await runRegistryAction(logger, appRoot, async () => {
-    const result = await addRegistryMappings(appRoot, mappings);
-    for (const namespace of result.skippedBuiltIn) {
-      logger.log(`Skipped ${namespace} because it is built in.`);
-    }
-    for (const namespace of result.skippedExisting) {
-      logger.log(`Skipped ${namespace} because it is already configured.`);
-    }
-    if (result.added.length > 0) {
-      logger.log(`Added ${result.added.join(", ")} to package.json.`);
-    }
   });
 }
 /** Lists registry items from every configured source or one selected source. */
