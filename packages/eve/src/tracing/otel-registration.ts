@@ -25,7 +25,14 @@ import {
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
 const PENDING_CHILD_SPAN_LIMIT = 10_000;
+const REPLAY_DEDUPLICATION_KEY = Symbol.for("eve.otel.replay-deduplication");
 const require = createRequire(import.meta.url);
+
+interface ReplayDeduplicationGlobal {
+  [REPLAY_DEDUPLICATION_KEY]?: Set<string>;
+}
+
+const replayDeduplicationGlobal = globalThis as typeof globalThis & ReplayDeduplicationGlobal;
 
 class RegistrationMarkerPropagator {
   #injected = false;
@@ -51,15 +58,16 @@ class RegistrationMarkerPropagator {
 
 /** Keeps eve's ownership check out of every authored destination. */
 class PrivateSpanFilteringProcessor implements SpanProcessor {
-  private readonly endedSpans = new Set<string>();
+  private readonly endedSpans: Set<string>;
   private readonly forwardedSpans = new Set<string>();
   private readonly pendingByParent = new Map<string, unknown[]>();
   private pendingSpanCount = 0;
   private readonly processors: readonly SpanProcessor[];
   private readonly startedSpans = new Set<string>();
 
-  constructor(processors: readonly SpanProcessor[]) {
+  constructor(processors: readonly SpanProcessor[], endedSpans: Set<string>) {
     this.processors = processors;
+    this.endedSpans = endedSpans;
   }
 
   async forceFlush(): Promise<void> {
@@ -152,6 +160,7 @@ export function registerOtelPipeline(input: {
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
+  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
   const configuration: Configuration = {
     attributes: pipeline.resource,
     autoDetectResources: false,
@@ -160,9 +169,7 @@ export function registerOtelPipeline(input: {
     metricReaders: pipeline.metricReaders,
     propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
     serviceName: input.serviceName,
-    spanProcessors: pipeline.spanProcessors.map((processor) =>
-      isSpanProcessor(processor) ? new PrivateSpanFilteringProcessor([processor]) : processor,
-    ),
+    spanProcessors,
   };
   registerOTel(
     // Absent means "let `@vercel/otel` decide", which is not the same as
@@ -211,6 +218,32 @@ export function registerOtelPipeline(input: {
       await Promise.all([provider.shutdown!(), meterProvider.shutdown?.()]);
     },
   };
+}
+
+function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): SpanProcessorOrName[] {
+  const concrete = processors.filter(isSpanProcessor);
+  if (concrete.length === 0) return [...processors];
+  const filtering = new PrivateSpanFilteringProcessor(concrete, replayDeduplicationRegistry());
+  const result: SpanProcessorOrName[] = [];
+  let inserted = false;
+  for (const processor of processors) {
+    if (!isSpanProcessor(processor)) {
+      result.push(processor);
+      continue;
+    }
+    if (inserted) continue;
+    inserted = true;
+    result.push(filtering);
+  }
+  return result;
+}
+
+function replayDeduplicationRegistry(): Set<string> {
+  const existing = replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY];
+  if (existing !== undefined) return existing;
+  const created = new Set<string>();
+  replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY] = created;
+  return created;
 }
 
 /** Lifecycle retained from the providers that own every destination. */
