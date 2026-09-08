@@ -56,7 +56,7 @@ Three more fields control what the AI SDK records inside those spans (see the AI
 
 eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
-eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` stays fixed at the original conversation ID across local and remote sessions, even when a remote rejects delegated lineage and creates a new root workflow. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting.
+eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` stays fixed at the original conversation ID across local and remote sessions, including independent remote root workflows. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
@@ -167,7 +167,7 @@ Each activation owns a fresh trace identity, including local and remote
 subagents. The first child activation links to its caller with
 `eve.link.type=agent.dispatch`; incoming `traceparent` provides that link, not
 the child trace ID. Later turns do not reuse the original caller link.
-Conversation baggage is independent of authenticated lineage and trace-policy
+Conversation baggage is independent of execution lineage and trace-policy
 ceilings, which remain in force across the boundary.
 
 Channel delivery does not allocate or replace the activation, and a later turn
