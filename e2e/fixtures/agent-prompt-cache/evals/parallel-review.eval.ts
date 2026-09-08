@@ -20,6 +20,11 @@ export default [false, true].map((laterTurn) =>
         );
         planning.expectOk();
         planning.messageIncludes("96");
+        planning.event("actions.requested", { count: 0 });
+        planning.event("step.completed", {
+          data: (data) => data.finishReason === "content-filter",
+          count: 0,
+        });
       }
 
       const started = await t.send(reviewPacket());
