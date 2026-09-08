@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic, type AgentDefinition } from "eve";
 import {
   mockModel,
   type MockModelRequest,
@@ -630,11 +630,24 @@ function findString(value: unknown, prefix: string): string | undefined {
 }
 
 const base = e2eAgentConfig();
+const scriptedModel = mockModel(respond);
 
-export default defineAgent({
-  ...base,
-  // These evals target orchestration, not model planning. Keep every suite
-  // deterministic while retaining the workflow-world override from `base`.
-  model: mockModel(respond),
-  modelContextWindowTokens: 1_000_000,
+const agent: AgentDefinition = defineAgent({
+  experimental: base.experimental,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const liveContinuation = ctx.messages.some(
+          (message) =>
+            message.role === "user" &&
+            JSON.stringify(message.content).includes("TASK-REVIEW-CONTINUATION"),
+        );
+        return liveContinuation
+          ? base.model
+          : { model: scriptedModel, modelContextWindowTokens: 1_000_000 };
+      },
+    },
+  }),
 });
+
+export default agent;
