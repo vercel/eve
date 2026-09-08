@@ -1,7 +1,6 @@
 import {
   ROOT_CONTEXT,
   SpanKind,
-  SpanStatusCode,
   type Context,
   type Span,
   type SpanContext,
@@ -36,6 +35,8 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { AGENT_SPAN_NAMES, agentInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 export interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -120,7 +121,7 @@ export function createAgentActionInstrumentation(input: {
     const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        invocation ? `invoke_agent ${state.name}` : "agent.action",
+        invocation ? agentInvocationSpanName(state.name) : AGENT_SPAN_NAMES.action,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -261,7 +262,12 @@ export function createAgentActionInstrumentation(input: {
     if (terminal.usage !== undefined) {
       setAgentUsage(span, terminal.usage);
     }
-    if (terminal.outcome !== "completed") recordError(span, terminal.error);
+    if (terminal.outcome !== "completed") {
+      recordError(
+        span,
+        input.recordOutputs && state.recordOutputs === true ? terminal.error : undefined,
+      );
+    }
     span.end(terminal.acceptedAtMs);
   }
 }
@@ -291,15 +297,4 @@ function contextFromActionState(state: AgentActionTraceState): Context {
 
 function isAgentInvocation(kind: InstrumentationActionKind): boolean {
   return kind === "subagent-call" || kind === "remote-agent-call";
-}
-
-function recordError(span: Span, error: unknown, errorType?: string): void {
-  span.setAttribute(
-    "error.type",
-    errorType ?? (error instanceof Error ? error.name || "Error" : "_OTHER"),
-  );
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

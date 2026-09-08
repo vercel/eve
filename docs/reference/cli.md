@@ -316,13 +316,13 @@ A durable session produces one bounded trace per turn. Worker replacements reuse
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
-Model and `execute_tool` spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KB.
+Model and `execute_tool` spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KiB of UTF-8 data. Oversized tool payloads remain valid JSON and include an `eve.truncated` marker.
 
-Step spans carry token counts, and cost when Vercel AI Gateway served the call. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
+Step spans carry token counts under `agent.usage.*`, and cost when Vercel AI Gateway served the call. Model spans also expose `gen_ai.usage.*` token counters. The CLI sums step-level counters only, so model and delegated-call totals are not counted twice.
 
 ### Retention
 
-eve sweeps the store when a session finishes and when the dev server starts, evicting oldest-first past the bounds below — except that the newest traces and anything written in the last five minutes are always kept, so a sweep will exceed the size budget rather than drop a trace you just recorded. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
+eve sweeps the store when an activation's writes finish, when a session finishes, and when the dev server starts. An open conversation does not pin every completed turn's trace. Sweeps evict oldest-first past the bounds below, except that active traces, the newest traces, and anything written in the last five minutes are kept. A sweep can therefore exceed the size budget. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
 
 | Variable                     | Default              | Effect                                                                              |
 | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------- |

@@ -10,6 +10,8 @@ import { inspect } from "node:util";
 
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { capturesErrorContent } from "#tracing/error-content-context.js";
+import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
 
 const MAX_INSPECT_STRING_LENGTH = 8 * 1024;
 const MAX_DETAIL_BYTES = 16 * 1024;
@@ -228,8 +230,15 @@ function truncateForDisplay(value: string, maxChars = 160): string {
  * non-active span should be annotated.
  */
 export function recordErrorOnSpan(span: Span, error: unknown): void {
-  const message = error instanceof Error ? error.message : getErrorMessage(error);
-  const name = error instanceof Error ? error.name : "Error";
+  if (!capturesErrorContent()) {
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    return;
+  }
+  const message = truncateTelemetryText(
+    error instanceof Error ? error.message : getErrorMessage(error),
+    4096,
+  );
+  const name = error instanceof Error ? truncateTelemetryText(error.name, 128) : "Error";
 
   span.setStatus({ code: SpanStatusCode.ERROR, message });
   span.recordException({ message, name, stack: inspectError(error) });
@@ -356,6 +365,10 @@ function recordOnActiveSpan(message: string, fields?: LogFields): void {
   }
 
   const error = fields?.error;
+  if (!capturesErrorContent()) {
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    return;
+  }
   if (error instanceof Error) {
     recordErrorOnSpan(span, error);
     return;
@@ -364,11 +377,13 @@ function recordOnActiveSpan(message: string, fields?: LogFields): void {
   // `logError` passes a pre-formatted object, not a live `Error`; still
   // record it as a span exception so the trace keeps the `detail`.
   if (isFormattedError(error)) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+    const message = truncateTelemetryText(error.message, 4096);
+    span.setStatus({ code: SpanStatusCode.ERROR, message });
     span.recordException({
-      message: error.message,
-      name: typeof error.name === "string" ? error.name : "Error",
-      stack: typeof error.detail === "string" ? error.detail : undefined,
+      message,
+      name: typeof error.name === "string" ? truncateTelemetryText(error.name, 128) : "Error",
+      stack:
+        typeof error.detail === "string" ? truncateTelemetryText(error.detail, 8192) : undefined,
     });
     return;
   }

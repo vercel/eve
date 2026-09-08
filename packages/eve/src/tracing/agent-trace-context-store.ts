@@ -14,6 +14,10 @@ import type {
 } from "#tracing/agent-trace-state.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { deriveTaskId } from "#tasks/task-id.js";
+import type { SessionStateMap } from "#harness/types.js";
+import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { createLogger } from "#internal/logging.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   decisionToTraceContentCeiling,
@@ -33,6 +37,65 @@ const AgentTraceContextKey = new ContextKey<AgentTraceContextState>(AGENT_TRACE_
     serialize: serializeAgentTraceContextState,
   },
 });
+
+/** Run after task-provider commits, so a returned background receipt keeps its anchor. */
+export function pruneAgentTraceState(
+  context: ContextAccessor,
+  sessionId: string,
+  sessionState: SessionStateMap | undefined,
+): void {
+  try {
+    pruneTraceOwnership(context, sessionId, sessionState);
+  } catch {
+    createLogger("tracing.retention").warn(
+      "could not reconcile trace ownership; preserving trace state",
+    );
+  }
+}
+
+function pruneTraceOwnership(
+  context: ContextAccessor,
+  sessionId: string,
+  sessionState: SessionStateMap | undefined,
+): void {
+  const state = context.get(AgentTraceContextKey);
+  if (state === undefined) return;
+  const calls = new Set(getWorkflowToolRuns(sessionState).map((run) => run.callId));
+  const tasks = new Set(
+    getSessionTaskIndex(sessionState)
+      .filter((task) => task.terminalView === undefined)
+      .map((task) => task.taskId),
+  );
+  const actionAnchors = Object.fromEntries(
+    Object.entries(state.actionAnchors).filter(
+      ([key, action]) =>
+        action.sessionId !== sessionId ||
+        state.actions[key] !== undefined ||
+        calls.has(action.callId) ||
+        tasks.has(
+          deriveTaskId({
+            callId: action.callId,
+            parentSessionId: sessionId,
+            parentTurnId: action.turnId,
+          }),
+        ),
+    ),
+  );
+  const retainedCalls = new Set(
+    Object.values(actionAnchors)
+      .filter((action) => action.sessionId === sessionId)
+      .map((action) => action.callId),
+  );
+  const invocations = Object.fromEntries(
+    Object.entries(state.invocations).filter(
+      ([, invocation]) =>
+        invocation.sessionId !== sessionId ||
+        invocation.terminal !== undefined ||
+        retainedCalls.has(invocation.parentActionCallId),
+    ),
+  );
+  context.set(AgentTraceContextKey, { ...state, actionAnchors, invocations });
+}
 
 /** Reads the decision already bound to a session in the current worker context. */
 export function readCurrentSessionTraceDecision(
@@ -131,6 +194,7 @@ export function recordNestedAgentInvocation(input: {
   readonly kind: "remote-agent-call" | "subagent-call";
   readonly name: string;
   readonly outerCallId: string;
+  readonly recordOutputs?: boolean;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly spanId: string;
@@ -160,6 +224,7 @@ export function recordNestedAgentInvocation(input: {
       traceId: outer.parent.traceId,
     },
     parentActionCallId: input.outerCallId,
+    recordOutputs: input.recordOutputs === true,
     rootSessionId: outer.rootSessionId,
     sessionId: outer.sessionId,
     spanId: input.spanId,

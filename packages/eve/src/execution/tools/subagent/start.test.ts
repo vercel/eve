@@ -24,30 +24,29 @@ describe("startSubagent", () => {
         traceId: "1".repeat(32),
       };
 
-      await withAgentChildTrace(
-        { originAudience: "private", parentTraceContext: caller },
-        () => startSubagent({
-        auth: null,
-        batchEvent: { sequence: 1, turnId: "turn-1" },
-        bundle: {} as never,
-        callbackBaseUrl: "https://parent.example",
-        capabilities: undefined,
-        channelMetadata: undefined,
-        currentSession: {} as never,
-        fanoutSize: 1,
-        initiatorAuth: null,
-        parentContinuationToken: "parent-token",
-        sandboxSessionId: "parent-session",
-        session: { rootSessionId: "root-session", sessionId: "parent-session" } as never,
-        target:
-          kind === "local"
-            ? {
-                action: { callId: "child-action" } as never,
-                kind,
-                source: { type: "runtime" },
-              }
-            : { action: { callId: "child-action" } as never, kind },
-      }),
+      await withAgentChildTrace({ originAudience: "private", parentTraceContext: caller }, () =>
+        startSubagent({
+          auth: null,
+          batchEvent: { sequence: 1, turnId: "turn-1" },
+          bundle: {} as never,
+          callbackBaseUrl: "https://parent.example",
+          capabilities: undefined,
+          channelMetadata: undefined,
+          currentSession: {} as never,
+          fanoutSize: 1,
+          initiatorAuth: null,
+          parentContinuationToken: "parent-token",
+          sandboxSessionId: "parent-session",
+          session: { rootSessionId: "root-session", sessionId: "parent-session" } as never,
+          target:
+            kind === "local"
+              ? {
+                  action: { callId: "child-action" } as never,
+                  kind,
+                  source: { type: "runtime" },
+                }
+              : { action: { callId: "child-action" } as never, kind },
+        }),
       );
 
       const start = kind === "local" ? startLocalSubagent : startRemoteSubagent;

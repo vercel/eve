@@ -235,6 +235,28 @@ An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` 
 
 Handlers for different providers run concurrently and are failure-isolated. Do not depend on provider execution order. Use `flush` to drain buffered records and `shutdown` to release resources.
 
+Each provider drain has a five-second deadline. A timed-out drain continues
+in the background, but later flush requests share that operation instead of
+starting overlapping work. eve logs the timeout and lets agent execution
+continue. Provider cleanup runs before the OTel pipeline closes.
+
+## Trace limits
+
+The [agent trace contract](./instrumentation#agent-trace-contract) defines span
+names, identities, and usage counters shared by the exporters and local viewers.
+These limits bound eve's own trace data without changing model or tool results:
+
+- Content attributes are capped at 32 KiB of UTF-8 JSON. Oversized tool
+  payloads use an `eve.truncated` envelope with a preview; message content stays
+  valid JSON.
+- Flattened runtime context has a 64 KiB value budget and at most 64 attributes,
+  including a truncation marker when a limit is reached.
+- Local persistence queues at most 2,048 spans and 8 MiB of serialized data.
+  A local span segment larger than 1 MiB is dropped.
+
+Queue overflow and drain failures produce diagnostics. A slow destination
+can lose telemetry, but it does not receive an unlimited queue.
+
 ## What to read next
 
 - [Observability](./instrumentation): the default `instrumentation.ts` API and trace hierarchy

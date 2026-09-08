@@ -1,8 +1,6 @@
 import {
   ROOT_CONTEXT,
   SpanKind,
-  SpanStatusCode,
-  type Span,
   type SpanContext,
   type Tracer,
   trace,
@@ -14,10 +12,8 @@ import type {
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-  InstrumentationTraceSeed,
-  InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
-import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
@@ -27,6 +23,8 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 interface ChannelDeliverySpanState {
   readonly channelAudience: ChannelAudience;
@@ -46,9 +44,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
   ) => Promise<AgentSessionTraceState>;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
-  readonly prepareTurnTrace: (
-    event: InstrumentationTurnStartedEvent,
-  ) => Promise<InstrumentationTraceSeed>;
   readonly recordInputs: boolean;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
@@ -75,25 +70,14 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       traceSeed: event.traceSeed,
       type: "session.started",
     });
-    let turn =
+    const turn =
       event.turnId === undefined || event.sequence === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
-    if (turn === undefined && event.turnId !== undefined && event.sequence !== undefined) {
-      await input.prepareTurnTrace({
-        agentName: event.agentName,
-        idempotencyKey: turnIdempotencyKey(event.sessionId, event.turnId),
-        parentLineage: session.parentLineage,
-        parentTraceContext: event.parentTraceContext,
-        rootSessionId: event.rootSessionId,
-        sequence: event.sequence,
-        sessionId: event.sessionId,
-        turnId: event.turnId,
-        type: "turn.started",
-      });
-      turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
-    }
-    const traceContext = turn?.context ?? session.context;
+    const traceContext = turn?.context ?? {
+      ...session.context,
+      traceId: input.idGenerator.generateTraceId(),
+    };
     if (!isSampledTrace(traceContext)) return;
     const inputAttribute = input.recordInputs ? contentAttribute(event.input, false) : undefined;
     const state: Record<string, JsonValue> = {
@@ -114,7 +98,11 @@ export function createAgentChannelDeliveryInstrumentation(input: {
         traceFlags: turn.context.traceFlags,
         traceId: turn.context.traceId,
       };
-    } else if (turn === undefined && event.parentTraceContext !== undefined) {
+    } else if (
+      turn === undefined &&
+      event.sequence === 0 &&
+      event.parentTraceContext !== undefined
+    ) {
       const parent = adoptedSpanContext(event.parentTraceContext);
       if (parent !== undefined) {
         state.parent = {
@@ -147,10 +135,13 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       event.turnId === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
+    const traceContext = turn?.context ?? state.traceContext;
+    if (!isSampledTrace(traceContext)) return;
+    const parent = turn?.context ?? state.parent;
     const requestLink = state.requestTraceContext;
     const startSpan = () =>
       input.tracer.startSpan(
-        "agent.channel.delivery",
+        AGENT_SPAN_NAMES.channelDelivery,
         {
           attributes: {
             "agent.channel.delivery.id": event.delivery.deliveryId,
@@ -179,17 +170,17 @@ export function createAgentChannelDeliveryInstrumentation(input: {
                     context: requestLink,
                   },
                 ],
-          root: state.parent === undefined,
+          root: parent === undefined,
           startTime: state.startTimeMs,
         },
         withChannelAudience(
-          state.parent === undefined ? ROOT_CONTEXT : contextFromSpanContext(state.parent),
+          parent === undefined ? ROOT_CONTEXT : contextFromSpanContext(parent),
           state.channelAudience,
         ),
       );
     const span = input.idGenerator.withSpanId(state.spanId, () =>
-      state.parent === undefined
-        ? input.idGenerator.withTraceId(state.traceContext.traceId, startSpan)
+      parent === undefined
+        ? input.idGenerator.withTraceId(traceContext.traceId, startSpan)
         : startSpan(),
     );
     span.addEvent("channel.delivery.started", undefined, state.startTimeMs);
@@ -204,24 +195,9 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       if (event.errorCode !== undefined) {
         span.setAttribute("agent.channel.delivery.error.code", event.errorCode);
       }
-      recordError(span, event.error);
+      recordError(span, event.error, errorType);
     }
     span.end();
-    if (
-      turn !== undefined &&
-      event.turnId !== undefined &&
-      turn.context.traceId === state.traceContext.traceId &&
-      turn.parentSpanId === state.parent?.spanId
-    ) {
-      await input.stateStore.updateTurn(event.sessionId, event.turnId, (current) =>
-        current.context.traceId === state.traceContext.traceId &&
-        current.parentSpanId === state.parent?.spanId
-          ? { ...current, parentIsRemote: false, parentSpanId: state.spanId }
-          : current,
-      );
-    } else if (event.turnId === undefined && state.turnId !== undefined) {
-      await input.stateStore.deleteTurn(event.sessionId, state.turnId);
-    }
   };
 
   return {
@@ -281,11 +257,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function contextFromSpanContext(spanContext: SpanContext) {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
-}
-
-function recordError(span: Span, error: unknown): void {
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

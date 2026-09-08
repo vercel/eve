@@ -861,8 +861,8 @@ describe("createAgentOtelInstrumentation", () => {
     });
     const turn = spans.find((span) => span.name === "invoke_agent support")!;
     expect(delivery.kind).toBe(SpanKind.CONSUMER);
-    expect(delivery.parentSpanContext).toBeUndefined();
-    expect(turn.parentSpanContext?.spanId).toBe(delivery.spanContext().spanId);
+    expect(turn.parentSpanContext).toBeUndefined();
+    expect(delivery.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(turn.spanContext().traceId).toBe(delivery.spanContext().traceId);
     expect(delivery.links).toEqual([
       expect.objectContaining({
@@ -961,16 +961,13 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const channelDeliveries = byName(spans, "agent.channel.delivery");
-    const firstDelivery = channelDeliveries.find(
-      (span) => span.attributes["agent.channel.delivery.id"] === "delivery-remote-first",
-    )!;
     const turn = byName(spans, "invoke_agent")[0]!;
     expect(byName(spans, "agent.session")).toHaveLength(0);
     expect(channelDeliveries).toHaveLength(2);
     for (const delivery of channelDeliveries) {
-      expect(delivery.parentSpanContext).toMatchObject(parentTraceContext);
+      expect(delivery.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     }
-    expect(turn.parentSpanContext?.spanId).toBe(firstDelivery.spanContext().spanId);
+    expect(turn.parentSpanContext).toMatchObject(parentTraceContext);
     expect(turn.spanContext().traceId).toBe(parentTraceContext.traceId);
     expect(turn.attributes).toMatchObject({
       "gen_ai.conversation.id": "parent-session",

@@ -15,6 +15,7 @@ import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
 } from "#tracing/local-trace-span-processor.js";
+import { isAgentActivationSpan } from "#tracing/agent-span-contract.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
@@ -234,11 +235,7 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
 }
 
 export function isAgentTurnSpan(span: LocalTraceSpan): boolean {
-  return (
-    span.name === "agent.turn" ||
-    (stringSpanAttribute(span, "gen_ai.operation.name") === "invoke_agent" &&
-      stringSpanAttribute(span, "agent.turn.id") !== undefined)
-  );
+  return isAgentActivationSpan(span);
 }
 
 /** Parses one OTLP/JSON segment file into spans belonging to `expectedTraceId`. */

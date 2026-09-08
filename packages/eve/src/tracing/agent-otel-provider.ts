@@ -1,7 +1,6 @@
 import {
   ROOT_CONTEXT,
   SpanKind,
-  SpanStatusCode,
   context,
   type Context,
   type Span,
@@ -68,6 +67,13 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import {
+  AGENT_SPAN_NAMES,
+  agentInvocationSpanName,
+  type AgentSamplingOperation,
+} from "#tracing/agent-span-contract.js";
+import { withErrorContent } from "#tracing/error-content-context.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 interface SpanState {
   readonly context: Context;
@@ -85,7 +91,7 @@ export interface AgentOtelInstrumentationInput {
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
-  readonly samplesTrace?: (traceId: string) => boolean;
+  readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
   readonly tracePolicy?: TraceCapturePolicy;
@@ -222,7 +228,7 @@ export function createAgentOtelInstrumentation(
       input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
       () =>
         input.tracer.startSpan(
-          "agent.step",
+          AGENT_SPAN_NAMES.step,
           {
             attributes: {
               "agent.framework.name": "eve",
@@ -324,23 +330,15 @@ export function createAgentOtelInstrumentation(
                 );
           const startSpan = () =>
             input.tracer.startSpan(
-              agentSpanName(agentName),
+              agentInvocationSpanName(agentName),
               {
-                attributes: {
-                  "agent.framework.name": "eve",
-                  "agent.framework.version": input.frameworkVersion,
-                  "agent.name": agentName,
-                  ...runtimeAttributes.agentLineageAttributes(turn),
-                  "agent.subagent.name": turn.subagentName,
-                  "agent.turn.id": event.turnId,
-                  "agent.turn.sequence": turn.sequence,
-                  "gen_ai.agent.name": agentName,
-                  "gen_ai.operation.name": "invoke_agent",
-                  ...agentTraceIdentityAttributes({
-                    rootSessionId: turn.rootSessionId,
-                    sessionId: event.sessionId,
-                  }),
-                },
+                attributes: runtimeAttributes.agentActivationAttributes({
+                  agentName,
+                  frameworkVersion: input.frameworkVersion,
+                  sessionId: event.sessionId,
+                  turnId: event.turnId!,
+                  turn,
+                }),
                 kind: SpanKind.INTERNAL,
                 root: turn.parentSpanId === undefined,
                 startTime: turn.startTimeMs,
@@ -531,7 +529,6 @@ export function createAgentOtelInstrumentation(
     ensureSessionContext,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
-    prepareTurnTrace,
     recordInputs,
     stateStore: input.stateStore,
     tracer: input.tracer,
@@ -604,9 +601,28 @@ export function createAgentOtelInstrumentation(
           if (!isSampledTrace(turn.context)) parent = suppressTracing(parent);
         }
       }
+      const session = await input.stateStore.getSession(operation.scope.sessionId);
+      const seed = resolveForwardedTraceSeed(contextStorage.getStore()?.get(SessionTraceSeedKey));
+      const decision = seed?.decision ?? session?.decision;
+      const effective =
+        decision === undefined
+          ? undefined
+          : applyLiveDeliveryAudienceCeiling(
+              decision,
+              normalizeChannelAudience(operation.scope.channelAudience),
+              seed?.forwardedTracePolicy,
+            );
       return parent === undefined
         ? execute()
-        : context.with(markAgentTraceContext(parent), execute);
+        : context.with(
+            markAgentTraceContext(
+              withErrorContent(
+                parent,
+                recordOutputs && effective?.action === "record" && effective.recordOutputs,
+              ),
+            ),
+            execute,
+          );
     },
   };
 
@@ -679,18 +695,6 @@ function modelSpanName(modelId: string): string {
   return `chat ${modelId}`;
 }
 
-function agentSpanName(agentName: string | undefined): string {
-  return agentName === undefined ? "invoke_agent" : `invoke_agent ${agentName}`;
-}
-
 function errorText(error: unknown): unknown {
   return error instanceof Error ? error.message : error;
-}
-
-function recordError(span: Span, error: unknown): void {
-  span.setAttribute("error.type", error instanceof Error ? error.name || "Error" : "_OTHER");
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

@@ -83,7 +83,8 @@ payload fields are never projected.
 
 The built-in OpenTelemetry provider maps each pair to an
 `agent.channel.delivery` consumer span. When the delivery starts a turn, the
-span begins that activation trace and parents its `invoke_agent` span. When
+delivery span is a child of that turn's `invoke_agent` activation. Multiple
+deliveries attach to the same activation without changing its identity. When
 `traceChannelRequests: true` creates an inbound HTTP server span, the delivery
 span links to it with `eve.link.type=channel.request` rather than using the
 short-lived request span as its parent.
@@ -111,7 +112,7 @@ The built-in OpenTelemetry provider preserves each span's OTel name and adds
 | `invoke_agent weather`                                                                                             | `invoke_agent`    | `invoke_agent weather` |
 | `execute_tool search`                                                                                              | `execute_tool`    | `execute_tool search`  |
 | `chat <model>`                                                                                                     | `chat`            | `chat <model>`         |
-| `agent.session`, `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
+| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
 
 These attributes apply to eve-owned spans in local tracing and the
 [instrumentation provider layout](./instrumentation-providers). They do not
@@ -139,6 +140,38 @@ status; cancellation is not an error. The scalar outcome survives backends
 that discard span events, including Sentry's [direct OTLP
 intake](https://docs.sentry.io/concepts/otlp/direct/traces/). These attributes
 remain available when model and tool content is redacted.
+
+## Agent trace contract
+
+The provider layout and zero-config local tracing emit the following spans.
+The legacy `instrumentation.ts` layout still uses its authored OTel setup.
+
+| Span                     | Meaning                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `invoke_agent <agent>`   | One agent activation, or a caller dispatch marked with `agent.invocation.role=caller` |
+| `agent.step`             | One model attempt                                                                     |
+| `agent.action`           | Durable action lifecycle, including dispatch and waiting                              |
+| `execute_tool <tool>`    | In-process tool execution beneath its action                                          |
+| `agent.approval`         | Approval waiting beneath its action                                                   |
+| `agent.channel.delivery` | Processing one inbound delivery                                                       |
+| `agent.channel.request`  | Optional HTTP request span in the provider layout                                     |
+
+Session-owned spans carry `agent.trace.schema.version=4`,
+`agent.session.id`, `vercel.session_id`, and `gen_ai.conversation.id`.
+Use the caller role to distinguish dispatch spans from activations; both use
+the `invoke_agent` operation. Turn IDs such as `turn_0` are local to a session,
+so correlate turns by session ID and turn ID together.
+
+The activation owns its trace identity. Channel delivery does not allocate
+or replace that activation, and a resumed turn receives a new trace. Samplers
+see the activation name and attributes after its session coordinates are
+available. Sampling must be deterministic for the same trace and operation
+because durable reconstruction can evaluate it again.
+
+Step spans report `agent.usage.*` totals; model spans also carry
+`gen_ai.usage.*`. Do not sum both levels. Error messages and stacks count as
+output content, including errors reconstructed after a worker replacement.
+Metadata-only capture retains failure status without those details.
 
 ## Runtime context
 

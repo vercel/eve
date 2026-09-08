@@ -15,6 +15,9 @@ const log = createLogger("harness.local-trace-span-processor");
 
 const LOCAL_TRACE_SCHEMA_DIRECTORY = "v1";
 const LOCAL_TRACE_SEGMENTS_DIRECTORY = "segments";
+export const LOCAL_TRACE_PENDING_SPANS = 2048;
+export const LOCAL_TRACE_PENDING_BYTES = 8 * 1024 * 1024;
+export const LOCAL_TRACE_SEGMENT_BYTES = 1024 * 1024;
 
 function resolveLocalTraceStoreDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "traces");
@@ -40,23 +43,50 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
   readonly #appRoot: string;
   #queue = Promise.resolve();
   #reportedFailure = false;
+  #pendingBytes = 0;
+  #pendingSpans = 0;
+  #droppedSpans = 0;
+  #stopped = false;
 
   constructor(appRoot: string) {
     this.#appRoot = appRoot;
   }
 
   forceFlush(): Promise<void> {
+    if (this.#droppedSpans > 0) {
+      log.warn("local trace spans dropped at the persistence budget", {
+        droppedSpans: this.#droppedSpans,
+      });
+      this.#droppedSpans = 0;
+    }
     return this.#queue;
   }
 
   onStart(): void {}
 
   onEnd(span: unknown): void {
+    if (this.#stopped) return;
+    if (
+      this.#pendingSpans >= LOCAL_TRACE_PENDING_SPANS ||
+      this.#pendingBytes >= LOCAL_TRACE_PENDING_BYTES
+    ) {
+      this.#droppedSpans += 1;
+      return;
+    }
     if (!isReadableSpan(span)) return;
     const { spanId, traceId } = span.spanContext();
     if (!isHexId(traceId, 32) || !isHexId(spanId, 16)) return;
     const payload = JsonTraceSerializer.serializeRequest([span]);
     if (payload === undefined) return;
+    if (
+      payload.byteLength > LOCAL_TRACE_SEGMENT_BYTES ||
+      this.#pendingBytes + payload.byteLength > LOCAL_TRACE_PENDING_BYTES
+    ) {
+      this.#droppedSpans += 1;
+      return;
+    }
+    this.#pendingBytes += payload.byteLength;
+    this.#pendingSpans += 1;
 
     this.#queue = this.#queue
       .then(async () => {
@@ -69,10 +99,15 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
           this.#reportedFailure = true;
           log.warn("local trace persistence failed", { error: formatError(error) });
         }
+      })
+      .finally(() => {
+        this.#pendingBytes -= payload.byteLength;
+        this.#pendingSpans -= 1;
       });
   }
 
   shutdown(): Promise<void> {
+    this.#stopped = true;
     return this.forceFlush();
   }
 }

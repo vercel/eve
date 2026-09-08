@@ -60,6 +60,7 @@ export interface AgentInvocationTraceState extends Omit<
 > {
   readonly kind: "remote-agent-call" | "subagent-call";
   readonly parentActionCallId: string;
+  readonly recordOutputs?: boolean;
   readonly terminal?: AgentActionTraceTerminalState;
 }
 

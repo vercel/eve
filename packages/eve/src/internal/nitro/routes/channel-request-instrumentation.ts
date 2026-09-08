@@ -12,6 +12,8 @@ import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { withErrorContent } from "#tracing/error-content-context.js";
 
 /**
  * Stable tracer name for every inbound eve channel HTTP request. Kept
@@ -77,7 +79,7 @@ export async function traceChannelRequest<T extends Response>(
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
   const spanName =
     getInstrumentationRuntime()?.instrumentationProviders === true
-      ? "agent.channel.request"
+      ? AGENT_SPAN_NAMES.channelRequest
       : routeKey;
   const span = trace.getTracer(TRACER_NAME).startSpan(
     spanName,
@@ -90,7 +92,9 @@ export async function traceChannelRequest<T extends Response>(
     },
     parentContext,
   );
-  const activeContext = markAgentTraceContext(trace.setSpan(parentContext, span));
+  const activeContext = markAgentTraceContext(
+    withErrorContent(trace.setSpan(parentContext, span), false),
+  );
 
   try {
     const response = await context.with(activeContext, () => handler(span));

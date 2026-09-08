@@ -5,6 +5,8 @@ import {
   deserializeAgentTraceContextState,
   serializeAgentTraceContextState,
 } from "#tracing/agent-trace-context-codec.js";
+import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
+import { boundedTraceError } from "#tracing/bounded-error.js";
 
 /** Pure context updates also run during workflow replay; no step I/O is needed. */
 export function recordNestedAgentInvocationTerminal(input: {
@@ -32,7 +34,16 @@ export function recordNestedAgentInvocationTerminal(input: {
       ...state,
       invocations: {
         ...state.invocations,
-        [key]: { ...invocation, terminal: input.terminal },
+        [key]: {
+          ...invocation,
+          terminal: {
+            ...input.terminal,
+            error:
+              invocation.recordOutputs === true && input.terminal.error !== undefined
+                ? invocationError(input.terminal.error)
+                : undefined,
+          },
+        },
       },
     }),
   };
@@ -71,9 +82,13 @@ export function settleAgentInvocationTrace(input: {
 }
 
 export function invocationError(value: unknown): Error {
-  if (value instanceof Error) return value;
-  if (typeof value === "object" && value !== null && "message" in value) {
-    return new Error(String(value.message));
+  if (value instanceof Error) {
+    return boundedTraceError(value);
   }
-  return new Error(typeof value === "string" ? value : "Agent invocation failed.");
+  if (typeof value === "object" && value !== null && "message" in value) {
+    return new Error(truncateTelemetryText(String(value.message), 4096));
+  }
+  return new Error(
+    typeof value === "string" ? truncateTelemetryText(value, 4096) : "Agent invocation failed.",
+  );
 }

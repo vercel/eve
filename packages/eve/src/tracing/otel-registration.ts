@@ -5,6 +5,7 @@ import {
   metrics,
   propagation,
   trace,
+  SpanKind,
   type Context,
 } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -16,6 +17,10 @@ import {
 
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelPipeline } from "#tracing/otel-declaration.js";
+import {
+  agentInvocationSpanName,
+  type AgentSamplingOperation,
+} from "#tracing/agent-span-contract.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
@@ -198,7 +203,7 @@ export function registerOtelPipeline(input: {
       await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
     },
     idGenerator,
-    samplesTrace: (traceId) => samplerAdmitsTrace(idGenerator, traceId),
+    samplesTrace: (traceId, operation) => samplerAdmitsTrace(idGenerator, traceId, operation),
     shutdown: async () => {
       // Stop auto-instrumentations first so nothing records into providers
       // that are about to shut down.
@@ -213,13 +218,21 @@ export interface RegisteredOtelPipeline {
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
   /** Whether the installed sampler would record a trace with this id. */
-  readonly samplesTrace: (traceId: string) => boolean;
+  readonly samplesTrace: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
 
-function samplerAdmitsTrace(idGenerator: AgentSpanIdGenerator, traceId: string): boolean {
+function samplerAdmitsTrace(
+  idGenerator: AgentSpanIdGenerator,
+  traceId: string,
+  operation: AgentSamplingOperation = { name: agentInvocationSpanName(undefined) },
+): boolean {
   const probe = idGenerator.withTraceId(traceId, () =>
-    trace.getTracer("eve.registration").startSpan(REGISTRATION_SPAN_NAME, { root: true }),
+    trace.getTracer("eve.registration").startSpan(operation.name, {
+      attributes: operation.attributes,
+      kind: SpanKind.INTERNAL,
+      root: true,
+    }),
   );
   return (probe.spanContext().traceFlags & 1) === 1;
 }
@@ -315,8 +328,9 @@ function isRegistrationSpan(span: unknown): boolean {
   return (
     typeof span === "object" &&
     span !== null &&
-    "name" in span &&
-    span.name === REGISTRATION_SPAN_NAME
+    (("name" in span && span.name === REGISTRATION_SPAN_NAME) ||
+      ("instrumentationScope" in span &&
+        (span.instrumentationScope as { name?: string } | undefined)?.name === "eve.registration"))
   );
 }
 

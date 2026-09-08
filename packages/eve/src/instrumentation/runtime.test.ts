@@ -741,7 +741,7 @@ describe("initializeSessionInstrumentation", () => {
     });
   }
 
-  it("marks the seed unsampled when the installed sampler drops the trace", () => {
+  it("defers sampler admission until activation metadata is available", () => {
     const samplesTrace = vi.fn(() => false);
     registerSeedRuntime({ samplesTrace });
     const ctx = createContext();
@@ -749,9 +749,9 @@ describe("initializeSessionInstrumentation", () => {
     initializeSessionInstrumentation({ agentName: "test-agent", ctx });
 
     const seed = ctx.get(SessionTraceSeedKey);
-    expect(seed?.traceFlags).toBe(0);
+    expect(seed?.traceFlags).toBe(1);
     expect(seed?.decision).toMatchObject({ action: "record" });
-    expect(samplesTrace).toHaveBeenCalledExactlyOnceWith(seed?.traceId);
+    expect(samplesTrace).not.toHaveBeenCalled();
   });
 
   it("keeps the seed sampled when the sampler admits the trace", () => {

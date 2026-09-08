@@ -59,7 +59,7 @@ describe("summarizeLocalTrace", () => {
           "agent.model.id": "gpt-5",
           "agent.usage.input_tokens": 1000,
           "agent.usage.output_tokens": 100,
-          "gen_ai.usage.cache_read.input_tokens": 800,
+          "agent.usage.cache_read_tokens": 800,
           "gen_ai.usage.cost": 0.01,
         },
       }),

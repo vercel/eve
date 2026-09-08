@@ -15,11 +15,15 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
+import { withErrorContent } from "#tracing/error-content-context.js";
+import { createLogger, logError } from "#internal/logging.js";
 
 const require = createRequire(import.meta.url);
 const authoredApi = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
 
 afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   authoredApi.context.disable();
   authoredApi.metrics.disable();
   authoredApi.propagation.disable();
@@ -33,6 +37,85 @@ afterEach(() => {
 });
 
 describe("registerOtelPipeline", () => {
+  it("samples using the real activation name and attributes without exporting probes", async () => {
+    const exporter = new InMemorySpanExporter();
+    const sampler = {
+      shouldSample: (
+        _context: unknown,
+        _traceId: string,
+        name: string,
+        _kind: unknown,
+        attributes: Record<string, unknown>,
+      ) => ({
+        decision:
+          name === "invoke_agent researcher" && attributes["agent.session.id"] === "session-1"
+            ? 2
+            : 0,
+      }),
+      toString: () => "activation-sampler",
+    };
+    const runtime = registerOtelPipeline({
+      pipeline: { sampler, spanProcessors: [new SimpleSpanProcessor(exporter)] },
+      serviceName: "researcher",
+    });
+    const operation = {
+      name: "invoke_agent researcher",
+      attributes: { "agent.session.id": "session-1" },
+    };
+    expect(runtime.samplesTrace("a".repeat(32), operation)).toBe(true);
+    expect(
+      runtime.samplesTrace("b".repeat(32), {
+        ...operation,
+        attributes: { "agent.session.id": "other" },
+      }),
+    ).toBe(false);
+    runtimeTrace
+      .getTracer("eve.agent")
+      .startSpan(operation.name, { attributes: operation.attributes, root: true })
+      .end();
+    await runtime.forceFlush();
+    expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual([operation.name]);
+    await runtime.shutdown();
+  });
+
+  it.each(["traceidratio", "parentbased_traceidratio"] as const)(
+    "honors the configured %s root ratio",
+    async (sampler) => {
+      vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "0");
+      const runtime = registerOtelPipeline({
+        pipeline: { sampler, spanProcessors: [] },
+        serviceName: "test",
+      });
+      expect(runtime.samplesTrace("a".repeat(32), { name: "invoke_agent test" })).toBe(false);
+      await runtime.shutdown();
+    },
+  );
+
+  it("keeps logger-to-span error details behind the active output policy", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const exporter = new InMemorySpanExporter();
+    const runtime = registerOtelPipeline({
+      pipeline: { spanProcessors: [new SimpleSpanProcessor(exporter)] },
+      serviceName: "test",
+    });
+    for (const allowed of [false, true]) {
+      const span = runtimeTrace.getTracer("eve.agent").startSpan(`logger-${allowed}`);
+      const active = withErrorContent(runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, span), allowed);
+      await runtimeContext.with(active, async () => {
+        logError(createLogger("test"), "operation failed", new Error("sensitive payload"));
+      });
+      span.end();
+    }
+    await runtime.forceFlush();
+    const [privateSpan, publicSpan] = exporter.getFinishedSpans();
+    expect(privateSpan?.status.code).toBe(2);
+    expect(privateSpan?.status.message).toBeUndefined();
+    expect(privateSpan?.events).toEqual([]);
+    expect(publicSpan?.status.message).toContain("sensitive payload");
+    expect(publicSpan?.events[0]?.attributes?.["exception.message"]).toContain("sensitive payload");
+    await runtime.shutdown();
+  });
+
   it("delegates an authored tracer cached before registration", async () => {
     const authoredTracer = authoredApi.trace.getTracer("authored");
     expect(authoredTracer.startSpan("before-registration").isRecording()).toBe(false);

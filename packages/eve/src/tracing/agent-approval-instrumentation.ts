@@ -1,7 +1,5 @@
 import {
   ROOT_CONTEXT,
-  SpanStatusCode,
-  type Span,
   type SpanContext,
   type Tracer,
   trace,
@@ -17,6 +15,8 @@ import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -94,7 +94,7 @@ export function createAgentApprovalInstrumentation(input: {
       input.idGenerator.deriveSpanId(`approval:${event.idempotencyKey}`),
       () =>
         input.tracer.startSpan(
-          "agent.approval",
+          AGENT_SPAN_NAMES.approval,
           {
             attributes: {
               "agent.action.call_id": state.actionCallId,
@@ -184,11 +184,4 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     stepIndex: state["stepIndex"],
     turnId: state["turnId"],
   };
-}
-
-function recordError(span: Span, error: unknown): void {
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

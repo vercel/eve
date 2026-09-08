@@ -58,6 +58,23 @@ export function prepareAgentInvocationTrace(input: {
   const turnId = taskAction?.turnId ?? input.turnId;
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);
   const liveAudience = normalizeChannelAudience(input.channelMetadata?.metadata.audience);
+  const outerTrace =
+    parentActionCallId === undefined
+      ? parentTurnContext
+      : readActionTraceContext(
+          input.serializedContext,
+          input.sessionId,
+          turnId,
+          parentActionCallId,
+        );
+  const outputDecision =
+    outerTrace?.decision === undefined
+      ? undefined
+      : applyLiveDeliveryAudienceCeiling(
+          outerTrace.decision,
+          liveAudience,
+          outerTrace.forwardedTracePolicy,
+        );
   const serializedContext =
     parentActionCallId === undefined
       ? input.serializedContext
@@ -74,6 +91,7 @@ export function prepareAgentInvocationTrace(input: {
             kind: input.invocation.kind,
             name: input.invocation.name,
             outerCallId: parentActionCallId,
+            recordOutputs: outputDecision?.action === "record" && outputDecision.recordOutputs,
             serializedContext: input.serializedContext,
             sessionId: input.sessionId,
             spanId: deriveAgentActionSpanId(input.sessionId, turnId, input.invocation.callId),
@@ -86,7 +104,11 @@ export function prepareAgentInvocationTrace(input: {
     input.invocation.callId,
   );
   const storedParentTraceContext =
-    callerTraceContext ?? (parentActionCallId === undefined ? parentTurnContext : undefined);
+    callerTraceContext ??
+    (parentActionCallId === undefined ||
+    (parentTurnContext !== undefined && (parentTurnContext.traceFlags & 1) === 0)
+      ? parentTurnContext
+      : undefined);
   const forwardedTracePolicy = readForwardedTraceAssertion(
     (storedParentTraceContext ?? parentTurnContext)?.forwardedTracePolicy,
   );

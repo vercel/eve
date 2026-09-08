@@ -72,15 +72,19 @@ export function createLocalTracesProcessor(
   // before this worker adds to it.
   requestPrune();
 
+  const forceFlush = async (): Promise<void> => {
+    await processor.forceFlush();
+    if (processor.releaseCompletedTraces()) requestPrune();
+  };
   return {
-    forceFlush: () => processor.forceFlush(),
+    forceFlush,
     onEnd: (span) => processor.onEnd(span),
     onStart: (span, parentContext) => processor.onStart(span, parentContext),
     async releaseSession(sessionId) {
       // Settle pending segment writes before dropping liveness: a sweep already
       // running reads the same live set, so releasing first would expose the
       // trace to eviction while it is still being written.
-      await processor.forceFlush();
+      await forceFlush();
       if (!processor.releaseSession(sessionId)) return false;
       requestPrune();
       return true;

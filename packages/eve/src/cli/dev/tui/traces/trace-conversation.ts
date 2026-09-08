@@ -9,6 +9,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
+import { agentTurnIdentity, isAgentCallerSpan } from "#tracing/agent-span-contract.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -62,7 +63,7 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const subagents = new Map<string, ConversationSubagent>();
   for (const span of trace.spans) {
     if (!isAgentTurnSpan(span)) continue;
-    const turnId = stringAttribute(span, "agent.turn.id");
+    const turnId = agentTurnIdentity(span);
     const subagent = turnSubagent(span, byId);
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
@@ -185,7 +186,7 @@ function subagentFor(
 ): ConversationSubagent | undefined {
   let current: LocalTraceSpan | undefined = span;
   while (current !== undefined) {
-    const turnId = stringAttribute(current, "agent.turn.id");
+    const turnId = agentTurnIdentity(current);
     if (turnId !== undefined) return subagents.get(turnId);
     current = current.parentSpanId === undefined ? undefined : byId.get(current.parentSpanId);
   }
@@ -198,7 +199,8 @@ function turnSubagent(
   byId: ReadonlyMap<string, LocalTraceSpan>,
 ): ConversationSubagent | undefined {
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent?.name !== "agent.action") return undefined;
+  if (parent === undefined || (parent.name !== "agent.action" && !isAgentCallerSpan(parent)))
+    return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");

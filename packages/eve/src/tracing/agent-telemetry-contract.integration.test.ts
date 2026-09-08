@@ -1,0 +1,377 @@
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { describe, expect, it } from "vitest";
+
+import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import {
+  ChannelInstrumentationKey,
+  ParentSessionKey,
+  ParentTraceContextKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import {
+  actionIdempotencyKey,
+  attemptIdempotencyKey,
+  createInstrumentationHooks,
+  inputIdempotencyKey,
+  modelCallIdempotencyKey,
+  sessionIdempotencyKey,
+  toolCallIdempotencyKey,
+  turnIdempotencyKey,
+  type InstrumentationAttemptScope,
+} from "#instrumentation/lifecycle.js";
+import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
+import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
+import {
+  assembleLocalTrace,
+  isAgentTurnSpan,
+  parseLocalTraceSegment,
+} from "#tracing/local-trace-reader.js";
+import { summarizeLocalTrace } from "#cli/commands/trace-detail.js";
+import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
+import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
+import {
+  composeSpanExportPolicies,
+  redactSpanInputs,
+  redactSpanOutputs,
+} from "#tracing/span-export-policy.js";
+
+function createRuntime() {
+  const exporter = new InMemorySpanExporter();
+  const metadata = new InMemorySpanExporter();
+  const idGenerator = new AgentSpanIdGenerator();
+  const provider = new BasicTracerProvider({
+    idGenerator,
+    spanProcessors: [
+      new SimpleSpanProcessor(exporter),
+      contentFilteringProcessor(
+        new SimpleSpanProcessor(metadata),
+        composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
+      ),
+    ],
+  });
+  const agent = createAgentOtelInstrumentation({
+    frameworkVersion: "test",
+    idGenerator,
+    recordInputs: true,
+    recordOutputs: true,
+    stateStore: new ContextAgentTraceStateStore(),
+    tracer: provider.getTracer("eve.agent"),
+  });
+  const hooks = createInstrumentationHooks([agent.hook]);
+  return {
+    ...agent,
+    hooks,
+    exporter,
+    metadata,
+    provider,
+    idGenerator,
+    ownsAgentSpans: true,
+    otelSettings: { recordInputs: true, recordOutputs: true, traceChannelRequests: false },
+    forceFlush: () => provider.forceFlush(),
+    shutdown: () => provider.shutdown(),
+  };
+}
+
+function contextFor(audience: "public" | "private") {
+  const ctx = new ContextContainer();
+  ctx.set(ChannelInstrumentationKey, { kind: "http", metadata: { audience } });
+  return ctx;
+}
+
+function scopeFor(sessionId: string, audience: "public" | "private"): InstrumentationAttemptScope {
+  return {
+    attemptId: `${sessionId}:turn_0:0:0`,
+    attemptIndex: 0,
+    channelAudience: audience,
+    functionId: sessionId,
+    sessionId,
+    rootSessionId: "parent",
+    stepIndex: 0,
+    turnId: "turn_0",
+  };
+}
+
+describe("exported agent telemetry contract", () => {
+  it.each(["public", "private"] as const)(
+    "round-trips %s channel, approval, delegated error and usage spans through the readers",
+    async (audience) => {
+      const runtime = createRuntime();
+      let parent = contextFor(audience);
+      const scope = scopeFor("parent", audience);
+      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience });
+      const actionKey = actionIdempotencyKey("parent", "turn_0", "workflow");
+      const operation = { modelId: "test", operationId: "ai.streamText", provider: "test" };
+      const binding = bindInstrumentationRuntime(runtime, parent, {
+        agentName: "parent",
+        rootSessionId: "parent",
+        sessionId: "parent",
+      })!;
+      let dispatch: ReturnType<typeof prepareAgentInvocationTrace>;
+      await contextStorage.run(parent, async () => {
+        await binding.instrumentChannelDelivery({
+          ctx: parent,
+          agentName: "parent",
+          rootSessionId: "parent",
+          sequence: 0,
+          sessionId: "parent",
+          turnId: "turn_0",
+          delivery: {
+            kind: "deliver",
+            payloads: [{ message: "private input" }],
+            deliveryMetadata: [
+              { channelKind: "http", channelName: "web", deliveryId: "delivery", payloadIndex: 0 },
+            ],
+          },
+        });
+        await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+        await hooks.publish({
+          idempotencyKey: attemptIdempotencyKey(scope),
+          operation,
+          scope,
+          type: "step.attempt.started",
+        });
+        await hooks.publish({
+          callId: "workflow",
+          idempotencyKey: actionKey,
+          input: { secret: "private input" },
+          isWorkflowTool: true,
+          kind: "tool-call",
+          name: "coordinate",
+          scope,
+          type: "action.started",
+        });
+        await hooks.publish({
+          callId: "workflow",
+          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
+          input: { secret: "private input" },
+          toolName: "coordinate",
+          scope,
+          type: "tool.call.started",
+        });
+        const approvalKey = inputIdempotencyKey("parent", "turn_0", "approval");
+        await hooks.publish({
+          action: { callId: "workflow", name: "coordinate" },
+          idempotencyKey: approvalKey,
+          kind: "tool-approval",
+          requestId: "approval",
+          scope,
+          type: "input.requested",
+          request: { prompt: "private approval" },
+        });
+        await hooks.publish({
+          idempotencyKey: approvalKey,
+          kind: "tool-approval",
+          outcome: "approved",
+          requestId: "approval",
+          response: { text: "private approval answer" },
+          scope,
+          type: "input.resolved",
+        });
+        dispatch = prepareAgentInvocationTrace({
+          channelMetadata: parent.get(ChannelInstrumentationKey),
+          invocation: { callId: "nested", kind: "subagent-call", name: "child" },
+          ownerId: "workflow-run",
+          serializedContext: serializeContext(parent),
+          sessionId: "parent",
+          turnId: "turn_0",
+          sessionState: {
+            "eve.runtime.workflowToolRuns": [
+              {
+                callId: "workflow",
+                hookToken: "hook",
+                runId: "workflow-run",
+                toolName: "coordinate",
+              },
+            ],
+          },
+        });
+      });
+      parent = await deserializeContext(dispatch!.serializedContext);
+      const child = contextFor(audience);
+      child.set(ParentSessionKey, {
+        callId: "nested",
+        rootSessionId: "parent",
+        sessionId: "parent",
+        turn: { id: "turn_0", sequence: 0 },
+      });
+      if (dispatch!.dispatch.parentTraceContext !== undefined) {
+        child.set(ParentTraceContextKey, dispatch!.dispatch.parentTraceContext);
+        child.set(SessionTraceSeedKey, dispatch!.dispatch.parentTraceContext);
+      }
+      const childScope = scopeFor("child", audience);
+      const childHooks = runtime.hooks.forTrace!({ agentName: "child", audience });
+      await contextStorage.run(child, async () => {
+        const childBinding = bindInstrumentationRuntime(runtime, child, {
+          agentName: "child",
+          rootSessionId: "parent",
+          sessionId: "child",
+        })!;
+        await childBinding.preparePreamble({
+          sequence: 0,
+          sessionStarted: false,
+          turnId: "turn_0",
+        });
+        await childHooks.publish({
+          idempotencyKey: attemptIdempotencyKey(childScope),
+          operation,
+          scope: childScope,
+          type: "step.attempt.started",
+        });
+        const modelKey = modelCallIdempotencyKey(childScope, 0);
+        await childHooks.publish({
+          idempotencyKey: modelKey,
+          model: { modelId: "test", provider: "test" },
+          scope: childScope,
+          type: "model.call.started",
+        });
+        await childHooks.publish({
+          idempotencyKey: modelKey,
+          content: [{ type: "text", text: "private reply" }],
+          finishReason: "stop",
+          scope: childScope,
+          type: "model.call.completed",
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            inputTokenDetails: { cacheReadTokens: 4, cacheWriteTokens: 2 },
+          },
+        });
+        await childHooks.publish({
+          idempotencyKey: attemptIdempotencyKey(childScope),
+          scope: childScope,
+          type: "step.attempt.completed",
+        });
+        await childHooks.publish({
+          idempotencyKey: turnIdempotencyKey("child", "turn_0"),
+          sessionId: "child",
+          turnId: "turn_0",
+          type: "turn.completed",
+        });
+        await childHooks.publish({
+          idempotencyKey: sessionIdempotencyKey("child"),
+          sessionId: "child",
+          turnId: "turn_0",
+          type: "session.waiting",
+        });
+      });
+      const settled = settleAgentInvocationTrace({
+        serializedContext: serializeContext(parent),
+        sessionId: "parent",
+        result: {
+          callId: "nested",
+          kind: "subagent-result",
+          origin: "child",
+          subagentName: "child",
+          output: "private failure",
+          outcome: {
+            kind: "terminal",
+            result: { kind: "failed", error: { message: "private failure" } },
+            usageDelta: {
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 4,
+              cacheWriteTokens: 2,
+            },
+          },
+        },
+      });
+      if (audience === "private") expect(JSON.stringify(settled)).not.toContain("private failure");
+      parent = await deserializeContext(settled);
+      await contextStorage.run(parent, async () => {
+        await hooks.publish({
+          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
+          output: { type: "result", output: "private output" },
+          scope,
+          type: "tool.call.completed",
+        });
+        await hooks.publish({
+          idempotencyKey: actionKey,
+          outcome: "completed",
+          output: { type: "result", output: "private output" },
+          scope,
+          type: "action.completed",
+        });
+        await hooks.publish({
+          idempotencyKey: attemptIdempotencyKey(scope),
+          scope,
+          type: "step.attempt.completed",
+        });
+        await binding.instrumentChannelDelivery({
+          ctx: parent,
+          includeTurn: true,
+          outcome: "completed",
+        });
+        await hooks.publish({
+          idempotencyKey: turnIdempotencyKey("parent", "turn_0"),
+          sessionId: "parent",
+          turnId: "turn_0",
+          type: "turn.completed",
+        });
+        await hooks.publish({
+          idempotencyKey: sessionIdempotencyKey("parent"),
+          sessionId: "parent",
+          turnId: "turn_0",
+          type: "session.waiting",
+        });
+      });
+      await runtime.forceFlush();
+      const exported = runtime.exporter.getFinishedSpans();
+      const bytes = JsonTraceSerializer.serializeRequest(exported)!;
+      const traceId = exported[0]!.spanContext().traceId;
+      const parsed = parseLocalTraceSegment(new TextDecoder().decode(bytes), traceId);
+      const trace = assembleLocalTrace(traceId, parsed);
+      expect(parsed).toHaveLength(exported.length);
+      expect(
+        parsed.every((span) => Number(span.attributes["agent.trace.schema.version"]) === 4),
+      ).toBe(true);
+      expect(
+        parsed.filter((span) => span.parentSpanId === undefined).map((span) => span.name),
+      ).toEqual(["invoke_agent parent"]);
+      expect(parsed.filter(isAgentTurnSpan)).toHaveLength(2);
+      const caller = parsed.find((span) => span.attributes["agent.invocation.role"] === "caller")!;
+      const activation = parsed.find(
+        (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
+      )!;
+      expect(activation.parentSpanId).toBe(caller.spanId);
+      expect(parsed.map((span) => span.name).sort()).toEqual(
+        [
+          "agent.action",
+          "agent.approval",
+          "agent.channel.delivery",
+          "agent.step",
+          "agent.step",
+          "chat test",
+          "execute_tool coordinate",
+          "invoke_agent child",
+          "invoke_agent child",
+          "invoke_agent parent",
+        ].sort(),
+      );
+      expect(summarizeLocalTrace(parsed)).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 4,
+        cacheWriteTokens: 2,
+      });
+      const items = buildConversationItems(trace);
+      expect(items.find((item) => item.kind === "assistant")?.subagent?.name).toBe("child");
+      const metadata = new TextDecoder().decode(
+        JsonTraceSerializer.serializeRequest(runtime.metadata.getFinishedSpans())!,
+      );
+      expect(metadata).not.toContain("private ");
+      if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
+      else expect(new TextDecoder().decode(bytes)).toContain("private failure");
+      await runtime.shutdown();
+    },
+  );
+});

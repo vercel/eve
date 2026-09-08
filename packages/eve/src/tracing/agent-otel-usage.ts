@@ -2,21 +2,22 @@ import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationUsage } from "#instrumentation/lifecycle.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
 
 /** Applies eve's structural token usage attributes to an agent span. */
 export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
   if (usage.inputTokens !== undefined) {
-    span.setAttribute("agent.usage.input_tokens", usage.inputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, usage.inputTokens);
   }
   if (usage.outputTokens !== undefined) {
-    span.setAttribute("agent.usage.output_tokens", usage.outputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.outputTokens, usage.outputTokens);
   }
   const details = usage.inputTokenDetails;
   if (details?.cacheReadTokens !== undefined) {
-    span.setAttribute("agent.usage.cache_read_tokens", details.cacheReadTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheReadTokens, details.cacheReadTokens);
   }
   if (details?.cacheWriteTokens !== undefined) {
-    span.setAttribute("agent.usage.cache_write_tokens", details.cacheWriteTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheWriteTokens, details.cacheWriteTokens);
   }
 }
 
@@ -44,10 +45,10 @@ export function setAgentInvocationUsage(
 ): void {
   if (modelUsage === undefined) return;
   if (modelUsage.inputTokens !== undefined) {
-    span.setAttribute("agent.usage.input_tokens", modelUsage.inputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, modelUsage.inputTokens);
   }
   if (modelUsage.outputTokens !== undefined) {
-    span.setAttribute("agent.usage.output_tokens", modelUsage.outputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.outputTokens, modelUsage.outputTokens);
   }
 }
 

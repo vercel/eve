@@ -972,7 +972,7 @@ describe("dispatchChannelRequest tracing", () => {
     expect(parentSpanId(span!)).toBe(parentId);
   });
 
-  it("marks the span an error and records the exception once for a handler that throws", async () => {
+  it("marks failed request spans without exporting exception content", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
@@ -1000,11 +1000,12 @@ describe("dispatchChannelRequest tracing", () => {
     expect(span!.attributes["http.response.status_code"]).toBe(500);
     expect(span!.status.code).toBe(2 /* SpanStatusCode.ERROR */);
     const exceptions = span!.events.filter((event) => event.name === "exception");
-    expect(exceptions).toHaveLength(1);
+    expect(exceptions).toHaveLength(0);
+    expect(span!.status.message).toBeUndefined();
     errorSpy.mockRestore();
   });
 
-  it("records the exception and rethrows when runtime-bundle resolution fails", async () => {
+  it("records failure status and rethrows when runtime-bundle resolution fails", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockRejectedValue(new Error("bundle boom"));
 
     await expect(
@@ -1014,7 +1015,8 @@ describe("dispatchChannelRequest tracing", () => {
     const [span] = await finishedSpans();
     expect(span!.name).toBe("POST /slack");
     expect(span!.status.code).toBe(2 /* SpanStatusCode.ERROR */);
-    expect(span!.events.filter((event) => event.name === "exception")).toHaveLength(1);
+    expect(span!.events.filter((event) => event.name === "exception")).toHaveLength(0);
+    expect(span!.status.message).toBeUndefined();
     // No channel was resolved, so no channel identity is attached.
     expect(span!.attributes["eve.channel.name"]).toBeUndefined();
   });

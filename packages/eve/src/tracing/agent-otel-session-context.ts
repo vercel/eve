@@ -17,10 +17,17 @@ import {
 } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
+import {
+  agentInvocationSpanName,
+  type AgentSamplingOperation,
+} from "#tracing/agent-span-contract.js";
+import { agentActivationAttributes } from "#tracing/agent-otel-runtime-context.js";
+import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 
 interface AgentOtelSessionContextInput {
+  readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
-  readonly samplesTrace?: (traceId: string) => boolean;
+  readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly stateStore: AgentTraceStateStore;
   readonly tracePolicy?: TraceCapturePolicy;
 }
@@ -89,7 +96,7 @@ export function createAgentOtelSessionContext(
         : useInitialContext
           ? { ...session.context, isRemote: false }
           : freshTurnContext(input, event.idempotencyKey, session.decision);
-    await input.stateStore.setTurn(event.sessionId, event.turnId, {
+    const turn: AgentTurnTraceState = {
       context: turnContext,
       parentLineage: event.parentLineage ?? session.parentLineage,
       parentIsRemote:
@@ -99,14 +106,37 @@ export function createAgentOtelSessionContext(
       sequence: event.sequence,
       startTimeMs: Date.now(),
       subagentName: (event.parentLineage ?? session.parentLineage)?.subagentName,
-    });
+    };
+    if (parent === undefined && isSampledTrace(turn.context)) {
+      const agentName = session.agentName ?? turn.subagentName;
+      const sampled =
+        input.samplesTrace?.(turn.context.traceId, {
+          name: agentInvocationSpanName(agentName),
+          attributes: agentActivationAttributes({
+            agentName,
+            frameworkVersion: input.frameworkVersion,
+            sessionId: event.sessionId,
+            turnId: event.turnId,
+            turn,
+          }),
+        }) ?? true;
+      await input.stateStore.setTurn(event.sessionId, event.turnId, {
+        ...turn,
+        context: { ...turn.context, traceFlags: sampled ? 1 : 0 },
+      });
+    } else {
+      await input.stateStore.setTurn(event.sessionId, event.turnId, turn);
+    }
     if (useInitialContext) {
       await input.stateStore.setSession(event.sessionId, {
         ...session,
         initialContextUsed: true,
       });
     }
-    return portableSpanContext(turnContext, session.decision);
+    return portableSpanContext(
+      (await input.stateStore.getTurn(event.sessionId, event.turnId))!.context,
+      session.decision,
+    );
   };
 
   return { ensureSessionContext, prepareSessionTrace, prepareTurnTrace };
@@ -146,7 +176,7 @@ function initialSessionContext(
     };
   }
   const traceId = input.idGenerator.generateTraceId();
-  const sampled = decision.action === "record" && (input.samplesTrace?.(traceId) ?? true);
+  const sampled = decision.action === "record";
   return {
     isRemote: false,
     spanId: input.idGenerator.allocateSpanId(),
@@ -161,7 +191,7 @@ function freshTurnContext(
   decision: AgentSessionTraceState["decision"],
 ): SpanContext {
   const traceId = input.idGenerator.generateTraceId();
-  const sampled = decision?.action !== "drop" && (input.samplesTrace?.(traceId) ?? true);
+  const sampled = decision?.action !== "drop";
   return {
     isRemote: false,
     spanId: input.idGenerator.deriveSpanId(`turn:${idempotencyKey}`),

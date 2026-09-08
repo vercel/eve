@@ -9,6 +9,7 @@ import type {
 } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { boundedTraceError } from "#tracing/bounded-error.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
 
@@ -36,7 +37,11 @@ export function serializeAgentTraceContextState(state: AgentTraceContextState): 
           terminal:
             value.terminal === undefined
               ? undefined
-              : { ...value.terminal, error: serializeError(value.terminal.error) },
+              : {
+                  ...value.terminal,
+                  error:
+                    value.recordOutputs === true ? serializeError(value.terminal.error) : undefined,
+                },
         },
       ]),
     ),
@@ -160,6 +165,7 @@ function deserializeInvocation(value: unknown): AgentInvocationTraceState | unde
     name: action.name,
     parent: action.parent,
     parentActionCallId: value.parentActionCallId,
+    recordOutputs: value.recordOutputs === true,
     rootSessionId: action.rootSessionId,
     sessionId: action.sessionId,
     spanId: action.spanId,
@@ -238,9 +244,9 @@ function serializeSpanContext(context: SpanContext): Record<string, unknown> {
 }
 
 function serializeError(error: unknown): unknown {
-  return error instanceof Error
-    ? { message: error.message, name: error.name, stack: error.stack }
-    : undefined;
+  if (!(error instanceof Error)) return undefined;
+  const bounded = boundedTraceError(error);
+  return { message: bounded.message, name: bounded.name, stack: bounded.stack };
 }
 
 function deserializeError(value: unknown): Error | undefined {
