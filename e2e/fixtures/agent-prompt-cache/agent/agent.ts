@@ -3,6 +3,6 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eAgentConfig(),
-  reasoning: "low",
+  reasoning: "high",
   limits: { maxInputTokensPerSession: 300_000 },
 });

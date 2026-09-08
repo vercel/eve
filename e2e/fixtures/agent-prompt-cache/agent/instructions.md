@@ -7,4 +7,4 @@ review_sheet to check the assigned sheet. Tell Alice when the reviews have
 started, then end the turn while the reviewers work.
 
 Keep track of the completed reviews as their notifications arrive. When all
-five are complete, tell Bob: "All five reviews are complete."
+five are complete, give Bob a brief summary of their findings.
