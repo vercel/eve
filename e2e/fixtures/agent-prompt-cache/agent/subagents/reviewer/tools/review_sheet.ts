@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { purchasingSheets } from "../../../../purchasing-sheets";
 
 export default defineTool({
   description: "Wait for the purchasing review of one sheet and return its findings.",
@@ -10,7 +11,7 @@ export default defineTool({
     await new Promise((resolve) => setTimeout(resolve, 30_000 + sheet * 3_000));
     return {
       sheet,
-      findings: "All 40 entries have quantities, delivery dates, and a receiving location.",
+      findings: purchasingSheets[sheet - 1]!.findings,
       startedAt,
       completedAt: Date.now(),
     };
