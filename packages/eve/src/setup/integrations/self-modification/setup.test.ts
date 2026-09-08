@@ -8,7 +8,9 @@ import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
 import {
   applySelfModificationSetup,
+  prepareLocalSelfModificationSetup,
   prepareSelfModificationSetup,
+  SELF_MODIFICATION_PRODUCTION_SETUP,
   SELF_MODIFICATION_SETUP,
 } from "./setup.js";
 
@@ -45,9 +47,9 @@ function contexts(answers: Record<string, unknown>) {
 describe("self-modification integration setup", () => {
   it("keeps the default setup local without mutation", async () => {
     const effects = operations();
-    const ctx = contexts({ "self-modification-deployed": false });
+    const ctx = contexts({});
 
-    const plan = await prepareSelfModificationSetup(ctx.prepare, effects);
+    const plan = await prepareLocalSelfModificationSetup(ctx.prepare, effects);
     await expect(applySelfModificationSetup(plan, ctx.apply, effects)).resolves.toEqual({
       facts: [{ label: "Self-modification", value: "local editing" }],
     });
@@ -58,7 +60,6 @@ describe("self-modification integration setup", () => {
   it("prepares deployed configuration before applying connector effects", async () => {
     const effects = operations();
     const ctx = contexts({
-      "self-modification-deployed": true,
       "self-modification-repository-owner": "acme",
       "self-modification-repository-name": "agents",
       "self-modification-repository-directory": "apps/support",
@@ -75,6 +76,10 @@ describe("self-modification integration setup", () => {
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('repository: "github.com/acme/agents"'),
     );
+  });
+
+  it("registers the production setup separately from local setup", () => {
+    expect(SELF_MODIFICATION_PRODUCTION_SETUP.kind).toBe("self-modification-production");
   });
 
   it("describes unavailable Vercel setup without suggesting portable credentials", () => {

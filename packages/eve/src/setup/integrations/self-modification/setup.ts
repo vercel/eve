@@ -48,16 +48,6 @@ export async function prepareSelfModificationSetup(
     return { kind: "authored" };
   }
 
-  const enableDeployed = await context.asker.ask(
-    confirm({
-      key: "self-modification-deployed",
-      message: "Enable draft pull requests from deployed sessions?",
-      recommended: false,
-      required: true,
-    }),
-  );
-  if (!enableDeployed) return { kind: "local" };
-
   const detected = await operations.detectGitRepository();
   const owner = await context.asker.ask(
     text({
@@ -155,23 +145,52 @@ export async function applySelfModificationSetup(
   };
 }
 
+export async function prepareLocalSelfModificationSetup(
+  context: SetupPrepareContext,
+  operations: SelfModificationSetupOperations = defaultSelfModificationSetupOperations(
+    context.appRoot,
+  ),
+): Promise<SelfModificationSetupPlan> {
+  const existing = await operations.readConfig();
+  if (classifySelfModificationConfig(existing) === "authored") {
+    context.presenter.note(
+      `The existing ${SELF_MODIFICATION_CONFIG_PATH} contains authored configuration and was not overwritten.`,
+      "Manual update required",
+      { tone: "warning" },
+    );
+    return { kind: "authored" };
+  }
+  return { kind: "local" };
+}
+
+function describeEnvironment(environment: SetupPrepareContext["environment"]): string {
+  if (environment.vercel.kind === "available") {
+    return describeIntegrationSetupEnvironment(environment);
+  }
+  switch (environment.vercel.reason) {
+    case "logged-out":
+      return "No authenticated Vercel account found. Local editing remains available; deployed proposals require Vercel Connect.";
+    case "cli-missing":
+      return "Vercel CLI not found. Local editing remains available; deployed proposals require Vercel Connect.";
+    case "unavailable":
+      return "Could not verify the Vercel account. Local editing remains available; deployed proposals require Vercel Connect.";
+  }
+}
+
 export const SELF_MODIFICATION_SETUP = defineSetupIntegration({
   kind: "self-modification",
   label: "Self-modification",
-  hint: "Local source editing is enabled by default",
-  describeEnvironment(environment) {
-    if (environment.vercel.kind === "available") {
-      return describeIntegrationSetupEnvironment(environment);
-    }
-    switch (environment.vercel.reason) {
-      case "logged-out":
-        return "No authenticated Vercel account found. Local editing remains available; deployed proposals require Vercel Connect.";
-      case "cli-missing":
-        return "Vercel CLI not found. Local editing remains available; deployed proposals require Vercel Connect.";
-      case "unavailable":
-        return "Could not verify the Vercel account. Local editing remains available; deployed proposals require Vercel Connect.";
-    }
-  },
+  hint: "Local source editing is enabled",
+  describeEnvironment,
+  prepare: prepareLocalSelfModificationSetup,
+  apply: applySelfModificationSetup,
+});
+
+export const SELF_MODIFICATION_PRODUCTION_SETUP = defineSetupIntegration({
+  kind: "self-modification-production",
+  label: "Self-modification production",
+  hint: "Configure deployed draft pull requests",
+  describeEnvironment,
   prepare: prepareSelfModificationSetup,
   apply: applySelfModificationSetup,
 });
