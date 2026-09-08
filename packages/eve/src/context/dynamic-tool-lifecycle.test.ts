@@ -1555,9 +1555,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       "deploy",
       "labelComplete",
       (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+      owner,
     );
-    registerTestCallback("deploy", "labelDelta", (_closure, _input, partial) =>
-      String((partial as { phase: unknown }).phase),
+    registerTestCallback(
+      "deploy",
+      "labelDelta",
+      (_closure, _input, partial) => String((partial as { phase: unknown }).phase),
+      owner,
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
