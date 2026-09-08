@@ -1,10 +1,13 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
+import type { HistoryState } from "#context/keys.js";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
+  readonly historyKey?: keyof HistoryState;
 }
 
 interface CurrentMessagesOptions {
+  readonly historyState?: HistoryState;
   readonly currentTurnMessages?: readonly ModelMessage[];
   readonly projectedMessages?: readonly ModelMessage[];
 }
@@ -15,12 +18,14 @@ export function createCurrentMessages(
   options: CurrentMessagesOptions = {},
 ): {
   readonly history: readonly ModelMessage[];
+  readonly historyState: HistoryState;
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, options?: AddCurrentMessageOptions): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
+  const historyState = { ...options.historyState };
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: ModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
@@ -46,13 +51,15 @@ export function createCurrentMessages(
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
   return {
-    add(message, { cacheFriendly = true } = {}) {
+    add(message, { cacheFriendly = true, historyKey } = {}) {
+      if (historyKey !== undefined && historyState[historyKey] === message) return;
       if (cacheFriendly && canAppendUserMessages) {
         const entry = { role: "user" as const, content: message };
         nonSystemMessages.splice(userInsertionIndex, 0, entry);
         durableMessages.splice(historyInsertionIndex, 0, entry);
         userInsertionIndex += 1;
         historyInsertionIndex += 1;
+        if (historyKey !== undefined) historyState[historyKey] = message;
       } else {
         systemMessages.push({ role: "system", content: message });
       }
@@ -65,6 +72,9 @@ export function createCurrentMessages(
     },
     get history() {
       return [...durableMessages];
+    },
+    get historyState() {
+      return { ...historyState };
     },
     get systemMessages() {
       return [...systemMessages];

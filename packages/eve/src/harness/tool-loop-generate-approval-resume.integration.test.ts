@@ -12,6 +12,7 @@ import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-m
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
+  HistoryStateKey,
   SessionKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
@@ -837,12 +838,16 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
   // and the provider rejected the prompt with a tool call that had no output.
   it.each(
     [
-      { key: PendingSkillAnnouncementKey, label: "dynamic skill announcement" },
-      { key: TurnTaskStateKey, label: "task state" },
+      {
+        key: PendingSkillAnnouncementKey,
+        label: "dynamic skill announcement",
+        historyKey: "availableSkills" as const,
+      },
+      { key: TurnTaskStateKey, label: "task state", historyKey: "taskState" as const },
     ].flatMap((context) => [false, true].map((restoredAnchor) => ({ ...context, restoredAnchor }))),
   )(
     "executes the approved tool when $label is injected on the resume step (restored anchor: $restoredAnchor)",
-    async ({ key, restoredAnchor }) => {
+    async ({ key, historyKey, restoredAnchor }) => {
       const siblingCall = {
         input: { command: "whoami" },
         toolCallId: "call-sibling",
@@ -909,6 +914,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
       expect(called.filter((id) => !answered.has(id))).toEqual([]);
       expect(providerPrompt.at(-1)?.role).toBe("tool");
+      expect(ctx.get(HistoryStateKey)).toEqual({});
       expect(result.session.history.at(-1)).toMatchObject({
         content: [{ text: "The command returned /workspace.", type: "text" }],
         role: "assistant",
@@ -922,6 +928,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           (message) => message.content === runtimeContextAnnouncement,
         ),
       ).toHaveLength(1);
+      expect(ctx.get(HistoryStateKey)).toEqual({ [historyKey]: runtimeContextAnnouncement });
     },
   );
 

@@ -22,6 +22,7 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
   AuthKey,
+  HistoryStateKey,
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
@@ -590,6 +591,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         history: [],
         state: clearMemorySessionState(session.state),
       };
+      contextStorage.getStore()?.delete(HistoryStateKey);
       await emit?.(
         createContextClearedEvent({
           sequence: emissionState.sequence,
@@ -1240,6 +1242,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Persist framework announcements before the new input, or after earlier
     // tool results on a continuation, so later requests retain the full prefix.
     const currentMessages = createCurrentMessages(messages, {
+      historyState: ctx?.get(HistoryStateKey),
       currentTurnMessages: preparedTurnInput,
       projectedMessages,
     });
@@ -1247,15 +1250,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(skillAnnouncement);
+        currentMessages.add(skillAnnouncement, { historyKey: "availableSkills" });
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
-        currentMessages.add(taskState);
+        currentMessages.add(taskState, { historyKey: "taskState" });
       }
     }
     if (deliveryPolicy.instruction !== undefined) {
-      currentMessages.add(deliveryPolicy.instruction);
+      currentMessages.add(deliveryPolicy.instruction, { historyKey: "deliveryInstruction" });
     }
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
@@ -1848,7 +1851,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Handle result ------------------------------------------------------
 
-    return handleStepResult({
+    const stepResult = await handleStepResult({
       config,
       emit,
       emissionState,
@@ -1862,6 +1865,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session,
       coordinationTools: modelCallCoordinationTools,
     });
+    // The returned session now owns these messages; persist their baseline with it.
+    ctx?.set(HistoryStateKey, currentMessages.historyState);
+    return stepResult;
   }
 
   return runStep;
@@ -3250,6 +3256,7 @@ async function maybeCompact(input: {
     }
   }
 
+  contextStorage.getStore()?.delete(HistoryStateKey);
   return { compacted: true, messages, session };
 }
 

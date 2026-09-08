@@ -78,6 +78,26 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
+  it("prepares tracked announcements without advancing the recorded baseline", () => {
+    const recorded = { taskState: "working" };
+    const current = createCurrentMessages([{ role: "user", content: "working" }], {
+      historyState: recorded,
+    });
+
+    current.add("working", { historyKey: "taskState" });
+    current.add("completed", { historyKey: "taskState" });
+    current.add("completed", { historyKey: "taskState" });
+    current.add("completed", { historyKey: "availableSkills" });
+
+    expect(recorded).toEqual({ taskState: "working" });
+    expect(current.historyState).toEqual({ taskState: "completed", availableSkills: "completed" });
+    expect(current.history.map((message) => message.content)).toEqual([
+      "working",
+      "completed",
+      "completed",
+    ]);
+  });
+
   it("persists additions without storing client context or replacing projected history", () => {
     const hidden = { role: "user" as const, content: "hidden by projection" };
     const input = { role: "user" as const, content: "request" };
@@ -122,10 +142,11 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.add("task state");
+    current.add("task state", { historyKey: "taskState" });
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
+    expect(current.historyState).toEqual({});
   });
 
   it("keeps hierarchy-sensitive context in instructions when requested", () => {

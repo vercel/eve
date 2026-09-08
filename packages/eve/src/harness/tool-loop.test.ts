@@ -18,6 +18,7 @@ import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-li
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  HistoryStateKey,
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
@@ -72,6 +73,7 @@ import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -9756,11 +9758,13 @@ describe("createToolLoopHarness", () => {
     const session = createTestSession({
       history: [{ content: "old message", role: "user" }],
     });
-
-    const result = await runStep(session);
+    const ctx = new ContextContainer();
+    ctx.set(HistoryStateKey, { taskState: "old message" });
+    const result = await contextStorage.run(ctx, () => runStep(session));
 
     expect(result.next).toBeNull();
     expect(result.session).toBe(session);
+    expect(ctx.get(HistoryStateKey)).toEqual({ taskState: "old message" });
     expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
@@ -12369,7 +12373,9 @@ describe("createToolLoopHarness", () => {
         const nextState = changed
           ? "Task status: analysis completed"
           : "Task status: analysis in progress";
-        const nextContext = new ContextContainer();
+        const nextContext = await deserializeContext(
+          JSON.parse(JSON.stringify(serializeContext(ctx))),
+        );
         nextContext.set(TurnTaskStateKey, nextState);
         setupMockAgent(defaultModelResult());
         const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
@@ -12378,11 +12384,112 @@ describe("createToolLoopHarness", () => {
         expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
         expect(
           nextPrompt.filter((message) => message.content === "Task status: analysis in progress"),
-        ).toHaveLength(changed ? 1 : 2);
-        expect(nextPrompt.at(-1)).toEqual({
-          role: "user",
-          content: nextState,
-        });
+        ).toHaveLength(1);
+        expect(nextContext.get(HistoryStateKey)).toEqual({ taskState: nextState });
+        if (changed) {
+          expect(nextPrompt.at(-1)).toEqual({ role: "user", content: nextState });
+        } else {
+          expect(nextPrompt.at(-1)?.role).toBe("tool");
+        }
+      },
+    );
+
+    it("does not advance history state when the model call fails", async () => {
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      setupMockAgentError(new Error("Model unavailable"));
+
+      const failed = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Check progress." }),
+      );
+      expect(ctx.get(HistoryStateKey)).toBeUndefined();
+      expect(failed.session.history).not.toContainEqual({
+        role: "user",
+        content: "Task status: analysis in progress",
+      });
+
+      setupMockAgent(defaultModelResult());
+      const retried = await contextStorage.run(ctx, () =>
+        runStep(failed.session, { message: "Try again." }),
+      );
+      expect(retried.session.history).toContainEqual({
+        role: "user",
+        content: "Task status: analysis in progress",
+      });
+      expect(ctx.get(HistoryStateKey)).toEqual({ taskState: "Task status: analysis in progress" });
+    });
+
+    it("does not advance history state when recording the step result fails", async () => {
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskStateKey, "Task status: analysis in progress");
+      const failure = new Error("Failed to finish the turn");
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", async (event) => {
+          if (event.type === "session.waiting") throw failure;
+        }),
+      );
+      setupMockAgent(defaultModelResult());
+
+      await expect(
+        contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Check progress." })),
+      ).rejects.toBe(failure);
+      expect(getLastAgentSettings().messages).toContainEqual({
+        role: "user",
+        content: "Task status: analysis in progress",
+      });
+      expect(ctx.get(HistoryStateKey)).toBeUndefined();
+    });
+
+    it.each(["clear", "manual compaction", "automatic compaction"])(
+      "reannounces unchanged context after %s replaces history",
+      async (replacement) => {
+        const ctx = new ContextContainer();
+        const availableSkills = "Available skills\n- policy: Tenant policy";
+        const taskState = "Task status: analysis in progress";
+        ctx.set(PendingSkillAnnouncementKey, availableSkills);
+        ctx.set(TurnTaskStateKey, taskState);
+        ctx.set(TurnTaskDeliveryKey, "initiating");
+        const runStep = createToolLoopHarness(createTestConfig("conversation"));
+        setupMockAgent(defaultModelResult());
+        const first = await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "Check progress." }),
+        );
+        const expectedState = {
+          availableSkills,
+          taskState,
+          deliveryInstruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
+        };
+        expect(ctx.get(HistoryStateKey)).toEqual(expectedState);
+
+        vi.mocked(compactMessages).mockResolvedValue([
+          { role: "user", content: "Conversation summary" },
+        ]);
+        let session = first.session;
+        if (replacement === "automatic compaction") {
+          vi.mocked(shouldCompact).mockReturnValueOnce(true);
+        } else {
+          const replaceHistory = createToolLoopHarness(
+            createTestConfig("conversation", undefined, {
+              clearOnly: replacement === "clear",
+              compactOnly: replacement === "manual compaction",
+            }),
+          );
+          session = (await contextStorage.run(ctx, () => replaceHistory(session))).session;
+          expect(ctx.get(HistoryStateKey)).toBeUndefined();
+        }
+
+        setupMockAgent(defaultModelResult());
+        const next = await contextStorage.run(ctx, () =>
+          runStep(session, { message: "Continue." }),
+        );
+        for (const content of Object.values(expectedState)) {
+          expect(
+            next.session.history.filter((message) => message.content === content),
+          ).toHaveLength(1);
+        }
+        expect(ctx.get(HistoryStateKey)).toEqual(expectedState);
       },
     );
 
