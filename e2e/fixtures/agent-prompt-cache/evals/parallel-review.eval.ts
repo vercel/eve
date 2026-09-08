@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { defineEval, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { z } from "zod";
+import { purchasingSheets } from "../purchasing-sheets";
 
 const reviewSchema = z.object({
   sheet: z.number().int().min(1).max(5),
@@ -164,48 +165,10 @@ function usesMatrixModel(events: EveEvalTurn["events"]): boolean {
 }
 
 function reviewPacket(): string {
-  const products = [
-    "stackable storage boxes",
-    "recycled paper notebooks",
-    "packing tape rolls",
-    "cotton cleaning cloths",
-    "cardboard mailing tubes",
-    "adjustable shelf dividers",
-    "reusable water bottles",
-    "clipboards with covers",
-    "wooden sorting trays",
-    "coloured index cards",
-    "document folders",
-    "cork notice boards",
-    "paper label sheets",
-    "desk organisers",
-    "felt protective pads",
-    "reusable shopping bags",
-    "pencil sharpeners",
-    "spiral planning books",
-    "magnetic page markers",
-    "small parts containers",
-  ];
-  const notes = [
-    "Match the colour to the sample approved at the last purchasing meeting.",
-    "Keep the manufacturer's care instructions with the delivery paperwork.",
-    "Count the individual units before putting the outer packaging aside.",
-    "Check that the carton label and the packing slip list the same quantity.",
-    "Place the delivery on the labelled shelf beside the receiving desk.",
-    "Record any damaged packaging on the receiving form before unpacking.",
-    "Ask the receiving coordinator to confirm the preferred storage position.",
-    "Retain one sample for Bob to compare with the next scheduled delivery.",
-  ];
-  const records = Array.from({ length: 5 }, (_, sheet) =>
-    [
-      `Sheet ${sheet + 1}: receiving area ${sheet + 1}`,
-      "Entry | Product | Quantity | Unit price (cents) | Delivery date | Receiving note",
-      ...Array.from(
-        { length: 40 },
-        (_, item) =>
-          `${item + 1} | ${products[(item + sheet * 3) % products.length]} | ${12 + item * 2} | ${150 + item * 37} | October ${(item % 20) + 1} | ${notes[(item + sheet) % notes.length]}`,
-      ),
-    ].join("\n"),
-  ).join("\n\n");
-  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Each reviewer only needs its sheet number, for example: "Review sheet 1." Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${records}`;
+  const sheets = purchasingSheets
+    .map(
+      (sheet, index) => `Sheet ${index + 1}: ${sheet.title}\n${sheet.question}\n\n${sheet.notes}`,
+    )
+    .join("\n\n");
+  return `Purchasing packet ${randomUUID()}.\nAlice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Give each reviewer its sheet number and the question for that sheet. Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${sheets}`;
 }
