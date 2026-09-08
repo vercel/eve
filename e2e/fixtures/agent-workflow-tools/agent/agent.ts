@@ -8,6 +8,21 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
+  if (message.includes("private-catalog")) {
+    const result = request.toolResults.find((entry) => entry.name === "connection_search");
+    if (result === undefined) {
+      return {
+        toolCalls: [
+          {
+            name: "connection_search",
+            input: { connection: "private-catalog", keywords: "items" },
+          },
+        ],
+      };
+    }
+    return JSON.stringify(result.output);
+  }
+
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
   if (stepAuth !== null) {
     const result = request.toolResults.find((entry) => entry.name === "authorize_service");
