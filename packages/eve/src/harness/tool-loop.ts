@@ -1246,10 +1246,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined) {
-        currentMessages.add(
-          skillAnnouncement || "Available skills\nNo dynamic skills are currently available.",
-        );
+      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
+        currentMessages.add(skillAnnouncement);
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {

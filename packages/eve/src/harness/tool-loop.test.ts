@@ -12378,7 +12378,7 @@ describe("createToolLoopHarness", () => {
       },
     );
 
-    it("records removal of the last dynamic skill without dropping its earlier announcement", async () => {
+    it("skips empty skill announcements without rewriting earlier history", async () => {
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
@@ -12394,10 +12394,10 @@ describe("createToolLoopHarness", () => {
       expect(next.session.history.slice(0, first.session.history.length)).toEqual(
         first.session.history,
       );
-      expect(getLastAgentSettings().messages).toContainEqual({
-        role: "user",
-        content: "Available skills\nNo dynamic skills are currently available.",
-      });
+      expect(getLastAgentSettings().messages).toEqual([
+        ...first.session.history,
+        { role: "user", content: "Continue." },
+      ]);
     });
 
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {
