@@ -97,6 +97,45 @@ retry behavior. Best-effort activity delivery keeps its single
 `[eve:execution.activity-submit] activity sink request failed` warning and does
 not mark the active span as failed.
 
+## Exported span names and outcomes
+
+The built-in OpenTelemetry provider preserves each span's OTel name and adds
+`operation.name` and `resource.name` for Datadog's operation/resource mapping:
+
+| OTel span name                                                                                                     | `operation.name`  | `resource.name`        |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------- | ---------------------- |
+| `invoke_agent weather`                                                                                             | `invoke_agent`    | `invoke_agent weather` |
+| `execute_tool search`                                                                                              | `execute_tool`    | `execute_tool search`  |
+| `chat <model>`                                                                                                     | `chat`            | `chat <model>`         |
+| `agent.session`, `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
+
+These attributes apply to eve-owned spans in local tracing and the
+[instrumentation provider layout](./instrumentation-providers). They do not
+rename Workflow, AI SDK, or other third-party spans, or change trace IDs,
+parenting, sampling, or session grouping. Legacy `instrumentation.ts` setup
+still owns its exporter configuration and [authored trace
+hierarchy](#authored-trace-hierarchy).
+
+In Datadog APM, `operation_name:invoke_agent resource_name:"invoke_agent weather"`
+selects named agent invocations. Operation-based dashboards and monitors may
+need to replace inferred names such as `otel.span` with these explicit names.
+Keep session IDs, turn IDs, and message content in attributes, not operation or
+resource names.
+
+If an eve-owned span still appears as `otel.span`, inspect its exported OTel
+name, `operation.name`, and `resource.name` before and after any drain or
+Collector transforms. Datadog's [operation-name mapping
+guide](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/)
+describes the explicit override. Exported fields must survive the ingestion
+path; a local export does not prove that a hosted backend retained them.
+
+Agent invocation spans carry `agent.turn.outcome=completed|failed|cancelled`
+when the turn has a terminal outcome. A failed invocation also has OTel error
+status; cancellation is not an error. The scalar outcome survives backends
+that discard span events, including Sentry's [direct OTLP
+intake](https://docs.sentry.io/concepts/otlp/direct/traces/). These attributes
+remain available when model and tool content is redacted.
+
 ## Runtime context
 
 _Runtime context_ is an [AI SDK concept](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text): a user-defined object that flows through a generation lifecycle. eve exposes it through `events["step.started"]`, a callback that runs once eve has assembled the model input for an attempt and returns `{ runtimeContext }`. Because eve registers the AI SDK's OpenTelemetry integration with runtime context enabled, those returned values ride onto the model-call span and its children. The field is named `runtimeContext`, not `metadata`, because AI SDK v7 carries per-call attributes on runtime context rather than a dedicated metadata field.
@@ -156,7 +195,7 @@ ai.eve.turn  {eve.session.id}
 
 eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. The AI SDK's OpenTelemetry integration names these spans after the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so backends that understand `gen_ai.operation.name` can classify them without extra configuration. The `invoke_agent` span is named after the model; the agent name is on its `gen_ai.agent.name` attribute.
 
-This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names the span `invoke_agent <agent>` and emits no step spans. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names its invocation span `invoke_agent <agent>` and its model-attempt spans `agent.step`. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
 Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
 

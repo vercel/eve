@@ -30,6 +30,7 @@ import { createAgentActionInstrumentation } from "#tracing/agent-action-instrume
 import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-instrumentation.js";
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
+import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
@@ -224,6 +225,7 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
+              ...agentSpanNamingAttributes("agent.step"),
               ...runtimeContextAttributes(event.runtimeContext),
             },
             links:
@@ -312,6 +314,7 @@ export function createAgentOtelInstrumentation(
                   "gen_ai.agent.name": agentName,
                   "gen_ai.conversation.id": event.sessionId,
                   "gen_ai.operation.name": "invoke_agent",
+                  ...agentSpanNamingAttributes(agentSpanName(agentName), "invoke_agent"),
                 },
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,
@@ -330,6 +333,14 @@ export function createAgentOtelInstrumentation(
           setAgentInvocationUsage(span, turn.modelUsage);
           span.addEvent("turn.started", undefined, turn.startTimeMs);
           if (turn.terminal !== undefined) {
+            span.setAttribute(
+              "agent.turn.outcome",
+              turn.terminal.type === "turn.completed"
+                ? "completed"
+                : turn.terminal.type === "turn.cancelled"
+                  ? "cancelled"
+                  : "failed",
+            );
             span.addEvent(turn.terminal.type);
             if (turn.terminal.type === "turn.failed") {
               recordError(span, turn.terminal.error);
@@ -362,6 +373,7 @@ export function createAgentOtelInstrumentation(
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
+          ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
           ...runtimeContextAttributes(event.runtimeContext),
         },
       },
