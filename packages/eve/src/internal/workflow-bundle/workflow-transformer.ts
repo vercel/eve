@@ -89,16 +89,9 @@ export async function findWorkflowDirectiveFunctions(
 }
 
 export async function transformWorkflowDirectives(input: {
-  /**
-   * Authored modules keep their body in workflow mode (steps become proxies in
-   * place) and lose an eve-definer default export, so the driver never
-   * evaluates the tool definition or its schema dependencies.
-   */
+  /** Authored modules retain their body but drop the eve-definer default export. */
   authored?: boolean;
-  /**
-   * Register an authorization twin per step and route calls that pass a `WorkflowToolContext`
-   * to it. Only modules that can define workflow tools need this, never eve's own steps.
-   */
+  /** Route context-bearing calls through an authorization twin for modules that define tools. */
   authorizeSteps?: boolean;
   filename: string;
   mode: WorkflowDirectiveMode;
@@ -177,10 +170,11 @@ export async function transformWorkflowDirectives(input: {
         if (input.mode === "step") {
           hasStepRegistration = true;
           suffixes.push(`registerStepFunction(${JSON.stringify(stepId)}, ${fn.name});`);
-          if (authorizationStepId !== undefined)
+          if (authorizationStepId !== undefined) {
             suffixes.push(
               `registerStepFunction(${JSON.stringify(authorizationStepId)}, withWorkflowStepAuthorization(${fn.name}));`,
             );
+          }
         } else {
           suffixes.push(`${fn.name}.stepId = ${JSON.stringify(stepId)};`);
         }
@@ -214,35 +208,40 @@ export async function transformWorkflowDirectives(input: {
       suffixes.push(`${fn.name}.workflowId = ${JSON.stringify(workflowId)};`);
     }
   }
-
   const manifestComment = `/**__internal_workflows${JSON.stringify(manifest)}*/;`;
-  const hasWorkflowDirective = functions.some((fn) => fn.directive === "use workflow");
-
-  if (input.mode === "workflow" && !hasWorkflowDirective && input.authored !== true) {
-    return {
-      code: `${hasAuthorizationSteps ? `import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};\n` : ""}${manifestComment}\n${createWorkflowStepProxySource(input.source, ast, functions, defaultIdBase, authorizeSteps)}`,
-      workflowManifest: manifest,
-    };
+  const imports: string[] = [];
+  if (hasStepRegistration) {
+    imports.push('import { registerStepFunction } from "workflow/internal/private";');
   }
-
+  if (hasAuthorizationSteps && input.mode === "workflow") {
+    imports.push(`import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};`);
+  } else if (hasAuthorizationSteps && hasStepRegistration) {
+    imports.push(
+      `import { withWorkflowStepAuthorization } from ${JSON.stringify(stepExecutionImport)};`,
+    );
+  }
+  const prefix = [...imports, manifestComment].join("\n");
+  const hasWorkflowDirective = functions.some((fn) => fn.directive === "use workflow");
+  if (input.mode === "workflow" && !hasWorkflowDirective && input.authored !== true) {
+    const proxies = createWorkflowStepProxySource(
+      input.source,
+      ast,
+      functions,
+      defaultIdBase,
+      authorizeSteps,
+    );
+    return { code: `${prefix}\n${proxies}`, workflowManifest: manifest };
+  }
   if (input.mode === "workflow" && input.authored === true) {
     replacements.push(...removeEveDefinerDefaultExport(ast));
   }
-
   const replacedSource = applySourceReplacements(input.source, replacements);
   const transformedSource =
     input.mode === "workflow"
       ? await stripUnusedValueImports(input.filename, replacedSource)
       : replacedSource;
-  const prefix = hasStepRegistration
-    ? `import { registerStepFunction } from "workflow/internal/private";\n${hasAuthorizationSteps ? `import { withWorkflowStepAuthorization } from ${JSON.stringify(stepExecutionImport)};\n` : ""}${manifestComment}\n`
-    : `${manifestComment}\n`;
   const suffix = suffixes.length > 0 ? `\n${suffixes.join("\n")}\n` : "";
-
-  return {
-    code: `${input.mode === "workflow" && hasAuthorizationSteps ? `import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};\n` : ""}${prefix}${transformedSource}${suffix}`,
-    workflowManifest: manifest,
-  };
+  return { code: `${prefix}\n${transformedSource}${suffix}`, workflowManifest: manifest };
 }
 
 async function parseWorkflowSource(filename: string, source: string): Promise<AstProgram> {

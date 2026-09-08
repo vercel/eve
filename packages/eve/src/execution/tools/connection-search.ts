@@ -134,8 +134,9 @@ async function resolveInteractiveAuth(
   const conn = registry.getConnections().find((c) => c.connectionName === connectionName);
   if (conn === undefined) return undefined;
   const authorization = await resolveConnectionAuthorization(conn);
-  if (authorization === undefined || !supportsInteractiveAuthorization(authorization))
+  if (authorization === undefined || !supportsInteractiveAuthorization(authorization)) {
     return undefined;
+  }
   return {
     scope: conn.connectionName,
     instanceId: conn.instanceId,

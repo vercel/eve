@@ -17,7 +17,9 @@ export async function completeWorkflowStepAuthorization(
   const result = getAuthorizationResults().find(
     (result) => result.name === scoped.scope && result.instanceId === scoped.instanceId,
   );
-  if (result === undefined) return false;
+  if (result === undefined) {
+    return false;
+  }
 
   const { stepId, attempt } = getStepMetadata();
   const namespace = `eve.authorization.${stepId}.${result.attemptId}`;
@@ -35,7 +37,9 @@ export async function completeWorkflowStepAuthorization(
     }
   }
 
-  if (!(await completeScopedAuthorization(scoped))) return false;
+  if (!(await completeScopedAuthorization(scoped))) {
+    return false;
+  }
   const writer = getWritable<true>({ namespace }).getWriter();
   try {
     await writer.write(true);

@@ -95,7 +95,9 @@ export function createAuthorizationExecution(
       try {
         return await resolveScopedToken(scoped);
       } catch (error) {
-        if (!isConnectionAuthorizationRequiredError(error)) throw error;
+        if (!isConnectionAuthorizationRequiredError(error)) {
+          throw error;
+        }
         return requireAuth(scoped, error);
       }
     },
@@ -141,7 +143,9 @@ export async function handleAuthorizationError(
   error: unknown,
   options: { readonly evictToken: boolean } = { evictToken: true },
 ): Promise<AuthorizationSignal> {
-  if (!isScopedAuthorizationRequiredError(error)) throw error;
+  if (!isScopedAuthorizationRequiredError(error)) {
+    throw error;
+  }
   const { scoped } = error;
   if (error.justAuthorized) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
@@ -151,9 +155,13 @@ export async function handleAuthorizationError(
     });
   }
 
-  if (options.evictToken) await evictScopedToken(scoped);
+  if (options.evictToken) {
+    await evictScopedToken(scoped);
+  }
   const signal = await startScopedAuthorization(scoped);
-  if (signal !== undefined) return signal;
+  if (signal !== undefined) {
+    return signal;
+  }
 
   if (supportsInteractiveAuthorization(scoped.authorization)) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
@@ -181,7 +189,9 @@ function executeWithAuthorization(
 
 async function* handleIterable(output: AsyncIterable<unknown>): AsyncIterable<unknown> {
   try {
-    for await (const value of output) yield value;
+    for await (const value of output) {
+      yield value;
+    }
   } catch (error) {
     yield await handleAuthorizationError(error);
   }

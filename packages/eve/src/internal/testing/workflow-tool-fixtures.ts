@@ -67,8 +67,9 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
   const provider: AuthorizationDefinition = {
     principalType: "user",
     async getToken({ principal }) {
-      if (service !== "preauthorized" && !(service === "retry" && getStepMetadata().attempt > 1))
+      if (service !== "preauthorized" && !(service === "retry" && getStepMetadata().attempt > 1)) {
         throw new ConnectionAuthorizationRequiredError("deploy");
+      }
       return { token: `secret:${principal.type === "user" ? principal.id : "app"}` };
     },
     async startAuthorization({ principal, callbackUrl }) {
@@ -99,8 +100,9 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
     },
   };
   const { token } = await ctx.getToken(provider);
-  if (service === "retry" && getStepMetadata().attempt === 1)
+  if (service === "retry" && getStepMetadata().attempt === 1) {
     throw new Error("Transient service failure after sign-in.");
+  }
   if (service === "rejected") ctx.requireAuth(provider);
   return token.slice("secret:".length);
 }

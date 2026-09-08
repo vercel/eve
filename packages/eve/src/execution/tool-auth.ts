@@ -30,8 +30,9 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
     };
     return auth.run(() => {
       if (input.execution === "background") {
-        if (task === undefined)
+        if (task === undefined) {
           throw new Error("Background tool execution requires a task runtime.");
+        }
         return input.execute(toolInput, ctx, task);
       }
       return input.execute(toolInput, ctx, task);

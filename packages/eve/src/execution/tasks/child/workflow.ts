@@ -336,7 +336,9 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       await handleStepAuthorization(request, replyTo);
       return;
     }
-    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) {
+      return;
+    }
     if (request.kind === "authorization-request") {
       await wakeTaskAuthorizationParentStep({
         request,
@@ -357,32 +359,33 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     replyTo: string,
   ): Promise<void> {
     const event = request.event.event;
-    // A terminal task may still need to close an already-displayed auth prompt.
-    if (
-      !dispatchRejected &&
-      (!isTerminalTaskStatus(view.status) || event.type === "authorization.completed")
-    ) {
+    const closesDisplayedPrompt = event.type === "authorization.completed";
+    const canForward =
+      !dispatchRejected && (!isTerminalTaskStatus(view.status) || closesDisplayedPrompt);
+
+    if (canForward) {
       const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
-      if (requestId !== undefined) {
-        await transitionTask(
-          event.type === "authorization.required"
-            ? {
-                kind: "require-input",
-                inputRequests: [
-                  ...(view.status === "input_required" ? view.inputRequests : []),
-                  { kind: "authorization", requestId, name: event.data.name },
-                ],
-              }
-            : { kind: "answered", requestIds: [requestId] },
-        );
+      if (requestId !== undefined && event.type === "authorization.required") {
+        const existingRequests = view.status === "input_required" ? view.inputRequests : [];
+        await transitionTask({
+          kind: "require-input",
+          inputRequests: [
+            ...existingRequests,
+            { kind: "authorization", requestId, name: event.data.name },
+          ],
+        });
+      } else if (requestId !== undefined) {
+        await transitionTask({ kind: "answered", requestIds: [requestId] });
       }
+
       await wakeTaskAuthorizationParentStep({
         request,
         taskId: view.taskId,
         token: input.parentContinuationToken,
       });
     }
-    // Acknowledge intentional discards too, but never failed persistence or delivery.
+
+    // Discarded events are acknowledged too; persistence and delivery failures are not.
     await resumeHookStep(replyTo, null, { ifPresent: true });
   }
 
@@ -396,7 +399,9 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         });
       }
     }
-    for (const request of pendingTraffic.ownerRequests) await handleOwnerRequest(request);
+    for (const request of pendingTraffic.ownerRequests) {
+      await handleOwnerRequest(request);
+    }
     pendingTraffic.messages.length = 0;
     pendingTraffic.ownerRequests.length = 0;
   }

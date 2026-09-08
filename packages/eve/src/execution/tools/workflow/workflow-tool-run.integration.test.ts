@@ -227,8 +227,9 @@ describe("workflow step authorization", () => {
         const stream = captureTurnEvents(run);
         try {
           let text = "";
-          for (let i = 0; i < 5 && !text.includes("authenticatedAs"); i++)
+          for (let i = 0; i < 5 && !text.includes("authenticatedAs"); i++) {
             text += JSON.stringify(await stream.nextTurn());
+          }
           expect(text).toContain("authenticatedAs");
           expect(text).toContain("user-1");
           expect(text).not.toContain("secret:");
@@ -304,8 +305,9 @@ describe("workflow step authorization", () => {
             params: { token, attemptId: required.data.attemptId!, name: required.data.name },
           } as never);
           expect(response.status).toBe(200);
-          for (let i = 0; i < 6 && !JSON.stringify(events).includes("authenticatedAs"); i++)
+          for (let i = 0; i < 6 && !JSON.stringify(events).includes("authenticatedAs"); i++) {
             events.push(...(await stream.nextTurn()));
+          }
           expect(
             filterEventsByType(events, "authorization.completed").map(
               (event) => event.data.outcome,

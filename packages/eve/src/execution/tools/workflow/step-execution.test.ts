@@ -228,6 +228,9 @@ describe("workflow step authorization", () => {
     const pending = await runStep(execute);
     if (pending.kind !== "authorization-required") throw new Error("Expected authorization");
     const challenge = pending.signal.challenges[0]!;
+    if (challenge.attemptId === undefined) {
+      throw new Error("Expected authorization attempt id");
+    }
     expect(challenge.hookUrl).toContain("https://agent.example/agents/devbox/eve/v1/");
     expect(challenge.hookUrl).toContain("callback-user-1");
     expect(challenge.hookUrl).not.toContain("session-1");
@@ -235,7 +238,11 @@ describe("workflow step authorization", () => {
       runStep(execute, {
         ...context(),
         authorizationResults: [
-          { ...challenge, callback: { method: "GET", params: { code: "approved" } } },
+          {
+            ...challenge,
+            attemptId: challenge.attemptId,
+            callback: { method: "GET", params: { code: "approved" } },
+          },
         ],
       }),
     ).rejects.toMatchObject({

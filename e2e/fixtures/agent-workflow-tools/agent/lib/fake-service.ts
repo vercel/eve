@@ -26,7 +26,8 @@ export function fixtureAuthorizationCallback(target: string, callback: string | 
   ) {
     url.hostname = targetUrl.hostname;
   }
-  if (url.origin !== targetUrl.origin)
+  if (url.origin !== targetUrl.origin) {
     throw new Error("Expected the fixture authorization callback on this deployment");
+  }
   return url;
 }

@@ -68,14 +68,15 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         );
       } catch (error) {
         // The Workflow SDK recognizes fatal=true; preserve eve's classified error fields.
-        if (isConnectionAuthorizationFailedError(error) && !error.retryable)
+        if (isConnectionAuthorizationFailedError(error) && !error.retryable) {
           Object.assign(error, { fatal: true });
+        }
         throw error;
       }
       const remaining = context.get(PendingAuthorizationResultKey) ?? [];
       const authorized = input.authorizationResults
         .filter((result) => !remaining.includes(result))
-        .map((result) => result.attemptId!);
+        .map((result) => result.attemptId);
       return isAuthorizationSignal(output)
         ? { kind: "authorization-required", signal: output, authorized }
         : { kind: "result", output, authorized };
