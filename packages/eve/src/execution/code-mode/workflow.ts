@@ -11,7 +11,7 @@ import {
 } from "#execution/code-mode/program-step.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { adoptCodeModeStateChanges } from "#execution/code-mode/state.js";
+import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/code-mode/state.js";
 
 /**
  * Durable body behind the framework `code_mode` tool.
@@ -45,7 +45,7 @@ export async function codeModeWorkflow(
     // Calls parked together were issued together (Promise.all); settle them
     // together. Ids are assigned before the await so replay hands each call
     // the same id regardless of completion order.
-    const settling = outcome.pending.map((pending) => {
+    const settling = outcome.pending.map((pending): Promise<SettledNestedCall> => {
       if (pending.call.target === "agent" && subagentCalls++ >= program.maxSubagents) {
         return Promise.resolve({
           interrupt: pending.interrupt,
@@ -58,11 +58,34 @@ export async function codeModeWorkflow(
       const invocationId = `${ctx.callId}:${String(nested++)}`;
       return settleNestedCall(ctx, run, pending, invocationId);
     });
-    const resolutions = await Promise.all(settling);
+    const settled = await Promise.all(settling);
+    // Adopt state in pending order once the batch settles, so replay applies
+    // the same merges (and surfaces the same conflicts) regardless of which
+    // call finished first.
+    const resolutions = settled.map(({ interrupt, resolution, stateChanges }) => {
+      if (stateChanges === undefined || stateChanges.length === 0) return { interrupt, resolution };
+      try {
+        const updated = adoptCodeModeStateChanges(run, stateChanges);
+        run.serializedContext = updated.serializedContext;
+        run.sessionState = updated.sessionState;
+        return { interrupt, resolution };
+      } catch (error) {
+        return {
+          interrupt,
+          resolution: { status: "failed" as const, error: toErrorMessage(error) },
+        };
+      }
+    });
     outcome = await runCodeModeProgramStep({ ...base, resume: resolutions });
   }
   if (outcome.status === "failed") throw new Error(outcome.error);
   return outcome.output;
+}
+
+interface SettledNestedCall {
+  readonly interrupt: CodeModePendingCall["interrupt"];
+  readonly resolution: CodeModeCallResolution;
+  readonly stateChanges?: readonly CodeModeStateChange[];
 }
 
 async function settleNestedCall(
@@ -70,10 +93,7 @@ async function settleNestedCall(
   run: ReturnType<typeof readCodeModeRunContext>,
   pending: CodeModePendingCall,
   invocationId: string,
-): Promise<{
-  readonly interrupt: CodeModePendingCall["interrupt"];
-  readonly resolution: CodeModeCallResolution;
-}> {
+): Promise<SettledNestedCall> {
   const { call, interrupt, toolCallId } = pending;
   const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
   try {
@@ -94,12 +114,7 @@ async function settleNestedCall(
       toolInput: call.toolInput,
       toolName: call.toolName,
     });
-    if (stateChanges !== undefined && stateChanges.length > 0) {
-      const updated = adoptCodeModeStateChanges(run, stateChanges);
-      run.serializedContext = updated.serializedContext;
-      run.sessionState = updated.sessionState;
-    }
-    return { interrupt, resolution };
+    return { interrupt, resolution, stateChanges };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();
     return { interrupt, resolution: { status: "failed", error: toErrorMessage(error) } };

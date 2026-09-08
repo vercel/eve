@@ -35,11 +35,11 @@ export async function executeCodeModeTool(
   const stateChanges: CodeModeStateChange[] = [];
   try {
     const iterator = callbacks[Symbol.asyncIterator]();
-    const call = { ...input, authorizationHookToken: callbacks.token };
+    let call = { ...input, authorizationHookToken: callbacks.token };
     let outcome = await executeCodeModeToolStep(call);
     while (outcome.status === "authorization-required") {
       if (outcome.stateChanges !== undefined) {
-        Object.assign(call, adoptCodeModeStateChanges(call, outcome.stateChanges));
+        call = { ...call, ...adoptCodeModeStateChanges(call, outcome.stateChanges) };
         stateChanges.push(...outcome.stateChanges);
       }
       outcome = await resumeAfterAuthorization(ctx, call, iterator, outcome.challenges);
@@ -47,6 +47,8 @@ export async function executeCodeModeTool(
     stateChanges.push(...(outcome.stateChanges ?? []));
     return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
   } catch (error) {
+    // Cancellation must reach the body; only tool failures keep their captured state.
+    ctx.abortSignal.throwIfAborted();
     if (stateChanges.length === 0) throw error;
     return { status: "failed", error: toErrorMessage(error), stateChanges };
   } finally {

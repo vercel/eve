@@ -49,7 +49,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       codeModeMutableState(input.codeMode),
       codeModeMutableState(bodyInput.codeMode),
     );
-    if (stateChanges.length > 0) outcome = { ...outcome, stateChanges };
+    if (stateChanges.length > 0) outcome = { ...outcome, codeMode: { stateChanges } };
   }
 
   const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };

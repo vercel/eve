@@ -626,4 +626,76 @@ describe("nested tool state across fresh contexts", () => {
     }
     expect(current.serializedContext).not.toHaveProperty("eve.authorizationHookToken");
   });
+
+  it("merges parallel calls from one snapshot in pending order without conflicts", async () => {
+    const { resolveKey } = await import("#context/key.js");
+    const { adoptCodeModeStateChanges } = await import("#execution/code-mode/state.js");
+    const { executeTodoTool } = await import("#execution/tools/todo.js");
+    const { executeReadFileOnSandbox } = await import("#execution/sandbox/read-file.js");
+    const bundle = state.ctx!.require(BundleKey);
+    vi.spyOn(serialization, "deserializeContext").mockImplementation(async (data) => {
+      const ctx = new ContextContainer();
+      ctx.set(BundleKey, bundle);
+      for (const [name, value] of Object.entries(data)) {
+        const key = resolveKey(name);
+        if (key !== undefined) ctx.set(key, structuredClone(value));
+      }
+      return ctx;
+    });
+    const todos = [{ content: "review", priority: "high" as const, status: "pending" as const }];
+    const fs = { readTextFile: async () => "original" };
+    state.tools.set(
+      "todo",
+      definition("todo", { execute: async () => executeTodoTool({ todos }) }),
+    );
+    state.tools.set(
+      "read_file",
+      definition("read_file", {
+        execute: async () =>
+          executeReadFileOnSandbox(fs as never, { filePath: "/workspace/probe.txt" }),
+      }),
+    );
+    state.tools.set("noop_a", definition("noop_a"));
+    state.tools.set("noop_b", definition("noop_b"));
+    let current = {
+      serializedContext: serialization.serializeContext(state.ctx!),
+      sessionState: {} as never,
+    };
+    const snapshot = current;
+    const invoke = (name: string) =>
+      executeCodeModeToolStep({
+        ...snapshot,
+        authorizationHookToken: "nested-auth",
+        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
+        toolCallId: name,
+        toolInput: {},
+        toolName: name,
+      });
+
+    const batch = await Promise.all(["todo", "read_file", "noop_a", "noop_b"].map(invoke));
+    expect(batch.map((outcome) => outcome.status)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+      "completed",
+    ]);
+    // Plain tools must not surface framework-internal context churn as state.
+    expect(batch[2]).not.toHaveProperty("stateChanges");
+    expect(batch[3]).not.toHaveProperty("stateChanges");
+    for (const outcome of batch) {
+      current = adoptCodeModeStateChanges(current, outcome.stateChanges ?? []) as typeof current;
+    }
+
+    state.tools.set("todo", definition("todo", { execute: async () => executeTodoTool({}) }));
+    const later = await executeCodeModeToolStep({
+      ...current,
+      authorizationHookToken: "nested-auth",
+      event: { sequence: 1, stepIndex: 2, turnId: "turn" },
+      toolCallId: "later",
+      toolInput: {},
+      toolName: "todo",
+    });
+    expect(later).toMatchObject({ status: "completed", output: { todos } });
+    expect(JSON.stringify(current.serializedContext)).toContain("/workspace/probe.txt");
+  });
 });

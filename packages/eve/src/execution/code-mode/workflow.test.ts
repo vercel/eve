@@ -96,6 +96,37 @@ describe("codeModeWorkflow", () => {
     });
   });
 
+  it("applies batch state in pending order so the same call conflicts regardless of finish order", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("tool", "first", {}), call("tool", "second", {})))
+      .mockResolvedValueOnce(completed("done"));
+    const change = (after: string) => [
+      { path: ["serializedContext", "todo"], before: undefined, after },
+    ];
+    let releaseFirst: () => void = () => {};
+    executeTool
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () =>
+              resolve({ status: "completed", output: "first", stateChanges: change("from-first") });
+          }),
+      )
+      .mockImplementationOnce(async () => {
+        queueMicrotask(releaseFirst);
+        return { status: "completed", output: "second", stateChanges: change("from-second") };
+      });
+
+    await codeModeWorkflow(program, context());
+
+    const resume = runProgram.mock.calls[1]?.[0].resume;
+    expect(resume[0].resolution).toEqual({ status: "completed", output: "first" });
+    expect(resume[1].resolution).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("CODE_MODE_STATE_CONFLICT"),
+    });
+  });
+
   it("counts failed calls and continuations against one budget across resumes", async () => {
     runProgram
       .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "first" })))

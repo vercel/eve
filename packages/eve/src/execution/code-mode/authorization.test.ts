@@ -299,6 +299,24 @@ describe("code mode authorization", () => {
     });
   });
 
+  it("propagates cancellation even after the tool captured state changes", async () => {
+    hook([]);
+    mocks.execute.mockResolvedValueOnce({
+      status: "authorization-required",
+      challenges: [challenge()],
+      stateChanges: [
+        { path: ["serializedContext", "progress"], before: undefined, after: "saved" },
+      ],
+    });
+    const controller = new AbortController();
+    const work = executeCodeModeTool(context(controller.signal), input);
+    const rejected = expect(work).rejects.toThrow("cancelled");
+    await vi.waitFor(() => expect(mocks.publish).toHaveBeenCalledOnce());
+    controller.abort(new Error("cancelled"));
+    await rejected;
+    expect(mocks.execute).toHaveBeenCalledOnce();
+  });
+
   it("settles the authorization event if restoring the resumed tool fails", async () => {
     hook([callback()]);
     mocks.execute

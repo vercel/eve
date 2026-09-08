@@ -27,12 +27,14 @@ describe("Code Mode outcomes in the parent", () => {
             output: "answer",
             error: "failed",
             reason: "stop",
-            stateChanges: [{ path: ["serializedContext", "todo"], before: "old", after: "new" }],
+            codeMode: {
+              stateChanges: [{ path: ["serializedContext", "todo"], before: "old", after: "new" }],
+            },
           },
         },
       });
       expect(cursor.serializedContext).toEqual({ todo: "new", parentOnly: "keep" });
-      expect(result).not.toHaveProperty("stateChanges");
+      expect(result).not.toHaveProperty("codeMode");
       expect(result).toMatchObject({ kind: "tool-result", toolName: "code_mode" });
     },
   );
@@ -45,7 +47,9 @@ describe("Code Mode outcomes in the parent", () => {
       result: {
         status: "completed" as const,
         output: "answer",
-        stateChanges: [{ path: ["serializedContext", "todo"], before: "stale", after: "new" }],
+        codeMode: {
+          stateChanges: [{ path: ["serializedContext", "todo"], before: "stale", after: "new" }],
+        },
       },
     };
     expect(

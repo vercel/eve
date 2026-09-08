@@ -71,9 +71,9 @@ async function handleWorkflowToolRunOutcome(
   if (recorded?.runId !== message.from.runId) return undefined;
 
   let settledMessage = message;
-  if (recorded.toolName === "code_mode" && message.result.stateChanges !== undefined) {
+  if (message.result.codeMode !== undefined) {
     try {
-      await cursor.adopt(adoptCodeModeStateChanges(cursor, message.result.stateChanges));
+      await cursor.adopt(adoptCodeModeStateChanges(cursor, message.result.codeMode.stateChanges));
     } catch (error) {
       settledMessage = { ...message, result: { status: "failed", error: toErrorMessage(error) } };
     }

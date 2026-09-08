@@ -69,7 +69,11 @@ describe("Code Mode state reporting", () => {
           kind: "outcome",
           result: expect.objectContaining({
             status,
-            stateChanges: [{ path: ["serializedContext", "todo"], before: "old", after: "saved" }],
+            codeMode: {
+              stateChanges: [
+                { path: ["serializedContext", "todo"], before: "old", after: "saved" },
+              ],
+            },
           }),
         }),
         { ifPresent: status === "cancelled" },

@@ -53,7 +53,7 @@ it.each(["completed", "failed", "cancelled"])(
     });
     const result = await executeWorkflowBody(input, controller.signal);
     expect(result.outcome).toMatchObject({ status });
-    expect(result.outcome).not.toHaveProperty("stateChanges");
+    expect(result.outcome).not.toHaveProperty("codeMode");
     if (result.outcome.status === "completed") expect(result.outcome.output).toBe("result");
     expect(input.codeMode?.serializedContext).toEqual({ todo: "new" });
   },

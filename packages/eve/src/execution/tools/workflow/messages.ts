@@ -70,7 +70,8 @@ export type WorkflowToolRunOutcome = (
   | { readonly status: "failed"; readonly error: unknown }
   | { readonly status: "cancelled"; readonly reason?: string }
 ) & {
-  readonly stateChanges?: readonly CodeModeStateChange[];
+  /** Present only for framework `code_mode` runs, which the dispatch step starts with turn state. */
+  readonly codeMode?: { readonly stateChanges: readonly CodeModeStateChange[] };
 };
 
 export interface WorkflowToolRunReport {
