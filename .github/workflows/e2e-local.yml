@@ -154,6 +154,7 @@ jobs:
             e2e/fixtures/*/.eve/evals
             apps/fixtures/*/.eve/evals
             ${{ matrix.dir }}/.eve/traces
+            ${{ matrix.dir }}/.eve/prompt-cache
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
