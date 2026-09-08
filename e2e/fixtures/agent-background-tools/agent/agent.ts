@@ -10,6 +10,17 @@ const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
 
+  const examplePrefix = "Alice is documenting conditional delivery. Return exactly this example:\n";
+  if (message.startsWith(examplePrefix)) {
+    return message.slice(examplePrefix.length);
+  }
+  if (message === "Repeat your previous assistant response verbatim.") {
+    return (
+      [...request.messages].reverse().find((entry) => entry.role === "assistant")?.text ??
+      "No previous assistant response."
+    );
+  }
+
   if (request.userMessages.some((entry) => entry.includes(SCHEDULED))) {
     return respondScheduled(request);
   }

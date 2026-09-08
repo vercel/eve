@@ -275,30 +275,31 @@ describe("emitStreamContent empty delivery", () => {
     );
   });
 
-  it("skips delivery when the sentinel appears anywhere in the final message", async () => {
-    const emit = createEmitStub();
+  it.each([EMPTY_DELIVERY_SENTINEL, "&lt;eve-empty-delivery/&gt;"])(
+    "delivers explanations that quote %s across streamed deltas",
+    async (sentinel) => {
+      const emit = createEmitStub();
+      const deltas = ["The pending-task instruction requires `", sentinel, "` and no other text."];
+      const message = deltas.join("");
 
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          id: "text-1",
-          text: `Internal preamble ${EMPTY_DELIVERY_SENTINEL} trailing text`,
-          type: "text-delta",
-        },
-        { finishReason: "stop", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-    );
+      await emitStreamContent(
+        emit,
+        EMISSION_STATE,
+        streamOf([
+          ...deltas.map((text) => ({ id: "text-1", text, type: "text-delta" })),
+          { finishReason: "stop", type: "finish-step" },
+        ] as TextStreamPart<ToolSet>[]),
+      );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: null }),
-        type: "message.completed",
-      }),
-    );
-  });
+      const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message }),
+          type: "message.completed",
+        }),
+      );
+    },
+  );
 });
 
 describe("emitStreamContent action requests", () => {
