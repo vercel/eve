@@ -119,6 +119,35 @@ principal forwarding, and output schema. Function-valued URLs resolve when the
 dynamic event runs. Auth and headers remain lazy and resolve before each
 outbound request without entering durable workflow state.
 
+A dynamic remote subagent can also return a record of `defineRemoteAgent()`
+definitions. eve exposes one subagent tool for each record entry, named after
+the subagent file and entry key. For example, `specialists.ts` exposes
+`specialists__triage` and `specialists__review`:
+
+```ts title="agent/subagents/specialists.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      triage: defineRemoteAgent({
+        description: "Classify and route the request.",
+        url: "https://triage.example.com",
+      }),
+      review: defineRemoteAgent({
+        description: "Review the proposed response.",
+        url: "https://review.example.com",
+      }),
+    }),
+  },
+});
+```
+
+Map entries must be remote agents; local `defineAgent()` subagents remain
+one-per-directory. Each entry has an independent child session. A turn map
+replaces the resolver's complete session map for that turn, so an empty record
+hides every session-level entry from that resolver.
+
 Dynamic subagents support `session.started` and `turn.started`. A turn selection
 shadows the session selection for that turn, including when the turn handler
 returns `null`. If a resolver throws or returns an invalid definition, eve logs the
