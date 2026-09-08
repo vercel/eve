@@ -4,6 +4,7 @@ import { z } from "#compiled/zod/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { isNeverApproval } from "#tools/approval/policies.js";
+import { AGENT_TASK_RECEIPT_DESCRIPTION } from "#tools/framework/agent-contract.js";
 import {
   DEFAULT_CODE_MODE_MAX_SUBAGENTS,
   serializeCodeModeWorkflowInput,
@@ -23,7 +24,8 @@ export function codeModeBridgeRequestLimit(maxSubagents: number): number {
 }
 
 const ORCHESTRATION_INSTRUCTION =
-  "Complete the task in one execution program: keep dependent calls, loops, retries, parallel work, and final writes together. " +
+  "Use direct tools for simple operations. Use Code Mode for substantial fan-out, loops, or filtering and combining results before returning them. " +
+  "Within a program, keep related calls together. " +
   "Reuse fetched results; avoid repeated fetches and duplicate computation.";
 
 const DISCOVERY_INSTRUCTION =
@@ -31,7 +33,7 @@ const DISCOVERY_INSTRUCTION =
   "Tools marked requiresDirectCall must be called directly outside this program.";
 
 /**
- * Exposes eligible tools only through `code_mode`, with schemas loaded on demand.
+ * Keeps authored tools direct while loading dynamic tool schemas on demand.
  *
  * The tool catalog is pinned into `executeInput`, so
  * the durable body sees the same names and schemas after a resume. Nothing here
@@ -56,18 +58,28 @@ export async function applyCodeModeTool(input: {
   const modelTools: ToolSet = {};
   const toolCatalog: CodeModeToolCatalogEntry[] = [];
   for (const [name, tool] of Object.entries(input.tools)) {
+    let description = typeof tool.description === "string" ? tool.description : "";
     let target: CodeModeToolCatalogEntry["target"] = "direct";
     if (claimsForCodeMode(name, input.harnessTools)) {
       target = isCodeModeAgentTool(input.harnessTools.get(name)!) ? "agent" : "tool";
-    } else if (name !== CODE_MODE_TOOL_NAME) {
+    }
+    if (target === "agent") {
+      description = description.replace(AGENT_TASK_RECEIPT_DESCRIPTION, "").trim();
+      description +=
+        " Inside Code Mode, await this call for the child's final response, not a task receipt.";
+    }
+    if (
+      name !== CODE_MODE_TOOL_NAME &&
+      (target === "direct" || input.harnessTools.get(name)?.dynamic !== true)
+    ) {
       modelTools[name] = tool;
     }
     toolCatalog.push({
       name,
-      description: typeof tool.description === "string" ? tool.description : "",
+      description,
       inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
       outputSchema:
-        tool.outputSchema === undefined
+        target === "agent" || tool.outputSchema === undefined
           ? null
           : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
       target,

@@ -94,6 +94,28 @@ function hook(deliveries: DeliverHookPayload[]) {
 beforeEach(() => vi.resetAllMocks());
 
 describe("code mode authorization", () => {
+  it("carries context changes through an authorization retry", async () => {
+    hook([callback()]);
+    const stateChanges = [
+      { path: ["serializedContext", "progress"], before: undefined, after: "saved" },
+    ];
+    mocks.execute
+      .mockResolvedValueOnce({
+        status: "authorization-required",
+        challenges: [challenge()],
+        stateChanges,
+      })
+      .mockResolvedValueOnce({ status: "completed", output: "done" });
+    expect(await executeCodeModeTool(context(), input)).toEqual({
+      status: "completed",
+      output: "done",
+      stateChanges,
+    });
+    expect(mocks.execute.mock.calls[1]?.[0]).toMatchObject({
+      serializedContext: { progress: "saved" },
+    });
+  });
+
   it("executes an authorized call once and disposes its unused callback hook", async () => {
     const { value } = hook([]);
     mocks.execute.mockResolvedValueOnce({ status: "completed", output: "done" });

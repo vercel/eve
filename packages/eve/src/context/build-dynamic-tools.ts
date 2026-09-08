@@ -140,6 +140,7 @@ export function replayDynamicTools(
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
     } = {
+      dynamic: true,
       description: entry.description,
       execute:
         entry.execution === "background"

@@ -1,6 +1,7 @@
 import { jsonSchema, type ToolSet } from "ai";
 
-import { deserializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { diffCodeModeState, type CodeModeStateChange } from "#execution/code-mode/state.js";
 import { withContextScope } from "#context/run-step.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
@@ -87,12 +88,13 @@ export type CodeModeProgramOutcome =
   | { readonly status: "failed"; readonly error: string }
   | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
 
-export type CodeModeToolOutcome =
+export type CodeModeToolOutcome = (
   | CodeModeCallResolution
   | {
       readonly status: "authorization-required";
       readonly challenges: readonly AuthorizationChallenge[];
-    };
+    }
+) & { readonly stateChanges?: readonly CodeModeStateChange[] };
 
 /**
  * Starts the generated program, or resumes it once every parked call settled.
@@ -234,6 +236,18 @@ export async function executeCodeModeToolStep(
     messages: createExecutionHistoryView(session).initial.messages,
     toolCallId: input.toolCallId,
   } as ToolExecuteOptions;
+  const toolContext = () => {
+    const serialized = serializeContext(ctx);
+    delete serialized[AuthorizationHookTokenKey.name];
+    delete serialized[PendingAuthorizationResultKey.name];
+    return serialized;
+  };
+  const before = structuredClone({
+    serializedContext: toolContext(),
+    sandboxState: session.sandboxState,
+  });
+  let updatedSession = session;
+  let outcome: CodeModeToolOutcome;
   try {
     const scoped = await withContextScope(ctx, session, async (enriched) => {
       await rehydrateConnections();
@@ -241,17 +255,24 @@ export async function executeCodeModeToolStep(
       const output = isAsyncIterable(result) ? await lastOf(result) : result;
       return { result: output, session: enriched };
     });
+    updatedSession = scoped.session;
     const authorization = readToolInterrupt(ctx, input.toolCallId);
     if (authorization !== undefined) {
-      return {
+      outcome = {
         status: "authorization-required",
         challenges: resolveActiveAuthorizationChallenges(authorization.challenges),
       };
+    } else {
+      outcome = { status: "completed", output: parseJsonValue(scoped.result ?? null) };
     }
-    return { status: "completed", output: parseJsonValue(scoped.result ?? null) };
   } catch (error) {
-    return { status: "failed", error: toErrorMessage(error) };
+    outcome = { status: "failed", error: toErrorMessage(error) };
   }
+  const stateChanges = diffCodeModeState(before, {
+    serializedContext: toolContext(),
+    sandboxState: updatedSession.sandboxState,
+  });
+  return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
 }
 
 export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {

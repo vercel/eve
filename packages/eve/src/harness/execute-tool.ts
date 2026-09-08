@@ -21,6 +21,8 @@ export type HarnessRuntimeActionDefinition = { readonly kind: "task-control" };
  */
 export interface HarnessToolDefinition {
   readonly label?: InternalToolLabelDefinition;
+  /** Resolved from a dynamic tool provider; schemas can be discovered on demand. */
+  readonly dynamic?: boolean;
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;

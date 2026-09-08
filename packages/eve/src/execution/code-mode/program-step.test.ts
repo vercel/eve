@@ -38,7 +38,16 @@ const state = vi.hoisted(() => ({
   ctx: undefined as ContextContainer | undefined,
   tools: new Map<string, HarnessToolDefinition>(),
 }));
-vi.mock("#context/serialize.js", () => ({ deserializeContext: async () => state.ctx }));
+vi.mock("#context/serialize.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  deserializeContext: async () => state.ctx,
+  serializeContext: (ctx: ContextContainer) =>
+    Object.fromEntries(
+      [...ctx.entries()]
+        .filter(([key]) => key.name !== "test.bundle" && key.name !== "eve.connectionRegistry")
+        .map(([key, value]) => [key.name, value]),
+    ),
+}));
 vi.mock("#runtime/sessions/runtime-context-keys.js", async () => {
   const { ContextKey } = await import("#context/key.js");
   return { BundleKey: new ContextKey("test.bundle"), ChannelKey: new ContextKey("test.channel") };
@@ -537,5 +546,79 @@ describe("runCodeModeProgramStep", () => {
     const failure = Object.assign(new Error("worker failed"), { code: "RUN_ERROR" });
     vi.spyOn(sandbox, "createWorkflowSandboxTool").mockRejectedValue(failure);
     await expect(runCodeModeProgramStep(input)).rejects.toBe(failure);
+  });
+});
+
+describe("nested tool state across fresh contexts", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["todo", "file"])("preserves %s state across step boundaries", async (kind) => {
+    const { resolveKey } = await import("#context/key.js");
+    const { adoptCodeModeStateChanges } = await import("#execution/code-mode/state.js");
+    const bundle = state.ctx!.require(BundleKey);
+    vi.spyOn(serialization, "deserializeContext").mockImplementation(async (data) => {
+      const ctx = new ContextContainer();
+      ctx.set(BundleKey, bundle);
+      for (const [name, value] of Object.entries(data)) {
+        const key = resolveKey(name);
+        if (key !== undefined) ctx.set(key, structuredClone(value));
+      }
+      return ctx;
+    });
+    let current = {
+      serializedContext: serialization.serializeContext(state.ctx!),
+      sessionState: {} as never,
+    };
+    async function invoke(name: string) {
+      const outcome = await executeCodeModeToolStep({
+        ...current,
+        authorizationHookToken: "nested-auth",
+        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
+        toolCallId: name,
+        toolInput: {},
+        toolName: name,
+      });
+      current = adoptCodeModeStateChanges(current, outcome.stateChanges ?? []) as typeof current;
+      return outcome;
+    }
+    if (kind === "todo") {
+      const { executeTodoTool } = await import("#execution/tools/todo.js");
+      const todos = [{ content: "review", priority: "high" as const, status: "pending" as const }];
+      state.tools.set(
+        "write",
+        definition("write", { execute: async () => executeTodoTool({ todos }) }),
+      );
+      state.tools.set("read", definition("read", { execute: async () => executeTodoTool({}) }));
+      expect(await invoke("write")).toMatchObject({ status: "completed", output: { todos } });
+      expect(await invoke("read")).toMatchObject({ status: "completed", output: { todos } });
+    } else {
+      const { executeReadFileOnSandbox } = await import("#execution/sandbox/read-file.js");
+      const { executeWriteFileOnSandbox } = await import("#execution/sandbox/write-file.js");
+      const fs = { readTextFile: async () => "original", writeTextFile: vi.fn() };
+      state.tools.set(
+        "read_file",
+        definition("read_file", {
+          execute: async () =>
+            executeReadFileOnSandbox(fs as never, { filePath: "/workspace/probe.txt" }),
+        }),
+      );
+      state.tools.set(
+        "write_file",
+        definition("write_file", {
+          execute: async () =>
+            executeWriteFileOnSandbox(fs as never, {
+              filePath: "/workspace/probe.txt",
+              content: "updated",
+            }),
+        }),
+      );
+      expect(await invoke("read_file")).toMatchObject({ status: "completed" });
+      expect(await invoke("write_file")).toMatchObject({
+        status: "completed",
+        output: { existed: true },
+      });
+      expect(fs.writeTextFile).toHaveBeenCalledOnce();
+    }
+    expect(current.serializedContext).not.toHaveProperty("eve.authorizationHookToken");
   });
 });

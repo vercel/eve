@@ -46,7 +46,21 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   let directive = "";
   let js: string | undefined;
-  if (message.includes("CODEMODE-VISIBILITY-CHILD")) {
+  if (message.includes("CODEMODE-STATE-READ")) {
+    const result = request.toolResults.find((entry) => entry.id === "read-parent-todo");
+    return result === undefined
+      ? { toolCalls: [{ name: "todo", id: "read-parent-todo", input: {} }] }
+      : `CODEMODE-PARENT-STATE ${JSON.stringify(result.output)}`;
+  } else if (message.includes("CODEMODE-STATE-START")) {
+    directive = "CODEMODE-STATE";
+    js = [
+      'await tools.todo({ todos: [{ content: "CODEMODE-PERSISTED-TODO", priority: "high", status: "pending" }] });',
+      'await tools.bash({ command: "printf original > /tmp/code-mode-state.txt" });',
+      'await tools.read_file({ filePath: "/tmp/code-mode-state.txt" });',
+      'await tools.write_file({ filePath: "/tmp/code-mode-state.txt", content: "CODEMODE-PERSISTED-FILE" });',
+      'return { todo: await tools.todo({}), file: await tools.read_file({ filePath: "/tmp/code-mode-state.txt" }) };',
+    ].join("\n");
+  } else if (message.includes("CODEMODE-VISIBILITY-CHILD")) {
     return request.tools.some((tool) => tool.name === "code_mode" || tool.name === "Workflow")
       ? "CHILD_WRAPPER_VISIBLE"
       : "CHILD_WRAPPER_ABSENT";
@@ -108,8 +122,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     const direct = request.tools.map((tool) => tool.name).sort();
     js = [
       "const catalog = await tools.search_tools({});",
-      "const direct = catalog.filter(tool => tool.requiresDirectCall || tool.name === 'code_mode').map(tool => tool.name).sort();",
-      `const complete = JSON.stringify(direct) === JSON.stringify(${JSON.stringify(direct)});`,
+      `const direct = ${JSON.stringify(direct)};`,
+      "const complete = direct.every(name => catalog.some(tool => tool.name === name)) && catalog.filter(tool => tool.requiresDirectCall).every(tool => direct.includes(tool.name));",
       'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
       'return { complete, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
     ].join("\n");
@@ -118,8 +132,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (!request.toolResults.some((entry) => entry.name === "connection_search")) {
       return { toolCalls: [{ name: "connection_search", input: { keywords: "status" } }] };
     }
-    if (!request.tools.some((tool) => tool.name === "catalog__getStatus")) {
-      throw new Error("Eager mode hid the discovered connection tool.");
+    if (request.tools.some((tool) => tool.name === "catalog__getStatus")) {
+      throw new Error("Code Mode exposed the discovered connection tool directly.");
     }
     // The inline spec tests discovery without making an external API request.
     js =
@@ -137,6 +151,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     ].join("\n");
   } else if (message.includes("CODEMODE-SURFACE-START")) {
     const names = request.tools.map((tool) => tool.name).sort();
+    if (["shared", "discovered"].some((name) => names.includes(name))) {
+      throw new Error("Code Mode exposed an eligible dynamic tool directly.");
+    }
     return `CODEMODE-SURFACE-RESULT [${names.join(",")}]`;
   }
 

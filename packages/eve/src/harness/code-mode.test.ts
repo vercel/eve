@@ -80,6 +80,43 @@ describe("claimsForCodeMode", () => {
 });
 
 describe("applyCodeModeTool", () => {
+  it.each([false, true])(
+    "preserves direct workspace tools (approval required=%s)",
+    async (gated) => {
+      const harnessTools = new Map<string, HarnessToolDefinition>([
+        ...["bash", "read_file", "write_file", "todo", "glob", "grep", "renamed_shell"].map(
+          (name) => [name, tool(name, gated ? { approval: always() } : {})] as const,
+        ),
+        ["remote_lookup", tool("remote_lookup", { dynamic: true })],
+        [CODE_MODE_TOOL_NAME, codeModeDefinition()],
+      ]);
+      const tools = buildToolSet({ tools: harnessTools });
+      const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+      expect(Object.keys(applied.modelTools)).toEqual([
+        "bash",
+        "read_file",
+        "write_file",
+        "todo",
+        "glob",
+        "grep",
+        "renamed_shell",
+        CODE_MODE_TOOL_NAME,
+      ]);
+      expect(applied.modelTools.bash).toBe(tools.bash);
+      expect(applied.modelTools.read_file).toBe(tools.read_file);
+      const input = parseCodeModeWorkflowInput(
+        applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return 1;" }),
+      );
+      expect(input.toolCatalog).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "bash", target: gated ? "direct" : "tool" }),
+          expect.objectContaining({ name: "read_file", target: gated ? "direct" : "tool" }),
+          expect.objectContaining({ name: "remote_lookup", target: "tool" }),
+        ]),
+      );
+    },
+  );
+
   it("pins the configured subagent budget", async () => {
     const harnessTools = new Map([[CODE_MODE_TOOL_NAME, codeModeDefinition()]]);
     const applied = await applyCodeModeTool({
@@ -96,7 +133,34 @@ describe("applyCodeModeTool", () => {
     expect(codeModeBridgeRequestLimit(300)).toBeGreaterThan(300);
   });
 
-  it("hides eligible direct tools and pins the program catalog into executeInput", async () => {
+  it("describes subagents as awaited results inside programs and receipts outside", async () => {
+    const agent = {
+      ...subagent("researcher"),
+      description:
+        "Research releases. This call starts a background task and returns a task receipt immediately.",
+      outputSchema: jsonSchema({ type: "object", properties: { taskId: { type: "string" } } }),
+    };
+    const harnessTools = new Map([
+      ["researcher", agent],
+      [CODE_MODE_TOOL_NAME, codeModeDefinition()],
+    ]);
+    const tools = buildToolSet({ tools: harnessTools });
+    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    const input = parseCodeModeWorkflowInput(
+      applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return null;" }),
+    );
+    const entry = input.toolCatalog.find((entry) => entry.name === "researcher")!;
+    expect(entry.description).toContain("Research releases.");
+    expect(entry.description).toContain("child's final response");
+    expect(entry.description).not.toContain("returns a task receipt immediately");
+    expect(entry.outputSchema).toBeNull();
+    expect(applied.modelTools.researcher).toBe(tools.researcher);
+    expect(applied.modelTools.researcher?.description).toContain(
+      "returns a task receipt immediately",
+    );
+  });
+
+  it("keeps authored tools direct and pins the program catalog into executeInput", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["add", tool("add", { outputSchema: jsonSchema({ type: "number" }) })],
       ["gated", tool("gated", { approval: always() })],
@@ -111,12 +175,17 @@ describe("applyCodeModeTool", () => {
       tools,
     });
 
-    expect(Object.keys(applied.modelTools).sort()).toEqual([CODE_MODE_TOOL_NAME, "gated"]);
-    expect(applied.modelTools.add).toBeUndefined();
-    expect(applied.modelTools.researcher).toBeUndefined();
+    expect(Object.keys(applied.modelTools).sort()).toEqual([
+      "add",
+      CODE_MODE_TOOL_NAME,
+      "gated",
+      "researcher",
+    ]);
+    expect(applied.modelTools.add).toBe(tools.add);
+    expect(applied.modelTools.researcher).toBe(tools.researcher);
     expect(applied.modelTools.gated).toBe(tools.gated);
     expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain(
-      "Complete the task in one execution program",
+      "Use direct tools for simple operations.",
     );
     expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).not.toContain(
       "Prefer direct tools",
@@ -158,7 +227,7 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain('"query"');
     expect(description).toContain("substring");
     expect(description).not.toContain('"q"');
-    expect(Object.keys(applied.modelTools)).toEqual([CODE_MODE_TOOL_NAME]);
+    expect(Object.keys(applied.modelTools)).toEqual(["add", CODE_MODE_TOOL_NAME]);
     expect(description).not.toContain("Prefer direct tools");
   });
 
@@ -203,6 +272,7 @@ describe("applyCodeModeTool", () => {
       properties: { q: { type: "string" } },
     });
     expect(Object.keys(applied.modelTools)).toEqual([
+      "add",
       "gated",
       "background",
       "provider",

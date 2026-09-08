@@ -298,8 +298,18 @@ direct. Subagent tools enter the program and
 return their result when called, the same way an authored workflow tool's
 `agent()` does.
 
-Eligible tools are called only through `code_mode`. Its description lists tool
-names and discovery helpers; programs load the schemas they need on demand.
+Built-in tools, authored tools, and subagents remain directly callable and can
+also be used inside `code_mode` when eligible. Eligible tools supplied by dynamic
+providers, including discovered connection tools, are called through `code_mode`.
+Its description lists tool names and discovery helpers; programs load the schemas
+they need on demand. Prefer direct calls for simple operations and programs for
+substantial fan-out, loops, or reducing intermediate results.
+
+Nested calls preserve context updates, including todo lists and file-read records,
+for later calls and the parent session. Updates also survive a later program
+failure. Concurrent writes to the same state field fail with
+`CODE_MODE_STATE_CONFLICT` instead of overwriting newer state. Tool side effects
+already completed are not rolled back.
 The former `mode` selector is removed. Migrate either `{ mode: "eager" }` or
 `{ mode: "lazy" }` to `{}`, retaining `maxSubagents` if configured.
 
@@ -358,7 +368,7 @@ the unchanged program. Sandbox infrastructure failures retain workflow step retr
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                            |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                   |
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                              |
-| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `codeMode` groups eligible tools behind a JavaScript program; `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit.                           |
+| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `codeMode` adds programmatic tool orchestration with on-demand discovery for dynamic tools; `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit.                           |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.             |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output. |
 

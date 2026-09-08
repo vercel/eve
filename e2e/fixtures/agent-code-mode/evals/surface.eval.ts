@@ -2,16 +2,18 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "Eager exposes direct tools and subagents alongside code_mode, including dynamic tools.",
+    "Code Mode preserves direct authored tools and subagents while discovering dynamic tools lazily.",
   async test(t) {
     const turn = await t.send("CODEMODE-SURFACE-START");
     turn.expectOk();
     for (const name of [
       "code_mode",
+      "bash",
+      "read_file",
+      "write_file",
+      "todo",
       "echo",
       "marker",
-      "shared",
-      "discovered",
       "gated",
       "background",
       "connection_search",

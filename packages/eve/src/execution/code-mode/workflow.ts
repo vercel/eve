@@ -11,6 +11,7 @@ import {
 } from "#execution/code-mode/program-step.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { adoptCodeModeStateChanges } from "#execution/code-mode/state.js";
 
 /**
  * Durable body behind the framework `code_mode` tool.
@@ -85,7 +86,7 @@ async function settleNestedCall(
       );
       return { interrupt, resolution: { status: "completed", output } };
     }
-    const resolution = await executeCodeModeTool(ctx, {
+    const { stateChanges, ...resolution } = await executeCodeModeTool(ctx, {
       event: { sequence, stepIndex, turnId },
       serializedContext: run.serializedContext,
       sessionState: run.sessionState,
@@ -93,6 +94,11 @@ async function settleNestedCall(
       toolInput: call.toolInput,
       toolName: call.toolName,
     });
+    if (stateChanges !== undefined && stateChanges.length > 0) {
+      const updated = adoptCodeModeStateChanges(run, stateChanges);
+      run.serializedContext = updated.serializedContext;
+      run.sessionState = updated.sessionState;
+    }
     return { interrupt, resolution };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();

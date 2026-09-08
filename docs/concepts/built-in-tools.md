@@ -386,7 +386,9 @@ You can also add the opt-in framework tools described below.
 Enable [`experimental.codeMode`](../agent-config#other-defineagent-fields) to
 coordinate tools and subagents in one JavaScript program. `code_mode` is
 available only in the root session. Subagent calls inside its program await the
-child result; direct subagent calls return background task receipts.
+child result; direct subagent calls return background task receipts. Built-in and
+authored tools remain directly available; eligible dynamic tools use on-demand
+discovery inside the program.
 
 ## Opt-in framework tools
 

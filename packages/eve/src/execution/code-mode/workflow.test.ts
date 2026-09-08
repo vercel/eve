@@ -5,10 +5,14 @@ import type {
   CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
 import type { ToolContext } from "#tools/definition.js";
-import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 
 const runProgram = vi.fn<(...args: any[]) => Promise<CodeModeProgramOutcome>>();
-const executeTool = vi.fn<(...args: any[]) => Promise<CodeModeCallResolution>>();
+const executeTool =
+  vi.fn<
+    (
+      ...args: any[]
+    ) => ReturnType<typeof import("#execution/code-mode/authorization.js").executeCodeModeTool>
+  >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
@@ -68,6 +72,30 @@ beforeEach(() => {
 });
 
 describe("codeModeWorkflow", () => {
+  it("carries state into later calls without exposing it to the program", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("tool", "write", {})))
+      .mockResolvedValueOnce(parked(call("tool", "read", {})))
+      .mockResolvedValueOnce(completed("done"));
+    executeTool
+      .mockResolvedValueOnce({
+        status: "completed",
+        output: "written",
+        stateChanges: [
+          { path: ["serializedContext", "todo"], before: undefined, after: ["saved"] },
+        ],
+      })
+      .mockImplementationOnce(async (input) => {
+        expect(input.serializedContext).toEqual({ ctx: true, todo: ["saved"] });
+        return { status: "completed", output: "read" };
+      });
+    await codeModeWorkflow(program, context());
+    expect(runProgram.mock.calls[1]?.[0].resume[0].resolution).toEqual({
+      status: "completed",
+      output: "written",
+    });
+  });
+
   it("counts failed calls and continuations against one budget across resumes", async () => {
     runProgram
       .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "first" })))

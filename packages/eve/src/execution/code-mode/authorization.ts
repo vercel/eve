@@ -21,6 +21,7 @@ import {
 } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ToolContext } from "#tools/definition.js";
+import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/code-mode/state.js";
 
 type CodeModeToolContext = Pick<ToolContext, "abortSignal" | "callId" | "toolName">;
 
@@ -28,17 +29,26 @@ type CodeModeToolContext = Pick<ToolContext, "abortSignal" | "callId" | "toolNam
 export async function executeCodeModeTool(
   ctx: CodeModeToolContext,
   input: CodeModeToolCall,
-): Promise<CodeModeCallResolution> {
+): Promise<CodeModeCallResolution & { readonly stateChanges?: readonly CodeModeStateChange[] }> {
   const callbacks = createHook<DeliverHookPayload>();
   await claimHookOwnership(callbacks);
+  const stateChanges: CodeModeStateChange[] = [];
   try {
     const iterator = callbacks[Symbol.asyncIterator]();
     const call = { ...input, authorizationHookToken: callbacks.token };
     let outcome = await executeCodeModeToolStep(call);
     while (outcome.status === "authorization-required") {
+      if (outcome.stateChanges !== undefined) {
+        Object.assign(call, adoptCodeModeStateChanges(call, outcome.stateChanges));
+        stateChanges.push(...outcome.stateChanges);
+      }
       outcome = await resumeAfterAuthorization(ctx, call, iterator, outcome.challenges);
     }
-    return outcome;
+    stateChanges.push(...(outcome.stateChanges ?? []));
+    return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
+  } catch (error) {
+    if (stateChanges.length === 0) throw error;
+    return { status: "failed", error: toErrorMessage(error), stateChanges };
   } finally {
     await disposeHook(callbacks);
   }

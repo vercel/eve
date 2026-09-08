@@ -30,13 +30,13 @@ export function readWorkflowToolExecutorAddress(
 }
 
 /**
- * Turn state the framework `code_mode` body needs to rebuild the tool catalog
- * in its own steps. Only that body receives it; authored workflow tools stay
- * limited to `ToolContext`.
+ * Cursor shared by the workflow run and its Code Mode body. Nested calls
+ * advance it; the run reports changes even if cancellation interrupts the body.
+ * Authored workflow tools stay limited to `ToolContext`.
  */
 export interface WorkflowToolRunCodeModeContext {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
+  serializedContext: Record<string, unknown>;
+  sessionState: DurableSessionState;
 }
 
 export interface WorkflowToolRunInput {

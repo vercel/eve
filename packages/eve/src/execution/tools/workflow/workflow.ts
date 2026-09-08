@@ -9,6 +9,7 @@ import { openWorkflowToolRunControlInbox } from "#execution/tools/workflow/run-c
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
+import { codeModeMutableState, diffCodeModeState } from "#execution/code-mode/state.js";
 
 const CANCEL_GRACE = "30s";
 
@@ -17,7 +18,11 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   "use workflow";
 
   const control = openWorkflowToolRunControlInbox(input.hookToken);
-  const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
+  const bodyInput = {
+    ...input,
+    codeMode: input.codeMode === undefined ? undefined : { ...input.codeMode },
+    execution: input.execution ?? "blocking",
+  } as const;
   const from = createWorkflowBodyRef(bodyInput);
   const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
     if (outcome.status === "completed") return outcome.output;
@@ -35,6 +40,16 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       await Promise.race([settled, workflowSleep(CANCEL_GRACE)]);
       outcome = { reason: control.reason(), status: "cancelled" };
     }
+  }
+
+  // Completed nested calls update this cursor even when another call outlives
+  // the cancellation grace period and the body has not returned an outcome.
+  if (input.codeMode !== undefined && bodyInput.codeMode !== undefined) {
+    const stateChanges = diffCodeModeState(
+      codeModeMutableState(input.codeMode),
+      codeModeMutableState(bodyInput.codeMode),
+    );
+    if (stateChanges.length > 0) outcome = { ...outcome, stateChanges };
   }
 
   const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
