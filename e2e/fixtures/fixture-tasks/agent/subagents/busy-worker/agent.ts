@@ -11,13 +11,7 @@ export default defineAgent({
     if (message.includes("BUSY-WORKER-A") || message.includes("BUSY-WORKER-B")) {
       if (!request.toolResults.some((result) => result.id === "exclusivity-hold")) {
         return {
-          toolCalls: [
-            {
-              id: "exclusivity-hold",
-              input: { marker: message.includes("EXCLUSIVITY-GATE") ? "EXCLUSIVITY" : "HOLD" },
-              name: "hold",
-            },
-          ],
+          toolCalls: [{ id: "exclusivity-hold", input: { marker: "HOLD" }, name: "hold" }],
         };
       }
     }

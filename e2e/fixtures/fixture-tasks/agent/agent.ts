@@ -509,12 +509,12 @@ function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
       toolCalls: [
         {
           id: "child-task-exclusivity-send-a",
-          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-A." },
+          input: { agentId, message: "Return BUSY-WORKER-A." },
           name: "busy-worker",
         },
         {
           id: "child-task-exclusivity-send-b",
-          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-B." },
+          input: { agentId, message: "Return BUSY-WORKER-B." },
           name: "busy-worker",
         },
       ],
