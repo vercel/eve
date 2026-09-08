@@ -3,13 +3,14 @@ import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
+export const TASK_DELIVERY_INSTRUCTION_LABEL = "Background task";
 
-export const TASK_DELIVERY_INITIATING_INSTRUCTION = `Background task reporting: launch acknowledgement
+export const TASK_DELIVERY_INITIATING_INSTRUCTION = `${TASK_DELIVERY_INSTRUCTION_LABEL} reporting: launch acknowledgement
 The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists background tasks accepted so far from the current turn. They continue independently after this turn.
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_PENDING_INSTRUCTION = `Background task control: incomplete cohort
+export const TASK_DELIVERY_PENDING_INSTRUCTION = `${TASK_DELIVERY_INSTRUCTION_LABEL} control: incomplete cohort
 This framework-authored instruction overrides any earlier instruction to report, summarize, acknowledge, or otherwise handle background results.
 
 The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn. At least one of those tasks is still pending, so the combined report is not ready.
@@ -27,7 +28,7 @@ Incorrect: "Two of three tasks have completed."
 Incorrect: "Still waiting for the remaining task."
 Correct: ${EMPTY_DELIVERY_SENTINEL}`;
 
-export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
+export const TASK_DELIVERY_SETTLED_INSTRUCTION = `${TASK_DELIVERY_INSTRUCTION_LABEL} reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
 
 /** Returns model context and cohort phase for tasks started by the same parent turn as this delivery. */
 export function resolveTaskDeliveryContext(input: {

@@ -1256,9 +1256,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     if (deliveryPolicy.instruction !== undefined) {
       currentMessages.add(deliveryPolicy.instruction, {
-        label: deliveryPolicy.instruction.startsWith("Background task")
-          ? "Background task"
-          : undefined,
+        label: deliveryPolicy.historyLabel,
       });
     }
     const pendingApprovals = renderPendingApprovalsInstruction(

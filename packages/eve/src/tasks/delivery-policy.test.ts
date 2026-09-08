@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { CONDITIONAL_DELIVERY_INSTRUCTION } from "#shared/empty-delivery.js";
 import {
+  TASK_DELIVERY_INSTRUCTION_LABEL,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
@@ -24,15 +25,28 @@ describe("resolveDeliveryPolicy", () => {
       instruction,
       allowsEmptyDelivery,
     ) => {
-      expect(
-        resolveDeliveryPolicy({
-          hasScheduleProvenance,
-          hasOutputSchema: false,
-          isChild: false,
-          isFirstTurn,
-          taskDeliveryPhase,
-        }),
-      ).toEqual({ allowsEmptyDelivery, instruction });
+      const policy = resolveDeliveryPolicy({
+        hasScheduleProvenance,
+        hasOutputSchema: false,
+        isChild: false,
+        isFirstTurn,
+        taskDeliveryPhase,
+      });
+      expect(policy).toMatchObject({ allowsEmptyDelivery, instruction });
+    },
+  );
+
+  it.each(["initiating", "pending", "settled"] as const)(
+    "groups %s instructions under the task-delivery history label",
+    (taskDeliveryPhase) => {
+      const policy = resolveDeliveryPolicy({
+        hasScheduleProvenance: false,
+        hasOutputSchema: false,
+        isChild: false,
+        isFirstTurn: false,
+        taskDeliveryPhase,
+      });
+      expect(policy.historyLabel).toBe(TASK_DELIVERY_INSTRUCTION_LABEL);
     },
   );
 
@@ -62,6 +76,7 @@ describe("resolveDeliveryPolicy", () => {
       }),
     ).toEqual({
       allowsEmptyDelivery: false,
+      historyLabel: TASK_DELIVERY_INSTRUCTION_LABEL,
       instruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
     });
   });
