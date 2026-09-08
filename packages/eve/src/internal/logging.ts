@@ -366,7 +366,9 @@ function recordOnActiveSpan(message: string, fields?: LogFields): void {
 
   const error = fields?.error;
   if (!capturesErrorContent()) {
-    span.setStatus({ code: SpanStatusCode.ERROR });
+    if (error instanceof Error || isFormattedError(error)) {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+    }
     return;
   }
   if (error instanceof Error) {

@@ -545,6 +545,7 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
+      flush: actions.flushSettledInvocations,
       events: {
         ...channelDeliveries,
         "action.completed": actions.events["action.completed"],

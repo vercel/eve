@@ -22,6 +22,11 @@ export class AgentSpanIdGenerator {
     return deriveAgentSpanId(key);
   }
 
+  deriveTraceId(key: string): string {
+    const traceId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+    return /^0+$/u.test(traceId) ? "00000000000000000000000000000001" : traceId;
+  }
+
   generateSpanId(): string {
     const primed = this.#primedSpanId;
     if (primed !== undefined) {

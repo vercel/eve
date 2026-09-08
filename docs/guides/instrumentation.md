@@ -156,7 +156,7 @@ The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 | `agent.channel.delivery` | Processing one inbound delivery                          |
 | `agent.channel.request`  | Optional HTTP request span in the provider layout        |
 
-Session-owned spans carry `agent.trace.schema.version=4`,
+Schema v4 removes the session-long `agent.session` root. Session-owned spans carry `agent.trace.schema.version=4`,
 `agent.session.id`, `vercel.session_id`, and `gen_ai.conversation.id`.
 Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use
 `agent.action` with `agent.invocation.role=caller`; the built-in `agent` tool
@@ -176,10 +176,17 @@ see the activation name and attributes after its session coordinates are
 available. Sampling must be deterministic for the same trace and operation
 because durable reconstruction can evaluate it again.
 
-Step spans report `agent.usage.*` totals; model spans also carry
-`gen_ai.usage.*`. Do not sum both levels. Error messages and stacks count as
+Activation spans retain `gen_ai.usage.input_tokens` and
+`gen_ai.usage.output_tokens` alongside `agent.usage.*` totals for that activation.
+Model spans carry `gen_ai.usage.*`; step and dispatch spans report
+`agent.usage.*`. Do not sum usage across these levels.
+
+Nested dispatch spans are exported when the child settles, and their completed
+records are removed from durable state. Cancelled or abandoned dispatches retain
+their outcome without error status. Error messages and stacks on eve spans count as
 output content, including errors reconstructed after a worker replacement.
-Metadata-only capture retains failure status without those details.
+Metadata-only capture retains failure status without those details. Error logging
+outside eve's instrumented execution retains its existing exception content.
 
 ## Runtime context
 

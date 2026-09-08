@@ -83,9 +83,9 @@ export function createAgentOtelSessionContext(
     }
 
     const session = await ensureSessionContext(event);
-    const useInitialContext = event.sequence === 0 && session.initialContextUsed !== true;
+    const useInitialContext = event.sequence === 0;
     const caller = useInitialContext ? event.parentTraceContext : undefined;
-    const turnContext = useInitialContext
+    let turnContext = useInitialContext
       ? { ...session.context, isRemote: false }
       : freshTurnContext(input, event.idempotencyKey, session.decision);
     const turn: AgentTurnTraceState = {
@@ -110,23 +110,13 @@ export function createAgentOtelSessionContext(
             turn,
           }),
         }) ?? true;
-      await input.stateStore.setTurn(event.sessionId, event.turnId, {
-        ...turn,
-        context: { ...turn.context, traceFlags: sampled ? 1 : 0 },
-      });
-    } else {
-      await input.stateStore.setTurn(event.sessionId, event.turnId, turn);
+      turnContext = { ...turnContext, traceFlags: sampled ? 1 : 0 };
     }
-    if (useInitialContext) {
-      await input.stateStore.setSession(event.sessionId, {
-        ...session,
-        initialContextUsed: true,
-      });
-    }
-    return portableSpanContext(
-      (await input.stateStore.getTurn(event.sessionId, event.turnId))!.context,
-      session.decision,
-    );
+    await input.stateStore.setTurn(event.sessionId, event.turnId, {
+      ...turn,
+      context: turnContext,
+    });
+    return portableSpanContext(turnContext, session.decision);
   };
 
   return { ensureSessionContext, prepareSessionTrace, prepareTurnTrace };
@@ -165,7 +155,7 @@ function initialSessionContext(
       traceFlags: decision.action === "drop" ? 0 : handed.traceFlags,
     };
   }
-  const traceId = input.idGenerator.generateTraceId();
+  const traceId = input.idGenerator.deriveTraceId(`session:${event.sessionId}`);
   const sampled = decision.action === "record";
   return {
     isRemote: false,
@@ -180,8 +170,8 @@ function freshTurnContext(
   idempotencyKey: string,
   decision: AgentSessionTraceState["decision"],
 ): SpanContext {
-  const traceId = input.idGenerator.generateTraceId();
-  const sampled = decision?.action !== "drop";
+  const traceId = input.idGenerator.deriveTraceId(`turn:${idempotencyKey}`);
+  const sampled = decision?.action === "record";
   return {
     isRemote: false,
     spanId: input.idGenerator.deriveSpanId(`turn:${idempotencyKey}`),

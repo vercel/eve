@@ -6,7 +6,6 @@ import {
 } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
-import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
 
 export interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
@@ -43,15 +42,12 @@ export async function applyTaskAgentRequest(
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
+        serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
       return {
-        serializedContext: settleAgentInvocationTrace({
-          result: request.result,
-          serializedContext: ctx.serializedContext,
-          sessionId: ctx.sessionState.sessionId,
-        }),
+        serializedContext: settled.serializedContext,
         sessionState: settled.sessionState,
       };
     }

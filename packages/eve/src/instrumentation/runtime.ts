@@ -479,9 +479,10 @@ export function bindInstrumentationRuntime(
                   },
           });
         try {
-          return parentContext === undefined
-            ? await run()
-            : await otelContext.with(withErrorContent(parentContext, content.recordOutputs), run);
+          return await otelContext.with(
+            withErrorContent(parentContext ?? otelContext.active(), content.recordOutputs),
+            run,
+          );
         } finally {
           turnSpan?.end();
           turnSpan = undefined;
@@ -604,7 +605,9 @@ function allocateSessionTraceSeed(input: {
     const idGenerator = input.runtime?.idGenerator ?? new AgentSpanIdGenerator();
     return {
       decision,
-      forwardedTracePolicy: input.forwardedTracePolicy,
+      ...(input.forwardedTracePolicy === undefined
+        ? undefined
+        : { forwardedTracePolicy: input.forwardedTracePolicy }),
       spanId: idGenerator.allocateSpanId(),
       traceFlags: decision.action === "drop" ? 0 : input.parentTraceContext.traceFlags,
       traceId: idGenerator.generateTraceId(),

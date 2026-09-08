@@ -7,6 +7,5 @@ export function withErrorContent(context: Context, allowed: boolean): Context {
 }
 
 export function capturesErrorContent(): boolean {
-  const active = context.active() as Context & { getValue(key: symbol): unknown };
-  return active.getValue(ERROR_CONTENT_KEY) === true;
+  return context.active().getValue(ERROR_CONTENT_KEY) !== false;
 }

@@ -89,8 +89,6 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
     context: value.context,
     decision: readInstrumentationDecision(value.decision),
-    initialContextUsed:
-      typeof value.initialContextUsed === "boolean" ? value.initialContextUsed : undefined,
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
   };

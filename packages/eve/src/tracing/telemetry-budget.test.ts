@@ -8,4 +8,13 @@ describe("trace text bounds", () => {
     expect(telemetryByteLength(truncated)).toBeLessThanOrEqual(100);
     expect(truncated).not.toContain("\ufffd");
   });
+
+  it("keeps surrogate pairs intact at every prefix and byte boundary", () => {
+    const text = `ab${String.fromCodePoint(0x1f600)}cd`.repeat(20);
+    for (let maxBytes = 0; maxBytes <= telemetryByteLength(text) + 1; maxBytes++) {
+      const truncated = truncateTelemetryText(text, maxBytes);
+      expect(telemetryByteLength(truncated)).toBeLessThanOrEqual(maxBytes);
+      expect(truncated).not.toContain("\ufffd");
+    }
+  });
 });

@@ -42,6 +42,7 @@ export interface AgentActionInstrumentation {
   deleteForSession(sessionId: string): void | PromiseLike<void>;
   deleteForTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   failForAttempt(scope: InstrumentationAttemptScope, error: unknown): Promise<void>;
+  flushSettledInvocations(): Promise<void>;
   flushForSessionTransition(event: InstrumentationSessionTransitionEvent): Promise<void>;
   contextFor(
     sessionId: string,
@@ -179,6 +180,7 @@ export function createAgentActionInstrumentation(input: {
         await input.stateStore.deleteAction(key);
       }
     },
+    flushSettledInvocations: () => flushInvocations(),
     async flushForSessionTransition(event) {
       const terminal =
         event.type === "session.completed"
@@ -186,19 +188,7 @@ export function createAgentActionInstrumentation(input: {
           : event.type === "session.failed"
             ? { error: event.error, outcome: "failed" as const }
             : undefined;
-      const invocations = await input.stateStore.findInvocations(event.sessionId);
-      for (const invocation of invocations) {
-        if (invocation.terminal === undefined && terminal === undefined) continue;
-        finishInvocationSpan(
-          invocation,
-          terminal === undefined
-            ? { outcome: "abandoned", type: "action.completed" }
-            : { ...terminal, type: "action.failed" },
-        );
-        await input.stateStore.deleteInvocation(
-          actionIdempotencyKey(invocation.sessionId, invocation.turnId, invocation.callId),
-        );
-      }
+      await flushInvocations(event.sessionId, terminal);
     },
     events: {
       "action.completed": onTerminal,
@@ -206,6 +196,20 @@ export function createAgentActionInstrumentation(input: {
       "action.started": onStarted,
     },
   };
+
+  async function flushInvocations(
+    sessionId?: string,
+    fallback?: AgentActionTraceTerminalState,
+  ): Promise<void> {
+    for (const invocation of await input.stateStore.findInvocations(sessionId)) {
+      const terminal = invocation.terminal ?? fallback;
+      if (terminal === undefined) continue;
+      finishInvocationSpan(invocation, terminal);
+      await input.stateStore.deleteInvocation(
+        actionIdempotencyKey(invocation.sessionId, invocation.turnId, invocation.callId),
+      );
+    }
+  }
 
   function forget(idempotencyKey: string): void {
     for (const [attemptId, keys] of byAttempt) {
@@ -241,20 +245,14 @@ export function createAgentActionInstrumentation(input: {
 
   function finishInvocationSpan(
     state: AgentInvocationTraceState,
-    outer: Pick<InstrumentationActionTerminalEvent, "outcome" | "type"> & {
-      readonly error?: unknown;
-    },
+    terminal: AgentActionTraceTerminalState,
   ): void {
-    const terminal: AgentActionTraceTerminalState = state.terminal ?? {
-      error: outer.type === "action.failed" ? outer.error : undefined,
-      outcome: outer.type === "action.failed" ? outer.outcome : "abandoned",
-    };
     const span = startSpan(state);
     span.setAttribute("agent.action.outcome", terminal.outcome);
     if (terminal.usage !== undefined) {
       setAgentUsage(span, terminal.usage);
     }
-    if (terminal.outcome !== "completed") {
+    if (terminal.outcome === "failed") {
       recordError(
         span,
         input.recordOutputs && state.recordOutputs === true ? terminal.error : undefined,

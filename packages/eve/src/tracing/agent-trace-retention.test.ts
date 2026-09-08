@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -25,6 +25,7 @@ const anchor = {
 
 describe("trace retention by live work", () => {
   it("does not turn a task-index compatibility problem into an execution failure", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const context = new ContextContainer();
     contextStorage.run(context, () =>
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
@@ -34,6 +35,11 @@ describe("trace retention by live work", () => {
       pruneAgentTraceState(context, "session", { "eve.tasks": { version: 1, tasks: [] } }),
     ).not.toThrow();
     expect(serializeContext(context)).toEqual(before);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("could not reconcile trace ownership"),
+      { error: expect.objectContaining({ message: expect.any(String) }) },
+    );
+    warn.mockRestore();
   });
 
   it("does not accumulate anchors across 1000 completed turns", () => {

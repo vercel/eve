@@ -7,8 +7,10 @@ import {
 } from "#tracing/agent-trace-context-codec.js";
 import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
 import { boundedTraceError } from "#tracing/bounded-error.js";
+import { contextStorage } from "#context/container.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 
-/** Pure context updates also run during workflow replay; no step I/O is needed. */
 export function recordNestedAgentInvocationTerminal(input: {
   readonly callId: string;
   readonly serializedContext: Record<string, unknown>;
@@ -50,6 +52,7 @@ export function recordNestedAgentInvocationTerminal(input: {
 }
 
 export function settleAgentInvocationTrace(input: {
+  readonly acceptedAtMs: number;
   readonly result: RuntimeSubagentChildResult;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
@@ -61,7 +64,7 @@ export function settleAgentInvocationTrace(input: {
     serializedContext: input.serializedContext,
     sessionId: input.sessionId,
     terminal: {
-      acceptedAtMs: Date.now(),
+      acceptedAtMs: input.acceptedAtMs,
       error: turnResult.kind === "failed" ? invocationError(turnResult.error) : undefined,
       outcome:
         turnResult.kind === "succeeded"
@@ -79,6 +82,21 @@ export function settleAgentInvocationTrace(input: {
       },
     },
   });
+}
+
+/** Called inside dispatch/settlement steps, so replay reuses the flushed context. */
+export async function flushAgentInvocationTraces(
+  serializedContext: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (serializedContext[AGENT_TRACE_CONTEXT_KEY] === undefined) return serializedContext;
+  const ctx = await deserializeContext(serializedContext);
+  const runtime = getInstrumentationRuntime();
+  if (runtime === undefined) return serializedContext;
+  await contextStorage.run(ctx, () => runtime.forceFlush());
+  return {
+    ...serializedContext,
+    [AGENT_TRACE_CONTEXT_KEY]: serializeContext(ctx)[AGENT_TRACE_CONTEXT_KEY],
+  };
 }
 
 export function invocationError(value: unknown): Error {

@@ -46,9 +46,10 @@ export function pruneAgentTraceState(
 ): void {
   try {
     pruneTraceOwnership(context, sessionId, sessionState);
-  } catch {
+  } catch (error) {
     createLogger("tracing.retention").warn(
       "could not reconcile trace ownership; preserving trace state",
+      { error },
     );
   }
 }
@@ -148,16 +149,8 @@ export function readActionTraceContext(
   const raw = serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return undefined;
   const state = deserializeAgentTraceContextState(raw);
-  const action = [
-    ...Object.values(state.invocations),
-    ...Object.values(state.actions),
-    ...Object.values(state.actionAnchors),
-  ].find(
-    (candidate) =>
-      candidate.sessionId === sessionId &&
-      candidate.turnId === turnId &&
-      candidate.callId === callId,
-  );
+  const key = actionIdempotencyKey(sessionId, turnId, callId);
+  const action = state.invocations[key] ?? state.actions[key] ?? state.actionAnchors[key];
   if (action === undefined) return undefined;
   return withTraceDecision(
     serializedContext,
@@ -198,17 +191,14 @@ export function recordNestedAgentInvocation(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly spanId: string;
+  readonly startTimeMs: number;
   readonly turnId: string;
 }): Record<string, unknown> {
   const raw = input.serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return input.serializedContext;
   const state = deserializeAgentTraceContextState(raw);
-  const outer = [...Object.values(state.actions), ...Object.values(state.actionAnchors)].find(
-    (action) =>
-      action.sessionId === input.sessionId &&
-      action.turnId === input.turnId &&
-      action.callId === input.outerCallId,
-  );
+  const outerKey = actionIdempotencyKey(input.sessionId, input.turnId, input.outerCallId);
+  const outer = state.actions[outerKey] ?? state.actionAnchors[outerKey];
   if (outer === undefined) return input.serializedContext;
   const key = actionIdempotencyKey(input.sessionId, input.turnId, input.callId);
   if (state.invocations[key] !== undefined) return input.serializedContext;
@@ -228,7 +218,7 @@ export function recordNestedAgentInvocation(input: {
     rootSessionId: outer.rootSessionId,
     sessionId: outer.sessionId,
     spanId: input.spanId,
-    startTimeMs: Date.now(),
+    startTimeMs: input.startTimeMs,
     stepIndex: outer.stepIndex,
     turnId: outer.turnId,
   };
@@ -388,7 +378,7 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
   }
 
   findInvocations(
-    sessionId: string,
+    sessionId?: string,
     turnId?: string,
     parentActionCallId?: string,
   ): readonly AgentInvocationTraceState[] {
@@ -396,7 +386,7 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
       contextStorage.getStore()?.get(AgentTraceContextKey)?.invocations ?? {},
     ).filter(
       (invocation) =>
-        invocation.sessionId === sessionId &&
+        (sessionId === undefined || invocation.sessionId === sessionId) &&
         (turnId === undefined || invocation.turnId === turnId) &&
         (parentActionCallId === undefined || invocation.parentActionCallId === parentActionCallId),
     );

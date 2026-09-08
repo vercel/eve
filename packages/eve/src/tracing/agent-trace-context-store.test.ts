@@ -219,7 +219,7 @@ describe("readActionTraceContext", () => {
         traceFlags: 1,
         traceId: "1".repeat(32),
       });
-      new ContextAgentTraceStateStore().setAction("action-1", {
+      new ContextAgentTraceStateStore().setAction("action:session-1:turn-1:call-1", {
         attemptIndex: 0,
         callId: "call-1",
         kind: "subagent-call",
@@ -258,7 +258,7 @@ describe("readActionTraceContext", () => {
         decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
       });
-      store.setAction("action-1", {
+      store.setAction("action:session-1:turn-1:call-1", {
         attemptIndex: 0,
         callId: "call-1",
         kind: "subagent-call",

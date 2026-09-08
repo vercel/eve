@@ -3,7 +3,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
 
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -31,7 +32,11 @@ import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js"
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
-import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
+import {
+  flushAgentInvocationTraces,
+  settleAgentInvocationTrace,
+} from "#tracing/agent-invocation-terminal.js";
+import * as instrumentation from "#instrumentation/runtime.js";
 import {
   assembleLocalTrace,
   isAgentTurnSpan,
@@ -78,7 +83,10 @@ function createRuntime() {
     idGenerator,
     ownsAgentSpans: true,
     otelSettings: { recordInputs: true, recordOutputs: true, traceChannelRequests: false },
-    forceFlush: () => provider.forceFlush(),
+    forceFlush: async () => {
+      await agent.hook.flush?.();
+      await provider.forceFlush();
+    },
     shutdown: () => provider.shutdown(),
   };
 }
@@ -103,6 +111,102 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 }
 
 describe("exported agent telemetry contract", () => {
+  it("flushes 1000 settled invocations without closing the session or retaining their errors", async () => {
+    const runtime = createRuntime();
+    const registered = vi
+      .spyOn(instrumentation, "getInstrumentationRuntime")
+      .mockReturnValue(runtime);
+    let ctx = contextFor("public");
+    const store = new ContextAgentTraceStateStore();
+    const count = 1000;
+    try {
+      for (let index = 0; index < count; index++) {
+        const callId = `nested-${index}`;
+        contextStorage.run(ctx, () =>
+          store.setInvocation(actionIdempotencyKey("parent", "turn_0", callId), {
+            attemptIndex: 0,
+            callId,
+            channelAudience: "public",
+            kind: "subagent-call",
+            name: "child",
+            parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
+            parentActionCallId: "outer",
+            recordOutputs: true,
+            rootSessionId: "parent",
+            sessionId: "parent",
+            spanId: runtime.idGenerator.deriveSpanId(callId),
+            startTimeMs: 1,
+            stepIndex: 0,
+            turnId: "turn_0",
+            terminal: {
+              acceptedAtMs: 2,
+              error: new Error("private " + "x".repeat(16384)),
+              outcome: index % 2 === 0 ? "failed" : "cancelled",
+            },
+          }),
+        );
+        const flushed = await flushAgentInvocationTraces(serializeContext(ctx));
+        expect(JSON.stringify(flushed)).not.toContain("private ");
+        ctx = await deserializeContext(flushed);
+        contextStorage.run(ctx, () => expect(store.findInvocations("parent")).toEqual([]));
+      }
+      expect(runtime.exporter.getFinishedSpans()).toHaveLength(count);
+      for (const span of runtime.exporter.getFinishedSpans()) {
+        expect(span.status.code).toBe(
+          span.attributes["agent.action.outcome"] === "failed"
+            ? SpanStatusCode.ERROR
+            : SpanStatusCode.UNSET,
+        );
+      }
+      await flushAgentInvocationTraces(serializeContext(ctx));
+      expect(runtime.exporter.getFinishedSpans()).toHaveLength(count);
+    } finally {
+      registered.mockRestore();
+      await runtime.shutdown();
+    }
+  });
+
+  it.each(["session.completed", "session.failed"] as const)(
+    "only marks unfinished invocations as errors on %s",
+    async (type) => {
+      const runtime = createRuntime();
+      const ctx = contextFor("public");
+      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "public" });
+      await contextStorage.run(ctx, async () => {
+        const store = new ContextAgentTraceStateStore();
+        store.setInvocation(actionIdempotencyKey("parent", "turn_0", "nested"), {
+          attemptIndex: 0,
+          callId: "nested",
+          kind: "subagent-call",
+          name: "child",
+          parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
+          parentActionCallId: "outer",
+          rootSessionId: "parent",
+          sessionId: "parent",
+          spanId: "3".repeat(16),
+          startTimeMs: 1,
+          stepIndex: 0,
+          turnId: "turn_0",
+        });
+        await hooks.publish({
+          error: new Error("private failure"),
+          idempotencyKey: sessionIdempotencyKey("parent"),
+          sessionId: "parent",
+          type,
+        });
+        expect(store.findInvocations("parent")).toEqual([]);
+      });
+      const [span] = runtime.exporter.getFinishedSpans();
+      expect(span?.attributes["agent.action.outcome"]).toBe(
+        type === "session.failed" ? "failed" : "abandoned",
+      );
+      expect(span?.status.code).toBe(
+        type === "session.failed" ? SpanStatusCode.ERROR : SpanStatusCode.UNSET,
+      );
+      await runtime.shutdown();
+    },
+  );
+
   it.each(["public", "private"] as const)(
     "round-trips %s channel, approval, delegated error and usage spans through the readers",
     async (audience) => {
@@ -183,6 +287,7 @@ describe("exported agent telemetry contract", () => {
           channelMetadata: parent.get(ChannelInstrumentationKey),
           invocation: { callId: "nested", kind: "subagent-call", name: "child" },
           ownerId: "workflow-run",
+          startTimeMs: Date.now(),
           serializedContext: serializeContext(parent),
           sessionId: "parent",
           turnId: "turn_0",
@@ -272,6 +377,7 @@ describe("exported agent telemetry contract", () => {
         });
       });
       const settled = settleAgentInvocationTrace({
+        acceptedAtMs: Date.now(),
         serializedContext: serializeContext(parent),
         sessionId: "parent",
         result: {
@@ -295,6 +401,13 @@ describe("exported agent telemetry contract", () => {
       if (audience === "private") expect(JSON.stringify(settled)).not.toContain("private failure");
       parent = await deserializeContext(settled);
       await contextStorage.run(parent, async () => {
+        await runtime.forceFlush();
+        expect(
+          runtime.exporter
+            .getFinishedSpans()
+            .filter((span) => span.attributes["agent.invocation.role"] === "caller"),
+        ).toHaveLength(1);
+        expect(new ContextAgentTraceStateStore().findInvocations("parent")).toEqual([]);
         await hooks.publish({
           idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
           output: { type: "result", output: "private output" },
@@ -368,6 +481,14 @@ describe("exported agent telemetry contract", () => {
       expect(activation.parentSpanId).toBeUndefined();
       expect(activation.traceId).not.toBe(caller.traceId);
       const childSpan = exported.find((span) => span.spanContext().spanId === activation.spanId)!;
+      expect(activation.attributes).toMatchObject({
+        "gen_ai.usage.input_tokens": 10,
+        "gen_ai.usage.output_tokens": 5,
+        "agent.usage.input_tokens": 10,
+        "agent.usage.output_tokens": 5,
+      });
+      expect(caller.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
+      expect(caller.attributes["gen_ai.usage.output_tokens"]).toBeUndefined();
       expect(childSpan.links).toEqual([
         {
           context: expect.objectContaining({ spanId: caller.spanId, traceId: caller.traceId }),

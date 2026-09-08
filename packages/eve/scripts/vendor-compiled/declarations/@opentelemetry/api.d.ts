@@ -44,6 +44,7 @@ export interface Tracer {
 }
 
 export interface Context {
+  getValue(key: symbol): unknown;
   setValue(key: symbol, value: unknown): Context;
 }
 

@@ -283,11 +283,8 @@ function renderSpanTree(
 /**
  * Extent of each span's own range unioned with its descendants', keyed by span id.
  *
- * eve records a span with no guaranteed close — an `agent.session` root,
- * whose session may idle forever — as a zero-duration marker, because
- * a span object cannot cross a durable worker boundary to be ended later.
- * The tree falls back to this extent for those rows so it shows where the
- * time went.
+ * Older schemas recorded zero-duration session markers. Include descendant
+ * time when rendering those stored traces.
  */
 function subtreeExtents(
   spans: readonly LocalTraceSpan[],

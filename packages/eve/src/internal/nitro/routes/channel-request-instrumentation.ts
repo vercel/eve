@@ -9,7 +9,6 @@ import {
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { recordErrorOnSpan } from "#internal/logging.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
@@ -53,10 +52,8 @@ export interface TraceChannelRequestInput {
  *
  * The handler runs inside the span's active context. When it returns, the
  * response status is recorded and a `>= 500` status marks the span as an
- * error. A thrown handler is recorded once and rethrown — handler
- * exceptions that eve already converts to a JSON 500 return normally and
- * are recorded by `logError` against this active span, so they are not
- * recorded a second time here. The span always ends in `finally`, without
+ * error. A thrown handler marks failure status and is rethrown; request
+ * spans never record exception content. The span always ends in `finally`, without
  * waiting for `event.waitUntil()` work or streamed response bodies.
  *
  * Emitting these spans is opt-in: unless authored instrumentation enables it
@@ -104,7 +101,7 @@ export async function traceChannelRequest<T extends Response>(
     }
     return response;
   } catch (error) {
-    recordErrorOnSpan(span, error);
+    span.setStatus({ code: SpanStatusCode.ERROR });
     throw error;
   } finally {
     span.end();

@@ -194,6 +194,7 @@ describe("blocking workflow agent continuation", () => {
       ]);
 
       const settled = await settleTaskAgentInvocationStep({
+        serializedContext: dispatched.serializedContext ?? {},
         ownerId: "workflow-run-1",
         result: {
           callId,

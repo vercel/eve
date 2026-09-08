@@ -176,11 +176,6 @@ describe("task HITL delivery routing", () => {
 
   it("dispatches agent invocations against the parent state and replies with immediate errors", async () => {
     const nextState = state(false);
-    const request = {
-      input: { message: "Find it", target: "research" },
-      invocationId: "call-1:research",
-      kind: "agent-invoke" as const,
-    };
     const result = {
       callId: "call-1:research",
       isError: true as const,
@@ -204,7 +199,11 @@ describe("task HITL delivery routing", () => {
               agentRequests: [
                 {
                   replyTo: "agent-reply",
-                  request,
+                  request: {
+                    input: { message: "Find it", target: "research" },
+                    invocationId: "call-1:research",
+                    kind: "agent-invoke" as const,
+                  },
                   taskId: "task-1",
                 },
               ],
@@ -220,7 +219,11 @@ describe("task HITL delivery routing", () => {
     expect(dispatchTaskAgentInvocationStep).toHaveBeenCalledWith({
       ownerId: "task-1",
       replyTo: "agent-reply",
-      request,
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:research",
+        kind: "agent-invoke",
+      },
       serializedContext: { source: "parent" },
       sessionState: state(false),
       taskId: "task-1",

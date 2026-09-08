@@ -39,6 +39,7 @@ export function prepareAgentInvocationTrace(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState?: SessionStateMap;
+  readonly startTimeMs: number;
   readonly taskId?: string;
   readonly turnId: string;
 }): {
@@ -95,6 +96,7 @@ export function prepareAgentInvocationTrace(input: {
             serializedContext: input.serializedContext,
             sessionId: input.sessionId,
             spanId: deriveAgentActionSpanId(input.sessionId, turnId, input.invocation.callId),
+            startTimeMs: input.startTimeMs,
             turnId,
           });
   const callerTraceContext = readActionTraceContext(

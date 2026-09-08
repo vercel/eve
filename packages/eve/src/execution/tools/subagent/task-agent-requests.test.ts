@@ -6,7 +6,6 @@ import {
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
-import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
@@ -37,28 +36,13 @@ const result: RuntimeSubagentChildResult = {
 beforeEach(() => vi.clearAllMocks());
 
 describe("workflow-owned agent requests", () => {
-  it("settles traces without adding anything to the durable settlement step contract", async () => {
-    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({ sessionState });
-    const serializedContext = {
-      [AGENT_TRACE_CONTEXT_KEY]: {
-        invocations: {
-          nested: {
-            attemptIndex: 0,
-            callId: "nested",
-            kind: "subagent-call",
-            name: "research",
-            parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
-            parentActionCallId: "outer",
-            rootSessionId: "parent",
-            sessionId: "parent",
-            spanId: "3".repeat(16),
-            startTimeMs: 1,
-            stepIndex: 0,
-            turnId: "turn-1",
-          },
-        },
-      },
-    };
+  it("reuses the settlement step's flushed trace context during workflow replay", async () => {
+    const serializedContext = { "eve.test": "before" };
+    const flushedContext = { "eve.test": "after" };
+    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+      serializedContext: flushedContext,
+      sessionState,
+    });
     const delivery = {
       ownerId: "workflow-run",
       replyTo: "reply",
@@ -71,29 +55,13 @@ describe("workflow-owned agent requests", () => {
       accumulateUsage: undefined,
       ownerId: "workflow-run",
       result,
+      serializedContext,
       sessionState,
       taskId: undefined,
     });
-    expect(settled.serializedContext).toMatchObject({
-      [AGENT_TRACE_CONTEXT_KEY]: {
-        invocations: {
-          nested: {
-            terminal: {
-              outcome: "completed",
-              usage: {
-                inputTokens: 2,
-                outputTokens: 3,
-              },
-            },
-          },
-        },
-      },
-    });
-    const replay = await applyTaskAgentRequest(delivery, {
-      ...context,
-      serializedContext: settled.serializedContext,
-    });
-    expect(replay.serializedContext).toBe(settled.serializedContext);
+    expect(settled.serializedContext).toBe(flushedContext);
+    const replay = await applyTaskAgentRequest(delivery, context);
+    expect(replay).toEqual(settled);
   });
 
   it("retains existing context when replaying a dispatch result without tracing state", async () => {

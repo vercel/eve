@@ -44,12 +44,7 @@ export function setAgentInvocationUsage(
   modelUsage: AgentTurnTraceState["modelUsage"],
 ): void {
   if (modelUsage === undefined) return;
-  if (modelUsage.inputTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, modelUsage.inputTokens);
-  }
-  if (modelUsage.outputTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.outputTokens, modelUsage.outputTokens);
-  }
+  setGenAiUsage(span, modelUsage);
 }
 
 /** Projects Vercel AI Gateway cost metadata onto GenAI span attributes. */

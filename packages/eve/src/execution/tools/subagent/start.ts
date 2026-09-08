@@ -13,7 +13,7 @@ import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
-import { readAgentChildTrace } from "#tracing/agent-child-trace.js";
+import type { AgentChildTraceDispatch } from "#tracing/agent-invocation-coordinator.js";
 import { resolveConversationId } from "#tracing/conversation-context.js";
 
 export type SubagentStartTarget =
@@ -49,11 +49,12 @@ export async function startSubagent(input: {
   readonly session: RuntimeSession;
   readonly taskId?: string;
   readonly target: SubagentStartTarget;
+  readonly trace: AgentChildTraceDispatch;
 }): Promise<DispatchOutcome> {
-  const trace = readAgentChildTrace();
+  const { trace } = input;
   const parent: SubagentParentContext = {
     conversationId:
-      trace?.conversationId ??
+      trace.conversationId ??
       resolveConversationId(input.session.rootSessionId ?? input.session.sessionId),
     lineage: {
       callId: input.target.action.callId,
@@ -62,8 +63,8 @@ export async function startSubagent(input: {
       turn: { id: input.batchEvent.turnId, sequence: input.batchEvent.sequence },
     },
     continuationToken: input.parentContinuationToken,
-    traceContext: trace?.parentTraceContext,
-    originAudience: trace?.originAudience,
+    traceContext: trace.parentTraceContext,
+    originAudience: trace.originAudience,
   };
 
   switch (input.target.kind) {

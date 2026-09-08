@@ -1554,6 +1554,9 @@ describe("createAgentOtelInstrumentation", () => {
       expect(byName(redeliverySpans, name)[0]!.spanContext().spanId).toBe(
         byName(firstSpans, name)[0]!.spanContext().spanId,
       );
+      expect(byName(redeliverySpans, name)[0]!.spanContext().traceId).toBe(
+        byName(firstSpans, name)[0]!.spanContext().traceId,
+      );
     }
     expect(byName(redeliverySpans, "chat claude-test")[0]!.spanContext().spanId).not.toBe(
       byName(firstSpans, "chat claude-test")[0]!.spanContext().spanId,
@@ -2477,7 +2480,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(step.spanContext().traceId).toBe(turn.spanContext().traceId);
   });
 
-  it("opens a fresh trace when a durable attempt replays before its state checkpoints", async () => {
+  it.each([0, 1])("reuses activation identity before turn %s checkpoints", async (turnSequence) => {
     const firstRuntime = createRuntime();
     const replayRuntime = createRuntime();
     await emitAttempt({
@@ -2485,14 +2488,14 @@ describe("createAgentOtelInstrumentation", () => {
       runInContext: firstRuntime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
-      turnSequence: 0,
+      turnSequence,
     });
     await emitAttempt({
       hooks: replayRuntime.hooks,
       runInContext: replayRuntime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
-      turnSequence: 0,
+      turnSequence,
     });
 
     const firstTurn = byName(firstRuntime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
@@ -2500,9 +2503,7 @@ describe("createAgentOtelInstrumentation", () => {
       replayRuntime.exporter.getFinishedSpans(),
       "invoke_agent weather",
     )[0]!;
-    // The abandoned attempt keeps its own trace rather than interleaving with
-    // the retry. Both carry the storage-facing workflow session id.
-    expect(replayTurn.spanContext().traceId).not.toBe(firstTurn.spanContext().traceId);
+    expect(replayTurn.spanContext()).toEqual(firstTurn.spanContext());
     expect(replayTurn.attributes["vercel.session_id"]).toBe(
       firstTurn.attributes["vercel.session_id"],
     );

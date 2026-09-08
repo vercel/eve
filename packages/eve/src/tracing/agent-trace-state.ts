@@ -18,7 +18,6 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly decision?: InstrumentationDecision;
-  readonly initialContextUsed?: boolean;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
 }
@@ -89,7 +88,7 @@ export interface AgentTraceStateStore {
     callId: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
   findInvocations(
-    sessionId: string,
+    sessionId?: string,
     turnId?: string,
     parentActionCallId?: string,
   ): readonly AgentInvocationTraceState[] | PromiseLike<readonly AgentInvocationTraceState[]>;
@@ -180,13 +179,13 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
   }
 
   findInvocations(
-    sessionId: string,
+    sessionId?: string,
     turnId?: string,
     parentActionCallId?: string,
   ): readonly AgentInvocationTraceState[] {
     return [...this.#invocations.values()].filter(
       (state) =>
-        state.sessionId === sessionId &&
+        (sessionId === undefined || state.sessionId === sessionId) &&
         (turnId === undefined || state.turnId === turnId) &&
         (parentActionCallId === undefined || state.parentActionCallId === parentActionCallId),
     );
