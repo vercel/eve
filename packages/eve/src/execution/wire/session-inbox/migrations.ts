@@ -1,10 +1,10 @@
-import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox/session-inbox-wire.v0.js";
 import type { Wire } from "#execution/wire/session-inbox/migration.js";
 import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import {
   SessionInboxWireError,
   type SessionInboxWireVersion,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { migrations as sessionInboxMigrations } from "#execution/wire/session-inbox/generated/catalog.js";
 import type { CurrentWire } from "#execution/wire/session-inbox/generated/versions.js";
 export { sessionInboxMigrations };

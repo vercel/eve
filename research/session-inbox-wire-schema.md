@@ -57,7 +57,7 @@ pure migration modules directly, without importing their schemas. There is no
 code extraction or generated copy of a migration. Directory discovery happens
 in tooling; the runtime uses static imports.
 
-Production sends use `execution/wire/session-inbox-encoder.ts`. It builds the current
+Production sends use `execution/wire/session-inbox/session-inbox-encoder.ts`. It builds the current
 wire representation, walks adjacent migrations backwards to the receiver's
 version, validates the result against that version's frozen schema, and only
 then returns a value that can be delivered.
@@ -136,7 +136,7 @@ Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
   come from validated producers. The decoder checks version and discriminator
   and rejects known operation/version mismatches; it is not a complete second
   schema validator.
-- **One encoder and one migration chain.** `wire/session-inbox-encoder.ts`
+- **One encoder and one migration chain.** `wire/session-inbox/session-inbox-encoder.ts`
   replaces the per-version encoders. Version modules retain their schemas.
   Tests and runtime sends use the same encoder.
 - **Legacy envelopes enter the same chain.** The v0 adapter converts persisted
@@ -309,9 +309,9 @@ The old codec is removed. Its regression tests now assert that
 including when called directly for an unversioned receiver. The complete target
 value must pass the receiver's schema before `resumeHook` can execute.
 
-[delivery-tests]: ../packages/eve/src/execution/wire/session-inbox-resume.test.ts
-[production-encoder]: ../packages/eve/src/execution/wire/session-inbox-encoder.ts
-[delivery-boundary]: ../packages/eve/src/execution/wire/session-inbox-resume.ts
+[delivery-tests]: ../packages/eve/src/execution/wire/session-inbox/session-inbox-resume.test.ts
+[production-encoder]: ../packages/eve/src/execution/wire/session-inbox/session-inbox-encoder.ts
+[delivery-boundary]: ../packages/eve/src/execution/wire/session-inbox/session-inbox-resume.ts
 [task-wire-regression]: https://github.com/vercel/eve/blob/aae26311a845b5638f701311b742fab7d9cb4baf/packages/eve/src/execution/wire/session-inbox-encoder.ts#L76
 
 ## Compatibility and payoff timeline

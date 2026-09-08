@@ -12,11 +12,11 @@ import {
   isSessionInboxWireVersion,
   type SessionInboxWireTarget,
   type SessionInboxWireVersion,
-} from "#execution/wire/session-inbox-contract.js";
-import { encodeSessionCommandV0 } from "#execution/wire/session-inbox-wire.v0.js";
-import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
+} from "#execution/wire/session-inbox/session-inbox-contract.js";
+import { encodeSessionCommandV0 } from "#execution/wire/session-inbox/session-inbox-wire.v0.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox/session-inbox-normalize.js";
 import { schemas, currentSchema } from "#execution/wire/session-inbox/generated/schemas.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 

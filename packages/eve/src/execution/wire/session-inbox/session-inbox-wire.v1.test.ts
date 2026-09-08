@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
-import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import {
   sessionInboxWire as sessionInboxWireDecoder,
   SessionInboxWireError,
-} from "#execution/wire/session-inbox-wire.js";
-import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
+} from "#execution/wire/session-inbox/session-inbox-wire.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox/session-inbox-wire.v1.js";
 
 const FROZEN_FIXTURES = {
   clear: '{"kind":"clear","version":1}',

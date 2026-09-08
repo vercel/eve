@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
 
 interface Eve0308TurnControlReceiver {
   bufferedDeliveries: unknown[];

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { sessionInboxMigrations } from "#execution/wire/session-inbox/migrations.js";
-import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { schemas } from "#execution/wire/session-inbox/generated/schemas.js";
 
 it("has exactly one adjacent migration for every supported version transition", () => {

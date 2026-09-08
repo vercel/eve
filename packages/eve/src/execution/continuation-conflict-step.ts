@@ -7,7 +7,7 @@ import {
 
 import type { SessionCommand } from "#channel/types.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox/session-inbox-resume.js";
 import { cancelRun, getRawHookByToken, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 

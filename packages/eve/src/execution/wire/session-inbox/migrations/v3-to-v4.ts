@@ -1,6 +1,6 @@
 import type { Migration, Wire } from "#execution/wire/session-inbox/migration.js";
 import { isObject } from "#shared/guards.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 type PayloadV3 = Extract<Wire<3>, { kind: "deliver" }>["payload"];
 type PayloadV4 = Extract<Wire<4>, { kind: "deliver" }>["payload"];

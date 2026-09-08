@@ -8,12 +8,14 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox/session-inbox-resume.js";
 
 vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn() }));
-vi.mock("#execution/wire/session-inbox-resume.js", () => ({ resumeSessionInbox: vi.fn() }));
+vi.mock("#execution/wire/session-inbox/session-inbox-resume.js", () => ({
+  resumeSessionInbox: vi.fn(),
+}));
 vi.mock("#execution/tools/workflow/answer.js", () => ({
   resumeWorkflowToolRunAnswers: vi.fn(),
 }));

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   SessionInboxWireError,
   type SessionInboxWireTarget,
-} from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+} from "#execution/wire/session-inbox/session-inbox-contract.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
 
 const legacyTargets = [
   { variant: "deliver", version: 0 },

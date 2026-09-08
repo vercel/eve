@@ -3,10 +3,10 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
-import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
-import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
-import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox/session-inbox-wire.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox/session-inbox-normalize.js";
+import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox/session-inbox-wire.v2.js";
 
 const activityObserver = {
   sink: { url: "https://example.com/eve/v1/activity/opaque-token", version: 1 as const },

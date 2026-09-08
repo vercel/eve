@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import {
   resolveSessionInboxWireTarget,
   resumeSessionInbox,
-} from "#execution/wire/session-inbox-resume.js";
+} from "#execution/wire/session-inbox/session-inbox-resume.js";
 
 const getHookByTokenMock = vi.fn();
 const getRawHookByTokenMock = vi.fn();

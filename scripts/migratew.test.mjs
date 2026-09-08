@@ -8,20 +8,21 @@ import { stripTypeScriptTypes } from "node:module";
 import { discover, generateCatalog, scaffold } from "./migratew.mjs";
 import { checkWireChanges } from "./guard-wire-changes.mjs";
 
-async function fixture(t) {
+async function fixture(t, legacySchema = false) {
   const root = await mkdtemp(join(tmpdir(), "eve-migratew-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const wire = join(root, "packages/eve/src/execution/wire");
-  await mkdir(join(wire, "session-inbox/migrations"), { recursive: true });
+  const family = join(wire, "session-inbox");
+  await mkdir(join(family, "migrations"), { recursive: true });
   await writeFile(
-    join(wire, "session-inbox-wire.v1.ts"),
+    join(legacySchema ? wire : family, "session-inbox-wire.v1.ts"),
     "export const sessionInboxWireV1Schema = {};\n",
   );
-  return { root, wire, migrations: join(wire, "session-inbox/migrations") };
+  return { root, wire, family, migrations: join(family, "migrations") };
 }
 
-async function gitFixture(t) {
-  const files = await fixture(t);
+async function gitFixture(t, legacySchema = false) {
+  const files = await fixture(t, legacySchema);
   const git = (...args) => execFileSync("git", args, { cwd: files.root, stdio: "pipe" });
   const commit = () =>
     git(
@@ -72,9 +73,9 @@ test("rejects runner, encoder, decoder, generator, and guard changes with a new 
   await scaffold(root, "session-inbox");
   const paths = [
     "packages/eve/src/execution/wire/session-inbox/migrations.ts",
-    "packages/eve/src/execution/wire/session-inbox-encoder.ts",
-    "packages/eve/src/execution/wire/session-inbox-wire.ts",
-    "packages/eve/src/execution/wire/new-helper.ts",
+    "packages/eve/src/execution/wire/session-inbox/session-inbox-encoder.ts",
+    "packages/eve/src/execution/wire/session-inbox/session-inbox-wire.ts",
+    "packages/eve/src/execution/wire/session-inbox/new-helper.ts",
     "packages/eve/src/execution/durable-session-migrations/chain.ts",
     "scripts/migratew.mjs",
     "scripts/migratew.test.mjs",
@@ -131,6 +132,12 @@ test("requires base history instead of silently skipping the scope check", async
   await assert.rejects(checkWireChanges(root, "missing-main"), /Fetch the base branch/);
 });
 
+test("recognizes legacy schema paths while moving the family directory", async (t) => {
+  const { root, wire, family } = await gitFixture(t, true);
+  await rename(join(wire, "session-inbox-wire.v1.ts"), join(family, "session-inbox-wire.v1.ts"));
+  await checkWireChanges(root, "main");
+});
+
 test("allows callers and documentation to change alongside a new wire version", async (t) => {
   const { root } = await gitFixture(t);
   await scaffold(root, "session-inbox");
@@ -140,7 +147,7 @@ test("allows callers and documentation to change alongside a new wire version", 
 });
 
 test("scaffolds a schema, migration, and test, with direct migration imports", async (t) => {
-  const { root, wire, migrations } = await fixture(t);
+  const { root, family, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   assert.deepEqual((await readdir(migrations)).sort(), [
     "v1-to-v2.test.ts",
@@ -156,7 +163,7 @@ test("scaffolds a schema, migration, and test, with direct migration imports", a
   assert.match(await readFile(join(migrations, "v1-to-v2.test.ts"), "utf8"), /Replace this test/);
   const authored = await readFile(join(migrations, "v1-to-v2.ts"), "utf8");
   assert.doesNotMatch(authored, /zod|previousSchema|z\.literal|export const schema/);
-  const generated = join(wire, "session-inbox/generated");
+  const generated = join(family, "generated");
   assert.deepEqual((await readdir(generated)).sort(), ["catalog.ts", "schemas.ts", "versions.ts"]);
   assert.match(await readFile(join(generated, "catalog.ts"), "utf8"), /migrations\/v1-to-v2\.js/);
   assert.match(await readFile(join(generated, "schemas.ts"), "utf8"), /migrations\/v2\.schema\.js/);
@@ -171,7 +178,7 @@ test("scaffolds a schema, migration, and test, with direct migration imports", a
 });
 
 test("migration edits need no regeneration; manual catalog edits are rejected", async (t) => {
-  const { root, wire, migrations } = await fixture(t);
+  const { root, family, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   const path = join(migrations, "v1-to-v2.ts");
   await writeFile(
@@ -182,27 +189,27 @@ test("migration edits need no regeneration; manual catalog edits are rejected", 
     ),
   );
   await generateCatalog(root, "session-inbox", true);
-  await writeFile(join(wire, "session-inbox/generated/catalog.ts"), "// changed registry\n");
+  await writeFile(join(family, "generated/catalog.ts"), "// changed registry\n");
   await assert.rejects(generateCatalog(root, "session-inbox", true), /catalog is stale/);
   await generateCatalog(root, "session-inbox");
   await generateCatalog(root, "session-inbox", true);
 });
 
 test("rejects missing tests, missing transitions, and conflicting schema definitions", async (t) => {
-  const { root, wire, migrations } = await fixture(t);
+  const { root, family, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   await writeFile(
-    join(wire, "session-inbox-wire.v2.ts"),
+    join(family, "session-inbox-wire.v2.ts"),
     "export const sessionInboxWireV2Schema = {};\n",
   );
   await assert.rejects(discover(root, "session-inbox"), /Duplicate schema/);
-  await rm(join(wire, "session-inbox-wire.v2.ts"));
+  await rm(join(family, "session-inbox-wire.v2.ts"));
   await rm(join(migrations, "v1-to-v2.test.ts"));
   await assert.rejects(discover(root, "session-inbox"), /missing migration test/);
   await rm(join(migrations, "v1-to-v2.ts"));
   await rm(join(migrations, "v2.schema.ts"));
   await writeFile(
-    join(wire, "session-inbox-wire.v2.ts"),
+    join(family, "session-inbox-wire.v2.ts"),
     "export const sessionInboxWireV2Schema = {};\n",
   );
   await assert.rejects(discover(root, "session-inbox"), /exactly one adjacent migration/);
@@ -223,18 +230,18 @@ test("rejects unknown families without creating paths", async (t) => {
 });
 
 test("removes obsolete generated transforms when an unshipped version is removed", async (t) => {
-  const { root, wire, migrations } = await fixture(t);
+  const { root, family, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   await rm(join(migrations, "v1-to-v2.ts"));
   await rm(join(migrations, "v1-to-v2.test.ts"));
   await rm(join(migrations, "v2.schema.ts"));
   await writeFile(
-    join(wire, "session-inbox/generated/v1-to-v2.ts"),
+    join(family, "generated/v1-to-v2.ts"),
     "// Generated by pnpm run migratew --sync. Do not edit.\n// obsolete copy\n",
   );
   await assert.rejects(generateCatalog(root, "session-inbox", true), /catalog is stale/);
   await generateCatalog(root, "session-inbox");
-  assert.deepEqual((await readdir(join(wire, "session-inbox/generated"))).sort(), [
+  assert.deepEqual((await readdir(join(family, "generated"))).sort(), [
     "catalog.ts",
     "schemas.ts",
     "versions.ts",

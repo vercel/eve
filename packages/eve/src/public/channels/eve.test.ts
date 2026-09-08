@@ -21,8 +21,8 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and

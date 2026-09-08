@@ -617,11 +617,11 @@ const SESSION_INBOX_MIGRATIONS_DIR = `${SESSION_INBOX_DIR}/migrations`;
 const SESSION_INBOX_MIGRATION_RE = new RegExp(
   `^${SESSION_INBOX_MIGRATIONS_DIR}/v\\d+(?:-to-v\\d+(?:\\.test)?|\\.schema)\\.ts$`,
 );
-const SESSION_INBOX_HISTORY_SCOPE = [WIRE_FAMILY_DIR, SESSION_INBOX_MIGRATIONS_DIR];
-const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
-const SESSION_INBOX_WIRE_DECODER = `${WIRE_FAMILY_DIR}/session-inbox-wire.ts`;
+const SESSION_INBOX_HISTORY_SCOPE = [SESSION_INBOX_DIR];
+const SESSION_INBOX_WIRE_CONTRACT = `${SESSION_INBOX_DIR}/session-inbox-contract.ts`;
+const SESSION_INBOX_WIRE_DECODER = `${SESSION_INBOX_DIR}/session-inbox-wire.ts`;
 const VERSIONED_WIRE_HISTORY_RE = new RegExp(
-  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+  `^${SESSION_INBOX_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
 );
 const PURE_MIGRATION_IMPORTS = new Map([
   [
@@ -632,7 +632,7 @@ const PURE_MIGRATION_IMPORTS = new Map([
     ]),
   ],
   [
-    "#execution/wire/session-inbox-contract.js",
+    "#execution/wire/session-inbox/session-inbox-contract.js",
     new Map([
       ["SessionInboxWireError", "value"],
       ["SessionInboxIncompatibleError", "value"],
@@ -646,9 +646,9 @@ const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
   "#execution/wire/session-inbox/generated/catalog.js",
   "#execution/wire/session-inbox/generated/versions.js",
   "#execution/durable-session-migrations/chain.js",
-  "#execution/wire/session-inbox-contract.js",
-  "#execution/wire/session-inbox-wire.v0.js",
-  "#execution/wire/session-inbox-normalize.js",
+  "#execution/wire/session-inbox/session-inbox-contract.js",
+  "#execution/wire/session-inbox/session-inbox-wire.v0.js",
+  "#execution/wire/session-inbox/session-inbox-normalize.js",
   "#shared/guards.js",
 ]);
 
@@ -886,32 +886,41 @@ function isRuntimeImportReference(node) {
 
 async function checkRule40WireContracts() {
   const violations = await checkRule40ImmutableWireHistory();
-  let entries;
+  let rootEntries;
+  let sessionInboxEntries;
   try {
-    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+    [rootEntries, sessionInboxEntries] = await Promise.all([
+      readdir(join(REPO_ROOT, WIRE_FAMILY_DIR)),
+      readdir(join(REPO_ROOT, SESSION_INBOX_DIR)),
+    ]);
   } catch {
     return violations;
   }
 
-  for (const name of entries) {
-    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
-    if (match === null) continue;
-    const [, family, version, kind = ""] = match;
+  for (const [directory, entries] of [
+    [WIRE_FAMILY_DIR, rootEntries],
+    [SESSION_INBOX_DIR, sessionInboxEntries],
+  ]) {
+    for (const name of entries) {
+      const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
+      if (match === null) continue;
+      const [, family, version, kind = ""] = match;
 
-    const testName = `${family}-wire.v${version}${kind}.test.ts`;
-    if (!entries.includes(testName)) {
-      violations.push({
-        rule: 40,
-        file: `${WIRE_FAMILY_DIR}/${name}`,
-        line: 1,
-        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
-      });
-    }
-    if (kind === ".migration") {
-      const path = `${WIRE_FAMILY_DIR}/${name}`;
-      violations.push(
-        ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
-      );
+      const testName = `${family}-wire.v${version}${kind}.test.ts`;
+      if (!entries.includes(testName)) {
+        violations.push({
+          rule: 40,
+          file: `${directory}/${name}`,
+          line: 1,
+          message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
+        });
+      }
+      if (kind === ".migration") {
+        const path = `${directory}/${name}`;
+        violations.push(
+          ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+        );
+      }
     }
   }
 

@@ -7,7 +7,7 @@ import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-s
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 describe("session command inbox integration", () => {

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox/session-inbox-encoder.js";
 import {
   sessionInboxWire as sessionInboxWireDecoder,
   SessionInboxWireError,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/wire/session-inbox/session-inbox-wire.js";
 
 /** Every payload shape persisted before explicit wire versioning. */
 const FROZEN_FIXTURES: ReadonlyArray<{

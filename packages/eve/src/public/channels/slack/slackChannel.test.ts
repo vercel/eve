@@ -9,7 +9,7 @@ import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js"
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,

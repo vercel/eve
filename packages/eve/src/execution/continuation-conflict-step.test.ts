@@ -10,7 +10,7 @@ const getWorldMock = vi.fn();
 const world = { hooks: { getByToken: getRawHookByTokenMock } };
 const resumeSessionInboxMock = vi.fn();
 
-vi.mock("#execution/wire/session-inbox-resume.js", () => ({
+vi.mock("#execution/wire/session-inbox/session-inbox-resume.js", () => ({
   resumeSessionInbox: (...args: unknown[]) => resumeSessionInboxMock(...args),
 }));
 

@@ -1,6 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
+import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox/session-inbox-wire.v3.js";
 import { runtimeSubagentChildResultSchema } from "#shared/action-types.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";

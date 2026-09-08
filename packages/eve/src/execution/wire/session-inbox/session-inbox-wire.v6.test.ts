@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
-import { sessionInboxWireV6Schema } from "#execution/wire/session-inbox-wire.v6.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
+import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox/session-inbox-wire.js";
+import { sessionInboxWireV6Schema } from "#execution/wire/session-inbox/session-inbox-wire.v6.js";
 
 describe("session inbox wire v6", () => {
   it("round-trips session-owned task cancellation", () => {

@@ -8,10 +8,10 @@ import { runMigrationChain } from "#execution/durable-session-migrations/chain.j
 import {
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/wire/session-inbox/session-inbox-contract.js";
 import type { CurrentWire } from "#execution/wire/session-inbox/generated/versions.js";
 import { sessionInboxUpMigrations } from "#execution/wire/session-inbox/migrations.js";
-import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox/session-inbox-normalize.js";
 import { isObject } from "#shared/guards.js";
 
 type SessionInboxWire = CurrentWire;
@@ -34,7 +34,7 @@ export type DecodedSessionInbox =
   | SessionTimeoutHookPayload
   | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
 
-export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+export { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 /** Prefixes migration and contract failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";

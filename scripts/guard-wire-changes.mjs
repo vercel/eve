@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { discover } from "./migratew.mjs";
 
 const wire = "packages/eve/src/execution/wire/";
-const migrations = `${wire}session-inbox/migrations/`;
-const generated = `${wire}session-inbox/generated/`;
+const sessionInbox = `${wire}session-inbox/`;
+const migrations = `${sessionInbox}migrations/`;
+const generated = `${sessionInbox}generated/`;
 const machinery = new Set([
   "scripts/migratew.mjs",
   "scripts/migratew.test.mjs",
@@ -28,7 +29,7 @@ export async function checkWireChanges(root, baseRef = "origin/main") {
   );
   const baseVersions = [...basePaths].flatMap((path) => {
     const schema = path.match(
-      /^packages\/eve\/src\/execution\/wire\/session-inbox-wire\.v(\d+)\.ts$/,
+      /^packages\/eve\/src\/execution\/wire\/(?:session-inbox\/)?session-inbox-wire\.v(\d+)\.ts$/,
     );
     const migration = path.match(
       /^packages\/eve\/src\/execution\/wire\/session-inbox\/migrations\/v\d+-to-v(\d+)\.ts$/,
@@ -49,7 +50,7 @@ export async function checkWireChanges(root, baseRef = "origin/main") {
       path.startsWith("packages/eve/src/execution/durable-session-migrations/")
     )
       return true;
-    if (!path.startsWith(wire) || path.startsWith(generated)) return false;
+    if (!path.startsWith(sessionInbox) || path.startsWith(generated)) return false;
     return !(
       path.startsWith(migrations) &&
       /^v\d+(?:-to-v\d+(?:\.test)?|\.schema)\.ts$/.test(path.slice(migrations.length)) &&

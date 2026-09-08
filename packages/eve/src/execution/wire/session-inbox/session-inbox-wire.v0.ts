@@ -1,5 +1,5 @@
 import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
-import type { SessionInboxWireV1 } from "#execution/wire/session-inbox-wire.v1.js";
+import type { SessionInboxWireV1 } from "#execution/wire/session-inbox/session-inbox-wire.v1.js";
 import { isObject } from "#shared/guards.js";
 
 /**

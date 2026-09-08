@@ -39,14 +39,14 @@ function exportedVariable(ast, name) {
 export async function discover(root, family) {
   if (family !== "session-inbox")
     throw new Error(`Unknown wire family ${JSON.stringify(family)}. Supported: session-inbox.`);
-  const directory = join(root, wireRoot);
-  const migrationsDir = join(directory, family, "migrations");
+  const directory = join(root, wireRoot, family);
+  const migrationsDir = join(directory, "migrations");
   const schemas = new Map();
   for (const name of await readdir(directory)) {
     const match = name.match(/^session-inbox-wire\.v([1-9]\d*)\.ts$/);
     if (match)
       schemas.set(Number(match[1]), {
-        module: `#execution/wire/${name.replace(/\.ts$/, ".js")}`,
+        module: `#execution/wire/${family}/${name.replace(/\.ts$/, ".js")}`,
         name: `sessionInboxWireV${match[1]}Schema`,
       });
   }
@@ -107,7 +107,7 @@ export async function discover(root, family) {
 export async function generateCatalog(root, family, check = false) {
   const catalog = await discover(root, family);
   const { schemas, versions, migrations, directory } = catalog;
-  const generated = join(directory, family, "generated");
+  const generated = join(directory, "generated");
   const outputs = new Map();
   const imports = migrations.map(
     (m) =>

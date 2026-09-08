@@ -28,7 +28,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
-import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
-import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
-import { normalizeSessionInboxWire } from "#execution/wire/session-inbox-normalize.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox/session-inbox-wire.js";
+import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox/session-inbox-wire.v0.js";
+import { normalizeSessionInboxWire } from "#execution/wire/session-inbox/session-inbox-normalize.js";
 import { v1ToV2 } from "#execution/wire/session-inbox/migrations/v1-to-v2.js";
 import type { Wire } from "#execution/wire/session-inbox/migration.js";
-import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
+import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox/session-inbox-wire.v3.js";
 
 const delivery = {
   acceptedDeploymentId: "dpl_current",

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
-import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox/session-inbox-wire.js";
+import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox/session-inbox-wire.v4.js";
 
 const agentRequest = {
   replyTo: "agent-reply",

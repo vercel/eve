@@ -1,6 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
+import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox/session-inbox-wire.v2.js";
 
 const v2 = sessionInboxWireV2Schema.options;
 const v2Deliver = v2[0];

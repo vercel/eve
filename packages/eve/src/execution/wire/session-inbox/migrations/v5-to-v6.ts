@@ -1,5 +1,5 @@
 import type { Migration } from "#execution/wire/session-inbox/migration.js";
-import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 export const v5ToV6 = {
   from: 5,

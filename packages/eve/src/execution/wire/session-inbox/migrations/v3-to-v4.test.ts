@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { v3ToV4 } from "./v3-to-v4.js";
-import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
-import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
+import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox/session-inbox-wire.v3.js";
+import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox/session-inbox-wire.v4.js";
 
 it("turns an old input request into the current answer route without losing its question", () => {
   const request = {

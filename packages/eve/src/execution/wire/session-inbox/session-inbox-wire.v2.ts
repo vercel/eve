@@ -1,6 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox/session-inbox-wire.v1.js";
 
 const activityWorkIdentitySchema = z
   .object({

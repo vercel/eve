@@ -2,7 +2,10 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
-import { sessionInboxWire, SessionInboxWireError } from "#execution/wire/session-inbox-wire.js";
+import {
+  sessionInboxWire,
+  SessionInboxWireError,
+} from "#execution/wire/session-inbox/session-inbox-wire.js";
 
 describe("session inbox wire policy", () => {
   it("rejects a present non-numeric version before normalization", () => {

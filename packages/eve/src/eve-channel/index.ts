@@ -1,6 +1,6 @@
 import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
-import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import {
   handleConnectionCallbackRequest,
