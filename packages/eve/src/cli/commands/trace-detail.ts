@@ -65,8 +65,15 @@ export function summarizeLocalTrace(spans: readonly LocalTraceSpan[]): LocalTrac
     if (span.name !== "agent.step") continue;
     inputTokens += numberAttribute(span, "agent.usage.input_tokens") ?? 0;
     outputTokens += numberAttribute(span, "agent.usage.output_tokens") ?? 0;
-    cacheReadTokens += numberAttribute(span, "gen_ai.usage.cache_read.input_tokens") ?? 0;
-    cacheWriteTokens += numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ?? 0;
+    cacheReadTokens +=
+      numberAttribute(span, "agent.usage.cache_read_tokens") ??
+      numberAttribute(span, "gen_ai.usage.cache_read.input_tokens") ??
+      0;
+    cacheWriteTokens +=
+      numberAttribute(span, "agent.usage.cache_write_tokens") ??
+      numberAttribute(span, "gen_ai.usage.cache_write.input_tokens") ??
+      numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ??
+      0;
     const cost = spanCostUsd(span);
     if (cost !== undefined) costUsd = (costUsd ?? 0) + cost;
   }

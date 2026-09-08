@@ -193,10 +193,12 @@ function toModelCallCompleted(
   idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallEnd">,
 ): InstrumentationModelCallCompletedEvent {
+  const response = Object.freeze({ id: source.responseId, modelId: source.modelId });
   return Object.freeze({
     content: state.capturesOutputs ? toContentParts(source.content) : undefined,
     finishReason: source.finishReason,
     idempotencyKey,
+    response,
     scope: state.scope,
     type: "model.call.completed",
     usage: toUsage(source.usage),

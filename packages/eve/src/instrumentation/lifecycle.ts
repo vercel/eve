@@ -41,6 +41,11 @@ export interface InstrumentationModelRef {
   readonly provider: string;
 }
 
+export interface InstrumentationModelResponseRef {
+  readonly id?: string;
+  readonly modelId?: string;
+}
+
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
   readonly inputTokenDetails?: {
@@ -413,6 +418,7 @@ export interface InstrumentationModelCallCompletedEvent {
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
+  readonly response?: InstrumentationModelResponseRef;
   readonly scope: InstrumentationAttemptScope;
   readonly usage: InstrumentationUsage;
 }

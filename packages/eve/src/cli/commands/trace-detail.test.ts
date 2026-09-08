@@ -57,9 +57,10 @@ describe("summarizeLocalTrace", () => {
       span({
         attributes: {
           "agent.model.id": "gpt-5",
+          "agent.usage.cache_read_tokens": 800,
+          "agent.usage.cache_write_tokens": 120,
           "agent.usage.input_tokens": 1000,
           "agent.usage.output_tokens": 100,
-          "gen_ai.usage.cache_read.input_tokens": 800,
           "gen_ai.usage.cost": 0.01,
         },
       }),
@@ -84,9 +85,24 @@ describe("summarizeLocalTrace", () => {
     expect(summary.inputTokens).toBe(1500);
     expect(summary.outputTokens).toBe(150);
     expect(summary.cacheReadTokens).toBe(800);
+    expect(summary.cacheWriteTokens).toBe(120);
     expect(summary.costUsd).toBeCloseTo(0.01);
     expect(summary.models).toEqual(["gpt-5", "claude-sonnet-4"]);
     expect(summary.errorCount).toBe(0);
+  });
+
+  it("reads legacy GenAI cache details from persisted step spans", () => {
+    const summary = summarizeLocalTrace([
+      span({
+        attributes: {
+          "gen_ai.usage.cache_creation.input_tokens": 20,
+          "gen_ai.usage.cache_read.input_tokens": 40,
+        },
+      }),
+    ]);
+
+    expect(summary.cacheReadTokens).toBe(40);
+    expect(summary.cacheWriteTokens).toBe(20);
   });
 
   it("reports errors and leaves cost undefined when unreported", () => {

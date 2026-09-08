@@ -32,7 +32,7 @@ import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channe
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
-import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import { setSpanUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
@@ -359,11 +359,13 @@ export function createAgentOtelInstrumentation(
       {
         attributes: {
           "gen_ai.agent.name": event.scope.functionId,
+          "gen_ai.conversation.id": event.scope.sessionId,
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
           ...runtimeContextAttributes(event.runtimeContext),
         },
+        kind: SpanKind.CLIENT,
       },
       attempt.context,
     );
@@ -394,10 +396,18 @@ export function createAgentOtelInstrumentation(
       recordError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
-      setAgentUsage(state.span, event.usage);
+      setSpanUsage(state.span, event.usage, "gen_ai");
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
+      if (event.response?.id !== undefined) {
+        state.span.setAttribute("gen_ai.response.id", event.response.id);
+      }
+      if (event.response?.modelId !== undefined) {
+        state.span.setAttribute("gen_ai.response.model", event.response.modelId);
+      }
       const attempt = steps.get(event.scope);
-      if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);
+      if (attempt !== undefined) {
+        setSpanUsage(attempt.span, event.usage, "agent");
+      }
       if (recordOutputs) {
         state.span.setAttribute("ai.response.finish_reason", event.finishReason);
         const content = event.content;
