@@ -12460,6 +12460,55 @@ describe("createToolLoopHarness", () => {
       expect(ctx.get(HistoryStateKey)).toBeUndefined();
     });
 
+    it("retains completed compaction when the next model call fails", async () => {
+      const announcement = "Available skills\n- policy: Tenant policy";
+      const ctx = new ContextContainer();
+      ctx.set(PendingSkillAnnouncementKey, announcement);
+      ctx.set(HistoryStateKey, { availableSkills: announcement });
+      const session = createTestSession({
+        compaction: {
+          recentWindowSize: 10,
+          threshold: 100_000,
+          lastKnownInputTokens: 50_000,
+          lastKnownPromptMessageCount: 1,
+        },
+        history: [{ role: "user", content: announcement }],
+      });
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", emit, {
+          resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model", provider: "openai" }),
+        }),
+      );
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockResolvedValueOnce([
+        { role: "user", content: "Conversation summary" },
+      ]);
+      setupMockAgentError(new Error("Model unavailable"));
+
+      const failed = await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Continue." }),
+      );
+      expect(failed.session.history).toEqual([{ role: "user", content: "Conversation summary" }]);
+      expect(ctx.get(HistoryStateKey)).toBeUndefined();
+      expect(failed.session.compaction).not.toHaveProperty("lastKnownInputTokens");
+      expect(failed.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
+
+      setupMockAgent(defaultModelResult());
+      const restoredContext = await deserializeContext(
+        JSON.parse(JSON.stringify(serializeContext(ctx))),
+      );
+      restoredContext.set(PendingSkillAnnouncementKey, announcement);
+      const restoredSession = JSON.parse(JSON.stringify(failed.session)) as HarnessSession;
+      const retried = await contextStorage.run(restoredContext, () =>
+        runStep(restoredSession, { message: "Try again." }),
+      );
+      expect(
+        retried.session.history.filter((message) => message.content === announcement),
+      ).toHaveLength(1);
+      expect(restoredContext.get(HistoryStateKey)).toEqual({ availableSkills: announcement });
+    });
+
     it.each(["clear", "manual compaction", "automatic compaction"])(
       "reannounces unchanged context after %s replaces history",
       async (replacement) => {

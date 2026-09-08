@@ -583,15 +583,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.clearOnly === true) {
       session = {
         ...session,
-        compaction: {
-          recentWindowSize: session.compaction.recentWindowSize,
-          threshold: session.compaction.threshold,
-          thresholdPercent: session.compaction.thresholdPercent,
-        },
-        history: [],
         state: clearMemorySessionState(session.state),
       };
-      contextStorage.getStore()?.delete(HistoryStateKey);
+      session = replaceSessionHistory(session, []);
       await emit?.(
         createContextClearedEvent({
           sequence: emissionState.sequence,
@@ -629,15 +623,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             telemetry: stepInstrumentation?.telemetry(),
           });
 
-          session = {
-            ...compacted.session,
-            compaction: {
-              recentWindowSize: compacted.session.compaction.recentWindowSize,
-              threshold: compacted.session.compaction.threshold,
-              thresholdPercent: compacted.session.compaction.thresholdPercent,
-            },
-            history: compacted.messages,
-          };
+          session = compacted.session;
         } catch (error) {
           logError(log, "manual session compaction failed", error, {
             sessionId: session.sessionId,
@@ -3132,6 +3118,19 @@ function createNextCompactionConfig(
   return next;
 }
 
+function replaceSessionHistory(session: HarnessSession, history: ModelMessage[]): HarnessSession {
+  contextStorage.getStore()?.delete(HistoryStateKey);
+  return {
+    ...session,
+    history,
+    compaction: {
+      recentWindowSize: session.compaction.recentWindowSize,
+      threshold: session.compaction.threshold,
+      thresholdPercent: session.compaction.thresholdPercent,
+    },
+  };
+}
+
 /**
  * Runs the compaction pipeline once if the session's input-token estimate
  * is over the configured threshold. Mutates neither input; returns the new
@@ -3254,8 +3253,7 @@ async function maybeCompact(input: {
     }
   }
 
-  contextStorage.getStore()?.delete(HistoryStateKey);
-  return { compacted: true, messages, session };
+  return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
 }
 
 /**
