@@ -5,17 +5,20 @@ import type {
   ClientRedirectPolicy,
   CompactResult,
   ResetResult,
+  RestoreHistoryResult,
 } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ClearResponseSchema } from "#protocol/clear-session.js";
 import { CompactResponseSchema } from "#protocol/compact-session.js";
 import { ResetResponseSchema } from "#protocol/reset-session.js";
+import { RestoreHistoryResponseSchema } from "#protocol/restore-history.js";
 import {
   createEveSessionCancelRoutePath,
   createEveSessionClearRoutePath,
   createEveSessionCompactRoutePath,
   createEveSessionResetRoutePath,
+  createEveSessionRestoreHistoryRoutePath,
 } from "#protocol/routes.js";
 
 interface SessionControlContext {
@@ -89,6 +92,29 @@ export async function compactClientSession(input: {
     (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
   ) {
     throw new Error("Compact route returned an invalid response.");
+  }
+  return result.data.status === "accepted"
+    ? { sessionId: result.data.sessionId, status: "accepted" }
+    : { status: "no_active_session" };
+}
+
+export async function restoreClientSessionHistory(input: {
+  readonly context: SessionControlContext;
+  readonly sessionId: string;
+  readonly to: number;
+}): Promise<RestoreHistoryResult> {
+  const { payload } = await postJson({
+    body: { to: input.to },
+    context: input.context,
+    operation: "Restore history",
+    path: createEveSessionRestoreHistoryRoutePath(input.sessionId),
+  });
+  const result = RestoreHistoryResponseSchema.safeParse(payload);
+  if (
+    !result.success ||
+    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
+  ) {
+    throw new Error("History restoration route returned an invalid response.");
   }
   return result.data.status === "accepted"
     ? { sessionId: result.data.sessionId, status: "accepted" }

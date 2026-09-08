@@ -56,6 +56,7 @@ export type {
   MessageResult,
   RespondTurnOptions,
   ResetResult,
+  RestoreHistoryResult,
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnOptions,

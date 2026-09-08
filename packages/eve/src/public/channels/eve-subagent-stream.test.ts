@@ -221,6 +221,9 @@ function createHarness(input: {
     async clear() {
       return { sessionId: coordinates.parentSessionId, status: "accepted" };
     },
+    async restoreHistory() {
+      return { sessionId: coordinates.parentSessionId, status: "accepted" };
+    },
     async reset() {
       return { previousSessionId: coordinates.parentSessionId, status: "reset" };
     },

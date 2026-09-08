@@ -37,7 +37,10 @@ import { isObject } from "#shared/guards.js";
 export type DecodedSessionInbox =
   | DeliverHookPayload
   | SessionTimeoutHookPayload
-  | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
+  | Extract<
+      SessionCommand,
+      { readonly kind: "cancel" | "clear" | "compact" | "reset" | "restore-history" }
+    >;
 
 export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 
@@ -53,6 +56,15 @@ const sessionInboxWireV5Migration: VersionMigration = {
   to: 6,
 };
 
+const sessionInboxWireV6Migration: VersionMigration = {
+  from: 6,
+  migrate(prior) {
+    if (!isObject(prior)) throw new Error("session inbox wire v6 value is not an object.");
+    return { ...prior, version: 7 };
+  },
+  to: 7,
+};
+
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
@@ -60,6 +72,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV3Migration,
   sessionInboxWireV4Migration,
   sessionInboxWireV5Migration,
+  sessionInboxWireV6Migration,
 ];
 
 /**
@@ -160,6 +173,8 @@ function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {
       return { kind: "compact" };
     case "reset":
       return { kind: "reset", reason: wire.reason };
+    case "restore-history":
+      return { kind: "restore-history", to: wire.to };
     case "cancel":
       return { kind: "cancel", taskId: wire.taskId, tasks: wire.tasks, turnId: wire.turnId };
     default:

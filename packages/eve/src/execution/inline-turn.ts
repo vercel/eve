@@ -1,4 +1,6 @@
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import type { BufferedSessionControl } from "#execution/parked-delivery-wait.js";
+
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import type {
@@ -32,7 +34,7 @@ export type InlineTurnOutcome =
 /** Runs same-deployment steps directly until they need the shared turn runner. */
 export async function runInlineTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly bufferedSessionControls: BufferedSessionControl[];
   readonly cancelledTaskIds?: Set<string>;
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionCommandInbox;
@@ -159,7 +161,7 @@ function continueOutcome(
 
 class InlineTurnControl {
   private readonly bufferedDeliveries: DeliverHookPayload[];
-  private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  private readonly bufferedSessionControls: BufferedSessionControl[];
   private readonly cancelledTaskIds: Set<string>;
   private readonly commandInbox: SessionCommandInbox;
   private readonly controller = new AbortController();
@@ -170,7 +172,7 @@ class InlineTurnControl {
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
-    readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly bufferedSessionControls: BufferedSessionControl[];
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
@@ -242,16 +244,20 @@ class InlineTurnControl {
       if (command.turnPolicy === "steer" && deliveryHasMessage(command)) this.abort({});
       return;
     }
-    if (command.kind === "clear" || command.kind === "compact") {
-      this.bufferedSessionControls.push(command.kind);
+    if (
+      command.kind === "clear" ||
+      command.kind === "compact" ||
+      command.kind === "restore-history"
+    ) {
+      this.bufferedSessionControls.push(command);
       return;
     }
     if (command.kind === "session-timeout") {
-      this.bufferedSessionControls.push("expired");
+      this.bufferedSessionControls.push({ kind: "expired" });
       return;
     }
     if (command.kind === "reset") {
-      this.bufferedSessionControls.push("reset");
+      this.bufferedSessionControls.push(command);
       this.abort({});
       return;
     }

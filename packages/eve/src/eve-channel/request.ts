@@ -30,6 +30,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { RestoreHistoryRequestSchema } from "#protocol/restore-history.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface ParsedCreateBody {
@@ -254,6 +255,23 @@ export async function parseResetBody(
     );
   }
   return reason === undefined ? {} : { reason };
+}
+
+export async function parseRestoreHistoryBody(
+  req: Request,
+): Promise<{ readonly to: number } | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  const tokenRejection = rejectSessionContinuationToken(payload);
+  if (tokenRejection !== null) return tokenRejection;
+  const parsed = RestoreHistoryRequestSchema.safeParse(payload);
+  if (!parsed.success) {
+    return Response.json(
+      { error: "Expected 'to' to be a nonnegative integer.", ok: false },
+      { status: 400 },
+    );
+  }
+  return parsed.data;
 }
 
 export async function parseSessionControlBody(

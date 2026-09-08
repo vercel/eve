@@ -8,6 +8,7 @@ import {
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { runInlineTurn } from "#execution/inline-turn.js";
+import type { BufferedSessionControl } from "#execution/parked-delivery-wait.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
@@ -33,7 +34,7 @@ export interface DispatchedTurn {
 /** Dispatches one turn and services its private-inbox control protocol until it terminates. */
 interface TurnDispatchInput {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly bufferedSessionControls: BufferedSessionControl[];
   readonly capabilities?: SessionCapabilities;
   readonly cancelledTaskIds?: Set<string>;
   readonly controlToken: string;

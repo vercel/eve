@@ -7,6 +7,7 @@ import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type { BufferedSessionControl } from "#execution/parked-delivery-wait.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
@@ -25,7 +26,7 @@ export type TurnDriverAction = NextDriverAction;
 /** Owns one turn's driver-side control hook and public-delivery relay state. */
 export class TurnControlReceiver {
   private readonly bufferedDeliveries: DeliverHookPayload[];
-  private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  private readonly bufferedSessionControls: BufferedSessionControl[];
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
@@ -37,7 +38,7 @@ export class TurnControlReceiver {
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
-    readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly bufferedSessionControls: BufferedSessionControl[];
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
@@ -96,12 +97,16 @@ export class TurnControlReceiver {
       await this.bufferDelivery(command);
       return undefined;
     }
-    if (command.kind === "clear" || command.kind === "compact") {
-      this.bufferedSessionControls.push(command.kind);
+    if (
+      command.kind === "clear" ||
+      command.kind === "compact" ||
+      command.kind === "restore-history"
+    ) {
+      this.bufferedSessionControls.push(command);
       return undefined;
     }
     if (command.kind === "session-timeout") {
-      this.bufferedSessionControls.push("expired");
+      this.bufferedSessionControls.push({ kind: "expired" });
       return undefined;
     }
     if (command.kind === "cancel") {
@@ -131,7 +136,7 @@ export class TurnControlReceiver {
         payload: {},
         token: turnCancellationHookToken(this.control.token),
       });
-      this.bufferedSessionControls.push("reset");
+      this.bufferedSessionControls.push(command);
       return undefined;
     }
     return unsupportedSessionCommand(command);

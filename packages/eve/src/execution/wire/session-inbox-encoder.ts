@@ -34,11 +34,15 @@ import {
   encodeSessionCommandV6,
   type SessionInboxWireV6,
 } from "#execution/wire/session-inbox-wire.v6.js";
+import {
+  encodeSessionCommandV7,
+  type SessionInboxWireV7,
+} from "#execution/wire/session-inbox-wire.v7.js";
 
 type SessionInboxCommand = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
 /** Current wire type consumed after migration. */
-export type SessionInboxWire = SessionInboxWireV6;
+export type SessionInboxWire = SessionInboxWireV7;
 
 type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly version: 0 }>;
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
@@ -55,6 +59,7 @@ const versionedEncoders = {
   5: (command: SessionInboxCommand) =>
     encodeSessionCommandV5(withoutOwnedTaskCancellation(command)),
   6: encodeSessionCommandV6,
+  7: encodeSessionCommandV7,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
 /** Encodes a command for the selected session-inbox consumer. */
@@ -64,6 +69,7 @@ function encode(command: SessionInboxCommand, target: { readonly version: 3 }): 
 function encode(command: SessionInboxCommand, target: { readonly version: 4 }): SessionInboxWireV4;
 function encode(command: SessionInboxCommand, target: { readonly version: 5 }): SessionInboxWireV5;
 function encode(command: SessionInboxCommand, target: { readonly version: 6 }): SessionInboxWireV6;
+function encode(command: SessionInboxCommand, target: { readonly version: 7 }): SessionInboxWireV7;
 function encode(
   command: SessionInboxCommand,
   target: { readonly version: SessionInboxWireVersion },
@@ -82,6 +88,7 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown>;
 function encode(
   command: SessionInboxCommand,
@@ -93,7 +100,13 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown> {
+  if (command.kind === "restore-history" && target.version < 7) {
+    throw new SessionInboxWireError(
+      `Cannot encode history restoration for wire version ${target.version}.`,
+    );
+  }
   if (command.kind === "cancel" && command.tasks === true && target.version < 6) {
     throw new SessionInboxWireError(
       `Cannot encode session-owned task cancellation for wire version ${target.version}.`,
@@ -139,7 +152,8 @@ function encode(
       | SessionInboxWireV3
       | SessionInboxWireV4
       | SessionInboxWireV5
-      | SessionInboxWireV6;
+      | SessionInboxWireV6
+      | SessionInboxWireV7;
   }
   throw new SessionInboxWireError(
     `Cannot encode session inbox payload for unknown wire version ${JSON.stringify((target as { version?: unknown }).version)}.`,

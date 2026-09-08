@@ -588,6 +588,9 @@ describe("defineChannel", () => {
           async clear() {
             return { sessionId: channelId, status: "accepted" as const };
           },
+          async restoreHistory() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
           async reset() {
             return { previousSessionId: channelId, status: "reset" as const };
           },
