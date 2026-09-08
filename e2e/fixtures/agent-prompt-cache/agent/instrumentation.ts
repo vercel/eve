@@ -5,6 +5,8 @@ import { defineInstrumentation } from "eve/instrumentation";
 import { promptRecordsPath } from "../prompt-records";
 
 export default defineInstrumentation({
+  recordInputs: true,
+  recordOutputs: true,
   events: {
     "step.started"({ modelInput, session, step, turn }) {
       if (session.parent !== undefined) return;

@@ -188,12 +188,48 @@ function usesMatrixModel(events: EveEvalTurn["events"]): boolean {
 }
 
 function reviewPacket(): string {
+  const products = [
+    "stackable storage boxes",
+    "recycled paper notebooks",
+    "packing tape rolls",
+    "cotton cleaning cloths",
+    "cardboard mailing tubes",
+    "adjustable shelf dividers",
+    "reusable water bottles",
+    "clipboards with covers",
+    "wooden sorting trays",
+    "coloured index cards",
+    "document folders",
+    "cork notice boards",
+    "paper label sheets",
+    "desk organisers",
+    "felt protective pads",
+    "reusable shopping bags",
+    "pencil sharpeners",
+    "spiral planning books",
+    "magnetic page markers",
+    "small parts containers",
+  ];
+  const notes = [
+    "Match the colour to the sample approved at the last purchasing meeting.",
+    "Keep the manufacturer's care instructions with the delivery paperwork.",
+    "Count the individual units before putting the outer packaging aside.",
+    "Check that the carton label and the packing slip list the same quantity.",
+    "Place the delivery on the labelled shelf beside the receiving desk.",
+    "Record any damaged packaging on the receiving form before unpacking.",
+    "Ask the receiving coordinator to confirm the preferred storage position.",
+    "Retain one sample for Bob to compare with the next scheduled delivery.",
+  ];
   const records = Array.from({ length: 5 }, (_, sheet) =>
-    Array.from(
-      { length: 40 },
-      (_, item) =>
-        `Sheet ${sheet + 1}, entry ${item + 1}: Alice requests ${12 + item} reusable storage boxes for receiving area ${sheet + 1}. Bob will confirm delivery on October ${(item % 20) + 1}. The receiving team will count the boxes, match the packing slip to this entry, and place them on shelf ${item + 1}. The purchasing record includes the quantity, delivery date, and receiving location.`,
-    ).join("\n"),
+    [
+      `Sheet ${sheet + 1}: receiving area ${sheet + 1}`,
+      "Entry | Product | Quantity | Unit price (cents) | Delivery date | Receiving note",
+      ...Array.from(
+        { length: 40 },
+        (_, item) =>
+          `${item + 1} | ${products[(item + sheet * 3) % products.length]} | ${12 + item * 2} | ${150 + item * 37} | October ${(item % 20) + 1} | ${notes[(item + sheet) % notes.length]}`,
+      ),
+    ].join("\n"),
   ).join("\n\n");
   return `Purchasing packet ${randomUUID()}.\nAlice has five independent purchasing sheets for Bob's team. Launch five reviewer subagents in parallel, one per sheet, and collect their results. Send each reviewer only its sheet number; the review_sheet tool has the corresponding records. Acknowledge admission briefly while they work. Report REVIEW_COMPLETE and all five SHEET_REVIEWED markers once their completion notifications arrive.\n\n${records}`;
 }
