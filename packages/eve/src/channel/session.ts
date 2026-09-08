@@ -30,6 +30,7 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { CHANNEL_AUTHENTICATION_PAYLOAD_KEY } from "#channel/authentication.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -67,6 +68,8 @@ interface SessionDeliveryOptions {
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  /** @internal Durable sender-auth input supplied by a channel route. */
+  readonly senderAuthentication?: { readonly event: unknown };
 }
 
 /** Options for sending a message through a fixed session handle. */
@@ -108,6 +111,11 @@ export function createSession(
       }>({ message: serializeUrlFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
+      if (options.senderAuthentication !== undefined) {
+        Object.assign(payload, {
+          [CHANNEL_AUTHENTICATION_PAYLOAD_KEY]: options.senderAuthentication,
+        });
+      }
       const commandWithoutCaller = {
         auth: options.auth,
         delivery,

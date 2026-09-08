@@ -1,0 +1,301 @@
+:root {
+  color: #171717;
+  background: #f7f7f7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chat-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+}
+
+.chat-header {
+  align-items: center;
+  border-bottom: 1px solid #e5e5e5;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 20px;
+}
+
+.chat-header span {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.chat-header button {
+  background: transparent;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  padding: 7px 11px;
+}
+
+.message-feed {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 24px;
+}
+
+.empty-state {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
+.empty-state h1 {
+  font-size: clamp(32px, 5vw, 48px);
+  font-weight: 550;
+  letter-spacing: -0.05em;
+  margin: 0;
+}
+
+.empty-state p {
+  color: #737373;
+  margin: 12px 0 0;
+}
+
+.message-list {
+  display: grid;
+  gap: 20px;
+  margin: 0 auto;
+  max-width: 760px;
+}
+
+.message {
+  display: flex;
+}
+
+.message-user {
+  justify-content: flex-end;
+}
+
+.message-content {
+  line-height: 1.6;
+  max-width: min(85%, 680px);
+}
+
+.message-content > p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.message-content > p + p {
+  margin-top: 12px;
+}
+
+.message-user .message-content {
+  background: #171717;
+  border-radius: 16px;
+  color: #fff;
+  padding: 10px 15px;
+}
+
+.pending {
+  color: #737373;
+}
+
+.authorization-card {
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.authorization-card p {
+  color: #525252;
+  margin: 6px 0 14px;
+}
+
+.authorization-card code {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.authorization-card a {
+  background: #171717;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-block;
+  font-weight: 600;
+  padding: 9px 13px;
+  text-decoration: none;
+}
+
+.authorization-status {
+  color: #287a3d;
+}
+
+.composer {
+  align-items: end;
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 7%);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0 auto 24px;
+  padding: 12px;
+  width: min(calc(100% - 32px), 720px);
+}
+
+.composer textarea {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  line-height: 1.5;
+  max-height: 160px;
+  min-height: 28px;
+  outline: 0;
+  padding: 5px 4px;
+  resize: vertical;
+}
+
+.composer button {
+  background: #171717;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  height: 34px;
+  width: 34px;
+}
+
+.composer button:disabled,
+.composer textarea:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.composer-error {
+  color: #b42318;
+  font-size: 13px;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.visually-hidden {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+  clip: rect(0 0 0 0);
+}
+
+.sign-in-shell {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.sign-in-card {
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 8%);
+  padding: 40px;
+  width: min(100%, 520px);
+}
+
+.eyebrow {
+  color: #666;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.sign-in-card h1 {
+  font-size: 38px;
+  letter-spacing: -0.04em;
+  margin: 0 0 16px;
+}
+
+.sign-in-card form {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.sign-in-card label {
+  font-weight: 650;
+  margin-top: 10px;
+}
+
+.sign-in-card input {
+  background: #fff;
+  border: 1px solid #b8b8b8;
+  border-radius: 8px;
+  color: inherit;
+  padding: 11px 13px;
+  width: 100%;
+}
+
+.sign-in-card button {
+  background: #171717;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 650;
+  margin-top: 18px;
+  padding: 11px 16px;
+}
+
+.note,
+.error {
+  font-size: 14px;
+  margin: 24px 0 0;
+}
+
+.note {
+  color: #666;
+}
+
+.error {
+  color: #b42318;
+}
+
+@media (max-width: 560px) {
+  .message-feed {
+    padding: 20px 16px;
+  }
+
+  .sign-in-card {
+    padding: 28px 22px;
+  }
+}

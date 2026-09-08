@@ -6,7 +6,6 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
-  defaultEveAuth,
   type EveChannelCors,
   type EveChannelCorsOptions,
   type EveChannelInput,
@@ -121,7 +120,8 @@ export function normalizeEveCorsOrigin(
 }
 
 interface OnMessageOutcome {
-  readonly auth: SessionAuthContext | null;
+  readonly auth?: SessionAuthContext | null;
+  readonly hasAuthOverride: boolean;
   readonly context?: readonly string[];
   readonly title?: string;
 }
@@ -144,7 +144,7 @@ export async function resolveOnMessage(input: {
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {
-      throw new TypeError("eveChannel onMessage must return an auth result.");
+      throw new TypeError("eveChannel onMessage must return a result object.");
     }
   } catch (error) {
     const errorId = logError(log, "onMessage handler failed", error, {
@@ -156,9 +156,14 @@ export async function resolveOnMessage(input: {
     );
   }
 
-  return { auth: result.auth, context: result.context, title: result.title };
+  return {
+    auth: result.auth,
+    context: result.context,
+    hasAuthOverride: Object.prototype.hasOwnProperty.call(result, "auth"),
+    title: result.title,
+  };
 }
 
-export function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
-  return { auth: defaultEveAuth(ctx) };
+export function defaultOnMessage(_ctx: EveMessageContext): EveMessageResult {
+  return {};
 }

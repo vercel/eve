@@ -444,6 +444,7 @@ describe("message stream protocol", () => {
       authorization: { url: "https://idp.example.com/authorize" },
       name: "linear",
       description: "Linear",
+      purpose: "session",
       sequence: 3,
       stepIndex: 1,
       turnId: "turn_0",
@@ -453,6 +454,7 @@ describe("message stream protocol", () => {
       url: "https://idp.example.com/authorize",
     });
     expect(full.data.webhookUrl).toBe(webhookUrl);
+    expect(full.data.purpose).toBe("session");
   });
 
   it("builds authorization.completed with optional reason", () => {
@@ -491,6 +493,7 @@ describe("message stream protocol", () => {
       authorization: { displayName: "Linear", url: "https://idp.example.com/authorize" },
       name: "linear",
       outcome: "authorized",
+      purpose: "session",
       sequence: 7,
       stepIndex: 1,
       turnId: "turn_0",
@@ -499,6 +502,7 @@ describe("message stream protocol", () => {
       displayName: "Linear",
       url: "https://idp.example.com/authorize",
     });
+    expect(withChallenge.data.purpose).toBe("session");
   });
 
   it("normalizes failed action results onto the event payload", () => {

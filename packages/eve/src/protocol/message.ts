@@ -645,6 +645,8 @@ export interface AuthorizationRequiredStreamEvent {
     candidateId?: string;
     description: string;
     name: string;
+    /** Whether the challenge establishes the session caller or authorizes a tool/connection. */
+    purpose?: "connection" | "session";
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -685,6 +687,8 @@ export interface AuthorizationCompletedStreamEvent {
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
     outcome: AuthorizationOutcome;
+    /** Whether the challenge established the session caller or authorized a tool/connection. */
+    purpose?: "connection" | "session";
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -1136,6 +1140,7 @@ export function createAuthorizationRequiredEvent(input: {
   readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
+  readonly purpose?: "connection" | "session";
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1160,6 +1165,9 @@ export function createAuthorizationRequiredEvent(input: {
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
   }
+  if (input.purpose !== undefined) {
+    data.purpose = input.purpose;
+  }
   return {
     data,
     type: "authorization.required",
@@ -1177,6 +1185,7 @@ export function createAuthorizationCompletedEvent(input: {
   readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
+  readonly purpose?: "connection" | "session";
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1200,6 +1209,9 @@ export function createAuthorizationCompletedEvent(input: {
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
+  }
+  if (input.purpose !== undefined) {
+    data.purpose = input.purpose;
   }
   return {
     data,

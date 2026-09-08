@@ -1,5 +1,5 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import { callAdapterEventHandler } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -43,7 +43,6 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -51,7 +50,6 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
 import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
@@ -63,9 +61,9 @@ import {
   createSessionStartedEvent,
   createTurnStartedEvent,
   encodeMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
   type MessageStreamEvent,
+  stampMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -98,6 +96,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
+import { resolveAuthenticatedChannelInput } from "#execution/channel-sender-authentication.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -162,7 +161,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     input = { ...input, input: { ...input.input, payloads: remainingPayloads } };
     if (matches.length > 0) {
       const authResults = matches.map((match) => match.result);
-      ctx.set(PendingAuthorizationResultKey, authResults);
+      const connectionAuthResults = authResults.filter(
+        (result) => result.senderAuthentication === undefined,
+      );
+      if (connectionAuthResults.length > 0) {
+        ctx.set(PendingAuthorizationResultKey, connectionAuthResults);
+      }
       durableSession = {
         ...durableSession,
         state: clearPendingAuthorization(
@@ -183,7 +187,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     ctx.set(AuthKey, input.input.auth ?? null);
   }
 
-  const initialSession = hydrateDurableSession({
+  let initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
@@ -238,33 +242,21 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await instrumentation?.flush();
   };
   const adapterCtx = buildAdapterContext(adapter, ctx);
-
-  // Run the adapter's deliver hook for each queued payload and
-  // coalesce the resulting StepInput values.
-  let resolved: StepInput | undefined;
-  if (input.input?.kind === "deliver") {
-    const results: StepInput[] = [];
-    try {
-      for (const payload of input.input.payloads) {
-        const result = adapter.deliver
-          ? await adapter.deliver(payload, adapterCtx)
-          : defaultDeliverResult(payload);
-
-        if (result !== undefined && result !== null) {
-          results.push(result);
-        }
-      }
-    } catch (error) {
-      await failChannelDeliveries(error);
-      throw error;
-    }
-    resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
-  } else if (input.input?.kind === "runtime-action-result") {
-    if (input.input.acceptedAtMsByCallId !== undefined) {
-      ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
-    }
-    resolved = { runtimeActionResults: input.input.results };
-  }
+  const authenticatedInput = await resolveAuthenticatedChannelInput({
+    adapter,
+    adapterCtx,
+    completedAuths,
+    ctx,
+    emissionState: initialEmissionState,
+    failDelivery: failChannelDeliveries,
+    parentWritable: input.parentWritable,
+    session: initialSession,
+    turnInput: input.input,
+  });
+  completedAuths = authenticatedInput.completedAuths;
+  initialSession = authenticatedInput.session;
+  let resolved = authenticatedInput.resolved;
+  if (authenticatedInput.parked !== undefined) return authenticatedInput.parked;
 
   if (
     resolved !== undefined &&

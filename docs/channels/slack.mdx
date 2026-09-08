@@ -140,10 +140,10 @@ Check the delivery path in order so you can identify where a Slack event stops:
 
 ### Message hooks
 
-Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
+Message hooks return an object to dispatch, `null` to drop, or `{ context }` to inject background into history. Include `auth` only when the handler should supply the final sender identity itself. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
-- `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
+- `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default posts `Thinking…`; the channel then resolves sender auth.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
 | Incoming event         | Handler order                                                       |
@@ -222,6 +222,48 @@ export default slackChannel({
 Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Apply the same policy in `onInputResponse` so someone who cannot start a turn cannot resume one through an eve-owned HITL control. Slack Connect can deliver events from external users, so authorize the explicit user and current conversation IDs your policy expects. If access depends on organization membership, resolve it from Slack's shared-channel and user data instead of inferring it from the request signature.
 
 Keep authorization checks inside sensitive tools too. The inbound allowlist controls who can start a turn; tool-level checks control what that authenticated Slack principal may read or change.
+
+#### Authenticate Slack senders
+
+Set `auth` on the Slack channel when an accepted message must resolve to an application identity before it reaches the model. The option accepts one `AuthFn<SlackEvent>` or an ordered array:
+
+- Return a `SessionAuthContext` to accept the sender and stop the walk.
+- Return `null` or `undefined` to continue to the next strategy.
+- Return `{ interaction: "required", ... }` to claim the message and start sign-in.
+
+```ts title="agent/channels/slack.ts"
+import { type AuthFn } from "eve/channels/auth";
+import { slackChannel, type SlackEvent } from "eve/channels/slack";
+
+const appAccount: AuthFn<SlackEvent> = async (event) => {
+  const session = await findAppSession(event);
+  if (session) return session.auth;
+
+  return {
+    interaction: "required",
+    startAuthorization: ({ callbackUrl }) => startAppSignIn({ callbackUrl, event }),
+    completeAuthorization: ({ callback, callbackUrl, resume }) =>
+      completeAppSignIn({ callback, callbackUrl, resume }),
+  };
+};
+
+export default slackChannel({
+  auth: [appAccount],
+});
+```
+
+`startAuthorization` returns `{ challenge, resume? }`. The challenge uses the same shape rendered for connection authorization, and `resume` must be JSON-serializable. eve journals the accepted message and `resume`, emits `authorization.required`, and parks the session before model or tool execution. When the callback arrives, eve runs the same strategy again and calls `completeAuthorization`; that callback must return the final `SessionAuthContext`. The default Slack authorization handlers deliver the sign-in challenge privately and resume the original message after success.
+
+This auth walk runs only after a message hook accepts a message. It does not replace Slack request-signature verification or the hook's allowlist checks. If the channel has no `auth` option, eve retains its built-in workspace-scoped Slack identity.
+
+A message hook can bypass the configured walk by returning an explicit `auth` property. This is a final override; `{ auth: null }` intentionally starts the turn without an authenticated sender. Omitting the property, as in `return {}`, uses the configured walk:
+
+```ts
+onAppMention(_ctx, message) {
+  if (isTrustedAutomation(message)) return { auth: automationAuth };
+  return {}; // resolve through slackChannel({ auth })
+},
+```
 
 `onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
 
@@ -416,7 +458,7 @@ Outbound text preserves bare `@` tokens as literal text. To mention a user, embe
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
-The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
+The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Its explicit `auth` bypasses the channel-level auth resolver. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
 ```ts
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
@@ -439,7 +481,7 @@ export default slackChannel({
 
 HITL renders as Slack buttons and selects. Fixed-choice actions and freeform modal submissions pass through `onInputResponse` before the parked session resumes. The initial **Type your answer** action only opens eve's modal; the hook runs when the user submits an answer.
 
-Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
+Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes a connection challenge binds their identity to that session connection; a sender-auth challenge sets the session's current identity. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Check `eventData.purpose === "session"` when an override needs different copy for sender sign-in; an absent purpose is connection authorization.
 
 ```ts
 events: {

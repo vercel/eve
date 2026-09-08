@@ -10,6 +10,7 @@ import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import { type ChannelAuthenticationResolution } from "#channel/authentication.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -36,6 +37,7 @@ import {
   defaultInputRequestedHandler,
   defaultOnAppMention,
   defaultOnDirectMessage,
+  defaultSlackAuth,
 } from "#public/channels/slack/defaults.js";
 import {
   parseMessageEvent,
@@ -63,9 +65,11 @@ import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
+  INTERNAL_SLACK_AUTHENTICATED_SEND,
   type SlackSendOptions,
   type SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";
+import { isAuthInteractionRequired, type AuthFn } from "#public/channels/auth.js";
 import {
   mergeUploadPolicy,
   type UploadPolicy,
@@ -89,6 +93,11 @@ export type {
 
 const log = createLogger("slack.channel");
 const PRIVATE_SLACK_RUN_TITLE = "Private message";
+
+interface SlackSenderAuthenticationEvent {
+  readonly defaultAuth: SessionAuthContext | null;
+  readonly event: SlackEvent;
+}
 
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
@@ -536,7 +545,8 @@ export type SlackInputResponseResult = { readonly auth: SessionAuthContext | nul
  * workflow run title without changing the message sent to the model.
  */
 export type SlackMentionResult = {
-  readonly auth: SessionAuthContext | null;
+  /** Final sender identity. When present, bypasses the channel-level `auth` walk. */
+  readonly auth?: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly title?: string;
 } | null;
@@ -607,6 +617,15 @@ export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
+  /**
+   * Resolves the sender identity for dispatched Slack events. Strategies run
+   * in order inside the durable session: `null` skips, a
+   * `SessionAuthContext` accepts, and `{ interaction: "required" }` parks the
+   * input for sign-in. A handler result with its own `auth` property bypasses
+   * this walk.
+   */
+  readonly auth?: AuthFn<SlackEvent> | readonly AuthFn<SlackEvent>[];
+
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
     readonly renderers: readonly SlackActivityRenderer[];
@@ -643,17 +662,19 @@ export interface SlackChannelConfig {
 
   /**
    * Invoked when a Slack `app_mention` event arrives (only `app_mention`;
-   * other event types are ignored). Decides whether to dispatch and with
-   * what auth, and may run pre-dispatch side effects (e.g.
+   * other event types are ignored). Decides whether to dispatch and may run
+   * pre-dispatch side effects (e.g.
    * `ctx.thread.startTyping("Thinking...")`) on the inbound webhook side
    * before the runtime cold-starts.
    *
-   * Return `{ auth }` to dispatch with that session auth context, or `null`
-   * to drop the mention. May be sync or async; the result is awaited before
+   * Return an object to dispatch, or `null` to drop the mention. Including an
+   * `auth` property supplies the final session auth and bypasses the configured
+   * sender-auth walk. May be sync or async; the result is awaited before
    * dispatching. Thrown errors are caught and logged and the mention is
    * dropped; wrap best-effort side effects in `try/catch` to keep them
-   * non-fatal. Defaults to a workspace-scoped auth derivation that posts a
-   * `"Thinking..."` typing indicator; replacing this replaces both.
+   * non-fatal. The default posts a `"Thinking..."` typing indicator; sender
+   * identity is then resolved by the configured auth walk or Slack's built-in
+   * workspace-scoped identity.
    */
   onAppMention?(
     ctx: SlackInboundMessageContext,
@@ -665,15 +686,17 @@ export interface SlackChannelConfig {
    * `channel_type: "im"`. Subtype messages (edits, deletes, joins, etc.)
    * and bot messages (`bot_id` set, including the bot's own replies) are
    * filtered out first, so handlers only see plain user-authored DMs.
-   * Decides whether to dispatch and with what auth, and may run
-   * pre-dispatch side effects on the inbound webhook side before cold-start.
+   * Decides whether to dispatch and may run pre-dispatch side effects on the
+   * inbound webhook side before cold-start.
    *
-   * Return `{ auth }` to dispatch with that session auth context, or `null`
-   * to drop the message. May be sync or async; the result is awaited before
+   * Return an object to dispatch, or `null` to drop the message. Including an
+   * `auth` property supplies the final session auth and bypasses the configured
+   * sender-auth walk. May be sync or async; the result is awaited before
    * dispatching. Thrown errors are caught and logged and the message is
    * dropped; wrap best-effort side effects in `try/catch` to keep them
-   * non-fatal. Defaults to a workspace-scoped auth derivation that posts a
-   * `"Thinking..."` typing indicator; replacing this replaces both.
+   * non-fatal. The default posts a `"Thinking..."` typing indicator; sender
+   * identity is then resolved by the configured auth walk or Slack's built-in
+   * workspace-scoped identity.
    * Requires the bot's Slack app to subscribe to `message.im` with the
    * `im:history` scope.
    */
@@ -939,6 +962,59 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         };
       }
       return defaultDeliverResult(payload);
+    },
+
+    async authenticateSender(event, callbackUrl): Promise<ChannelAuthenticationResolution> {
+      const input = event as SlackSenderAuthenticationEvent;
+      const configured = config.auth;
+      if (configured === undefined) {
+        return input.defaultAuth === null
+          ? { kind: "not-authenticated" }
+          : { auth: input.defaultAuth, kind: "authenticated" };
+      }
+
+      const strategies: readonly AuthFn<SlackEvent>[] = Array.isArray(configured)
+        ? configured
+        : [configured as AuthFn<SlackEvent>];
+      for (const [strategyIndex, strategy] of strategies.entries()) {
+        const result = await strategy(input.event);
+        if (result === null || result === undefined) continue;
+        if (isAuthInteractionRequired(result)) {
+          const started = await result.startAuthorization({ callbackUrl });
+          return {
+            challenge: started.challenge,
+            kind: "interaction-required",
+            resume: started.resume,
+            strategyIndex,
+          };
+        }
+        return { auth: result, kind: "authenticated" };
+      }
+      return { kind: "not-authenticated" };
+    },
+
+    async completeSenderAuthentication(input) {
+      const event = input.event as SlackSenderAuthenticationEvent;
+      const configured = config.auth;
+      if (configured === undefined) {
+        throw new Error("Slack sender authentication callback has no configured auth strategy.");
+      }
+      const strategies: readonly AuthFn<SlackEvent>[] = Array.isArray(configured)
+        ? configured
+        : [configured as AuthFn<SlackEvent>];
+      const strategy = strategies[input.strategyIndex];
+      if (strategy === undefined) {
+        throw new Error("Slack sender authentication strategy changed while sign-in was pending.");
+      }
+      const result = await strategy(event.event);
+      if (!isAuthInteractionRequired(result)) {
+        throw new Error("Slack sender authentication strategy changed while sign-in was pending.");
+      }
+      return await result.completeAuthorization({
+        callback: input.callback,
+        callbackUrl: input.callbackUrl,
+        resume: input.resume,
+      });
     },
 
     routes: [
@@ -1375,6 +1451,7 @@ async function dispatchSlackMessage(input: {
     isPrivateConversation,
     isMentioned: isBotMentioned,
     message: input.message,
+    defaultAuth: defaultSlackAuth(input.message, { slack, thread }),
     result,
     sessionOperations,
     thread,
@@ -1471,8 +1548,9 @@ async function verifyInbound(
 
 async function deliverSlackMessage(input: {
   readonly botUserId: string | undefined;
-  readonly sessionOperations: SlackSessionOperations;
+  readonly sessionOperations: ReturnType<typeof bindSlackSessionOperations>;
   readonly credentials: SlackChannelCredentials | undefined;
+  readonly defaultAuth: SessionAuthContext | null;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
   readonly kind: string;
@@ -1517,11 +1595,20 @@ async function deliverSlackMessage(input: {
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
     const sendOptions: SlackSendOptions =
-      channelContext.length === 0
-        ? { auth: input.result.auth, title }
-        : { auth: input.result.auth, context: channelContext, title };
+      channelContext.length === 0 ? { title } : { context: channelContext, title };
 
-    await input.sessionOperations.send(turnMessage, sendOptions);
+    if (Object.hasOwn(input.result, "auth")) {
+      await input.sessionOperations.send(turnMessage, { ...sendOptions, auth: input.result.auth });
+    } else {
+      await input.sessionOperations[INTERNAL_SLACK_AUTHENTICATED_SEND](
+        turnMessage,
+        {
+          defaultAuth: input.defaultAuth,
+          event: message.raw,
+        },
+        sendOptions,
+      );
+    }
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }

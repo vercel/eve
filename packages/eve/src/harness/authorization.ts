@@ -64,6 +64,11 @@ export interface AuthorizationChallenge {
    * journaled across the park. Absent for provider-owned flows.
    */
   readonly resume?: JsonValue;
+  /** Durable sender-auth state for a channel-level sign-in challenge. */
+  readonly senderAuthentication?: {
+    readonly event: unknown;
+    readonly strategyIndex: number;
+  };
 }
 
 export interface AuthorizationSignal {
@@ -87,6 +92,7 @@ export interface AuthorizationResult {
   readonly callback: AuthorizationCallback;
   readonly hookUrl: string;
   readonly principal?: ConnectionPrincipal;
+  readonly senderAuthentication?: AuthorizationChallenge["senderAuthentication"];
 }
 
 // ---------------------------------------------------------------------------

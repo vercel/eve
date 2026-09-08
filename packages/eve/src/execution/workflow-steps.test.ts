@@ -1,16 +1,19 @@
 import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
+import { CHANNEL_AUTHENTICATION_PAYLOAD_KEY } from "#channel/authentication.js";
 import type {
   DeliverPayload,
   SessionAuthContext,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ContextKey } from "#context/key.js";
 import {
   ActivityObserverKey,
   AuthKey,
+  InitiatorAuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
@@ -31,6 +34,7 @@ import { serializeContext } from "#context/serialize.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
@@ -225,12 +229,15 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
 
 function createSerializedContext(
   mode: "conversation" | "task" = "conversation",
+  adapter: ChannelAdapter = threadContextAdapter,
+  callbackBaseUrl?: string,
 ): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
+  ctx.set(InitiatorAuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -246,10 +253,11 @@ function createSerializedContext(
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
+  if (callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, callbackBaseUrl);
   return serializeContext(ctx);
 }
 
@@ -1161,6 +1169,158 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("parks sender sign-in before model execution and resumes the deferred input with final auth", async () => {
+    const authenticated: SessionAuthContext = {
+      attributes: { email: "alice@example.com" },
+      authenticator: "example-oidc",
+      issuer: "https://idp.example",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const authenticateSender = vi.fn(async (_event: unknown, callbackUrl: string) => ({
+      challenge: { displayName: "Example", url: `${callbackUrl}?start=1` },
+      kind: "interaction-required" as const,
+      resume: { verifier: "pkce" },
+      strategyIndex: 1,
+    }));
+    const completeSenderAuthentication = vi.fn(async () => authenticated);
+    const authorizationSessions: unknown[] = [];
+    const adapter: ChannelAdapter = {
+      ...threadContextAdapter,
+      "authorization.completed": () => {
+        authorizationSessions.push(buildCallbackContext().session);
+      },
+      "authorization.required": () => {
+        authorizationSessions.push(buildCallbackContext().session);
+      },
+      kind: "sender-auth-test",
+      authenticateSender,
+      completeSenderAuthentication,
+    };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    const serializedContext = createSerializedContext(
+      "conversation",
+      adapter,
+      "https://agent.example",
+    );
+
+    const first = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            [CHANNEL_AUTHENTICATION_PAYLOAD_KEY]: {
+              event: { actor: "U01", type: "app_mention" },
+            },
+            message: "hello",
+          },
+        ],
+      },
+      parentWritable: createTestWritable("sender-auth-required"),
+      serializedContext,
+      sessionState: createStubSessionState(),
+    });
+
+    expect(first).toMatchObject({
+      action: "park",
+      authorizationNames: ["session-auth"],
+      hasPendingAuthorization: true,
+    });
+    expect(createExecutionNodeStep).not.toHaveBeenCalled();
+    expect(first.serializedContext[AuthKey.name]).toBeNull();
+    expect(authorizationSessions).toEqual([
+      expect.objectContaining({
+        auth: { current: null, initiator: null },
+        id: "session-1",
+      }),
+    ]);
+    const parkedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
+    const pending = getPendingAuthorization(parkedSession?.state);
+    expect(pending?.challenges[0]).toMatchObject({
+      name: "session-auth",
+      resume: { verifier: "pkce" },
+      senderAuthentication: {
+        event: { actor: "U01", type: "app_mention" },
+        strategyIndex: 1,
+      },
+    });
+    const requiredEvents = (workflowWritesByNamespace.get("sender-auth-required") ?? []).map(
+      (chunk) => JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+    );
+    expect(requiredEvents).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ name: "session-auth", purpose: "session" }),
+        type: "authorization.required",
+      }),
+    ]);
+
+    if (parkedSession === undefined || pending?.challenges[0]?.attemptId === undefined) {
+      throw new Error("Expected a parked sender-auth attempt.");
+    }
+    installSessionStoreMocks([parkedSession]);
+    let resumedInput: unknown;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => async (stepSession, stepInput) => {
+      resumedInput = stepInput;
+      return { next: null, session: stepSession };
+    });
+    const attempt = pending.challenges[0];
+    const resumed = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: attempt.attemptId,
+              callback: {
+                method: "GET",
+                params: { code: "oauth-code" },
+              },
+              connectionName: "session-auth",
+            },
+          },
+        ],
+      },
+      parentWritable: createTestWritable("sender-auth-completed"),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+
+    expect(completeSenderAuthentication).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callback: expect.objectContaining({ params: { code: "oauth-code" } }),
+        event: { actor: "U01", type: "app_mention" },
+        resume: { verifier: "pkce" },
+        strategyIndex: 1,
+      }),
+      expect.anything(),
+    );
+    expect(resumed.serializedContext[AuthKey.name]).toEqual(authenticated);
+    expect(resumed.serializedContext[InitiatorAuthKey.name]).toEqual(authenticated);
+    expect(authorizationSessions).toEqual([
+      expect.objectContaining({ auth: { current: null, initiator: null } }),
+      expect.objectContaining({
+        auth: { current: authenticated, initiator: authenticated },
+        id: "session-1",
+      }),
+    ]);
+    expect(resumedInput).toEqual({ message: "thread=unset; user=hello" });
+  });
+
   it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
     const session = createStubSession({
       state: {

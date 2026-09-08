@@ -1759,6 +1759,160 @@ describe("eveChannel — auth array shape", () => {
     expect(response.status).toBe(202);
     expect(handler.send.mock.calls[0]?.[1]).toMatchObject({ auth: ACCEPTED });
   });
+
+  it("hands an interactive create request to the durable sender-auth gate", async () => {
+    const interaction = {
+      interaction: "required" as const,
+      startAuthorization: async () => ({ challenge: { url: "https://app.example/sign-in" } }),
+      completeAuthorization: async () => ACCEPTED,
+    };
+    const handler = createEveCreateHandler({ auth: [() => null, () => interaction] });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0];
+    expect(runInput?.auth).toBeNull();
+    expect(runInput?.input.senderAuthentication).toEqual({
+      event: {
+        request: { method: "POST", url: "https://example.com/eve/v1/session" },
+        strategyIndex: 1,
+      },
+    });
+  });
+
+  it("hands an interactive follow-up message to the durable sender-auth gate", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ({
+        interaction: "required",
+        startAuthorization: async () => ({ challenge: {} }),
+        completeAuthorization: async () => ACCEPTED,
+      }),
+    });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id?credential=secret", {
+        body: JSON.stringify({ message: "follow-up" }),
+        headers: {
+          authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
+      auth: null,
+      senderAuthentication: {
+        event: {
+          request: {
+            method: "POST",
+            url: "https://example.com/eve/v1/session/test-session-id",
+          },
+          strategyIndex: 0,
+        },
+      },
+    });
+  });
+
+  it("rejects operation-id creation when final identity requires interaction", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ({
+        interaction: "required",
+        startAuthorization: async () => ({ challenge: {} }),
+        completeAuthorization: async () => ACCEPTED,
+      }),
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(handler.createSession).not.toHaveBeenCalled();
+  });
+
+  it("lets an explicit onMessage auth override bypass an interactive result", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ({
+        interaction: "required",
+        startAuthorization: async () => ({ challenge: {} }),
+        completeAuthorization: async () => ACCEPTED,
+      }),
+      onMessage: () => ({ auth: OVERRIDE_AUTH }),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0];
+    expect(runInput?.auth).toEqual(OVERRIDE_AUTH);
+    expect(runInput?.input.senderAuthentication).toBeUndefined();
+  });
+
+  it("treats an explicit null onMessage auth as a final override", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ({
+        interaction: "required",
+        startAuthorization: async () => ({ challenge: {} }),
+        completeAuthorization: async () => ACCEPTED,
+      }),
+      onMessage: () => ({ auth: null }),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0];
+    expect(runInput?.auth).toBeNull();
+    expect(runInput?.input.senderAuthentication).toBeUndefined();
+  });
+
+  it("starts and completes the selected interactive strategy in the durable adapter", async () => {
+    const startAuthorization = vi.fn(async ({ callbackUrl }: { callbackUrl: string }) => ({
+      challenge: { url: `https://app.example/sign-in?callback=${encodeURIComponent(callbackUrl)}` },
+      resume: { nonce: "test" },
+    }));
+    const completeAuthorization = vi.fn(async () => ACCEPTED);
+    const adapter = getEveAdapter({
+      auth: [
+        () => null,
+        () => ({ interaction: "required", startAuthorization, completeAuthorization }),
+      ],
+    });
+    const ctx = new ContextContainer();
+    const adapterCtx = buildAdapterContext(adapter, contextAccessorFor(ctx));
+    const event = {
+      request: { method: "POST", url: "https://example.com/eve/v1/session" },
+      strategyIndex: 1,
+    };
+
+    await expect(
+      adapter.authenticateSender?.(event, "https://example.com/callback", adapterCtx),
+    ).resolves.toEqual({
+      challenge: {
+        url: "https://app.example/sign-in?callback=https%3A%2F%2Fexample.com%2Fcallback",
+      },
+      kind: "interaction-required",
+      resume: { nonce: "test" },
+      strategyIndex: 1,
+    });
+    await expect(
+      adapter.completeSenderAuthentication?.(
+        {
+          callback: { method: "GET", params: { email: "alice@example.com" } },
+          callbackUrl: "https://example.com/callback",
+          event,
+          resume: { nonce: "test" },
+          strategyIndex: 1,
+        },
+        adapterCtx,
+      ),
+    ).resolves.toEqual(ACCEPTED);
+    expect(startAuthorization).toHaveBeenCalledOnce();
+    expect(completeAuthorization).toHaveBeenCalledOnce();
+  });
 });
 
 describe("eveChannel — cancel turn", () => {

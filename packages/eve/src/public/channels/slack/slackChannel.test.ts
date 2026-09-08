@@ -3,8 +3,10 @@ import { createHmac } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
+import { CHANNEL_AUTHENTICATION_PAYLOAD_KEY } from "#channel/authentication.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -1490,7 +1492,9 @@ describe("slackChannel() inbound mention pipeline", () => {
   });
 
   it("dispatches when onAppMention returns an auth result", async () => {
+    const channelAuth = vi.fn(() => null);
     const channel = slackChannel({
+      auth: channelAuth,
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({
         auth: {
@@ -1512,6 +1516,105 @@ describe("slackChannel() inbound mention pipeline", () => {
       authenticator: "test",
       principalId: "U999",
       principalType: "user",
+    });
+    expect(options).not.toHaveProperty(CHANNEL_AUTHENTICATION_PAYLOAD_KEY);
+    expect(channelAuth).not.toHaveBeenCalled();
+  });
+
+  it("carries the Slack event to the durable auth gate when the handler omits auth", async () => {
+    const channel = slackChannel({
+      auth: () => null,
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({}),
+    });
+    const { body } = buildMentionBody({ user: "U_AUTH" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, delivery] = send.mock.calls[0]!;
+    expect(delivery).toMatchObject({
+      [CHANNEL_AUTHENTICATION_PAYLOAD_KEY]: {
+        event: {
+          defaultAuth: expect.objectContaining({ principalId: "slack:T01:U_AUTH" }),
+          event: expect.objectContaining({ type: "app_mention", user: "U_AUTH" }),
+        },
+      },
+      auth: null,
+    });
+  });
+
+  it("walks Slack auth strategies and preserves null as fallthrough", async () => {
+    const principal: SessionAuthContext = {
+      attributes: { role: "member" },
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const skip = vi.fn(() => null);
+    const accept = vi.fn(() => principal);
+    const adapter = getAdapter(slackChannel({ auth: [skip, accept] }));
+    const event = { type: "app_mention", user: "U01" } as never;
+
+    await expect(
+      adapter.authenticateSender!(
+        { defaultAuth: null, event },
+        "https://agent.example/callback",
+        buildAdapterContext(adapter, stubAccessor()),
+      ),
+    ).resolves.toEqual({ auth: principal, kind: "authenticated" });
+    expect(skip).toHaveBeenCalledWith(event);
+    expect(accept).toHaveBeenCalledWith(event);
+  });
+
+  it("starts and completes an interactive Slack auth strategy", async () => {
+    const principal: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test-oidc",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const startAuthorization = vi.fn(async () => ({
+      challenge: { url: "https://idp.example/authorize" },
+      resume: { verifier: "pkce" },
+    }));
+    const completeAuthorization = vi.fn(async () => principal);
+    const required = {
+      interaction: "required" as const,
+      startAuthorization,
+      completeAuthorization,
+    };
+    const auth = vi.fn(() => required);
+    const adapter = getAdapter(slackChannel({ auth }));
+    const wrappedEvent = {
+      defaultAuth: null,
+      event: { type: "app_mention", user: "U01" },
+    };
+    const adapterCtx = buildAdapterContext(adapter, stubAccessor());
+
+    await expect(
+      adapter.authenticateSender!(wrappedEvent, "https://agent.example/callback", adapterCtx),
+    ).resolves.toEqual({
+      challenge: { url: "https://idp.example/authorize" },
+      kind: "interaction-required",
+      resume: { verifier: "pkce" },
+      strategyIndex: 0,
+    });
+    await expect(
+      adapter.completeSenderAuthentication!(
+        {
+          callback: { method: "GET", params: { code: "code" } },
+          callbackUrl: "https://agent.example/callback",
+          event: wrappedEvent,
+          resume: { verifier: "pkce" },
+          strategyIndex: 0,
+        },
+        adapterCtx,
+      ),
+    ).resolves.toEqual(principal);
+    expect(completeAuthorization).toHaveBeenCalledWith({
+      callback: { method: "GET", params: { code: "code" } },
+      callbackUrl: "https://agent.example/callback",
+      resume: { verifier: "pkce" },
     });
   });
 

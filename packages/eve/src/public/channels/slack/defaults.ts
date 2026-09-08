@@ -134,11 +134,9 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
 }
 
 /**
- * Workspace-scoped projection of the Slack actor that produced
- * `message`, derived into a {@link SessionAuthContext}. Used by both
- * {@link defaultOnAppMention} and {@link defaultOnDirectMessage} when
- * the customer hasn't supplied their own `onAppMention` /
- * `onDirectMessage`. Returns `null` when the message has no author.
+ * Workspace-scoped projection of the Slack actor that produced `message`,
+ * derived into a {@link SessionAuthContext}. Used as the Slack channel's
+ * default sender-auth result. Returns `null` when the message has no author.
  */
 export function defaultSlackAuth(
   message: SlackMessage,
@@ -159,29 +157,29 @@ export function defaultSlackAuth(
 }
 
 /**
- * Default `onAppMention` — derives auth from the Slack actor and posts
- * a `"Thinking…"` typing indicator before the workflow runtime starts.
+ * Default `onAppMention` — posts a `"Thinking…"` typing indicator before
+ * the workflow runtime starts. Sender identity is resolved by the channel's
+ * durable auth gate.
  */
 export async function defaultOnAppMention(
   ctx: SlackContext,
-  message: SlackMessage,
+  _message: SlackMessage,
 ): Promise<SlackMentionResult> {
   await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
+  return {};
 }
 
 /**
- * Default `onDirectMessage` — derives auth from the Slack actor and
- * posts a `"Thinking…"` typing indicator before the workflow runtime
- * starts. Matches the default mention behavior; replace the option to
- * customize gating, auth derivation, or pre-dispatch side effects.
+ * Default `onDirectMessage` — posts a `"Thinking…"` typing indicator before
+ * the workflow runtime starts. Matches the default mention behavior; replace
+ * the option to customize routing or pre-dispatch side effects.
  */
 export async function defaultOnDirectMessage(
   ctx: SlackContext,
-  message: SlackMessage,
+  _message: SlackMessage,
 ): Promise<SlackMentionResult> {
   await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
+  return {};
 }
 
 /**
@@ -455,7 +453,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.required"(event, channel, ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName =
+      event.authorization?.displayName ??
+      (event.purpose === "session" ? "your account" : formatConnectionDisplayName(event.name));
     const triggeringUserId =
       event.candidateId === undefined
         ? (slackUserIdFromAuthContext(ctx.session.auth.current) ??
@@ -472,6 +472,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       const publicText = buildAuthRequiredPublicText({
         displayName,
         hasUser: triggeringUserId !== null,
+        purpose: event.purpose,
       });
       try {
         const sent = await channel.thread.post(publicText);
@@ -517,9 +518,15 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName =
+      event.authorization?.displayName ??
+      (event.purpose === "session" ? "your account" : formatConnectionDisplayName(event.name));
     if (event.outcome === "authorized" && event.candidateId === undefined) {
-      await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
+      await channel.thread.startTyping(
+        event.purpose === "session"
+          ? "Signed in. Resuming..."
+          : `Connected to ${displayName}. Resuming...`,
+      );
     }
 
     const pending = channel.state.pendingAuthMessageTs ?? {};
@@ -529,6 +536,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const text = buildAuthCompletedText({
       displayName,
       outcome: event.outcome as ConnectionAuthorizationOutcome,
+      purpose: event.purpose,
       reason: event.reason,
     });
 

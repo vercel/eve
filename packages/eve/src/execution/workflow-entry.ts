@@ -1,5 +1,6 @@
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
+import { CHANNEL_AUTHENTICATION_PAYLOAD_KEY } from "#channel/authentication.js";
 import type {
   DeliverHookPayload,
   DeliverPayload,
@@ -266,6 +267,9 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
           payloads: [
             attachClientContext(
               {
+                ...(input.input.senderAuthentication && {
+                  [CHANNEL_AUTHENTICATION_PAYLOAD_KEY]: input.input.senderAuthentication,
+                }),
                 message: input.input.message,
                 context: input.input.context,
                 outputSchema: input.input.outputSchema,

@@ -9,8 +9,23 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { InputResponse, StrictInputResponses } from "#shared/input.js";
 import type { UserContent } from "ai";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
+import { CHANNEL_AUTHENTICATION_PAYLOAD_KEY } from "#channel/authentication.js";
 
 type SlackSource = ChannelSource<SlackChannelState>;
+
+export const INTERNAL_SLACK_AUTHENTICATED_SEND = Symbol("eve.slack.authenticated-send");
+
+interface SlackSessionOperationsInternal extends SlackSessionOperations {
+  [INTERNAL_SLACK_AUTHENTICATED_SEND](
+    message: string | UserContent,
+    event: unknown,
+    options?: SlackSendOptions,
+  ): ReturnType<SlackSource["send"]>;
+}
 
 /** Options for a message send already bound to one Slack thread. */
 export type SlackSendOptions = Omit<ChannelSendOptions<SlackChannelState>, "auth" | "state"> & {
@@ -43,12 +58,27 @@ export function bindSlackSessionOperations(input: {
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
   readonly state: SlackChannelState;
-}): SlackSessionOperations {
-  const source = input.from(input.address);
+}): SlackSessionOperationsInternal {
+  const source = input.from(input.address) as InternalChannelSource<SlackChannelState>;
   const auth = (value: SessionAuthContext | null | undefined) =>
     value === undefined ? input.defaultAuth : value;
 
   return {
+    async [INTERNAL_SLACK_AUTHENTICATED_SEND](message, event, options = {}) {
+      return await source[INTERNAL_CHANNEL_DELIVER](
+        {
+          [CHANNEL_AUTHENTICATION_PAYLOAD_KEY]: { event },
+          context: options.context,
+          message,
+          outputSchema: options.outputSchema,
+        },
+        {
+          ...options,
+          auth: null,
+          state: input.state,
+        },
+      );
+    },
     async send(message, options = {}) {
       return await source.send(message, {
         ...options,

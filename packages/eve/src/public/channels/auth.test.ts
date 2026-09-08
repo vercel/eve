@@ -16,6 +16,7 @@ import {
   localDev,
   none,
   placeholderAuth,
+  resolveAuth,
   routeAuth,
   type UnauthorizedChallenge,
   UnauthenticatedError,
@@ -509,6 +510,30 @@ describe("routeAuth", () => {
     const result = await routeAuth(makeRequest(), [asyncAccept]);
 
     expect(result).toEqual(SAMPLE_CONTEXT);
+  });
+
+  it("rejects an interactive result because route auth cannot park the request", async () => {
+    await expect(
+      routeAuth(makeRequest(), () => ({
+        interaction: "required",
+        startAuthorization: async () => ({ challenge: {} }),
+        completeAuthorization: async () => SAMPLE_CONTEXT,
+      })),
+    ).rejects.toThrow(
+      "Interactive sign-in requires a durable channel sender-auth gate and cannot run during HTTP route authentication.",
+    );
+  });
+
+  it("returns an interactive result and its strategy index to durable channel factories", async () => {
+    const interaction = {
+      interaction: "required" as const,
+      startAuthorization: async () => ({ challenge: {} }),
+      completeAuthorization: async () => SAMPLE_CONTEXT,
+    };
+
+    const result = await resolveAuth(makeRequest(), [() => null, () => interaction]);
+
+    expect(result).toEqual({ interaction, strategyIndex: 1 });
   });
 
   // ---------------------------------------------------------------------------

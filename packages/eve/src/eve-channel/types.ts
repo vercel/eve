@@ -66,7 +66,8 @@ export interface EveMessageContext {
  * optionally prepending `context` strings as user messages.
  */
 export type EveMessageResult = {
-  readonly auth: SessionAuthContext | null;
+  /** Final sender identity. When present, bypasses the channel-level `auth` walk. */
+  readonly auth?: SessionAuthContext | null;
   readonly context?: readonly string[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
@@ -89,9 +90,11 @@ export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | nul
  */
 export interface EveChannelInput {
   /**
-   * Route auth policy: a single {@link AuthFn} or an ordered array walked by {@link routeAuth}.
+   * Request and sender auth policy: a single {@link AuthFn} or an ordered array.
    * The first entry returning a {@link SessionAuthContext} wins; `null` / `undefined` skips to
-   * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
+   * the next; exhaustion (including the empty array) rejects with 401. On a message route,
+   * `{ interaction: "required" }` accepts and parks the input for durable sign-in before model
+   * or tool execution. Other HTTP routes cannot park and reject an interactive result.
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
