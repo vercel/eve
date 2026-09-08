@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-04"
+last_updated: "2026-09-08"
 ---
 
 # Named subagents on workflow tool context
@@ -109,6 +109,11 @@ first tuple element is the validated output value, with its TypeScript type infe
 from that schema. `review.successful` above is therefore reviewer-authored structured
 output. Execution failures reject the promise.
 
+`ctx.agent` accepts an arbitrary caller-supplied output schema for each invocation,
+using the same schema support as tools. The schema does not need to be declared on
+the agent or chosen from a predefined set. It constrains that invocation's response
+without changing the agent definition or fixing the schema for subsequent calls.
+
 The proposed metadata starts with `{ agentId: string }`. Prefer `agentId` over
 `sessionId` to match the existing continuation input: eve distinguishes the
 [child identity from its session address][child-identity-from-its-session-address].
@@ -116,13 +121,16 @@ The proposed metadata starts with `{ agentId: string }`. Prefer `agentId` over
 ```ts
 import { z } from "zod";
 
-const OutputSchema = z.object({ successful: z.boolean(), reason: z.string() });
+const ResearchSchema = z.object({ findings: z.array(z.string()) });
+const AssessmentSchema = z.object({ successful: z.boolean(), reason: z.string() });
 
 // Inside a defineWorkflowTool executor with its ctx argument:
-const [research, metadata] = await ctx.agent("Research the proposed change.");
+const [research, metadata] = await ctx.agent("Research the proposed change.", {
+  outputSchema: ResearchSchema,
+});
 const [assessment] = await ctx.agent("Assess the change using your research.", {
   agentId: metadata.agentId,
-  outputSchema: OutputSchema,
+  outputSchema: AssessmentSchema,
 });
 ```
 
@@ -413,6 +421,8 @@ These are requirements for the proposal, not claims about an implementation.
 - Verify a typed structured result supports a branch such as
   `if (review.successful)`, and distinguish a negative review from execution failure.
 - Verify no schema yields a string and schema input determines the output type.
+  For `ctx.agent`, supply schemas absent from the agent definition and verify each
+  invocation validates against its own schema without changing the definition.
   Resume with returned `metadata.agentId`, verify history is retained, and request
   a different output schema on the follow-up. Cover blocking and background
   workflow tools, busy or mismatched children, and expired handles.
