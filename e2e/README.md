@@ -50,8 +50,8 @@ suite stronger.
 ### Code Mode planning coverage
 
 `agent-code-mode` uses scripted models to test execution contracts.
-`agent-code-mode-models` and `agent-code-mode-models-lazy` test whether real
-matrix models construct useful programs in eager and lazy mode. Both run on
+`agent-code-mode-models` tests whether real
+matrix models construct useful programs with on-demand tool discovery. It runs on
 every model in `matrix.json`, with the same natural-language tasks and no
 supplied JavaScript:
 

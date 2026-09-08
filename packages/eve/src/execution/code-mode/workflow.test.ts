@@ -56,7 +56,7 @@ function context(aborted = false): ToolContext {
 
 const program = {
   js: "return 1;",
-  mode: "eager",
+
   maxSubagents: 100,
   toolCatalog: [],
 };

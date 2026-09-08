@@ -47,7 +47,6 @@ export type PreparedDispatchTarget =
   | { readonly kind: "task-update" }
   | {
       readonly codeMode?: {
-        readonly mode: "eager" | "lazy";
         readonly toolNames: readonly string[];
       };
       readonly kind: "workflow-tool-call";

@@ -7,7 +7,6 @@ import { isNeverApproval } from "#tools/approval/policies.js";
 import {
   DEFAULT_CODE_MODE_MAX_SUBAGENTS,
   serializeCodeModeWorkflowInput,
-  type CodeModeMode,
   type CodeModeToolCatalogEntry,
   type CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
@@ -27,19 +26,12 @@ const ORCHESTRATION_INSTRUCTION =
   "Complete the task in one execution program: keep dependent calls, loops, retries, parallel work, and final writes together. " +
   "Reuse fetched results; avoid repeated fetches and duplicate computation.";
 
-const EAGER_SELECTION_INSTRUCTION =
-  "Prefer code_mode for dependent lookups, pagination, loops, or filtering and aggregating tool results. " +
-  "Prefer direct tools when a single call or native batch already produces the needed result with little further processing. " +
-  "Use the supplied tool schemas without unnecessary discovery.";
-
 const DISCOVERY_INSTRUCTION =
   "Use tools.search_tools and tools.describe_tools to discover every available tool. " +
   "Tools marked requiresDirectCall must be called directly outside this program.";
 
-export type { CodeModeMode };
-
 /**
- * Exposes eligible tools through `code_mode`, retaining direct calls in eager mode.
+ * Exposes eligible tools only through `code_mode`, with schemas loaded on demand.
  *
  * The tool catalog is pinned into `executeInput`, so
  * the durable body sees the same names and schemas after a resume. Nothing here
@@ -48,7 +40,6 @@ export type { CodeModeMode };
 export async function applyCodeModeTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
-  readonly mode: CodeModeMode;
   readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<{
@@ -68,7 +59,6 @@ export async function applyCodeModeTool(input: {
   for (const [name, tool] of Object.entries(input.tools)) {
     if (claimsForCodeMode(name, input.harnessTools)) {
       hostTools[name] = tool;
-      if (input.mode === "eager") modelTools[name] = tool;
     } else if (name !== CODE_MODE_TOOL_NAME) {
       modelTools[name] = tool;
     }
@@ -95,16 +85,12 @@ export async function applyCodeModeTool(input: {
     });
 
   const discoveryTools = createDiscoveryTools(toolCatalog);
-  Object.assign(hostTools, discoveryTools);
   const generated = await createWorkflowSandboxTool({
     bridgeRequestLimit: codeModeBridgeRequestLimit(maxSubagents),
     continuationSecurity: input.continuationSecurity,
-    hostTools: (input.mode === "lazy" ? discoveryTools : hostTools) as ToolSet,
+    hostTools: discoveryTools as ToolSet,
   });
-  const generatedDescription =
-    input.mode === "lazy"
-      ? lazyDescription(generated, toolCatalog)
-      : `${EAGER_SELECTION_INSTRUCTION}\n\n${ORCHESTRATION_INSTRUCTION}\n\nTools marked requiresDirectCall must be called directly outside this program.\n\n${generated.description ?? ""}`;
+  const generatedDescription = discoveryDescription(generated, toolCatalog);
   const description = `${generatedDescription}\n\nA program may invoke at most ${maxSubagents} subagents in total, including retries and continuations. Excess calls reject with CODE_MODE_SUBAGENT_LIMIT_REACHED.`;
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeModelTool,
@@ -115,7 +101,6 @@ export async function applyCodeModeTool(input: {
   if (codeModeDefinition.workflowId === undefined) {
     throw new Error("The framework code_mode tool is not configured as a workflow tool.");
   }
-  const mode = input.mode;
   const harnessTools = new Map(input.harnessTools);
   harnessTools.set(CODE_MODE_TOOL_NAME, {
     ...codeModeDefinition,
@@ -123,7 +108,6 @@ export async function applyCodeModeTool(input: {
     executeInput: (toolInput) =>
       serializeCodeModeWorkflowInput({
         js: readProgram(toolInput),
-        mode,
         maxSubagents,
         toolCatalog,
       } satisfies CodeModeWorkflowInput),
@@ -220,7 +204,7 @@ function readProgram(toolInput: unknown): string {
   return js;
 }
 
-function lazyDescription(
+function discoveryDescription(
   tool: ToolSet[string],
   catalog: readonly CodeModeToolCatalogEntry[],
 ): string {

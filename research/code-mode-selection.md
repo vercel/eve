@@ -1,29 +1,28 @@
 ---
 issue: https://github.com/vercel/eve/pull/3002
 status: implemented
-last_updated: "2026-09-04"
+last_updated: "2026-09-08"
 ---
 
-# Code Mode selection
+# Code Mode tool exposure
 
-Eager mode exposes direct tools alongside `code_mode` so the model can choose a program when the work benefits from one.
+Code Mode uses on-demand discovery as its only execution policy; eager mode and the `mode` selector are removed.
 
-Previously both eager and lazy hid eligible direct tools. Selection guidance
-could not offer a direct call for a single lookup. Eager now preserves those
-tools and their existing executors, while retaining the same program catalog
-and durable execution. Lazy keeps its discovery-only exposure. Approval-gated
-tools remain direct-only.
+Enable it with `experimental.codeMode: {}` or `{ maxSubagents: 25 }`.
+Eligible tools are callable through the program; approval-gated tools and
+framework controls remain direct. Programs retain their pinned catalog and
+durable execution. Discovery lists names first and loads schemas on demand.
 
-The guidance prefers programs for dependent lookups, pagination, loops, and
-filtering or aggregation. It prefers direct calls when one call or a native
-batch already produces the needed result. Neither path is the universal default.
-Programs should reuse fetched data and avoid duplicate computation.
+The previous eager policy exposed eligible tools both directly and through a
+program, requiring the model to choose an execution path. Removing that choice
+simplifies the public API and leaves the measured lazy behavior intact.
 
-The [54-attempt pilot](https://github.com/ruiconti/shower/blob/b1f122ce6f09ba426918594bebc00d491b16dce6/research/benchmark/jobs/d0-golden-controls/task-shapes-pilot-20260904/REPORT.md)
-supports testing this policy, not a universal fanout threshold. Eager still
-includes schemas up front; this change does not avoid that metadata cost.
+The [12-task benchmark](https://github.com/vercel-labs/eve-bench/blob/079fccb/research/code-mode-expansion/normal-eve-results.md)
+found four faster lazy runs among five mutually successful direct/lazy pairs.
+These are single trials on development tasks; grader defects and unverified
+background completion prevent a clean overall ranking. Historical eager
+measurements remain published. This API removal has not received a new paid run.
 
-Unit coverage checks both surfaces, executor identity, the pinned catalog, and
-approval exclusions. Deterministic fixture evals cover direct completion and
-program execution. They verify availability, not whether a real model chooses
-the faster or cheaper path; that requires a matched conditional-policy run.
+Unit and integration coverage checks eligible-tool hiding, direct approval
+gates, discovery, catalog serialization and program suspension/resumption.
+The scripted and real-model E2E fixtures now exercise the single policy.

@@ -5,6 +5,6 @@ const base = e2eAgentConfig();
 
 export default defineAgent({
   ...base,
-  experimental: { ...base.experimental, codeMode: { mode: "eager" } },
+  experimental: { ...base.experimental, codeMode: {} },
   reasoning: "high",
 });

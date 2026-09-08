@@ -39,7 +39,7 @@ const authoredTools = new Map<string, HarnessToolDefinition>([
   ],
 ]);
 
-describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (mode) => {
+describe("connection tools in code mode", () => {
   it.each([
     { policy: "unset", approval: undefined, claimed: true },
     { policy: "never", approval: never(), claimed: true },
@@ -102,7 +102,6 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
         return applyCodeModeTool({
           continuationSecurity: { signingKey: "test" },
           harnessTools,
-          mode,
           tools: buildToolSet({ tools: harnessTools }),
         });
       }
@@ -124,7 +123,7 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
       const second = await step(next, 1);
       expect(second.claimedToolNames).toEqual(claimed ? ["linear__list_issues"] : []);
       expect(Object.keys(second.modelTools).sort()).toEqual(
-        claimed && mode === "lazy"
+        claimed
           ? ["code_mode", "connection_search"]
           : ["code_mode", "connection_search", "linear__list_issues"],
       );
@@ -150,7 +149,6 @@ describe.each(["eager", "lazy"] as const)("%s connection tools in code mode", (m
       expect(
         pinned.toolCatalog.filter((entry) => entry.target !== "direct").map((entry) => entry.name),
       ).toEqual(["linear__list_issues"]);
-      expect(pinned.mode).toBe(mode);
 
       const nested = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(next))));
       provide(nested);

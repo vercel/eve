@@ -1893,43 +1893,40 @@ describe("createToolLoopHarness", () => {
     expect(events.at(-1)?.type).toBe("session.waiting");
   });
 
-  it.each(["eager", "lazy"] as const)(
-    "keeps child tools direct with %s code_mode enabled on the root",
-    async (mode) => {
-      setupMockAgent({
-        finishReason: "stop",
-        response: { messages: [{ content: "Hello!", role: "assistant" }] },
-        text: "Hello!",
-        toolCalls: [],
-        toolResults: [],
-      });
-      const config = createTestConfig("conversation", undefined, {
-        codeMode: { mode },
-        tools: new Map([
-          ...createDelegationToolMap(),
-          [
-            "code_mode",
-            {
-              behavior: { availability: ["root-session"] },
-              description: "Run a program.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "code_mode",
-              workflowId: "workflow//eve//codeModeWorkflow",
-            },
-          ],
-        ]),
-      });
-      const runStep = createToolLoopHarness(config);
+  it("keeps child tools direct with code_mode enabled on the root", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const config = createTestConfig("conversation", undefined, {
+      codeMode: {},
+      tools: new Map([
+        ...createDelegationToolMap(),
+        [
+          "code_mode",
+          {
+            behavior: { availability: ["root-session"] },
+            description: "Run a program.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "code_mode",
+            workflowId: "workflow//eve//codeModeWorkflow",
+          },
+        ],
+      ]),
+    });
+    const runStep = createToolLoopHarness(config);
 
-      await runStep(createTestSession({ rootSessionId: "root-session" }), { message: "Hi" });
+    await runStep(createTestSession({ rootSessionId: "root-session" }), { message: "Hi" });
 
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      expect(agentCall).toBeDefined();
-      expect(agentCall!.tools).toHaveProperty("delegate");
-      expect(agentCall!.tools).not.toHaveProperty("code_mode");
-      expect(agentCall!.tools).not.toHaveProperty("Workflow");
-    },
-  );
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.tools).toHaveProperty("delegate");
+    expect(agentCall!.tools).not.toHaveProperty("code_mode");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
 
   it("forwards the agent reasoning effort to the model call", async () => {
     setupMockAgent({
@@ -2474,7 +2471,7 @@ describe("createToolLoopHarness", () => {
     const base = createTestConfig();
     const runStep = createToolLoopHarness({
       ...base,
-      codeMode: { mode: "eager" },
+      codeMode: {},
       tools: new Map([
         ...base.tools,
         [
@@ -2490,12 +2487,7 @@ describe("createToolLoopHarness", () => {
     });
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
     const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
-    expect(Object.keys(advertised ?? {}).sort()).toEqual([
-      "add",
-      "code_mode",
-      "discovered",
-      "gated_dynamic",
-    ]);
+    expect(Object.keys(advertised ?? {}).sort()).toEqual(["code_mode", "gated_dynamic"]);
     expect(advertised?.code_mode?.description).toContain("discovered");
   });
 

@@ -333,7 +333,7 @@ describe("executeCodeModeToolStep", () => {
     const applied = await applyCodeModeTool({
       continuationSecurity: { signingKey: "test" },
       harnessTools: new Map([...effective, ["code_mode", state.tools.get("code_mode")!]]),
-      mode: "eager",
+
       tools: {
         ...tools,
         ...buildToolSet({ tools: new Map([["code_mode", state.tools.get("code_mode")!]]) }),
@@ -364,11 +364,11 @@ describe("executeCodeModeToolStep", () => {
     const result = await applyCodeModeTool({
       continuationSecurity: { signingKey: "test" },
       harnessTools,
-      mode: "eager",
+
       tools: buildToolSet({ tools: harnessTools }),
     });
     expect(result.claimedToolNames).toEqual(["lookup"]);
-    expect(Object.keys(result.modelTools)).toEqual(["lookup", "code_mode"]);
+    expect(Object.keys(result.modelTools)).toEqual(["code_mode"]);
     await expect(nested("lookup")).resolves.toEqual({ status: "completed", output: "discovered" });
   });
 });
@@ -381,7 +381,7 @@ describe("runCodeModeProgramStep", () => {
     sessionState: {} as never,
     program: {
       js: "return 1;",
-      mode: "eager" as const,
+
       toolCatalog: [],
       maxSubagents: 100,
     },

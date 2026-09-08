@@ -200,8 +200,6 @@ export interface AgentLimitsDefinition {
 
 /** Configuration for the framework `code_mode` orchestration tool. */
 export interface AgentCodeModeDefinition {
-  /** Eager keeps direct tools and inlines program schemas; lazy exposes tools through discovery. */
-  readonly mode: "eager" | "lazy";
   /** Maximum subagent calls per program, including retries and continuations. @default 100 */
   readonly maxSubagents?: number;
 }

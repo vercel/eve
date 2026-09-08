@@ -147,7 +147,7 @@ describe("session-limit continuation decline integration", () => {
       agent: {
         limits: { maxInputTokensPerSession: 1 },
         name: "limit-decline-child",
-        experimental: { codeMode: { mode: "eager" } },
+        experimental: { codeMode: {} },
       },
     });
     const continuationToken = "http:limit-decline-child";

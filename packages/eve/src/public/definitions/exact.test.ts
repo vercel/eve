@@ -64,7 +64,7 @@ describe("definition helper exact inputs", () => {
     expect(
       defineAgent({
         model: "test/model",
-        experimental: { codeMode: { mode: "eager", maxSubagents: 6 } },
+        experimental: { codeMode: { maxSubagents: 6 } },
       }).experimental.codeMode.maxSubagents,
     ).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
@@ -252,7 +252,6 @@ function typeOnlyFixtures(): void {
     model: "test/model",
     experimental: {
       codeMode: {
-        mode: "lazy",
         // @ts-expect-error code_mode maxSubagents must be a number.
         maxSubagents: "6",
       },

@@ -1142,14 +1142,14 @@ describe("compileAgent", () => {
       [
         "export default {",
         '  model: "openai/gpt-5.4",',
-        '  experimental: { codeMode: { mode: "eager" } },',
+        "  experimental: { codeMode: {} },",
         "};",
         "",
       ].join("\n"),
     );
 
     await expect(compileAgent({ startPath: appRoot })).resolves.toMatchObject({
-      manifest: { config: { experimental: { codeMode: { mode: "eager" } } } },
+      manifest: { config: { experimental: { codeMode: {} } } },
     });
 
     await writeFile(

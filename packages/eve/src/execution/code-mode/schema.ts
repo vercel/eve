@@ -2,8 +2,6 @@ import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.j
 
 export const DEFAULT_CODE_MODE_MAX_SUBAGENTS = 100;
 
-export type CodeModeMode = "eager" | "lazy";
-
 export type CodeModeCallResolution =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: string };
@@ -23,7 +21,6 @@ export interface CodeModeToolCatalogEntry {
  */
 export interface CodeModeWorkflowInput {
   readonly js: string;
-  readonly mode: CodeModeMode;
   readonly maxSubagents: number;
   readonly toolCatalog: readonly CodeModeToolCatalogEntry[];
 }
@@ -31,7 +28,6 @@ export interface CodeModeWorkflowInput {
 export function serializeCodeModeWorkflowInput(input: CodeModeWorkflowInput): JsonObject {
   return {
     js: input.js,
-    mode: input.mode,
     maxSubagents: input.maxSubagents,
     toolCatalog: input.toolCatalog.map((entry) => ({ ...entry })),
   };
@@ -44,9 +40,6 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
   const record = value as Record<string, unknown>;
   if (typeof record.js !== "string") {
     throw new TypeError('code_mode workflow input requires a "js" string.');
-  }
-  if (record.mode !== "eager" && record.mode !== "lazy") {
-    throw new TypeError('code_mode workflow input requires "mode" of "eager" or "lazy".');
   }
   if (
     typeof record.maxSubagents !== "number" ||
@@ -77,7 +70,6 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
   });
   return {
     js: record.js,
-    mode: record.mode,
     maxSubagents: record.maxSubagents,
     toolCatalog,
   };

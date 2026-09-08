@@ -13,7 +13,7 @@ selects the eve tool contract and the directive marks the function's replay sema
 ## Model-authored orchestration
 
 The framework `code_mode` tool replaces the former `Workflow` wrapper. Enable it
-with `experimental.codeMode: { mode: "eager" | "lazy", maxSubagents?: number }`.
+with `experimental.codeMode: {}` or `{ maxSubagents: 25 }`.
 Each program pins its catalog and subagent-call budget. The default budget is
 100 invocations, including retries and continuations. Authored workflow tools
 remain independent of this model-facing wrapper.

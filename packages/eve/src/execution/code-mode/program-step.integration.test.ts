@@ -39,141 +39,137 @@ const security = { signingKey: "code-mode-program-step-test" };
  * settle would silently serialize or misroute, so this test fails first.
  */
 describe("code-mode sandbox continuation contract", () => {
-  it.each(["eager", "lazy"] as const)(
-    "discovers every direct tool across a %s program resume",
-    async (mode) => {
-      const execute = vi.fn(async () => "must stay direct");
-      const definitions = new Map<string, HarnessToolDefinition>([
-        [
-          "echo",
-          {
-            name: "echo",
-            description: "Echo",
-            inputSchema: jsonSchema({ type: "object" }),
-            execute,
-          },
-        ],
-        [
-          "gated",
+  it("discovers every direct tool across a program resume", async () => {
+    const execute = vi.fn(async () => "must stay direct");
+    const definitions = new Map<string, HarnessToolDefinition>([
+      [
+        "echo",
+        {
+          name: "echo",
+          description: "Echo",
+          inputSchema: jsonSchema({ type: "object" }),
+          execute,
+        },
+      ],
+      [
+        "gated",
+        {
+          name: "gated",
+          description: "Needs approval",
+          inputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
+          approval: always(),
+          execute,
+        },
+      ],
+      [
+        "background",
+        {
+          name: "background",
+          description: "Background task",
+          inputSchema: jsonSchema({ type: "object" }),
+          execution: "background",
+          execute,
+        },
+      ],
+      [
+        "provider",
+        {
+          name: "provider",
+          description: "Provider tool",
+          inputSchema: jsonSchema({ type: "object" }),
+        },
+      ],
+      [
+        "connection_search",
+        {
+          name: "connection_search",
+          description: "Discover connection tools",
+          inputSchema: jsonSchema({ type: "object" }),
+          execute,
+        },
+      ],
+      [
+        "code_mode",
+        {
+          name: "code_mode",
+          description: "Run a program",
+          inputSchema: jsonSchema({ type: "object" }),
+          workflowId: "workflow//eve//codeModeWorkflow",
+        },
+      ],
+    ]);
+    const applied = await applyCodeModeTool({
+      continuationSecurity: security,
+      harnessTools: definitions,
+      tools: buildToolSet({ tools: definitions }),
+    });
+    const program = parseCodeModeWorkflowInput(
+      applied.harnessTools.get("code_mode")!.executeInput!({
+        js: [
+          "const before = await tools.search_tools({});",
+          'const schemas = await tools.describe_tools({ names: ["gated", "provider", "unknown"] });',
+          "const result = await tools.echo({});",
+          "return { before, schemas, result, after: await tools.search_tools({}) };",
+        ].join("\n"),
+      }),
+    );
+    const hostTools = {
+      echo: createCodeModeToolStub(program.toolCatalog.find((entry) => entry.name === "echo")!),
+      ...createDiscoveryTools(program.toolCatalog),
+    };
+    const tool = await createWorkflowSandboxTool({
+      bridgeRequestLimit: codeModeBridgeRequestLimit(100),
+      continuationSecurity: security,
+      hostTools,
+    });
+    const parked = await unwrapWorkflowSandboxResult(
+      await tool.execute!({ js: program.js } as never, { toolCallId: "discovery" } as never),
+      security,
+    );
+    if (parked.status !== "interrupted") throw new Error("Expected echo to park");
+    const restored = parseCodeModeWorkflowInput(
+      JSON.parse(JSON.stringify(serializeCodeModeWorkflowInput(program))),
+    );
+    const resumed = await unwrapWorkflowSandboxResult(
+      await continueWorkflowSandboxInterrupt({
+        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
+        continuationSecurity: security,
+        interrupt: parked.interrupt,
+        resolution: { status: "completed", output: "done" },
+        tools: { echo: hostTools.echo, ...createDiscoveryTools(restored.toolCatalog) },
+      }),
+      security,
+    );
+    const names = program.toolCatalog.map(({ name, description, target }) => ({
+      name,
+      description,
+      requiresDirectCall: target === "direct",
+    }));
+    expect(resumed).toEqual({
+      status: "completed",
+      output: {
+        before: names,
+        after: names,
+        result: "done",
+        schemas: [
           {
             name: "gated",
             description: "Needs approval",
-            inputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
-            approval: always(),
-            execute,
+            inputSchema: { type: "object", properties: { value: { type: "string" } } },
+            requiresDirectCall: true,
           },
-        ],
-        [
-          "background",
-          {
-            name: "background",
-            description: "Background task",
-            inputSchema: jsonSchema({ type: "object" }),
-            execution: "background",
-            execute,
-          },
-        ],
-        [
-          "provider",
           {
             name: "provider",
             description: "Provider tool",
-            inputSchema: jsonSchema({ type: "object" }),
+            inputSchema: { type: "object" },
+            requiresDirectCall: true,
           },
+          { error: "unknown tool", name: "unknown" },
         ],
-        [
-          "connection_search",
-          {
-            name: "connection_search",
-            description: "Discover connection tools",
-            inputSchema: jsonSchema({ type: "object" }),
-            execute,
-          },
-        ],
-        [
-          "code_mode",
-          {
-            name: "code_mode",
-            description: "Run a program",
-            inputSchema: jsonSchema({ type: "object" }),
-            workflowId: "workflow//eve//codeModeWorkflow",
-          },
-        ],
-      ]);
-      const applied = await applyCodeModeTool({
-        continuationSecurity: security,
-        harnessTools: definitions,
-        mode,
-        tools: buildToolSet({ tools: definitions }),
-      });
-      const program = parseCodeModeWorkflowInput(
-        applied.harnessTools.get("code_mode")!.executeInput!({
-          js: [
-            "const before = await tools.search_tools({});",
-            'const schemas = await tools.describe_tools({ names: ["gated", "provider", "unknown"] });',
-            "const result = await tools.echo({});",
-            "return { before, schemas, result, after: await tools.search_tools({}) };",
-          ].join("\n"),
-        }),
-      );
-      const hostTools = {
-        echo: createCodeModeToolStub(program.toolCatalog.find((entry) => entry.name === "echo")!),
-        ...createDiscoveryTools(program.toolCatalog),
-      };
-      const tool = await createWorkflowSandboxTool({
-        bridgeRequestLimit: codeModeBridgeRequestLimit(100),
-        continuationSecurity: security,
-        hostTools,
-      });
-      const parked = await unwrapWorkflowSandboxResult(
-        await tool.execute!({ js: program.js } as never, { toolCallId: "discovery" } as never),
-        security,
-      );
-      if (parked.status !== "interrupted") throw new Error("Expected echo to park");
-      const restored = parseCodeModeWorkflowInput(
-        JSON.parse(JSON.stringify(serializeCodeModeWorkflowInput(program))),
-      );
-      const resumed = await unwrapWorkflowSandboxResult(
-        await continueWorkflowSandboxInterrupt({
-          bridgeRequestLimit: codeModeBridgeRequestLimit(100),
-          continuationSecurity: security,
-          interrupt: parked.interrupt,
-          resolution: { status: "completed", output: "done" },
-          tools: { echo: hostTools.echo, ...createDiscoveryTools(restored.toolCatalog) },
-        }),
-        security,
-      );
-      const names = program.toolCatalog.map(({ name, description, target }) => ({
-        name,
-        description,
-        requiresDirectCall: target === "direct",
-      }));
-      expect(resumed).toEqual({
-        status: "completed",
-        output: {
-          before: names,
-          after: names,
-          result: "done",
-          schemas: [
-            {
-              name: "gated",
-              description: "Needs approval",
-              inputSchema: { type: "object", properties: { value: { type: "string" } } },
-              requiresDirectCall: true,
-            },
-            {
-              name: "provider",
-              description: "Provider tool",
-              inputSchema: { type: "object" },
-              requiresDirectCall: true,
-            },
-            { error: "unknown tool", name: "unknown" },
-          ],
-        },
-      });
-      expect(execute).not.toHaveBeenCalled();
-    },
-  );
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
 
   it("makes a failed call catchable and retryable without repeating a completed sibling", async () => {
     const hostTools = Object.fromEntries(

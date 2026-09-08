@@ -287,7 +287,7 @@ for the retry behavior.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-Set `experimental.codeMode` to `{ mode: "eager" }` or `{ mode: "lazy" }` to
+Set `experimental.codeMode` to `{}` to
 expose eligible tools through a framework-managed `code_mode` tool. The model writes a
 JavaScript program that calls `tools.<name>(input)`; `code_mode` runs it as a
 durable workflow in which every nested call is its own step, so a crash
@@ -298,16 +298,10 @@ direct. Subagent tools enter the program and
 return their result when called, the same way an authored workflow tool's
 `agent()` does.
 
-`"eager"` keeps eligible tools directly callable and also includes their
-signatures in `code_mode`. The model is guided toward programs for dependent
-lookups, pagination, loops, and data processing, and toward direct calls when a
-single call or native batch already provides the needed result. This is model
-guidance, not a deterministic router or a performance guarantee. Schemas are
-included up front even when the model chooses direct calls.
-
-`"lazy"` hides eligible direct tools, lists the available tool names and the
-discovery helpers' signatures, and lets the program discover schemas before
-execution.
+Eligible tools are called only through `code_mode`. Its description lists tool
+names and discovery helpers; programs load the schemas they need on demand.
+The former `mode` selector is removed. Migrate either `{ mode: "eager" }` or
+`{ mode: "lazy" }` to `{}`, retaining `maxSubagents` if configured.
 
 Each program can invoke at most 100 subagents by default. Set `maxSubagents` to
 change that limit; sequential calls, parallel calls, retries, and calls that
@@ -320,7 +314,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "openai/gpt-5.5",
-  experimental: { codeMode: { mode: "eager", maxSubagents: 25 } },
+  experimental: { codeMode: { maxSubagents: 25 } },
 });
 ```
 
@@ -328,7 +322,7 @@ export default defineAgent({
 `experimental_workflow()` from `eve/tools/workflow` and enable code mode in
 `agent.ts`. Authored [workflow tools](./tools/workflows) continue to work.
 
-In both modes, `tools.search_tools` and `tools.describe_tools` discover the
+`tools.search_tools` and `tools.describe_tools` discover the
 complete advertised tool catalog, including tools that remain available for
 direct calls. Results include `requiresDirectCall: true` when the program
 cannot execute a tool. Discovery does not run the tool or bypass its approval
@@ -342,8 +336,7 @@ input schemas for the requested tool names.
 
 Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model
-step's catalog; eligible discovered tools become callable through `code_mode`, and remain
-directly callable in eager mode. When names overlap, step-scoped definitions override turn-scoped,
+step's catalog; eligible discovered tools become callable through `code_mode`. When names overlap, step-scoped definitions override turn-scoped,
 session-scoped, and static definitions, in that order. Each program keeps the
 tool catalog and captured values from the model step that dispatched it.
 

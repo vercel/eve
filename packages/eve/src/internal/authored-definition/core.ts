@@ -302,21 +302,16 @@ function normalizeAgentExperimentalDefinition(
       record.codeMode,
       `${message} "experimental.codeMode" must be an object or false.`,
     );
-    expectOnlyKnownKeys(config, ["mode", "maxSubagents"], message);
-    if (config.mode !== "eager" && config.mode !== "lazy") {
-      throw new Error(`${message} "experimental.codeMode.mode" must be "eager" or "lazy".`);
-    }
-    normalizedDefinition.codeMode = {
-      mode: config.mode,
-      ...(config.maxSubagents === undefined
+    expectOnlyKnownKeys(config, ["maxSubagents"], message);
+    normalizedDefinition.codeMode =
+      config.maxSubagents === undefined
         ? {}
         : {
             maxSubagents: expectPositiveInteger(
               config.maxSubagents,
               `${message} "experimental.codeMode.maxSubagents" must be a positive integer.`,
             ),
-          }),
-    };
+          };
   }
 
   if (record.instrumentationProviders !== undefined) {

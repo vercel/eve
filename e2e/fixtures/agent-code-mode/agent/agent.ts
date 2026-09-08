@@ -3,16 +3,10 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 /**
- * Deterministic script covering direct calls and code_mode programs.
+ * Deterministic script covering code_mode programs and direct-only controls.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
-  if (message.includes("CODEMODE-DIRECT-START")) {
-    const direct = request.toolResults.find((entry) => entry.id === "CODEMODE-DIRECT");
-    return direct === undefined
-      ? { toolCalls: [{ id: "CODEMODE-DIRECT", input: { value: "direct" }, name: "echo" }] }
-      : `CODEMODE-DIRECT-RESULT ${direct.output}`;
-  }
   if (message.includes("CODEMODE-PROGRAM-ERROR-START")) {
     const failed = request.toolResults.find((entry) => entry.id === "CODEMODE-INVALID");
     if (failed === undefined) {
@@ -114,7 +108,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     const direct = request.tools.map((tool) => tool.name).sort();
     js = [
       "const catalog = await tools.search_tools({});",
-      "const direct = catalog.map(tool => tool.name).sort();",
+      "const direct = catalog.filter(tool => tool.requiresDirectCall || tool.name === 'code_mode').map(tool => tool.name).sort();",
       `const complete = JSON.stringify(direct) === JSON.stringify(${JSON.stringify(direct)});`,
       'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
       'return { complete, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
@@ -159,7 +153,7 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  experimental: { ...base.experimental, codeMode: { mode: "eager", maxSubagents: 2 } },
+  experimental: { ...base.experimental, codeMode: { maxSubagents: 2 } },
   // Always author the deterministic script so this fixture never depends on a
   // live model; world suites already set EVE_E2E_MODEL=mock.
   model: mockModel(respond),

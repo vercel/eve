@@ -83,7 +83,7 @@ describe("compileAgentManifest source graph", () => {
             logicalPath: "agent.ts",
             loadNamespace: async () => ({
               default: defineAgent({
-                experimental: { codeMode: { mode: "eager" } },
+                experimental: { codeMode: {} },
                 model: "openai/gpt-5.4",
               }),
             }),

@@ -316,7 +316,7 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        `export default { model: "openai/gpt-5.4-mini", experimental: { codeMode: ${workflow ? '{ mode: "eager" }' : "false"} } };\n`,
+        `export default { model: "openai/gpt-5.4-mini", experimental: { codeMode: ${workflow ? "{}" : "false"} } };\n`,
       );
       await writeFile(join(appRoot, "agent", "instructions.md"), "Trace code_mode assets.\n");
       await writeFile(

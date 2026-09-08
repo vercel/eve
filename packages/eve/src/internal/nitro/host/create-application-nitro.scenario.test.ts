@@ -706,7 +706,7 @@ describe("application Nitro creation", () => {
 
     const directHost = await createPreparedHost();
     const workflowHost = await createPreparedHost();
-    workflowHost.compileResult.manifest.config.experimental = { codeMode: { mode: "eager" } };
+    workflowHost.compileResult.manifest.config.experimental = { codeMode: {} };
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));

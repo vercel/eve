@@ -598,7 +598,6 @@ const compiledAgentConfigBaseFields = {
         .union([
           z.literal(false),
           z.strictObject({
-            mode: z.enum(["eager", "lazy"]),
             maxSubagents: z.number().int().positive().optional(),
           }),
         ])
