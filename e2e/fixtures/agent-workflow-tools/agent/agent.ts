@@ -12,7 +12,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       .reverse()
       .find(
         (entry) =>
-          /^(WORKFLOW-|Background task task_)/u.test(entry) || entry.includes("private-catalog"),
+          /^(WORKFLOW-|(?:Background task|Deploy) task_)/u.test(entry) ||
+          entry.includes("private-catalog"),
       ) ?? "";
   if (message.includes("private-catalog")) {
     const result = request.toolResults.find((entry) => entry.name === "connection_search");
