@@ -11,7 +11,7 @@ export default defineTool({
     await new Promise((resolve) => setTimeout(resolve, 30_000 + sheet * 3_000));
     return {
       sheet,
-      findings: purchasingSheets[sheet - 1]!.findings,
+      ...purchasingSheets[sheet - 1]!,
       startedAt,
       completedAt: Date.now(),
     };

@@ -3,6 +3,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eSubagentConfig(),
-  description: "Review one numbered purchasing sheet and return its result.",
+  description:
+    "Review one purchasing sheet. The review_sheet tool has the stored sheets; the assignment only needs a sheet number and review question.",
   reasoning: "low",
 });
