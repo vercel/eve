@@ -426,17 +426,10 @@ export interface SessionCallback {
  *
  * Channel routes that can reach a human (HTTP, Slack, etc.) set
  * `requestInput: true` when starting a run. Subagent dispatch inherits the
- * parent's input capability, so HITL bubbles up transparently through a
+ * parent's capabilities pointwise, so HITL bubbles up transparently through a
  * conversation chain and stays disabled in a scheduled chain.
  */
 export interface SessionCapabilities {
-  /**
-   * The session driver supports authorization events from background workflow tools.
-   * Set by the driver, never inherited or granted through RunInput. Older drivers
-   * leave this absent, so newer turns fail fast when these tools request auth.
-   */
-  readonly workflowTaskAuthorization?: boolean;
-
   /**
    * True when the session may request input from a human (tool approvals,
    * `ask_question`). The runtime reads this in every HITL gate:

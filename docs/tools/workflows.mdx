@@ -186,7 +186,9 @@ The workflow body calls `await readRepository(ctx, repository)`.
 
 > [!WARNING]
 > Do not return the token from the helper: step results enter the workflow's durable history.
-> eve's token cache stays inside the step.
+> eve's token cache stays inside the step. The step's input is recorded too, and after sign-in it
+> carries the provider's callback parameters (such as a one-time authorization code), just as an
+> agent turn records the callback it receives. Bearer tokens are never written.
 
 When sign-in is required, the step attempt ends and the workflow waits on its own callback hook,
 without holding compute. The channel renders the sign-in challenge. After the callback, eve retries
@@ -196,10 +198,10 @@ not rerun. Resolve auth before other side effects in that step, and make operati
 again. Provider declarations can be shared imports, but context must be passed directly, not nested
 inside another argument or captured in a closure.
 
-After a successful callback exchange, eve records completion before returning to authored code.
-If that code later fails and the step retries, eve reads the token from the provider instead of
-exchanging the same callback again. The provider must persist the grant or token; the durable
-completion marker contains no credentials.
+After a successful callback exchange, eve records a completion marker before returning to authored
+code. If that code later fails and the step retries, eve reads the token from the provider instead
+of exchanging the same callback again. The provider must persist the grant or token; the marker
+itself contains no credentials.
 
 A background task becomes `input_required` during sign-in. The callback resumes that task; it does
 not rely on the launching agent turn still being active. Cancelling an authorization wait withdraws

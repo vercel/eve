@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionCapabilities } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { CapabilitiesKey, SessionKey } from "#context/keys.js";
+import { SessionKey } from "#context/keys.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
 import {
@@ -20,7 +19,13 @@ import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { getSessionTaskIndex, recordSessionTask } from "#tasks/session-index.js";
+import { getHookByToken } from "#internal/workflow/runtime.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
+  getHookByToken: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: vi.fn() }));
 vi.mock("#execution/tools/subagent/task-cancel.js", () => ({ cancelBackgroundAgentTask: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
@@ -71,12 +76,8 @@ function createSession(owned = true): HarnessSession {
   return owned ? recordSessionTask(session, entry) : session;
 }
 
-async function createScope(
-  session = createSession(),
-  capabilities: SessionCapabilities | undefined = undefined,
-) {
+async function createScope(session = createSession()) {
   const ctx = new ContextContainer();
-  if (capabilities !== undefined) ctx.set(CapabilitiesKey, capabilities);
   ctx.setVirtualContext(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId: session.sessionId,
@@ -124,18 +125,23 @@ describe("background subagent steering", () => {
     vi.mocked(cancelOwnedTask).mockResolvedValue(cancelledView);
     vi.mocked(startTaskRun).mockResolvedValue(undefined as never);
     vi.mocked(waitForTaskCommandOwner).mockResolvedValue({ runId: "steering-task-run" } as never);
+    vi.mocked(getHookByToken).mockResolvedValue({
+      metadata: { workflowTaskAuthorization: true },
+    } as never);
   });
 
   it.each([
-    { capabilities: undefined, supported: false },
-    { capabilities: { requestInput: true }, supported: false },
-    { capabilities: { workflowTaskAuthorization: false }, supported: false },
-    { capabilities: { workflowTaskAuthorization: true }, supported: true },
+    { metadata: undefined, supported: false },
+    { metadata: { sessionInboxWireVersion: 6 }, supported: false },
+    { metadata: { workflowTaskAuthorization: "true" }, supported: false },
+    { metadata: { workflowTaskAuthorization: true }, supported: true },
   ])(
-    "passes the receiving driver's auth capability to the task ($supported)",
-    async ({ capabilities, supported }) => {
-      const scope = await createScope(createSession(), capabilities);
+    "passes the receiving driver's auth support to the task ($supported)",
+    async ({ metadata, supported }) => {
+      vi.mocked(getHookByToken).mockResolvedValue({ metadata } as never);
+      const scope = await createScope();
       await expect(scope.execute()).resolves.toMatchObject({ status: "working" });
+      expect(getHookByToken).toHaveBeenCalledWith(sessionCommandHookToken("parent"));
       expect(startTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           workflow: expect.objectContaining({ authorizationSupported: supported }),

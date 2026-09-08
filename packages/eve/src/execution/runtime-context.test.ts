@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
   AuthKey,
-  CapabilitiesKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   ParentTraceContextKey,
@@ -152,26 +151,6 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
-  it.each(["http", "subagent"])("does not inherit driver support from a %s caller", (kind) => {
-    const capabilities = { requestInput: true, workflowTaskAuthorization: true };
-    const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
-      run: {
-        adapter: { kind },
-        auth: null,
-        capabilities,
-        input: { message: "hello" },
-        mode: "conversation",
-      },
-    });
-
-    expect(ctx.get(CapabilitiesKey)).toEqual({
-      requestInput: true,
-      workflowTaskAuthorization: false,
-    });
-    expect(capabilities.workflowTaskAuthorization).toBe(true);
-  });
-
   it("seeds auth from the run input", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),

@@ -123,7 +123,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: 6 },
+      metadata: { sessionInboxWireVersion: 6, workflowTaskAuthorization: true },
       token: "stable",
     });
     await inbox.dispose();

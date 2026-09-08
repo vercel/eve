@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
-import type { HookPayload, SessionCapabilities } from "#channel/types.js";
+import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
@@ -169,31 +169,6 @@ describe("workflowEntry", () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
   });
-
-  it.each([undefined, { requestInput: true, workflowTaskAuthorization: false }])(
-    "advertises its own auth support while preserving session capabilities (%j)",
-    async (supplied) => {
-      const sessionState = createBaseSessionState();
-      vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
-      installHookMocks({
-        deliveryHooks: [{ token: "http:test" }],
-        turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
-      });
-
-      await workflowEntry({
-        input: { message: "hello" },
-        serializedContext: createSerializedContext({ "eve.capabilities": supplied }),
-      });
-
-      const expected: SessionCapabilities = { ...supplied, workflowTaskAuthorization: true };
-      expect(dispatchTurnStep).toHaveBeenCalledWith(
-        expect.objectContaining({
-          capabilities: expected,
-          serializedContext: expect.objectContaining({ "eve.capabilities": expected }),
-        }),
-      );
-    },
-  );
 
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
     const sessionState = createBaseSessionState();

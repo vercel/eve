@@ -1,6 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
-import { ActivityObserverKey, CapabilitiesKey } from "#context/keys.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -37,6 +37,7 @@ import {
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionDriverSupportsWorkflowTaskAuthorization } from "#execution/wire/session-inbox-resume.js";
 import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
@@ -459,7 +460,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
       workflow: {
-        authorizationSupported: input.ctx.get(CapabilitiesKey)?.workflowTaskAuthorization === true,
+        authorizationSupported: await sessionDriverSupportsWorkflowTaskAuthorization(
+          this.initialSession.sessionId,
+        ),
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,

@@ -198,8 +198,7 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const ctx = loadContext();
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
-  const token =
-    ctx.get(AuthorizationHookKey)?.token ?? (sessionId ? authHookToken(sessionId) : undefined);
+  const token = ctx.get(AuthorizationHookKey) ?? (sessionId ? authHookToken(sessionId) : undefined);
   if (!token || !baseUrl) return undefined;
   return createWorkflowCallbackUrl(
     baseUrl,
@@ -211,7 +210,7 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
 export function createAuthorizationAttempt(
   name: string,
 ): { readonly attemptId: string; readonly hookUrl: string } | undefined {
-  const attemptId = loadContext().get(AuthorizationHookKey)?.attemptId ?? createUlid();
+  const attemptId = createUlid();
   const hookUrl = getHookUrl(name, attemptId);
   return hookUrl === undefined ? undefined : { attemptId, hookUrl };
 }
@@ -297,11 +296,8 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
  */
 export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 
-/** The executing runtime may own its callback hook instead of using the session hook. */
-export const AuthorizationHookKey = new ContextKey<{
-  readonly token: string;
-  readonly attemptId?: string;
-}>("eve.authorizationHook");
+/** Hook token of a runtime that owns its callback instead of using the session hook. */
+export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHook");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

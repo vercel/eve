@@ -132,17 +132,57 @@ describe("applyWorkflowTransform", () => {
           ping: {
             stepId: "step//./steps/ping//ping",
           },
-          "ping:eve-authorization": { stepId: "step//./steps/ping//ping:eve-authorization" },
         },
       },
     });
     expect(transformed.code).toContain(
       'import { registerStepFunction } from "workflow/internal/private";',
     );
-    expect(transformed.code).toContain(
-      'registerStepFunction("step//./steps/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
-    );
+    expect(transformed.code).toContain('registerStepFunction("step//./steps/ping//ping", ping);');
+    expect(transformed.code).not.toContain("eve-authorization");
     expect(transformed.code).not.toContain('"use step"');
+  });
+
+  it("registers authorization twins only for package test fixtures", async () => {
+    const source = [
+      "export async function ping(input: { value: string }): Promise<string> {",
+      '  "use step";',
+      "  return input.value;",
+      "}",
+      "",
+    ].join("\n");
+    const fixturePath = resolvePackageSourceFilePath("src/internal/testing/ping.ts");
+    const transformed = await applyWorkflowTransform(
+      "src/internal/testing/ping.ts",
+      source,
+      "step",
+      fixturePath,
+    );
+    expect(transformed.workflowManifest.steps?.["src/internal/testing/ping.ts"]).toEqual({
+      ping: { stepId: "step//./src/internal/testing/ping//ping" },
+      "ping:eve-authorization": {
+        stepId: "step//./src/internal/testing/ping//ping:eve-authorization",
+      },
+    });
+    expect(transformed.code).toContain(
+      'import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./src/internal/testing/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
+    );
+
+    const workflow = await applyWorkflowTransform(
+      "src/internal/testing/ping.ts",
+      source,
+      "workflow",
+      fixturePath,
+    );
+    expect(workflow.code).toContain(
+      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+    );
+    expect(workflow.code).toContain(
+      'export var ping = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping:eve-authorization"));',
+    );
   });
 
   it("replaces step functions with workflow proxies in workflow mode", async () => {
@@ -165,8 +205,9 @@ describe("applyWorkflowTransform", () => {
     );
 
     expect(transformed.code).toContain(
-      'export var localStep = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep:eve-authorization"));',
+      'export var localStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep");',
     );
+    expect(transformed.code).not.toContain("workflowToolStep");
     expect(transformed.code).toContain('export const TASK_KIND = "task";');
     expect(transformed.code).toContain("export const RETRY_OFFSET = -1;");
     expect(transformed.code).not.toContain("node:crypto");
@@ -235,10 +276,6 @@ describe("applyWorkflowTransform", () => {
           notifyDelegatedParentStep: {
             stepId: "step//./src/execution/workflow-entry//notifyDelegatedParentStep",
           },
-          "notifyDelegatedParentStep:eve-authorization": {
-            stepId:
-              "step//./src/execution/workflow-entry//notifyDelegatedParentStep:eve-authorization",
-          },
         },
       },
       workflows: {
@@ -251,7 +288,7 @@ describe("applyWorkflowTransform", () => {
     });
     expect(transformed.code).toContain("async function runWorkflowLoop");
     expect(transformed.code).toContain(
-      'var notifyDelegatedParentStep = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep:eve-authorization"));',
+      'var notifyDelegatedParentStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep");',
     );
     expect(transformed.code).not.toContain("step//./src/execution/workflow-entry//runWorkflowLoop");
   });
@@ -286,9 +323,6 @@ describe("applyWorkflowTransform", () => {
         "src/execution/turn-workflow.ts": {
           notifyDriverStep: {
             stepId: "step//eve@1.2.3//notifyDriverStep",
-          },
-          "notifyDriverStep:eve-authorization": {
-            stepId: "step//eve@1.2.3//notifyDriverStep:eve-authorization",
           },
         },
       },

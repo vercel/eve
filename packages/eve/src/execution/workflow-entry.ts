@@ -153,13 +153,9 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   const { workflowRunId: sessionId, workflowStartedAt } = getWorkflowMetadata();
   const continuationToken = (input.serializedContext["eve.continuationToken"] as string) || "";
   const mode = input.serializedContext["eve.mode"] as RunMode;
-  // The driver stays pinned while later turns can run newer code. Advertise
-  // its support here, including for steps that execute inline in this driver.
-  const capabilities: SessionCapabilities = {
-    ...(input.serializedContext["eve.capabilities"] as SessionCapabilities | undefined),
-    workflowTaskAuthorization: true,
-  };
-  input.serializedContext["eve.capabilities"] = capabilities;
+  const capabilities = input.serializedContext["eve.capabilities"] as
+    | SessionCapabilities
+    | undefined;
   const serializedBundle = input.serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
