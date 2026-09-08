@@ -7,6 +7,7 @@ import {
   parseToolErrorOutput,
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
+  waitForTaskInput,
   waitForTaskNotification,
 } from "./shared.js";
 
@@ -62,10 +63,11 @@ export default defineTaskEval({
       status: "failed",
     });
 
+    const held = await waitForTaskInput(t, race.session, "hold");
     const later = await sendAndFollowQueuedTurn(
       t,
       `CHILD-TASK-EXCLUSIVITY-LATER ${agentId}`,
-      race.session,
+      held.session,
     );
     later.turn.expectOk();
     later.turn.calledSubagent("busy-worker", { count: 1, status: "completed" });
