@@ -56,6 +56,7 @@ export function serializeAgentTraceContextState(state: AgentTraceContextState): 
         id,
         {
           ...value,
+          caller: value.caller === undefined ? undefined : serializeSpanContext(value.caller),
           context: serializeSpanContext(value.context),
           terminal:
             value.terminal === undefined
@@ -100,11 +101,10 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     return undefined;
   }
   return {
+    caller: isSpanContext(value.caller) ? value.caller : undefined,
     context: value.context,
     modelUsage: deserializeModelUsage(value.modelUsage),
-    parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
     parentLineage: deserializeParentLineage(value.parentLineage),
-    parentSpanId: typeof value.parentSpanId === "string" ? value.parentSpanId : undefined,
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     sequence: typeof value.sequence === "number" ? value.sequence : 0,
     startTimeMs: value.startTimeMs,

@@ -308,9 +308,9 @@ Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need
 
 Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
-An awaited subagent's first activation continues the caller trace. Its `invoke_agent` span is parented to the action span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child invocation as a standalone label. Later turns in the child session start fresh activation traces. Remote agents propagate the caller context over `traceparent`.
+Every subagent activation starts its own trace. The first child's `invoke_agent` root links to the dispatching caller with `eve.link.type=agent.dispatch`; remote agents carry that caller context over `traceparent`. Later turns also start fresh traces without repeating the initial caller link. All related sessions retain the same `gen_ai.conversation.id`, and `agent.subagent.name` labels the child invocation.
 
-Each `agent()` call inside an authored workflow has its own caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `agent.action` and `execute_tool` spans.
+Each `agent()` call inside an authored workflow has its own `agent.action` caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `agent.action` and `execute_tool` spans. Only agent execution uses `invoke_agent`.
 
 A durable session produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the session id shows every trace it produced, oldest first.
 

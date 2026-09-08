@@ -316,18 +316,7 @@ export function createAgentOtelInstrumentation(
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;
-          const parentContext =
-            turn.parentSpanId === undefined
-              ? withChannelAudience(ROOT_CONTEXT, session?.channelAudience)
-              : withChannelAudience(
-                  contextFromSpanContext({
-                    isRemote: turn.parentIsRemote ?? false,
-                    spanId: turn.parentSpanId,
-                    traceFlags: turn.context.traceFlags,
-                    traceId: turn.context.traceId,
-                  }),
-                  session?.channelAudience,
-                );
+          const parentContext = withChannelAudience(ROOT_CONTEXT, session?.channelAudience);
           const startSpan = () =>
             input.tracer.startSpan(
               agentInvocationSpanName(agentName),
@@ -340,15 +329,22 @@ export function createAgentOtelInstrumentation(
                   turn,
                 }),
                 kind: SpanKind.INTERNAL,
-                root: turn.parentSpanId === undefined,
+                links:
+                  turn.caller === undefined
+                    ? undefined
+                    : [
+                        {
+                          context: turn.caller,
+                          attributes: { "eve.link.type": "agent.dispatch" },
+                        },
+                      ],
+                root: true,
                 startTime: turn.startTimeMs,
               },
               parentContext,
             );
           const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
-            turn.parentSpanId === undefined
-              ? input.idGenerator.withTraceId(turn.context.traceId, startSpan)
-              : startSpan(),
+            input.idGenerator.withTraceId(turn.context.traceId, startSpan),
           );
           setAgentInvocationUsage(span, turn.modelUsage);
           span.addEvent("turn.started", undefined, turn.startTimeMs);

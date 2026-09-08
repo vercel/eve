@@ -44,12 +44,12 @@ export interface ConversationItem {
   readonly error: boolean;
 }
 
-/** Dispatch lineage for a subagent turn, read from its parent action span. */
+/** Dispatch lineage available on a subagent activation or its caller. */
 export interface ConversationSubagent {
   /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
   /** Turn id of the dispatching parent turn. */
-  readonly parentTurnId: string;
+  readonly parentTurnId?: string;
   /** Tool call id of the dispatch, when recorded. */
   readonly parentCallId?: string;
 }
@@ -193,11 +193,18 @@ function subagentFor(
   return undefined;
 }
 
-/** Reads subagent identity from the action span that directly parents its turn. */
 function turnSubagent(
   turn: LocalTraceSpan,
   byId: ReadonlyMap<string, LocalTraceSpan>,
 ): ConversationSubagent | undefined {
+  const subagentName = stringAttribute(turn, "agent.subagent.name");
+  if (subagentName !== undefined || stringAttribute(turn, "agent.parent_run.id") !== undefined) {
+    const name = subagentName ?? stringAttribute(turn, "gen_ai.agent.name");
+    return {
+      name: name === undefined ? undefined : stripTerminalControls(name),
+      parentCallId: stringAttribute(turn, "agent.parent_call.id"),
+    };
+  }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
   if (parent === undefined || (parent.name !== "agent.action" && !isAgentCallerSpan(parent)))
     return undefined;

@@ -35,7 +35,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import { AGENT_SPAN_NAMES, agentInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 export interface AgentActionInstrumentation {
@@ -121,7 +121,7 @@ export function createAgentActionInstrumentation(input: {
     const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        invocation ? agentInvocationSpanName(state.name) : AGENT_SPAN_NAMES.action,
+        AGENT_SPAN_NAMES.action,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -132,10 +132,7 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes(
-              invocation ? `invoke_agent ${state.name}` : "agent.action",
-              invocation ? "invoke_agent" : "agent.action",
-            ),
+            ...agentSpanNamingAttributes("agent.action"),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               sessionId: state.sessionId,
@@ -143,7 +140,6 @@ export function createAgentActionInstrumentation(input: {
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,
-                  "gen_ai.operation.name": "invoke_agent",
                   [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.caller,
                 }
               : undefined),

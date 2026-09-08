@@ -91,27 +91,13 @@ export function createAgentChannelDeliveryInstrumentation(input: {
         traceId: traceContext.traceId,
       },
     };
-    if (turn?.parentSpanId !== undefined) {
+    if (turn !== undefined) {
       state.parent = {
-        isRemote: turn.parentIsRemote ?? false,
-        spanId: turn.parentSpanId,
+        isRemote: false,
+        spanId: turn.context.spanId,
         traceFlags: turn.context.traceFlags,
         traceId: turn.context.traceId,
       };
-    } else if (
-      turn === undefined &&
-      event.sequence === 0 &&
-      event.parentTraceContext !== undefined
-    ) {
-      const parent = adoptedSpanContext(event.parentTraceContext);
-      if (parent !== undefined) {
-        state.parent = {
-          isRemote: parent.isRemote ?? false,
-          spanId: parent.spanId,
-          traceFlags: parent.traceFlags,
-          traceId: parent.traceId,
-        };
-      }
     }
     if (event.turnId !== undefined) state.turnId = event.turnId;
     if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;
@@ -227,19 +213,6 @@ function readState(value: unknown): ChannelDeliverySpanState | undefined {
     traceContext: value.traceContext,
     turnId: typeof value.turnId === "string" ? value.turnId : undefined,
   };
-}
-
-function adoptedSpanContext(
-  context: InstrumentationChannelDeliveryStartedEvent["parentTraceContext"],
-): SpanContext | undefined {
-  return context === undefined
-    ? undefined
-    : {
-        isRemote: "isRemote" in context && context.isRemote === true,
-        spanId: context.spanId,
-        traceFlags: context.traceFlags,
-        traceId: context.traceId,
-      };
 }
 
 function isSpanContext(value: unknown): value is SpanContext {

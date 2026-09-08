@@ -145,6 +145,11 @@ eve also carries the original `gen_ai.conversation.id` in `eve.conversation.id` 
 
 eve replaces configured `traceparent` and conversation baggage only when it has a framework value to send. Incoming baggage has an 8 KiB limit; the audience and conversation readers share whitespace, percent-decoding, and duplicate-key validation. Conversation IDs are limited to 1 KiB and exclude control characters and line separators.
 
+In the [provider trace contract](./instrumentation#agent-trace-contract), each
+child activation starts a separate trace. The first activation uses the incoming
+`traceparent` as an `agent.dispatch` span link rather than adopting the caller's
+trace ID.
+
 > ⚠️ **Upgrade both deployments before resuming persistent remote sessions.** A sender with continuation forwarding includes `forwardedPrincipal` on each authenticated follow-up. A receiver that supports forwarding only on session creation rejects that continuation with HTTP 400. eve does not retry without the field because that would run the follow-up as the transport service principal and silently change caller authority. The parent retains the child handle after this failure, so you can retry the same session after upgrading the receiver.
 
 A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.

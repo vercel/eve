@@ -56,7 +56,7 @@ Three more fields control what the AI SDK records inside those spans (see the AI
 
 eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
-eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` contains the root workflow run ID, so parent and child sessions remain queryable as one conversation even though each turn uses a bounded trace. These attributes describe and index a run; they do not control trace parenting or execution.
+eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` stays fixed at the original conversation ID across local and remote sessions, even when a remote rejects delegated lineage and creates a new root workflow. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
@@ -107,11 +107,11 @@ not mark the active span as failed.
 The built-in OpenTelemetry provider preserves each span's OTel name and adds
 `operation.name` and `resource.name` for Datadog's operation/resource mapping:
 
-| OTel span name                                                                                                     | `operation.name`  | `resource.name`        |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------- | ---------------------- |
-| `invoke_agent weather`                                                                                             | `invoke_agent`    | `invoke_agent weather` |
-| `execute_tool search`                                                                                              | `execute_tool`    | `execute_tool search`  |
-| `chat <model>`                                                                                                     | `chat`            | `chat <model>`         |
+| OTel span name                                                                                    | `operation.name`  | `resource.name`        |
+| ------------------------------------------------------------------------------------------------- | ----------------- | ---------------------- |
+| `invoke_agent weather`                                                                            | `invoke_agent`    | `invoke_agent weather` |
+| `execute_tool search`                                                                             | `execute_tool`    | `execute_tool search`  |
+| `chat <model>`                                                                                    | `chat`            | `chat <model>`         |
 | `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
 
 These attributes apply to eve-owned spans in local tracing and the
@@ -146,24 +146,32 @@ remain available when model and tool content is redacted.
 The provider layout and zero-config local tracing emit the following spans.
 The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 
-| Span                     | Meaning                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| `invoke_agent <agent>`   | One agent activation, or a caller dispatch marked with `agent.invocation.role=caller` |
-| `agent.step`             | One model attempt                                                                     |
-| `agent.action`           | Durable action lifecycle, including dispatch and waiting                              |
-| `execute_tool <tool>`    | In-process tool execution beneath its action                                          |
-| `agent.approval`         | Approval waiting beneath its action                                                   |
-| `agent.channel.delivery` | Processing one inbound delivery                                                       |
-| `agent.channel.request`  | Optional HTTP request span in the provider layout                                     |
+| Span                     | Meaning                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `invoke_agent <agent>`   | One agent activation in its own trace                    |
+| `agent.step`             | One model attempt                                        |
+| `agent.action`           | Durable action lifecycle, including dispatch and waiting |
+| `execute_tool <tool>`    | In-process tool execution beneath its action             |
+| `agent.approval`         | Approval waiting beneath its action                      |
+| `agent.channel.delivery` | Processing one inbound delivery                          |
+| `agent.channel.request`  | Optional HTTP request span in the provider layout        |
 
 Session-owned spans carry `agent.trace.schema.version=4`,
 `agent.session.id`, `vercel.session_id`, and `gen_ai.conversation.id`.
-Use the caller role to distinguish dispatch spans from activations; both use
-the `invoke_agent` operation. Turn IDs such as `turn_0` are local to a session,
+Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use
+`agent.action` with `agent.invocation.role=caller`; the built-in `agent` tool
+executes under `execute_tool agent`. Turn IDs such as `turn_0` are local to a session,
 so correlate turns by session ID and turn ID together.
 
-The activation owns its trace identity. Channel delivery does not allocate
-or replace that activation, and a resumed turn receives a new trace. Samplers
+Each activation owns a fresh trace identity, including local and remote
+subagents. The first child activation links to its caller with
+`eve.link.type=agent.dispatch`; incoming `traceparent` provides that link, not
+the child trace ID. Later turns do not reuse the original caller link.
+Conversation baggage is independent of authenticated lineage and trace-policy
+ceilings, which remain in force across the boundary.
+
+Channel delivery does not allocate or replace the activation, and a later turn
+receives a new trace. Samplers
 see the activation name and attributes after its session coordinates are
 available. Sampling must be deterministic for the same trace and operation
 because durable reconstruction can evaluate it again.

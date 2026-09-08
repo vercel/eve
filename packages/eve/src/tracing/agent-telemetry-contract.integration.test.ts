@@ -9,6 +9,7 @@ import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/i
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
+  ConversationIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -107,6 +108,7 @@ describe("exported agent telemetry contract", () => {
     async (audience) => {
       const runtime = createRuntime();
       let parent = contextFor(audience);
+      parent.set(ConversationIdKey, "original-conversation");
       const scope = scopeFor("parent", audience);
       const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience });
       const actionKey = actionIdempotencyKey("parent", "turn_0", "workflow");
@@ -198,6 +200,7 @@ describe("exported agent telemetry contract", () => {
       });
       parent = await deserializeContext(dispatch!.serializedContext);
       const child = contextFor(audience);
+      child.set(ConversationIdKey, dispatch!.dispatch.conversationId!);
       child.set(ParentSessionKey, {
         callId: "nested",
         rootSessionId: "parent",
@@ -206,7 +209,11 @@ describe("exported agent telemetry contract", () => {
       });
       if (dispatch!.dispatch.parentTraceContext !== undefined) {
         child.set(ParentTraceContextKey, dispatch!.dispatch.parentTraceContext);
-        child.set(SessionTraceSeedKey, dispatch!.dispatch.parentTraceContext);
+        child.set(SessionTraceSeedKey, {
+          ...dispatch!.dispatch.parentTraceContext,
+          spanId: runtime.idGenerator.allocateSpanId(),
+          traceId: runtime.idGenerator.generateTraceId(),
+        });
       }
       const childScope = scopeFor("child", audience);
       const childHooks = runtime.hooks.forTrace!({ agentName: "child", audience });
@@ -327,24 +334,49 @@ describe("exported agent telemetry contract", () => {
       await runtime.forceFlush();
       const exported = runtime.exporter.getFinishedSpans();
       const bytes = JsonTraceSerializer.serializeRequest(exported)!;
-      const traceId = exported[0]!.spanContext().traceId;
-      const parsed = parseLocalTraceSegment(new TextDecoder().decode(bytes), traceId);
-      const trace = assembleLocalTrace(traceId, parsed);
+      const traceIds = [...new Set(exported.map((span) => span.spanContext().traceId))];
+      expect(traceIds).toHaveLength(2);
+      const traces = traceIds.map((traceId) =>
+        assembleLocalTrace(
+          traceId,
+          parseLocalTraceSegment(new TextDecoder().decode(bytes), traceId),
+        ),
+      );
+      const parsed = traceIds.flatMap((traceId) =>
+        parseLocalTraceSegment(new TextDecoder().decode(bytes), traceId),
+      );
       expect(parsed).toHaveLength(exported.length);
+      expect(
+        parsed.every(
+          (span) => span.attributes["gen_ai.conversation.id"] === "original-conversation",
+        ),
+      ).toBe(true);
       expect(
         parsed.every((span) => Number(span.attributes["agent.trace.schema.version"]) === 4),
       ).toBe(true);
       expect(
-        parsed.filter((span) => span.parentSpanId === undefined).map((span) => span.name),
-      ).toEqual(["invoke_agent parent"]);
+        parsed
+          .filter((span) => span.parentSpanId === undefined)
+          .map((span) => span.name)
+          .sort(),
+      ).toEqual(["invoke_agent child", "invoke_agent parent"]);
       expect(parsed.filter(isAgentTurnSpan)).toHaveLength(2);
       const caller = parsed.find((span) => span.attributes["agent.invocation.role"] === "caller")!;
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
       )!;
-      expect(activation.parentSpanId).toBe(caller.spanId);
+      expect(activation.parentSpanId).toBeUndefined();
+      expect(activation.traceId).not.toBe(caller.traceId);
+      const childSpan = exported.find((span) => span.spanContext().spanId === activation.spanId)!;
+      expect(childSpan.links).toEqual([
+        {
+          context: expect.objectContaining({ spanId: caller.spanId, traceId: caller.traceId }),
+          attributes: { "eve.link.type": "agent.dispatch" },
+        },
+      ]);
       expect(parsed.map((span) => span.name).sort()).toEqual(
         [
+          "agent.action",
           "agent.action",
           "agent.approval",
           "agent.channel.delivery",
@@ -352,7 +384,6 @@ describe("exported agent telemetry contract", () => {
           "agent.step",
           "chat test",
           "execute_tool coordinate",
-          "invoke_agent child",
           "invoke_agent child",
           "invoke_agent parent",
         ].sort(),
@@ -363,7 +394,7 @@ describe("exported agent telemetry contract", () => {
         cacheReadTokens: 4,
         cacheWriteTokens: 2,
       });
-      const items = buildConversationItems(trace);
+      const items = traces.flatMap(buildConversationItems);
       expect(items.find((item) => item.kind === "assistant")?.subagent?.name).toBe("child");
       const metadata = new TextDecoder().decode(
         JsonTraceSerializer.serializeRequest(runtime.metadata.getFinishedSpans())!,

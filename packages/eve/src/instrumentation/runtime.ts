@@ -42,7 +42,7 @@ import {
   type PrepareTurnTraceContextInput,
 } from "#instrumentation/prepare-trace-context.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
@@ -559,7 +559,11 @@ export function initializeSessionInstrumentation(input: {
       });
     }
     if (forwardedTracePolicy !== undefined && parentTraceContext !== undefined) {
-      const resolvedParent = { ...parentTraceContext, ...traceSeed };
+      const resolvedParent = {
+        ...parentTraceContext,
+        decision: traceSeed.decision,
+        traceFlags: traceSeed.traceFlags,
+      };
       delete resolvedParent.forwardedTracePolicy;
       input.ctx.set(ParentTraceContextKey, resolvedParent);
     }
@@ -586,24 +590,24 @@ function allocateSessionTraceSeed(input: {
       ? traceContentCeilingToDecision(input.forwardedTracePolicy.ceiling)
       : undefined;
     const inheritedDecision = readInstrumentationDecision(input.parentTraceContext.decision);
-    const parentDecision = forwardedCeiling
-      ? inheritedDecision === undefined
-        ? forwardedCeiling
-        : intersectInstrumentationDecisions(forwardedCeiling, inheritedDecision)
-      : (inheritedDecision ??
-        resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience));
+    const parentDecision = !isSampledTrace(input.parentTraceContext)
+      ? { action: "drop" as const }
+      : forwardedCeiling
+        ? inheritedDecision === undefined
+          ? forwardedCeiling
+          : intersectInstrumentationDecisions(forwardedCeiling, inheritedDecision)
+        : (inheritedDecision ??
+          resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience));
     const decision = input.forwardedTracePolicy
       ? intersectInstrumentationDecisions(parentDecision, localDecision())
       : parentDecision;
+    const idGenerator = input.runtime?.idGenerator ?? new AgentSpanIdGenerator();
     return {
       decision,
       forwardedTracePolicy: input.forwardedTracePolicy,
-      spanId: input.parentTraceContext.spanId,
-      traceFlags:
-        input.forwardedTracePolicy !== undefined && decision.action === "drop"
-          ? input.parentTraceContext.traceFlags & ~1
-          : input.parentTraceContext.traceFlags,
-      traceId: input.parentTraceContext.traceId,
+      spanId: idGenerator.allocateSpanId(),
+      traceFlags: decision.action === "drop" ? 0 : input.parentTraceContext.traceFlags,
+      traceId: idGenerator.generateTraceId(),
     };
   }
   if (input.runtime?.prepareSessionTrace === undefined || input.runtime.idGenerator === undefined)

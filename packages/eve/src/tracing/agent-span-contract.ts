@@ -31,8 +31,7 @@ interface AgentSpanRecord {
 
 export function isAgentCallerSpan(span: AgentSpanRecord): boolean {
   return (
-    span.attributes["gen_ai.operation.name"] === "invoke_agent" &&
-    span.attributes["agent.invocation.role"] === "caller"
+    span.name === AGENT_SPAN_NAMES.action && span.attributes["agent.invocation.role"] === "caller"
   );
 }
 

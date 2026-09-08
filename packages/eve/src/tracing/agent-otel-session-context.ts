@@ -84,30 +84,20 @@ export function createAgentOtelSessionContext(
 
     const session = await ensureSessionContext(event);
     const useInitialContext = event.sequence === 0 && session.initialContextUsed !== true;
-    const parent = useInitialContext ? event.parentTraceContext : undefined;
-    const turnContext =
-      parent !== undefined
-        ? {
-            isRemote: false,
-            spanId: input.idGenerator.deriveSpanId(`turn:${event.idempotencyKey}`),
-            traceFlags: session.decision?.action === "drop" ? 0 : parent.traceFlags,
-            traceId: parent.traceId,
-          }
-        : useInitialContext
-          ? { ...session.context, isRemote: false }
-          : freshTurnContext(input, event.idempotencyKey, session.decision);
+    const caller = useInitialContext ? event.parentTraceContext : undefined;
+    const turnContext = useInitialContext
+      ? { ...session.context, isRemote: false }
+      : freshTurnContext(input, event.idempotencyKey, session.decision);
     const turn: AgentTurnTraceState = {
+      caller: caller === undefined ? undefined : adoptedSpanContext(caller),
       context: turnContext,
       parentLineage: event.parentLineage ?? session.parentLineage,
-      parentIsRemote:
-        parent === undefined ? undefined : "isRemote" in parent && parent.isRemote === true,
-      parentSpanId: parent?.spanId,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,
       startTimeMs: Date.now(),
       subagentName: (event.parentLineage ?? session.parentLineage)?.subagentName,
     };
-    if (parent === undefined && isSampledTrace(turn.context)) {
+    if (isSampledTrace(turn.context)) {
       const agentName = session.agentName ?? turn.subagentName;
       const sampled =
         input.samplesTrace?.(turn.context.traceId, {
@@ -168,7 +158,7 @@ function initialSessionContext(
   event: SessionMetadata,
   decision: ReturnType<typeof resolveTracePolicy>,
 ): SpanContext {
-  const handed = event.parentTraceContext ?? event.traceSeed;
+  const handed = event.traceSeed;
   if (handed !== undefined) {
     return {
       ...adoptedSpanContext(handed),
@@ -205,6 +195,9 @@ function resolveSessionTraceDecision(
   audience: ChannelAudience,
   policy: TraceCapturePolicy | undefined,
 ): ReturnType<typeof resolveTracePolicy> {
+  if (event.parentTraceContext !== undefined && !isSampledTrace(event.parentTraceContext)) {
+    return { action: "drop" };
+  }
   if (event.traceSeed?.decision !== undefined) {
     return readInstrumentationDecision(event.traceSeed.decision) ?? { action: "drop" };
   }

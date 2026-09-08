@@ -124,6 +124,12 @@ describe("initializeSessionInstrumentation", () => {
       traceFlags: 1,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
+      spanId: "c".repeat(16),
+      traceId: "d".repeat(32),
+    });
+    expect(ctx.get(SessionTraceSeedKey)?.spanId).not.toBe("c".repeat(16));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
     expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
     expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
@@ -302,7 +308,7 @@ describe("initializeSessionInstrumentation", () => {
     expect(ceiling).toEqual({ recordInputs: false, recordOutputs: false });
   });
 
-  it("preserves sampled flags for a non-forwarded parent decision", () => {
+  it("drops the independent trace when a local parent decision drops", () => {
     const ctx = createContext("public");
     ctx.set(ParentTraceContextKey, {
       decision: { action: "drop" },
@@ -322,9 +328,25 @@ describe("initializeSessionInstrumentation", () => {
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
       decision: { action: "drop" },
-      traceFlags: 1,
+      traceFlags: 0,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+  });
+
+  it("does not widen an unsampled parent with a record decision", () => {
+    const ctx = createContext("public");
+    ctx.set(ParentTraceContextKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      spanId: "c".repeat(16),
+      traceFlags: 0,
+      traceId: "d".repeat(32),
+    });
+    initializeSessionInstrumentation({ agentName: "local-subagent", ctx });
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "drop" },
+      traceFlags: 0,
+    });
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
   });
 });
 

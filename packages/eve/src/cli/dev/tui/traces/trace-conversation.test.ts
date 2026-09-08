@@ -204,6 +204,26 @@ describe("buildConversationItems", () => {
     });
   });
 
+  it("labels a separately rooted child without requiring the caller trace", () => {
+    const spans = weatherTurn().map((item) =>
+      item.attributes["gen_ai.operation.name"] === "invoke_agent"
+        ? {
+            ...item,
+            attributes: {
+              ...item.attributes,
+              "agent.subagent.name": "research",
+              "agent.parent_run.id": "parent",
+              "agent.parent_call.id": "call-child",
+            },
+          }
+        : item,
+    );
+    const items = buildConversationItems(trace(spans));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((item) => item.subagent?.name === "research")).toBe(true);
+    expect(items[0]?.subagent?.parentCallId).toBe("call-child");
+  });
+
   it("interleaves a subagent's cards between the parent's dispatch and reply", () => {
     // The parent parks while the child runs: step 1 dispatches, the child
     // works, step 2 replies with the result. Cards must read in that order,

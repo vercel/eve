@@ -24,8 +24,7 @@ describe("ContextAgentTraceStateStore", () => {
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
         modelUsage: { inputTokens: 12, outputTokens: 4 },
-        parentIsRemote: true,
-        parentSpanId: "2".repeat(16),
+        caller: { ...spanContext("4", "2"), isRemote: true },
         rootSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
@@ -42,8 +41,7 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
         modelUsage: { inputTokens: 12, outputTokens: 4 },
-        parentIsRemote: true,
-        parentSpanId: "2".repeat(16),
+        caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
       });
@@ -64,7 +62,7 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
-        parentSpanId: "2".repeat(16),
+        caller: spanContext("4", "2"),
         rootSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
@@ -83,7 +81,7 @@ describe("ContextAgentTraceStateStore", () => {
       const store = new ContextAgentTraceStateStore();
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
-        parentSpanId: "2".repeat(16),
+        caller: spanContext("4", "2"),
         rootSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,

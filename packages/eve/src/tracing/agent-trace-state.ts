@@ -24,11 +24,10 @@ export interface AgentSessionTraceState {
 }
 
 export interface AgentTurnTraceState {
+  readonly caller?: SpanContext;
   readonly context: SpanContext;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
-  readonly parentIsRemote?: boolean;
-  readonly parentSpanId?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly startTimeMs: number;
