@@ -8,6 +8,7 @@ export type DurableDynamicCallbackPhase =
   | "labelDelta"
   | "labelStart"
   | "approvalKey"
+  | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -38,6 +39,7 @@ export interface DurableDynamicToolCallbacks {
     readonly start?: DurableDynamicCallbackReference;
   };
   readonly approvalKey?: DurableDynamicCallbackReference;
+  readonly approvalPrompt?: DurableDynamicCallbackReference;
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
   readonly toModelOutput?: DurableDynamicCallbackReference;
@@ -59,6 +61,7 @@ export type LiveDurableDynamicToolCallbacks = Partial<{
     readonly start?: StampedDurableDynamicCallback;
   };
   approvalKey: StampedDurableDynamicCallback;
+  approvalPrompt: StampedDurableDynamicCallback;
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
   toModelOutput: StampedDurableDynamicCallback;
@@ -273,6 +276,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   };
   readonly approval?: Approval<never>;
   readonly approvalKey?: (...args: never[]) => unknown;
+  readonly approvalPrompt?: (...args: never[]) => unknown;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
@@ -289,6 +293,7 @@ export function collectDurableDynamicToolCallbacks(input: {
       : readDurableDynamicCallback(input.approval.response);
 
   const approvalKey = readDurableDynamicCallback(input.approvalKey);
+  const approvalPrompt = readDurableDynamicCallback(input.approvalPrompt);
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
@@ -305,6 +310,7 @@ export function collectDurableDynamicToolCallbacks(input: {
     };
   }
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
+  if (approvalPrompt !== undefined) callbacks.approvalPrompt = approvalPrompt;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;
