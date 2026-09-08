@@ -65,7 +65,11 @@ export default [false, true].map((laterTurn) =>
         satisfies((count: number) => count > 1, "background completion wakes the parent"),
       );
       const final = turns.at(-1)!;
-      for (let sheet = 1; sheet <= 5; sheet += 1) final.messageIncludes(`Sheet ${sheet}`);
+      final.messageIncludes("All five reviews are complete.");
+      final.event("step.completed", {
+        data: (data) => data.finishReason === "stop",
+        count: 1,
+      });
 
       const parentEvents = turns.flatMap((turn) => turn.events);
       const calls = parentEvents.flatMap((event) =>
@@ -231,5 +235,5 @@ function reviewPacket(): string {
       ),
     ].join("\n"),
   ).join("\n\n");
-  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Tell each reviewer which sheet to check using review_sheet. Let Alice know when the reviews are underway. As they finish, collect their findings and give Bob a short summary with a line labelled Sheet 1 through Sheet 5.\n\n${records}`;
+  return `Purchasing packet ${randomUUID()}.\nPlease help Alice prepare these five purchasing sheets for Bob. Start one reviewer per sheet, with all five reviews running in parallel. Tell each reviewer which sheet to check using review_sheet. Let Alice know when the reviews are underway. After all five reviews finish, tell Bob: "All five reviews are complete."\n\n${records}`;
 }
