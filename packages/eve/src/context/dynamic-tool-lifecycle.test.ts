@@ -1538,11 +1538,18 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
   it("replays a label start callback", () => {
     const ctx = createCtx();
-    registerTestCallback("deploy", "execute", () => ({ ok: true }));
+    const owner = {
+      sessionId: ctx.require(SessionIdKey),
+      scope: "turn" as const,
+      resolverSlug: "legacy",
+      entryKey: "legacy:deploy",
+    };
+    registerTestCallback("deploy", "execute", () => ({ ok: true }), owner);
     registerTestCallback(
       "deploy",
       "labelStart",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
+      owner,
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
@@ -1561,7 +1568,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
       "Deploy to preview",
     );
-    getDynamicCallbackRegistry().delete("deploy");
+    clearDurableDynamicCallbacks(owner.sessionId);
   });
 
   it("replays phase-specific turn metadata", async () => {
