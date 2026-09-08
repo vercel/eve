@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { CodexBinaryNotFoundError, type CodexAppServer } from "./codex-app-server.js";
 import type { ChatGptCredentialStore } from "./credential-store.js";
 import type { ChatGptCredentials, ChatGptRefreshCredentials } from "./oauth.js";
-import { createCodexTokenBroker } from "./token-broker.js";
+import { createCodexTokenBroker, type CodexTokenBrokerOptions } from "./token-broker.js";
 
 const credentials: ChatGptCredentials = {
   accessToken: "access-token",
@@ -34,11 +35,37 @@ function refreshed() {
   });
 }
 
+function missingCodexAppServer(): CodexAppServer {
+  return {
+    getAuthStatus: vi.fn(async () => {
+      throw new CodexBinaryNotFoundError();
+    }),
+  };
+}
+
+function createOwnedTokenBroker(options: Omit<CodexTokenBrokerOptions, "appServer"> = {}) {
+  return createCodexTokenBroker({ ...options, appServer: missingCodexAppServer() });
+}
+
 describe("ChatGPT token broker", () => {
-  it("caches an eve session without spawning Codex", async () => {
+  it("prefers Codex app-server credentials without reading eve's store", async () => {
+    const store = memoryStore();
+    const appServer: CodexAppServer = {
+      getAuthStatus: vi.fn(async () => ({ authMethod: "chatgpt", authToken: "codex-token" })),
+    };
+    const broker = createCodexTokenBroker({ appServer, store });
+
+    await expect(broker.getToken({ reason: "request" })).resolves.toEqual({
+      token: "codex-token",
+    });
+    expect(store.read).not.toHaveBeenCalled();
+    expect(broker.credentialOwner()).toBe("codex");
+  });
+
+  it("falls back to an eve session when the Codex binary is not found", async () => {
     const store = memoryStore();
     const fetch = vi.fn<typeof globalThis.fetch>();
-    const broker = createCodexTokenBroker({ store, fetch, now: () => 1_800_000_000_000 });
+    const broker = createOwnedTokenBroker({ store, fetch, now: () => 1_800_000_000_000 });
     await expect(broker.getToken({ reason: "request" })).resolves.toEqual({
       token: credentials.accessToken,
       expiresAt: credentials.expiresAt,
@@ -50,12 +77,85 @@ describe("ChatGPT token broker", () => {
     await expect(broker.refreshState()).resolves.toMatchObject({ kind: "ready" });
     expect(fetch).not.toHaveBeenCalled();
     expect(broker.state()).toEqual({ kind: "ready", accountLabel: "alice@example.com" });
+    expect(broker.credentialOwner()).toBe("eve");
+  });
+
+  it("re-probes Codex on a state refresh after falling back to eve", async () => {
+    const store = memoryStore();
+    let codexAvailable = false;
+    const appServer: CodexAppServer = {
+      getAuthStatus: vi.fn(async () => {
+        if (!codexAvailable) throw new CodexBinaryNotFoundError();
+        return { authMethod: "chatgpt", authToken: "codex-token" };
+      }),
+    };
+    const broker = createCodexTokenBroker({ appServer, store });
+
+    await expect(broker.getToken({ reason: "request" })).resolves.toMatchObject({
+      token: credentials.accessToken,
+    });
+    expect(broker.credentialOwner()).toBe("eve");
+
+    codexAvailable = true;
+    await expect(broker.refreshState()).resolves.toEqual({ kind: "ready" });
+    await expect(broker.getToken({ reason: "request" })).resolves.toEqual({
+      token: "codex-token",
+    });
+    expect(broker.credentialOwner()).toBe("codex");
+    expect(store.read).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent state refreshes before restarting app-server", async () => {
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let requests = 0;
+    const restart = vi.fn();
+    const appServer: CodexAppServer = {
+      restart,
+      getAuthStatus: vi.fn(async () => {
+        requests += 1;
+        if (requests > 1) await refreshGate;
+        return { authMethod: "chatgpt" };
+      }),
+    };
+    const broker = createCodexTokenBroker({ appServer, store: memoryStore() });
+    await expect(broker.refreshState()).resolves.toEqual({ kind: "signed-out" });
+
+    const first = broker.refreshState();
+    const second = broker.refreshState();
+    releaseRefresh();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { kind: "signed-out" },
+      { kind: "signed-out" },
+    ]);
+    expect(restart).toHaveBeenCalledOnce();
+    expect(appServer.getAuthStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not hide other app-server failures behind eve credentials", async () => {
+    const store = memoryStore();
+    const broker = createCodexTokenBroker({
+      appServer: {
+        getAuthStatus: vi.fn(async () => {
+          throw new Error("Codex protocol failed");
+        }),
+      },
+      store,
+    });
+
+    await expect(broker.getToken({ reason: "request" })).rejects.toThrow("Codex protocol failed");
+    expect(store.read).not.toHaveBeenCalled();
+    expect(broker.credentialOwner()).toBe("codex");
+    expect(broker.state()).toEqual({ kind: "unavailable", reason: "Codex protocol failed" });
   });
 
   it("exchanges a saved refresh token on a cold start and caches the access token", async () => {
     const store = memoryStore({ refreshToken: "saved-refresh", accountId: "acct-1" });
     const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
-    const broker = createCodexTokenBroker({ store, fetch });
+    const broker = createOwnedTokenBroker({ store, fetch });
     await expect(broker.getToken({ reason: "request" })).resolves.toMatchObject({
       token: "new-access",
       accountId: "acct-1",
@@ -68,7 +168,7 @@ describe("ChatGPT token broker", () => {
 
   it("reads the latest saved refresh token after acquiring the update lock", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
-    const broker = createCodexTokenBroker({
+    const broker = createOwnedTokenBroker({
       fetch,
       store: {
         read: async () => ({ refreshToken: "previous-refresh" }),
@@ -86,7 +186,7 @@ describe("ChatGPT token broker", () => {
   it("refreshes within five minutes of expiry and persists rotated credentials", async () => {
     const store = memoryStore({ ...credentials, expiresAt: 1_800_000_100_000 });
     const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
-    const broker = createCodexTokenBroker({ store, fetch, now: () => 1_800_000_000_000 });
+    const broker = createOwnedTokenBroker({ store, fetch, now: () => 1_800_000_000_000 });
     await expect(broker.getToken({ reason: "request" })).resolves.toMatchObject({
       token: "new-access",
     });
@@ -100,7 +200,7 @@ describe("ChatGPT token broker", () => {
   it("coalesces concurrent rejected-token refreshes", async () => {
     const gate = Promise.withResolvers<Response>();
     const fetch = vi.fn<typeof globalThis.fetch>(() => gate.promise);
-    const broker = createCodexTokenBroker({ store: memoryStore(), fetch });
+    const broker = createOwnedTokenBroker({ store: memoryStore(), fetch });
     const first = broker.getToken({ reason: "rejected" });
     const second = broker.getToken({ reason: "rejected" });
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
@@ -111,7 +211,7 @@ describe("ChatGPT token broker", () => {
 
   it("reuses credentials another eve process refreshed while acquiring the lock", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
-    const broker = createCodexTokenBroker({
+    const broker = createOwnedTokenBroker({
       fetch,
       store: {
         read: async () => credentials,
@@ -129,7 +229,7 @@ describe("ChatGPT token broker", () => {
     const store = memoryStore();
     vi.mocked(store.read).mockReturnValueOnce(gate.promise);
     const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
-    const broker = createCodexTokenBroker({ store, fetch });
+    const broker = createOwnedTokenBroker({ store, fetch });
     const first = broker.getToken({ reason: "request" });
     const second = broker.getToken({ reason: "rejected" });
     gate.resolve(credentials);
@@ -141,7 +241,7 @@ describe("ChatGPT token broker", () => {
   it("reports signed out and discovers a subsequent eve login", async () => {
     const store = memoryStore();
     vi.mocked(store.read).mockResolvedValueOnce(undefined);
-    const broker = createCodexTokenBroker({ store });
+    const broker = createOwnedTokenBroker({ store });
     await expect(broker.getToken({ reason: "request" })).rejects.toThrow("/model");
     expect(broker.state()).toEqual({ kind: "signed-out" });
     await expect(broker.refreshState()).resolves.toEqual({
@@ -153,13 +253,13 @@ describe("ChatGPT token broker", () => {
   it("preserves the sign-in hint when credentials disappear before a rejected request retries", async () => {
     const store = memoryStore();
     vi.mocked(store.read).mockResolvedValue(undefined);
-    const broker = createCodexTokenBroker({ store });
+    const broker = createOwnedTokenBroker({ store });
     await expect(broker.getToken({ reason: "rejected" })).rejects.toThrow("/model");
     expect(broker.state()).toEqual({ kind: "reauth-required" });
   });
 
   it("reports revoked credentials without exposing the provider response", async () => {
-    const broker = createCodexTokenBroker({
+    const broker = createOwnedTokenBroker({
       store: memoryStore(),
       fetch: async () => new Response("secret-bearer-token", { status: 401 }),
     });
@@ -173,7 +273,7 @@ describe("ChatGPT token broker", () => {
       .mockResolvedValueOnce(new Response("secret", { status: 503 }))
       .mockResolvedValueOnce(refreshed());
     const store = memoryStore({ ...credentials, expiresAt: 1 });
-    const broker = createCodexTokenBroker({ store, fetch });
+    const broker = createOwnedTokenBroker({ store, fetch });
     await expect(broker.getToken({ reason: "request" })).rejects.toThrow("HTTP 503");
     expect(broker.state()).toMatchObject({ kind: "unavailable" });
     expect(JSON.stringify(broker.state())).not.toContain("secret");

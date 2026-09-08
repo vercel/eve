@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CodexBinaryNotFoundError,
+  type CodexAppServer,
+} from "#public/models/openai/chatgpt/codex-app-server.js";
+import {
   ChatGptInvalidStoredSessionError,
   type ChatGptCredentialStore,
 } from "#public/models/openai/chatgpt/credential-store.js";
 import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
-import { createCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
+import {
+  createCodexTokenBroker,
+  type CodexTokenBroker,
+} from "#public/models/openai/chatgpt/token-broker.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 
 vi.mock("node:timers/promises", () => ({
@@ -39,10 +46,18 @@ function setup() {
   return {
     store,
     fetch,
-    broker: createCodexTokenBroker({ store, fetch }),
+    broker: createCodexTokenBroker({ appServer: missingCodexAppServer(), store, fetch }),
     open: vi.fn(),
     log: vi.fn(),
     headless: true,
+  };
+}
+
+function missingCodexAppServer(): CodexAppServer {
+  return {
+    getAuthStatus: vi.fn(async () => {
+      throw new CodexBinaryNotFoundError();
+    }),
   };
 }
 
@@ -85,6 +100,65 @@ describe("ChatGPT device sign-in", () => {
     await vi.advanceTimersByTimeAsync(2001);
     await login;
     expect(options.store.update).toHaveBeenCalledWith(expect.any(Function), { replace: true });
+  });
+
+  it("uses Codex login when app-server owns the credentials", async () => {
+    const options = setup();
+    let signedIn = false;
+    const restart = vi.fn();
+    const appServer: CodexAppServer = {
+      restart,
+      getAuthStatus: vi.fn(async () =>
+        signedIn ? { authMethod: "chatgpt", authToken: "codex-token" } : { authMethod: "chatgpt" },
+      ),
+    };
+    const broker = createCodexTokenBroker({ appServer, store: options.store });
+    const codexLogin = vi.fn(async () => {
+      signedIn = true;
+    });
+
+    await ensureChatGptAuth({ ...options, broker, codexLogin });
+
+    expect(codexLogin).toHaveBeenCalledOnce();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(options.store.update).not.toHaveBeenCalled();
+    expect(options.open).not.toHaveBeenCalled();
+    expect(broker.credentialOwner()).toBe("codex");
+  });
+
+  it("does not fall back when app-server fails for a reason other than a missing binary", async () => {
+    const options = setup();
+    const codexLogin = vi.fn();
+    const broker = createCodexTokenBroker({
+      appServer: {
+        getAuthStatus: vi.fn(async () => {
+          throw new Error("Codex protocol failed");
+        }),
+      },
+      store: options.store,
+    });
+
+    await expect(ensureChatGptAuth({ ...options, broker, codexLogin })).rejects.toThrow(
+      "Codex protocol failed",
+    );
+    expect(codexLogin).not.toHaveBeenCalled();
+    expect(options.store.update).not.toHaveBeenCalled();
+  });
+
+  it("does not enter eve-owned sign-in with an unresolved credential owner", async () => {
+    const options = setup();
+    const broker: CodexTokenBroker = {
+      credentialOwner: () => undefined,
+      getToken: vi.fn(),
+      refreshState: vi.fn(async () => ({ kind: "signed-out" }) as const),
+      state: () => ({ kind: "signed-out" }),
+    };
+
+    await expect(ensureChatGptAuth({ ...options, broker })).rejects.toThrow(
+      "ChatGPT credential owner could not be resolved",
+    );
+    expect(options.store.update).not.toHaveBeenCalled();
+    expect(options.open).not.toHaveBeenCalled();
   });
 
   it("completes a first sign-in after pending polls without any Codex credentials", async () => {

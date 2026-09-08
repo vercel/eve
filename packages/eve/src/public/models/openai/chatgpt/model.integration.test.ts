@@ -22,6 +22,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       { model: "gpt-5.6-luna" },
       {
         broker: {
+          credentialOwner: () => undefined,
           getToken: async () => ({ token: "test-token" }),
           refreshState: async () => ({ kind: "ready" }),
           state: () => ({ kind: "ready" }),

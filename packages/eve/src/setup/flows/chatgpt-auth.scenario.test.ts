@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import type { ChatGptCredentialStore } from "#public/models/openai/chatgpt/credential-store.js";
+import {
+  CodexBinaryNotFoundError,
+  type CodexAppServer,
+} from "#public/models/openai/chatgpt/codex-app-server.js";
 import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 
@@ -30,9 +34,17 @@ function setup() {
     store,
     controller,
     fetch,
-    broker: createCodexTokenBroker({ store, fetch }),
+    broker: createCodexTokenBroker({ appServer: missingCodexAppServer(), store, fetch }),
     log: vi.fn(),
     headless: false,
+  };
+}
+
+function missingCodexAppServer(): CodexAppServer {
+  return {
+    getAuthStatus: vi.fn(async () => {
+      throw new CodexBinaryNotFoundError();
+    }),
   };
 }
 

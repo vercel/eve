@@ -178,6 +178,7 @@ describe("Codex model", () => {
 
 function fakeBroker(): CodexTokenBroker {
   return {
+    credentialOwner: () => undefined,
     getToken: async () => ({ token: "access-token" }),
     refreshState: async () => ({ kind: "ready" }),
     state: () => ({ kind: "ready" }),
