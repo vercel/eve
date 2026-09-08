@@ -10,9 +10,10 @@
   },
   "dependencies": {
     "@ai-sdk/harness": "^1.0.87",
+    "@ai-sdk/harness-claude-code": "^1.0.90",
     "@standard-schema/spec": "^1.1.0",
-    "ai": "^7.0.79",
     "@vercel/sandbox-drives": "catalog:",
+    "ai": "^7.0.79",
     "eve": "workspace:*",
     "zod": "catalog:"
   },
