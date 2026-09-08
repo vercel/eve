@@ -1,0 +1,23 @@
+{
+  "name": "harness-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/harness": "^1.0.87",
+    "@standard-schema/spec": "^1.1.0",
+    "ai": "^7.0.79",
+    "@vercel/sandbox-drives": "catalog:",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}
