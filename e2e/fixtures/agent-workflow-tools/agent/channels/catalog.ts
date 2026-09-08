@@ -9,8 +9,8 @@ const rpcRequest = z.object({
 // A fixture-owned MCP server: eve still resolves auth and performs real HTTP discovery.
 export default defineChannel({
   routes: [
-    GET("/fixture-service/catalog", async () => new Response(null, { status: 405 })),
-    POST("/fixture-service/catalog", async (request) => {
+    GET("/fixture-catalog/mcp", async () => new Response(null, { status: 405 })),
+    POST("/fixture-catalog/mcp", async (request) => {
       if (request.headers.get("authorization") !== "Bearer authorized-fixture-token") {
         return new Response("Unauthorized", { status: 401 });
       }
