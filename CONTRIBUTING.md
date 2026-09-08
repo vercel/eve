@@ -268,18 +268,17 @@ you agree that your contributions will be licensed under that same license
 ## Adding a session inbox wire migration
 
 Run `pnpm run migratew session-inbox` from the repository root. It creates a
-migration file containing the new schema and both conversions, plus a test
-file under `packages/eve/src/execution/wire/session-inbox/migrations/`.
+schema file, a migration with both conversions, and a test file under `packages/eve/src/execution/wire/session-inbox/migrations/`.
 Implement the protocol change and replace the deliberately failing example
 test. Preserve each operation when downgrading, or throw `SessionInboxWireError`.
 
 Run `pnpm run migratew --sync` after editing; framework builds and typechecks
-also sync automatically. Commit the generated files with the two authored
+also sync automatically. Commit the generated files with the three authored
 files. CI checks freshness with `pnpm run migratew --check` and runs the
 scaffolder tests through `pnpm guard:invariants`. Do not edit registrations or
 historical migrations by hand. See [the wire contract](research/session-inbox-wire-schema.md).
 
-A PR adding a wire version may change only new migration/test pairs and
+A PR adding a wire version may change only new schema/migration/test files and
 generated files within `wire/`. CI rejects changes to the interface, runners,
 encoder, decoder, generator, or guard in the same PR. Ship machinery changes
 separately first. The guard compares against the merge base with `origin/main`,

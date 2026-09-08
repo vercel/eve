@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { stripTypeScriptTypes } from "node:module";
-import { discover, extractMigration, generateCatalog, scaffold } from "./migratew.mjs";
+import { discover, generateCatalog, scaffold } from "./migratew.mjs";
 import { checkWireChanges } from "./guard-wire-changes.mjs";
 
 async function fixture(t) {
@@ -139,10 +139,14 @@ test("allows callers and documentation to change alongside a new wire version", 
   await checkWireChanges(root, "main");
 });
 
-test("scaffolds only a migration and test, and automatically registers the next version", async (t) => {
+test("scaffolds a schema, migration, and test, with direct migration imports", async (t) => {
   const { root, wire, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
-  assert.deepEqual((await readdir(migrations)).sort(), ["v1-to-v2.test.ts", "v1-to-v2.ts"]);
+  assert.deepEqual((await readdir(migrations)).sort(), [
+    "v1-to-v2.test.ts",
+    "v1-to-v2.ts",
+    "v2.schema.ts",
+  ]);
   const catalog = await discover(root, "session-inbox");
   assert.deepEqual(catalog.versions, [1, 2]);
   assert.match(
@@ -150,11 +154,14 @@ test("scaffolds only a migration and test, and automatically registers the next 
     /satisfies Migration<1, 2>/,
   );
   assert.match(await readFile(join(migrations, "v1-to-v2.test.ts"), "utf8"), /Replace this test/);
-  const generated = await readFile(join(wire, "session-inbox/generated/v1-to-v2.ts"), "utf8");
-  assert.match(generated, /export const migration/);
-  assert.doesNotMatch(generated, /zod|previousSchema|z\.literal|export const schema/);
-  const code = stripTypeScriptTypes(generated);
-  const { migration } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
+  const authored = await readFile(join(migrations, "v1-to-v2.ts"), "utf8");
+  assert.doesNotMatch(authored, /zod|previousSchema|z\.literal|export const schema/);
+  const generated = join(wire, "session-inbox/generated");
+  assert.deepEqual((await readdir(generated)).sort(), ["catalog.ts", "schemas.ts", "versions.ts"]);
+  assert.match(await readFile(join(generated, "catalog.ts"), "utf8"), /migrations\/v1-to-v2\.js/);
+  assert.match(await readFile(join(generated, "schemas.ts"), "utf8"), /migrations\/v2\.schema\.js/);
+  const code = stripTypeScriptTypes(authored);
+  const { v1ToV2: migration } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
   const before = { kind: "cancel", version: 1, turnId: "turn-1" };
   assert.deepEqual(migration.up(before), { ...before, version: 2 });
   assert.deepEqual(migration.down(migration.up(before)), before);
@@ -163,8 +170,8 @@ test("scaffolds only a migration and test, and automatically registers the next 
   assert.deepEqual((await discover(root, "session-inbox")).versions, [1, 2, 3]);
 });
 
-test("reports stale generated transforms after an authored migration changes", async (t) => {
-  const { root, migrations } = await fixture(t);
+test("migration edits need no regeneration; manual catalog edits are rejected", async (t) => {
+  const { root, wire, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   const path = join(migrations, "v1-to-v2.ts");
   await writeFile(
@@ -174,6 +181,8 @@ test("reports stale generated transforms after an authored migration changes", a
       '({ ...wire, version: 1, marker: "changed" })',
     ),
   );
+  await generateCatalog(root, "session-inbox", true);
+  await writeFile(join(wire, "session-inbox/generated/catalog.ts"), "// changed registry\n");
   await assert.rejects(generateCatalog(root, "session-inbox", true), /catalog is stale/);
   await generateCatalog(root, "session-inbox");
   await generateCatalog(root, "session-inbox", true);
@@ -191,6 +200,7 @@ test("rejects missing tests, missing transitions, and conflicting schema definit
   await rm(join(migrations, "v1-to-v2.test.ts"));
   await assert.rejects(discover(root, "session-inbox"), /missing migration test/);
   await rm(join(migrations, "v1-to-v2.ts"));
+  await rm(join(migrations, "v2.schema.ts"));
   await writeFile(
     join(wire, "session-inbox-wire.v2.ts"),
     "export const sessionInboxWireV2Schema = {};\n",
@@ -212,53 +222,16 @@ test("rejects unknown families without creating paths", async (t) => {
   await assert.rejects(scaffold(root, "../escape"), /Unknown wire family/);
 });
 
-test("extracts helper dependencies without confusing object keys with schema variables", () => {
-  const source = `
-import { z } from "#compiled/zod/index.js";
-import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
-const version = z.literal(2);
-export const schema = z.object({ version });
-function down(wire) { if (wire.unsupported) throw new SessionInboxWireError("unsupported"); return { ...wire, version: 1 }; }
-export const migration = { from: 1, to: 2, up: (wire) => ({ ...wire, version: 2 }), down };
-`;
-  const result = extractMigration("/migration.ts", source, "migration");
-  assert.match(result, /function down/);
-  assert.match(result, /SessionInboxWireError/);
-  assert.doesNotMatch(result, /zod|z\.literal|export const schema/);
-});
-
-test("rejects a transform that depends on the schema or a filesystem import", () => {
-  assert.throws(
-    () =>
-      extractMigration(
-        "/migration.ts",
-        `
-export const schema = {};
-export const migration = { up: () => schema };
-`,
-        "migration",
-      ),
-    /must not depend on schema/,
-  );
-  assert.throws(
-    () =>
-      extractMigration(
-        "/migration.ts",
-        `
-import { readFileSync } from "node:fs";
-export const migration = { up: () => readFileSync("x") };
-`,
-        "migration",
-      ),
-    /not workflow-safe/,
-  );
-});
-
 test("removes obsolete generated transforms when an unshipped version is removed", async (t) => {
   const { root, wire, migrations } = await fixture(t);
   await scaffold(root, "session-inbox");
   await rm(join(migrations, "v1-to-v2.ts"));
   await rm(join(migrations, "v1-to-v2.test.ts"));
+  await rm(join(migrations, "v2.schema.ts"));
+  await writeFile(
+    join(wire, "session-inbox/generated/v1-to-v2.ts"),
+    "// Generated by pnpm run migratew --sync. Do not edit.\n// obsolete copy\n",
+  );
   await assert.rejects(generateCatalog(root, "session-inbox", true), /catalog is stale/);
   await generateCatalog(root, "session-inbox");
   assert.deepEqual((await readdir(join(wire, "session-inbox/generated"))).sort(), [
@@ -268,22 +241,14 @@ test("removes obsolete generated transforms when an unshipped version is removed
   ]);
 });
 
-test("rejects unsupported import forms rather than dropping a runtime dependency", () => {
-  for (const source of [
-    'import * as guards from "#shared/guards.js"; export const migration = { up: () => guards.isObject({}) };',
-    'import guards from "#shared/guards.js"; export const migration = { up: () => guards({}) };',
-  ])
-    assert.throws(
-      () => extractMigration("/migration.ts", source, "migration"),
-      /must use named imports/,
-    );
-  assert.throws(
-    () =>
-      extractMigration(
-        "/migration.ts",
-        'import "side-effects"; export const migration = {};',
-        "migration",
-      ),
-    /side-effect imports/,
-  );
+test("rejects missing schemas and migration endpoints that disagree with the filename", async (t) => {
+  const { root, migrations } = await fixture(t);
+  await scaffold(root, "session-inbox");
+  const path = join(migrations, "v1-to-v2.ts");
+  const source = await readFile(path, "utf8");
+  await writeFile(path, source.replace("to: 2", "to: 3"));
+  await assert.rejects(discover(root, "session-inbox"), /to must be the literal 2/);
+  await writeFile(path, source);
+  await rm(join(migrations, "v2.schema.ts"));
+  await assert.rejects(discover(root, "session-inbox"), /exactly one adjacent migration/);
 });

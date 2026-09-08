@@ -52,13 +52,13 @@ export async function checkWireChanges(root, baseRef = "origin/main") {
     if (!path.startsWith(wire) || path.startsWith(generated)) return false;
     return !(
       path.startsWith(migrations) &&
-      /^v\d+-to-v\d+(?:\.test)?\.ts$/.test(path.slice(migrations.length)) &&
+      /^v\d+(?:-to-v\d+(?:\.test)?|\.schema)\.ts$/.test(path.slice(migrations.length)) &&
       !basePaths.has(path)
     );
   });
   if (forbidden.length) {
     throw new Error(
-      `A wire version addition may change only new migration/test pairs and generated files within wire, and must leave the migration machinery unchanged. Ship machinery changes in a separate PR first. Use pnpm run migratew session-inbox to add a version. Forbidden changes:\n${forbidden.sort().join("\n")}`,
+      `A wire version addition may change only new schema/migration/test files and generated files within wire, and must leave the migration machinery unchanged. Ship machinery changes in a separate PR first. Use pnpm run migratew session-inbox to add a version. Forbidden changes:\n${forbidden.sort().join("\n")}`,
     );
   }
 }

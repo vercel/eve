@@ -34,27 +34,27 @@ Add a wire version with:
 pnpm run migratew session-inbox
 ```
 
-The command creates exactly two authored files under
-`execution/wire/session-inbox/migrations/`: `vN-to-vNext.ts` and its
-`vN-to-vNext.test.ts`. Define the new `schema` and the `migration` object's
-`up`/`down` conversions in the migration file. The scaffold preserves the
-previous variants with the new version stamp. Its second test deliberately
-fails until replaced with an example of the actual protocol change and its
-downgrade behavior.
+The command creates three authored files under
+`execution/wire/session-inbox/migrations/`:
 
-`pnpm run migratew --sync` regenerates the static catalogs and extracts the
-migration's helpers into a schema-free workflow module. Normal framework
-builds and typechecks sync automatically. `pnpm run migratew --check` checks
+- `vNext.schema.ts`: the new frozen schema.
+- `vN-to-vNext.ts`: pure `up`/`down` conversions between the fixed versions.
+- `vN-to-vNext.test.ts`: contract and conversion examples using both modules.
+
+The scaffold preserves the previous variants with the new version stamp. Its
+second test deliberately fails until replaced with an example of the actual
+protocol change and its downgrade behavior.
+
+`pnpm run migratew --sync` regenerates static registrations and schema/type maps.
+Normal framework builds and typechecks sync automatically. `--check` checks
 freshness without writing; the invariant guard runs this check in CI.
 No imports, version arrays, schema/type maps, or guard allowlists need hand edits.
 Generated files live under `wire/session-inbox/generated/` and are committed.
-Shipped v1–v6 schemas keep their original files; new schemas live in their
-migration file.
+Shipped v1–v6 schemas keep their original files.
 
-Schema construction stays on the producer side. The generator follows local
-symbol references from `migration`, keeps required helpers and named imports,
-and rejects runtime dependencies on `schema` or unsupported imports. It does
-not execute authored modules to discover versions. Directory discovery happens
+Schema construction stays on the producer side. The workflow decoder imports
+pure migration modules directly, without importing their schemas. There is no
+code extraction or generated copy of a migration. Directory discovery happens
 in tooling; the runtime uses static imports.
 
 Production sends use `execution/wire/session-inbox-encoder.ts`. It builds the current
@@ -128,10 +128,10 @@ Send a v6 command to v3:    v6 → v5 → v4 → v3 → validate v3 → deliver
 - **Validate after conversion.** The production encoder validates the current
   command and the final target value. Delivery helpers cannot bypass that
   contract, including the stable fast path and unversioned targets.
-- **Keep pure transformations workflow-safe.** Generated workflow transforms
-  import schema types only. Authored schema construction stays on the producer
+- **Keep pure transformations workflow-safe.** Authored migrations use
+  type-only wire imports. Authored schema construction stays on the producer
   side, outside the embedded workflow driver. CI checks the decoder, generated
-  catalogs, and extracted migration imports.
+  catalogs, and direct migration imports.
 - **Decoder trust remains explicit.** Known versioned messages are assumed to
   come from validated producers. The decoder checks version and discriminator
   and rejects known operation/version mismatches; it is not a complete second
@@ -149,7 +149,7 @@ The generator derives the current version and all version types from the
 schema and migration files. Existing migration files do not change. CI checks
 continuity, generated-file freshness, historical contracts, migration output
 shapes, and rejection before hook delivery. The generator tests scaffold a
-new version and execute its extracted transformations in both directions.
+new version and execute its authored transformations in both directions.
 
 ## Version signals and their semantics
 
@@ -354,7 +354,7 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - Rule 40 freezes adjacent migration pairs and their tests, and rejects policy
   imports from those transforms. It compares each shipped schema and its local
   dependencies with `origin/main`, and separately protects frozen fixtures and
-  snapshots. PRs adding a wire version may change only new migration/test pairs
+  snapshots. PRs adding a wire version may change only new schema/migration/test files
   and generated files within `wire/`; they cannot edit the interface, runners,
   encoder, decoder, generator, or guard. Machinery fixes must ship separately
   first. This scope check includes local untracked files and compares against

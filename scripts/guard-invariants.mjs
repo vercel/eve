@@ -131,7 +131,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
-import { extractMigration, generateCatalog } from "./migratew.mjs";
+import { generateCatalog } from "./migratew.mjs";
 import { checkWireChanges } from "./guard-wire-changes.mjs";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
@@ -615,7 +615,7 @@ const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 const SESSION_INBOX_DIR = `${WIRE_FAMILY_DIR}/session-inbox`;
 const SESSION_INBOX_MIGRATIONS_DIR = `${SESSION_INBOX_DIR}/migrations`;
 const SESSION_INBOX_MIGRATION_RE = new RegExp(
-  `^${SESSION_INBOX_MIGRATIONS_DIR}/v\\d+-to-v\\d+(?:\\.test)?\\.ts$`,
+  `^${SESSION_INBOX_MIGRATIONS_DIR}/v\\d+(?:-to-v\\d+(?:\\.test)?|\\.schema)\\.ts$`,
 );
 const SESSION_INBOX_HISTORY_SCOPE = [WIRE_FAMILY_DIR, SESSION_INBOX_MIGRATIONS_DIR];
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
@@ -843,9 +843,7 @@ function checkRule40WorkflowDecoderImports(source, path = SESSION_INBOX_WIRE_DEC
       specifier !== undefined &&
       isRuntimeImportReference(node) &&
       !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text) &&
-      !/^#execution\/wire\/session-inbox\/(?:migrations|generated)\/v\d+-to-v\d+\.js$/.test(
-        specifier.text,
-      )
+      !/^#execution\/wire\/session-inbox\/migrations\/v\d+-to-v\d+\.js$/.test(specifier.text)
     ) {
       violations.push({
         rule: 40,
@@ -916,14 +914,7 @@ async function checkRule40WireContracts() {
     if (!/^v\d+-to-v\d+\.ts$/.test(name)) continue;
     const path = `${SESSION_INBOX_MIGRATIONS_DIR}/${name}`;
     const source = await readFile(join(REPO_ROOT, path), "utf8");
-    try {
-      const runtime = /export const schema\s*=/.test(source)
-        ? extractMigration(join(REPO_ROOT, path), source, "migration")
-        : source;
-      violations.push(...checkRule40MigrationPurity(path, runtime));
-    } catch (error) {
-      violations.push({ rule: 40, file: path, line: 1, message: error.message });
-    }
+    violations.push(...checkRule40MigrationPurity(path, source));
     if (!migrationFiles.includes(name.replace(/\.ts$/, ".test.ts"))) {
       violations.push({
         rule: 40,

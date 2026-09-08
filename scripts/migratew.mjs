@@ -36,125 +36,6 @@ function exportedVariable(ast, name) {
     .find((declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name);
 }
 
-/** Keep only the migration and its dependencies; schema construction stays server-side. */
-export function extractMigration(path, source, name) {
-  const ast = parse(path, source);
-  const root = exportedVariable(ast, name);
-  if (!root) throw new Error(`${path} must export ${name}.`);
-  const host = ts.createCompilerHost({});
-  host.getSourceFile = (file) => (file === path ? ast : undefined);
-  const program = ts.createProgram([path], { noResolve: true, noLib: true }, host);
-  const checker = program.getTypeChecker();
-  const declarations = new Map();
-  for (const statement of ast.statements) {
-    if (ts.isImportDeclaration(statement)) {
-      const clause = statement.importClause;
-      if (!clause)
-        throw new Error(`${path}: side-effect imports are not supported in migration modules.`);
-      if (clause.name) declarations.set(checker.getSymbolAtLocation(clause.name), clause);
-      const bindings = clause.namedBindings;
-      if (bindings && ts.isNamespaceImport(bindings))
-        declarations.set(checker.getSymbolAtLocation(bindings.name), bindings);
-      if (bindings && ts.isNamedImports(bindings)) {
-        for (const binding of bindings.elements)
-          declarations.set(checker.getSymbolAtLocation(binding.name), binding);
-      }
-    } else if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        const bind = (node) => {
-          if (ts.isIdentifier(node))
-            declarations.set(checker.getSymbolAtLocation(node), declaration);
-          ts.forEachChild(node, bind);
-        };
-        bind(declaration.name);
-      }
-    } else if (statement.name) {
-      declarations.set(checker.getSymbolAtLocation(statement.name), statement);
-    } else {
-      throw new Error(
-        `${path}: use declarations only; migration modules cannot run top-level statements.`,
-      );
-    }
-  }
-  const selected = new Set();
-  const collect = (declaration) => {
-    if (selected.has(declaration)) return;
-    if (ts.isImportClause(declaration) || ts.isNamespaceImport(declaration)) {
-      throw new Error(`${path}: up/down dependencies must use named imports.`);
-    }
-    if (declaration === exportedVariable(ast, "schema")) {
-      throw new Error(`${path}: up/down must not depend on schema construction. Use Wire types.`);
-    }
-    selected.add(declaration);
-    const visit = (node) => {
-      if (ts.isIdentifier(node)) {
-        const symbol = ts.isShorthandPropertyAssignment(node.parent)
-          ? checker.getShorthandAssignmentValueSymbol(node.parent)
-          : checker.getSymbolAtLocation(node);
-        const dependency = declarations.get(symbol);
-        if (dependency) collect(dependency);
-      }
-      ts.forEachChild(node, visit);
-    };
-    if (!ts.isImportSpecifier(declaration)) visit(declaration);
-  };
-  collect(root);
-  const printer = ts.createPrinter();
-  const output = [];
-  for (const statement of ast.statements) {
-    let node = statement;
-    if (ts.isImportDeclaration(statement)) {
-      const clause = statement.importClause;
-      const bindings = clause?.namedBindings;
-      if (!bindings || !ts.isNamedImports(bindings)) continue;
-      const used = bindings.elements.filter((binding) => selected.has(binding));
-      if (!used.length) continue;
-      const specifier = statement.moduleSpecifier.text;
-      const typeOnly = clause.isTypeOnly || used.every((binding) => binding.isTypeOnly);
-      const safeValues = new Map([
-        ["#execution/wire/session-inbox-contract.js", ["SessionInboxWireError"]],
-        ["#shared/guards.js", ["isObject"]],
-      ]);
-      if (
-        !typeOnly &&
-        !used.every(
-          (binding) =>
-            binding.isTypeOnly ||
-            safeValues.get(specifier)?.includes(binding.propertyName?.text ?? binding.name.text),
-        )
-      ) {
-        throw new Error(`${path}: migration runtime import ${specifier} is not workflow-safe.`);
-      }
-      if (!specifier.startsWith("#"))
-        throw new Error(`${path}: migration dependencies must use # imports.`);
-      node = ts.factory.updateImportDeclaration(
-        statement,
-        statement.modifiers,
-        ts.factory.updateImportClause(
-          clause,
-          clause.isTypeOnly,
-          undefined,
-          ts.factory.updateNamedImports(bindings, used),
-        ),
-        statement.moduleSpecifier,
-        statement.attributes,
-      );
-    } else if (ts.isVariableStatement(statement)) {
-      const used = statement.declarationList.declarations.filter((declaration) =>
-        selected.has(declaration),
-      );
-      if (!used.length) continue;
-      node = ts.factory.updateVariableStatement(
-        statement,
-        statement.modifiers,
-        ts.factory.updateVariableDeclarationList(statement.declarationList, used),
-      );
-    } else if (!selected.has(statement)) continue;
-    output.push(printer.printNode(ts.EmitHint.Unspecified, node, ast));
-  }
-  return output.join("\n");
-}
-
 export async function discover(root, family) {
   if (family !== "session-inbox")
     throw new Error(`Unknown wire family ${JSON.stringify(family)}. Supported: session-inbox.`);
@@ -169,8 +50,19 @@ export async function discover(root, family) {
         name: `sessionInboxWireV${match[1]}Schema`,
       });
   }
+  const entries = (await readdir(migrationsDir)).sort();
+  for (const name of entries) {
+    const match = name.match(/^v([1-9]\d*)\.schema\.ts$/);
+    if (!match) continue;
+    const version = Number(match[1]);
+    if (schemas.has(version)) throw new Error(`Duplicate schema for wire version ${version}.`);
+    schemas.set(version, {
+      module: `#execution/wire/${family}/migrations/${name.replace(/\.ts$/, ".js")}`,
+      name: "schema",
+    });
+  }
   const migrations = [];
-  for (const name of (await readdir(migrationsDir)).sort()) {
+  for (const name of entries) {
     const match = name.match(/^v(\d+)-to-v(\d+)\.ts$/);
     if (!match) continue;
     const from = Number(match[1]);
@@ -181,8 +73,7 @@ export async function discover(root, family) {
       throw new Error(`${name}: missing migration test.`);
     const source = await readFile(path, "utf8");
     const ast = parse(path, source);
-    const combined = exportedVariable(ast, "schema") !== undefined;
-    const exportName = combined ? "migration" : `v${from}ToV${to}`;
+    const exportName = `v${from}ToV${to}`;
     const declaration = exportedVariable(ast, exportName);
     let initializer = declaration?.initializer;
     while (initializer && (ts.isSatisfiesExpression(initializer) || ts.isAsExpression(initializer)))
@@ -202,14 +93,7 @@ export async function discover(root, family) {
       )
         throw new Error(`${name}: ${key} must be the literal ${expected}.`);
     }
-    if (combined) {
-      if (schemas.has(to)) throw new Error(`Duplicate schema for wire version ${to}.`);
-      schemas.set(to, {
-        module: `#execution/wire/${family}/migrations/${name.replace(/\.ts$/, ".js")}`,
-        name: "schema",
-      });
-    }
-    migrations.push({ from, to, exportName, source, path, combined, name });
+    migrations.push({ from, to, exportName, name });
   }
   const versions = [...schemas.keys()].sort((a, b) => a - b);
   if (!versions.length || versions.some((v, i) => v !== i + 1))
@@ -225,12 +109,10 @@ export async function generateCatalog(root, family, check = false) {
   const { schemas, versions, migrations, directory } = catalog;
   const generated = join(directory, family, "generated");
   const outputs = new Map();
-  const imports = migrations.map((m) => {
-    const area = m.combined ? "generated" : "migrations";
-    if (m.combined)
-      outputs.set(join(generated, m.name), extractMigration(m.path, m.source, m.exportName));
-    return `import { ${m.exportName === `v${m.from}ToV${m.to}` ? m.exportName : `${m.exportName} as v${m.from}ToV${m.to}`} } from "#execution/wire/${family}/${area}/${m.name.replace(/\.ts$/, ".js")}";`;
-  });
+  const imports = migrations.map(
+    (m) =>
+      `import { ${m.exportName} } from "#execution/wire/${family}/migrations/${m.name.replace(/\.ts$/, ".js")}";`,
+  );
   outputs.set(
     join(generated, "catalog.ts"),
     `${imports.join("\n")}
@@ -287,12 +169,11 @@ export async function scaffold(root, family) {
   const previous = catalog.schemas.get(from);
   const path = join(catalog.migrationsDir, `v${from}-to-v${to}.ts`);
   const testPath = path.replace(/\.ts$/, ".test.ts");
-  if (existsSync(path) || existsSync(testPath))
+  const schemaPath = join(catalog.migrationsDir, `v${to}.schema.ts`);
+  if ([schemaPath, path, testPath].some(existsSync))
     throw new Error(`Migration v${from} to v${to} already exists.`);
-  const migration = `import { z } from "#compiled/zod/index.js";
+  const schema = `import { z } from "#compiled/zod/index.js";
 import { ${previous.name} as previousSchema } from "${previous.module}";
-import type { Migration } from "#execution/wire/${family}/migration.js";
-
 const version = z.literal(${to});
 // Define the new contract here. Existing contracts remain frozen.
 const [first, ...rest] = previousSchema.options;
@@ -300,8 +181,10 @@ export const schema = z.discriminatedUnion("kind", [
   first.extend({ version }),
   ...rest.map((option) => option.extend({ version })),
 ]);
+`;
+  const migration = `import type { Migration } from "#execution/wire/${family}/migration.js";
 
-export const migration = {
+export const v${from}ToV${to} = {
   from: ${from},
   to: ${to},
   up: (wire) => ({ ...wire, version: ${to} }),
@@ -309,7 +192,8 @@ export const migration = {
 } satisfies Migration<${from}, ${to}>;
 `;
   const test = `import { expect, it } from "vitest";
-import { migration, schema } from "./v${from}-to-v${to}.js";
+import { v${from}ToV${to} as migration } from "./v${from}-to-v${to}.js";
+import { schema } from "./v${to}.schema.js";
 import { ${previous.name} as previousSchema } from "${previous.module}";
 
 it("preserves an ordinary cancellation in both directions", () => {
@@ -323,10 +207,11 @@ it("covers the protocol change", () => {
   throw new Error("Replace this test with an example of the new field or operation, including downgrade behavior.");
 });
 `;
+  await writeFile(schemaPath, await formatted(schemaPath, schema), { flag: "wx" });
   await writeFile(path, await formatted(path, migration), { flag: "wx" });
   await writeFile(testPath, await formatted(testPath, test), { flag: "wx" });
   await generateCatalog(root, family);
-  return { path, testPath };
+  return { schemaPath, path, testPath };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -339,7 +224,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     } else {
       const result = await scaffold(repoRoot, argument);
       console.log(
-        `Created ${result.path}\nCreated ${result.testPath}\nDefine the schema and conversions, then replace the failing example test.\nRun pnpm run migratew --sync after editing the migration.`,
+        `Created ${result.schemaPath}\nCreated ${result.path}\nCreated ${result.testPath}\nDefine the schema and conversions, then replace the failing example test.\nRun pnpm run migratew --sync after editing the migration.`,
       );
     }
   } catch (error) {
