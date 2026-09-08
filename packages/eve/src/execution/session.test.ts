@@ -76,22 +76,6 @@ describe("createCompactionConfig", () => {
 });
 
 describe("createSession", () => {
-  it.each([undefined, false, true])(
-    "preserves the completion batching option in durable state (%s)",
-    (batchTaskCompletions) => {
-      const turnAgent = createTestTurnAgent({ batchTaskCompletions });
-      const session = createSession({
-        continuationToken: "root-token",
-        sessionId: "sess-root",
-        turnAgent,
-      });
-      const durable = projectToDurableSession(session);
-      expect(durable.agent.batchTaskCompletions).toBe(batchTaskCompletions);
-      expect(hydrateDurableSession({ durable, turnAgent }).agent.batchTaskCompletions).toBe(
-        batchTaskCompletions,
-      );
-    },
-  );
   it("creates a session with correct agent configuration", () => {
     const outputSchema = { properties: { title: { type: "string" } }, type: "object" } as const;
     const session = createSession({

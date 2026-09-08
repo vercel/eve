@@ -14,12 +14,16 @@ and the user question are excluded. The scripted model always obeys the silence
 policy, so this measures the runtime cost of perfect compliance; the real-model
 prompt ablation lives in `agent-task-reporting`.
 
-The same cases run in two fixtures on every revision: `fixture-tasks` uses the
-default (batching off), and `fixture-task-batching` sets
-`experimental.batchTaskCompletions: true`. Both use the same mock and workers.
+Batching is automatic. Both schedules run against the same runtime.
 The first completion's mock model call takes ten seconds, allowing later burst
 completions to enter the active parent's buffer. This delay belongs to the test
-model; the runtime adds no timer. The log includes the `batching` setting.
+model; the runtime adds no timer. The cases allow three minutes because the
+Vercel staggered run exceeded the previous two-minute timeout.
+
+At `76a18ee1`, the same burst workload with the previous option off/on took
+10/4 parent model steps in the local world. The staggered control took 10/10.
+Those measurements are retained in PR #3144; future runs exercise the default
+behavior and log their actual counts.
 
 Callback timing still varies across workflow worlds. Compare the observed batch
 sizes and model-step counts, not an assumed ten-to-one gain. The unit test at the

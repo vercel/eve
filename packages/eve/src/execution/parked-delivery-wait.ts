@@ -169,9 +169,7 @@ async function waitForNextSessionAction(input: {
     return {
       delivery: takeBufferedTurnDelivery(
         input.bufferedDeliveries,
-        input.stateCursor.sessionState.snapshot?.session.agent.batchTaskCompletions === true
-          ? getSessionTaskIndex(input.stateCursor.sessionState.snapshot.session.state)
-          : [],
+        getSessionTaskIndex(input.stateCursor.sessionState.snapshot?.session.state),
       ),
       kind: "delivery",
     };

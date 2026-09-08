@@ -125,7 +125,6 @@ function createSessionAgent(
   const base = {
     compactionModelReference: turnAgent.compactionModel,
     reasoning: turnAgent.reasoning,
-    batchTaskCompletions: turnAgent.batchTaskCompletions,
     system,
     tools,
   };
@@ -201,7 +200,7 @@ export function mintSubagentContinuationToken(suffix?: string): string {
  */
 export function projectToDurableSession(session: HarnessSession): DurableSession {
   const durable: {
-    agent: { system: string; batchTaskCompletions?: boolean };
+    agent: { system: string };
     compaction?: {
       lastKnownInputTokens?: number;
       lastKnownPromptMessageCount?: number;
@@ -217,10 +216,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     taskId?: string;
     workflowMaxSubagents?: number;
   } = {
-    agent: {
-      system: session.agent.system,
-      batchTaskCompletions: session.agent.batchTaskCompletions,
-    },
+    agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
     history: session.history,
     sessionId: session.sessionId,

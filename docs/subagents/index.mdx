@@ -5,12 +5,11 @@ description: "Delegate work to root-agent copies or declared specialists with th
 
 eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
-## Experimental completion batching
+## Completion batching
 
-Set `experimental: { batchTaskCompletions: true }` in the parent agent definition
-to combine adjacent successful completions already queued from tasks launched in
-the same parent turn. The default is off. Every result is retained, but the parent
-responds to the batch rather than between individual completions.
+eve automatically combines adjacent successful completions already queued from
+tasks launched in the same parent turn. Every result is retained, and the parent
+responds to the batch in one turn. No configuration is required.
 
 There is no debounce timer or waiting for unfinished tasks. Failures, input
 requests, explicit updates, user messages, and different task cohorts remain

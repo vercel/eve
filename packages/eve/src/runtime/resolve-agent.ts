@@ -241,7 +241,6 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
-      batchTaskCompletions: manifest.config.experimental.batchTaskCompletions,
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       workflow:
         manifest.config.experimental.workflow === undefined

@@ -1,9 +1,0 @@
-{
-  "experimentalServices": {
-    "eve": {
-      "entrypoint": ".",
-      "framework": "eve",
-      "routePrefix": "/eve/v1"
-    }
-  }
-}

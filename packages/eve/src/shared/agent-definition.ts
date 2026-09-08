@@ -204,8 +204,6 @@ export interface AgentLimitsDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
-  /** Coalesce adjacent queued successful sibling completions into one parent turn. Defaults to false. */
-  readonly batchTaskCompletions?: boolean;
   /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.

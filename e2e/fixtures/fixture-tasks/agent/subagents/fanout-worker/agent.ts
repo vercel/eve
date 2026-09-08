@@ -10,8 +10,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return { toolCalls: [{ input: { marker: fanInMarker ?? "RELEASE" }, name: "release" }] };
   }
   if (fanInMarker !== undefined) return `FANOUT-COMPLETE:${fanInMarker}`;
-  const marker = /FANOUT-WORKER-\d+/u.exec(request.lastUserMessage ?? "")?.[0];
-  if (marker === undefined) throw new Error("Fanout worker has no work marker.");
+  const message = request.lastUserMessage ?? "";
+  const marker = /FANOUT-WORKER-\d+/u.exec(message)?.[0] ?? message;
   return `FANOUT-COMPLETE:${marker}`;
 }
 

@@ -324,7 +324,7 @@ function completion(taskId: string): DeliverHookPayload {
   };
 }
 
-function batchingInput(batchTaskCompletions: boolean | undefined) {
+function batchingInput() {
   const input = waitInput(createMockInbox([]));
   input.stateCursor.adoptState({
     sessionState: {
@@ -335,7 +335,7 @@ function batchingInput(batchTaskCompletions: boolean | undefined) {
           sessionId: "session",
           continuationToken: "token",
           history: [],
-          agent: { system: "", batchTaskCompletions },
+          agent: { system: "" },
           state: {
             "eve.tasks": {
               version: 2,
@@ -376,7 +376,7 @@ describe("buffered task completion batching", () => {
   afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
 
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
-    const input = batchingInput(true);
+    const input = batchingInput();
     const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));
     const bufferedDeliveries = [...deliveries];
     const next = await nextTurnDelivery({ ...input, bufferedDeliveries });
@@ -395,19 +395,6 @@ describe("buffered task completion batching", () => {
     expect(bufferedDeliveries).toEqual([]);
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
   });
-
-  it.each([false, undefined])(
-    "keeps one completion per turn when the option is %s",
-    async (enabled) => {
-      const input = batchingInput(enabled);
-      const first = completion("task_0");
-      const second = completion("task_1");
-      const bufferedDeliveries = [first, second];
-      const next = await nextTurnDelivery({ ...input, bufferedDeliveries });
-      expect(next).toMatchObject({ kind: "turn", delivery: { payloads: first.payloads } });
-      expect(bufferedDeliveries).toEqual([second]);
-    },
-  );
 
   it.each([
     ["failed", { ...completion("task_2"), taskDeliveryId: "task_2:ready:failed" }],
@@ -432,7 +419,7 @@ describe("buffered task completion batching", () => {
   ] satisfies readonly (readonly [string, DeliverHookPayload])[])(
     "stops at a %s without reaching later siblings",
     async (_name, boundary) => {
-      const input = batchingInput(true);
+      const input = batchingInput();
       const first = completion("task_0");
       const second = completion("task_1");
       const later = completion("task_3");
@@ -447,7 +434,7 @@ describe("buffered task completion batching", () => {
   );
 
   it("delivers an available completion without waiting for unfinished siblings", async () => {
-    const input = batchingInput(true);
+    const input = batchingInput();
     const first = completion("task_0");
     const next = await nextTurnDelivery({ ...input, bufferedDeliveries: [first] });
     expect(next).toMatchObject({ kind: "turn", delivery: { payloads: first.payloads } });
@@ -455,7 +442,7 @@ describe("buffered task completion batching", () => {
   });
 
   it("services ready authorization before a buffered completion batch", async () => {
-    const input = batchingInput(true);
+    const input = batchingInput();
     const bufferedDeliveries = [completion("task_0"), completion("task_1")];
     const next = await nextTurnDelivery({
       ...input,
