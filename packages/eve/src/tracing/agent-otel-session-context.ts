@@ -169,7 +169,7 @@ function initialSessionContext(
   const sampled = decision.action === "record";
   return {
     isRemote: false,
-    spanId: input.idGenerator.allocateSpanId(),
+    spanId: input.idGenerator.deriveSpanId(`session:${event.sessionId}`),
     traceFlags: sampled ? 1 : 0,
     traceId,
   };

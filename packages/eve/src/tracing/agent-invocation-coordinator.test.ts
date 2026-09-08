@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
@@ -58,20 +59,42 @@ describe("agent invocation trace coordinator", () => {
     await expect(readInvocations(replay.serializedContext)).resolves.toHaveLength(1);
   });
 
-  it("upgrades the built-in subagent action instead of creating a duplicate caller", async () => {
+  it.each([
+    ["subagent-call", true],
+    ["subagent-call", false],
+    ["remote-agent-call", true],
+    ["remote-agent-call", false],
+  ] as const)("caps %s context with or without a recorded caller (%s)", async (kind, recorded) => {
     const context = new ContextContainer();
+    const action = outerAction();
+    context.set(SessionTraceSeedKey, {
+      ...action.parent,
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: {
+        originAudience: "public",
+        ceiling: { recordInputs: true, recordOutputs: true },
+      },
+    });
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
-      const action = outerAction();
-      store.setAction("outer", action);
-      store.setActionAnchor("outer", action);
+      store.setTurn("session-1", "turn-1", {
+        context: action.parent,
+        rootSessionId: "session-1",
+        sequence: 0,
+        startTimeMs: 1,
+      });
+      if (recorded) {
+        store.setAction("outer", action);
+        store.setActionAnchor("outer", action);
+      }
     });
     const serializedContext = await serializeContext(context);
 
     const prepared = prepareAgentInvocationTrace({
+      channelMetadata: { kind: "http", metadata: { audience: "private" } },
       invocation: {
         callId: "workflow",
-        kind: "subagent-call",
+        kind,
         name: "research",
       },
       ownerId: "workflow-run",
@@ -80,11 +103,19 @@ describe("agent invocation trace coordinator", () => {
       sessionState,
       turnId: "turn-1",
     });
+    expect(prepared.dispatch.parentTraceContext).toMatchObject({
+      ...action.parent,
+      spanId: recorded ? action.spanId : action.parent.spanId,
+      decision: { action: "record", recordInputs: false, recordOutputs: false },
+    });
+    expect(prepared.dispatch.originAudience).toBe("public");
     const restored = await deserializeContext(prepared.serializedContext);
     await contextStorage.run(restored, () => {
       const store = new ContextAgentTraceStateStore();
-      expect(store.getAction("outer")?.kind).toBe("subagent-call");
-      expect(store.findActionAnchor("session-1", "turn-1", "workflow")?.kind).toBe("subagent-call");
+      expect(store.getAction("outer")?.kind).toBe(recorded ? kind : undefined);
+      expect(store.findActionAnchor("session-1", "turn-1", "workflow")?.kind).toBe(
+        recorded ? kind : undefined,
+      );
       expect(store.findInvocations("session-1")).toHaveLength(0);
     });
   });

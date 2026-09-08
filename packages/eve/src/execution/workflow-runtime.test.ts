@@ -1089,7 +1089,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceFlags).toBe(0);
   });
 
-  it("inherits the parent trace context for delegated subagents", async () => {
+  it("inherits parent policy while allocating an independent delegated trace", async () => {
     const tracePolicy = vi.fn(() => false);
     installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
     mockBundleAndRun();
@@ -1121,7 +1121,13 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const seed = serialized["eve.sessionTraceSeed"] as
       | { traceId: string; spanId: string; traceFlags: number }
       | undefined;
-    expect(seed).toEqual(parentTrace);
+    expect(seed).toMatchObject({
+      decision: parentTrace.decision,
+      traceFlags: parentTrace.traceFlags,
+    });
+    expect(seed!.traceId).not.toBe(parentTrace.traceId);
+    expect(seed!.spanId).not.toBe(parentTrace.spanId);
+    expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
     expect(tracePolicy).not.toHaveBeenCalled();
