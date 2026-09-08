@@ -72,7 +72,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover-fixtures.outputs.model_matrix) }}
+        include:
+          - name: agent-prompt-cache
+            dir: e2e/fixtures/agent-prompt-cache
+            model_name: openai-sol
+            model_id: openai/gpt-5.6-sol
+          - name: agent-prompt-cache
+            dir: e2e/fixtures/agent-prompt-cache
+            model_name: anthropic-opus
+            model_id: anthropic/claude-opus-5
 
     env:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}

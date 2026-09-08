@@ -1,0 +1,8 @@
+import { e2eAgentConfig } from "@eve-e2e/config";
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  ...e2eAgentConfig(),
+  reasoning: "low",
+  limits: { maxInputTokensPerSession: 300_000 },
+});
