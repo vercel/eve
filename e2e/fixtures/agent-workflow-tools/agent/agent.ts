@@ -40,6 +40,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
+    ["WORKFLOW-WEBHOOK-START", "webhook_deploy"],
     ["WORKFLOW-AGENT-FANOUT-START", "fanout_agents"],
   ] as const) {
     if (!message.includes(directive)) continue;

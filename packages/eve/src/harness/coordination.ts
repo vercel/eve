@@ -424,27 +424,18 @@ export function createRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
-
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
-      kind: "load-skill",
-    };
-  }
-
-  return {
+  const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input, {
-      callId: input.toolCall.toolCallId,
-      toolName: input.toolCall.toolName,
-    }),
-    kind: "tool-call",
     toolName: input.toolCall.toolName,
-  };
+  });
+  return definition?.frameworkAction === "load-skill"
+    ? { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" }
+    : {
+        callId: input.toolCall.toolCallId,
+        input: toolInput,
+        kind: "tool-call",
+        toolName: input.toolCall.toolName,
+      };
 }
 
 /** Projects one deferred harness tool call into task/control coordination. */

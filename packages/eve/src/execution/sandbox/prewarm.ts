@@ -206,6 +206,7 @@ export async function prewarmBuiltAppSandboxes(input: {
       compiledArtifactsSource: builtArtifactsSource,
     }),
     loadCompiledModuleMapFromAuthoredSource({
+      authoredAppRoot: input.appRoot,
       compiledArtifactsSource: builtArtifactsSource,
     }),
   ]);

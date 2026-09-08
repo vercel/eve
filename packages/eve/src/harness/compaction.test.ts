@@ -352,6 +352,8 @@ async function compact(
   } as Awaited<ReturnType<typeof generateText>>);
 
   const compactionConfig: CompactionConfig = {
+    lastKnownInputTokens: overrides.lastKnownInputTokens,
+    lastKnownPromptMessageCount: overrides.lastKnownPromptMessageCount,
     recentWindowSize: overrides.recentWindowSize ?? 4,
     threshold: overrides.threshold ?? ROOMY,
   };
@@ -366,6 +368,73 @@ async function compact(
 }
 
 describe("compactMessages: tool-result cap heuristic", () => {
+  it.each([false, true])(
+    "summarizes provider-measured pressure when capping is insufficient (tool output: %s)",
+    async (withToolOutput) => {
+      const messages = [
+        ...checkpointHead("Previous investigation checkpoint."),
+        user("Dense multilingual context ".repeat(30)),
+        ...(withToolOutput
+          ? toolExchange({ callId: "call-0", payloadChars: 4_000 })
+          : [assistant("Evidence recorded.")]),
+        user("Continue the investigation."),
+      ];
+      const measuredConfig = {
+        lastKnownInputTokens: 30_000,
+        lastKnownPromptMessageCount: messages.length - 1,
+        recentWindowSize: 1,
+        threshold: 20_000,
+      };
+      expect(shouldCompact(messages, measuredConfig)).toBe(true);
+      expect(estimateTokens(messages) + ENVELOPE_TOKENS).toBeLessThan(measuredConfig.threshold);
+
+      const { result, summarizer } = await compact(messages, measuredConfig);
+
+      expect(summarizer).toHaveBeenCalledOnce();
+      expect(result[1]).toEqual(assistant("checkpoint text"));
+      expect(result.at(-1)).toEqual(messages.at(-1));
+      expect(result).toHaveLength(3);
+      expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
+    },
+  );
+
+  it("accepts capping that frees enough space against the measured input count", async () => {
+    const messages = [
+      user("Investigate."),
+      ...toolExchange({ callId: "large", payloadChars: 100_000 }),
+      user("Continue."),
+    ];
+    const measuredConfig = {
+      lastKnownInputTokens: 30_000,
+      lastKnownPromptMessageCount: messages.length,
+      recentWindowSize: 1,
+      threshold: 20_000,
+    };
+    expect(shouldCompact(messages, measuredConfig)).toBe(true);
+    const { result, summarizer } = await compact(messages, measuredConfig);
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(result).toHaveLength(messages.length);
+    expect(JSON.stringify(result)).toContain("Truncated by eve");
+  });
+
+  it.each([undefined, -1, 100])(
+    "ignores unusable prompt counts (%s) when evaluating capping",
+    async (lastKnownPromptMessageCount) => {
+      const messages = [
+        user("Investigate."),
+        ...toolExchange({ callId: "large", payloadChars: 4_000 }),
+        user("Continue."),
+      ];
+      const { summarizer } = await compact(messages, {
+        lastKnownInputTokens: 30_000,
+        lastKnownPromptMessageCount,
+        recentWindowSize: 1,
+        threshold: 20_000,
+      });
+      expect(summarizer).not.toHaveBeenCalled();
+    },
+  );
+
   it("caps oversized older tool results in place without calling the summarizer", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
@@ -395,6 +464,43 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(result.at(-1)).toEqual(user("what did you find?"));
     // The capped result cannot immediately re-trigger compaction.
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
+  });
+
+  it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
+    // JSON.stringify of this output places 📥's high surrogate at index 1999
+    // of the 2000-unit TRANSCRIPT_PAYLOAD_LIMIT cut.
+    const content = `${"x".repeat(1964)}📥${"y".repeat(500)}`;
+    const call: ModelMessage = {
+      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      role: "assistant",
+    };
+    const resultMsg: ModelMessage = {
+      content: [
+        {
+          output: { type: "json", value: { content } },
+          toolCallId: "call-0",
+          toolName: "grep",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    const messages = [user("investigate"), call, resultMsg, user("what did you find?")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    const value =
+      typeof output === "object" && output !== null && "value" in output
+        ? String(output.value)
+        : "";
+    expect(value).toContain("Truncated by eve");
+    expect(value).toBe(value.toWellFormed());
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(value)).toBe(false);
+    expect(value).not.toContain("📥");
+    expect(value).toContain("x".repeat(1964));
   });
 
   it("stubs content-output file parts instead of truncating into their payloads", async () => {
@@ -548,6 +654,39 @@ describe("compactMessages: tool-result cap heuristic", () => {
 });
 
 describe("compactMessages: forced summary", () => {
+  it.each(["", " \n\t"])(
+    "rejects a blank checkpoint without replacing history (%j)",
+    async (text) => {
+      const { generateText } = await import("ai");
+      vi.mocked(generateText).mockResolvedValue({
+        finishReason: "content-filter",
+        text,
+      } as Awaited<ReturnType<typeof generateText>>);
+      const messages = [
+        user("Keep the original request."),
+        assistant("Work is in progress."),
+        user("A background task completed."),
+      ];
+      const original = structuredClone(messages);
+
+      await expect(
+        compactMessages(
+          messages,
+          {} as Parameters<typeof compactMessages>[1],
+          { recentWindowSize: 10, threshold: ROOMY },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow(
+        "The compaction model returned an empty summary. Finish reason: content-filter.",
+      );
+      expect(messages).toEqual(original);
+    },
+  );
+
   it("summarizes the full conversation even when it is already under the threshold", async () => {
     const { generateText } = await import("ai");
     vi.mocked(generateText).mockResolvedValue({

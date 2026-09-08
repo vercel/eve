@@ -4,16 +4,15 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
 
 /**
  * Creates a language model billed to the local ChatGPT subscription instead
- * of an API key, served through the Codex backend the `codex login` flow
- * authorizes.
+ * of an API key. Sign in through `/model` in `eve dev`.
  *
  * Defaults to `gpt-5.6-sol`. Pass a bare OpenAI model slug or an
  * `openai/`-prefixed id to override it; the Codex backend serves OpenAI models
  * only, so any other provider-qualified id is rejected. Model availability is
  * enforced by the Codex backend per account at call time, not at compile time.
  *
- * Credentials are read from the Codex CLI login on the machine the agent
- * runs on, so this model works in local dev and fails in a deployment.
+ * eve stores and refreshes credentials locally without requiring the Codex
+ * CLI. This model works in local dev and fails in a deployment.
  * Branch on environment for production:
  *
  * ```ts

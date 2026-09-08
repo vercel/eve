@@ -31,6 +31,11 @@ export default defineTool({
     const sandbox = await ctx.getSandbox();
     await sandbox.writeTextFile({ path: "analysis/run.py", content: script });
     const result = await sandbox.run({ command: "python analysis/run.py" });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Analysis failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
     return { stdout: result.stdout };
   },
 });
@@ -41,13 +46,15 @@ inside eve-managed runtime execution. For workflow tools, it works only inside `
 functions after the tool opts in with `sandbox: true`. See
 [Use the sandbox from steps](./tools/workflows#use-the-sandbox-from-steps).
 
+`sandbox.run()` resolves with `{ exitCode, stdout, stderr }` when the process exits, including a nonzero exit. Check `exitCode` before reporting success or using generated files. Throw from a tool to report a failed operation to the model, and throw from `bootstrap` to prevent eve from caching an incomplete setup. The built-in `bash` tool returns all three fields so the model can interpret command results itself.
+
 `/workspace` is one namespace across every backend, so `/workspace/foo` points at the same file whether the backend is local or Vercel. When you need to interpolate a path into a generated command, `sandbox.resolvePath("repo/build.py")` anchors a relative path to its absolute `/workspace/repo/build.py` form.
 
 The handle does more than `run` and `writeTextFile`. In every method, relative paths resolve from `/workspace` and absolute paths pass through untouched:
 
 | Method                                   | Does                                                                                            |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `run({ command })`                       | run one command, block until it exits, return `{ stdout, stderr, ... }`                         |
+| `run({ command })`                       | run one command, block until it exits, return `{ exitCode, stdout, stderr }`                    |
 | `spawn(options)`                         | launch a long-running process (server, watcher) and return a `SandboxProcess` handle            |
 | `readTextFile` / `writeTextFile`         | read/write a UTF-8 (or specified encoding) file; `readTextFile` supports 1-based line ranges    |
 | `readBinaryFile` / `writeBinaryFile`     | read/write raw bytes (images, archives, anything non-text)                                      |
@@ -109,7 +116,12 @@ export default defineSandbox({
   revalidationKey: () => "repo-bootstrap-v1",
   async bootstrap({ use }) {
     const sandbox = await use();
-    await sandbox.run({ command: "sudo apt-get install -y jq" });
+    const result = await sandbox.run({ command: "sudo apt-get install -y jq" });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Sandbox setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
   },
   async onSession({ use }) {
     await use({ networkPolicy: "deny-all" });

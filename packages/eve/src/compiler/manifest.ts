@@ -606,6 +606,7 @@ const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefini
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
+  defaultTools: z.boolean().optional(),
   description: z.string().optional(),
   experimental: z
     .object({
@@ -1203,6 +1204,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
           : cloneCompiledRuntimeModelReference(config.compaction.model),
       thresholdPercent: config.compaction?.thresholdPercent,
     },
+    defaultTools: config.defaultTools,
     description: config.description,
     experimental:
       config.experimental === undefined

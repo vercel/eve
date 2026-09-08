@@ -23,6 +23,10 @@ describe("defineWorkflowTool", () => {
         return { deployed: input.service };
       },
       sandbox: true,
+      approvalKey(input) {
+        expectTypeOf(input).toEqualTypeOf<Readonly<{ service: string }>>();
+        return `deploy:${input.service}`;
+      },
       toModelOutput(output) {
         expectTypeOf(output).toEqualTypeOf<{ deployed: string }>();
         return { type: "text", value: output.deployed };

@@ -120,12 +120,14 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   expectOnlyKnownKeys(
     record,
     [
+      "label",
       "auth",
       "description",
       "execute",
       "execution",
       "inputSchema",
       "approval",
+      "approvalKey",
       "outputSchema",
       "toModelOutput",
       ...(isWorkflowTool ? ["sandbox"] : []),
@@ -185,8 +187,20 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
+  if (record.label !== undefined) {
+    const label = expectObjectRecord(record.label, message);
+    expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
+    expectFunction(label.start, message);
+    if (label.complete !== undefined) expectFunction(label.complete, message);
+    if (label.delta !== undefined) expectFunction(label.delta, message);
+  }
+
   if (record.approval !== undefined) {
     normalizeApproval(record.approval, message);
+  }
+
+  if (record.approvalKey !== undefined) {
+    expectFunction(record.approvalKey, message);
   }
 
   if (record.toModelOutput !== undefined) {

@@ -63,6 +63,7 @@ export async function prepareDevelopmentApplicationHost(
     const schedules = await resolveSchedules({ manifest: compileResult.manifest });
     generation = await stageDevelopmentGeneration(compileResult);
     const compiledArtifacts = await writeDevelopmentCompiledArtifactsFiles({
+      authoredWorkflowModules: generation.authoredWorkflowModules,
       compileResult,
       outDir: workspace.artifactsDir,
       runtimeAppRoot: generation.runtimeAppRoot,

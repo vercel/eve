@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { CODING_AGENT_ENV_MARKERS } from "../../src/cli/agent-detection.js";
+import { loadYaml } from "../../src/evals/loaders/yaml.js";
 import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -170,6 +171,9 @@ describe("eve init smoke", () => {
     "resolves a standalone pnpm scaffold under the release-age policy",
     async () => {
       const scratch = await createScratchDirectory("eve-init-release-age-");
+      const workspacePolicy = (await loadYaml(
+        fileURLToPath(new URL("../../../../pnpm-workspace.yaml", import.meta.url)),
+      )) as { minimumReleaseAgeExclude: string[] };
       const env = {
         ...withoutCodingAgentMarkers(process.env),
         // The agent path skips the interactive dev handoff, which cannot run
@@ -177,10 +181,12 @@ describe("eve init smoke", () => {
         AI_AGENT: "claude",
         CI: "true",
         PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
-        // A fresh eve release is younger than the policy window, so resolution
-        // would rightly fail. Internal testing opts the framework package out
-        // through the environment instead of any scaffold-owned bypass.
-        PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: '["eve"]',
+        // Use the repository's reviewed dependency exceptions for the current
+        // release without adding bypasses to scaffolded projects.
+        PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: JSON.stringify([
+          "eve",
+          ...workspacePolicy.minimumReleaseAgeExclude,
+        ]),
       };
 
       const result = await runEveBin(scratch, ["init", "policy-agent"], env);

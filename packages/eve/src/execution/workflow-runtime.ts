@@ -369,8 +369,8 @@ function activeCommandResult<TCommand extends SessionCommand>(
   const result =
     command.kind === "reset"
       ? { previousSessionId: sessionId, status: "reset" as const }
-      : command.kind === "cancel"
-        ? { sessionId, status: "accepted" as const }
+      : command.kind === "send" && command.delivery !== undefined
+        ? { sessionId, status: "accepted" as const, deliveryId: command.delivery.deliveryId }
         : { sessionId, status: "accepted" as const };
   return result as SessionCommandResult<TCommand>;
 }

@@ -30,6 +30,44 @@ describe("activity protocol and reducer", () => {
     });
   });
 
+  it("applies additive action labels without changing the action start shape", () => {
+    const batch = parseActivityBatchV1({
+      events: [
+        {
+          action: {
+            id: "action",
+            kind: "tool",
+            name: "search",
+            parentWorkId: work.id,
+            rootTurnId: "turn",
+            stepIndex: 0,
+          },
+          eventId: "action:start",
+          kind: "action.started",
+          startedAt: "now",
+        },
+        {
+          actionId: "action",
+          eventId: "action:label",
+          kind: "action.label.updated",
+          label: "Search issues",
+        },
+        {
+          actionId: "action",
+          eventId: "action:update",
+          kind: "action.label.updated",
+          label: "Found 3 issues",
+        },
+      ],
+      version: 1,
+    });
+
+    expect(batch).toBeDefined();
+    expect(reduceActivityBatch(createActivitySnapshot(), batch!).actions.action?.label).toBe(
+      "Found 3 issues",
+    );
+  });
+
   it("rejects malformed known events", () => {
     expect(
       parseActivityBatchV1({

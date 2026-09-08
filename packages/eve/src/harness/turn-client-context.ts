@@ -3,6 +3,7 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 const TURN_CLIENT_CONTEXT_STATE_KEY = "eve.harness.turnClientContext";
 
 export interface TurnClientContextState {
+  /** Durable turn boundary shared by client context and framework announcements. */
   readonly insertionIndex: number;
   readonly messages: readonly string[];
   readonly turnId: string;

@@ -16,23 +16,30 @@ interface NodeEsmCompatBannerOptions {
 interface BannerLine {
   readonly importLine: string;
   readonly declarationLine: string;
-  readonly bindingPattern: RegExp;
+  readonly bindingName: string;
 }
 
-// Match `const|let|var <name>` at the literal start of a line. Bundler
-// output places module-scope declarations at column zero; indented
-// declarations live inside functions, classes, or blocks and therefore do
-// not collide with the banner.
+interface ParsedNode {
+  readonly body?: ParsedNode | readonly ParsedNode[];
+  readonly type: string;
+  readonly name?: string;
+  readonly declarations?: readonly { readonly id: ParsedNode }[];
+}
+
+interface ParsedProgram {
+  readonly body: readonly ParsedNode[];
+}
+
 const BANNER_LINES: readonly BannerLine[] = [
   {
     importLine: 'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
     declarationLine: "const __filename = __eveFileURLToPath(import.meta.url);",
-    bindingPattern: /^(?:const|let|var)\s+__filename(?![\w$])/m,
+    bindingName: "__filename",
   },
   {
     importLine: 'import { dirname as __eveDirname } from "node:path";',
     declarationLine: "const __dirname = __eveDirname(__filename);",
-    bindingPattern: /^(?:const|let|var)\s+__dirname(?![\w$])/m,
+    bindingName: "__dirname",
   },
 ];
 
@@ -42,19 +49,18 @@ const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
 const REQUIRE_LINE: BannerLine = {
   importLine: 'import { createRequire as __eveCreateRequire } from "node:module";',
   declarationLine: "const require = __eveCreateRequire(import.meta.url);",
-  bindingPattern: /^(?:const|let|var)\s+require(?![\w$])/m,
+  bindingName: "require",
 };
 
 /**
- * Builds the ESM CommonJS-compatibility banner appropriate for a single
- * bundle chunk's code. Identifiers the chunk already binds at the top
- * level (e.g. `const __dirname = ...` emitted by an inlined module) are
- * skipped so the prepended banner never re-declares them.
+ * Builds the ESM CommonJS-compatibility banner appropriate for a parsed
+ * bundle chunk. Identifiers the chunk already binds in a top-level variable
+ * declaration are skipped so the prepended banner never re-declares them.
  *
  * Returns an empty string when the chunk already provides every binding.
  */
 export function buildNodeEsmCompatBanner(
-  code: string,
+  program: ParsedProgram,
   options: NodeEsmCompatBannerOptions = {},
 ): string {
   const lines: BannerLine[] = [...BANNER_LINES];
@@ -65,11 +71,12 @@ export function buildNodeEsmCompatBanner(
 
   const imports: string[] = [];
   const declarations: string[] = [];
-  const chunkProvidesFilename = FILENAME_BANNER_LINE.bindingPattern.test(code);
-  const chunkProvidesDirname = DIRNAME_BANNER_LINE.bindingPattern.test(code);
+  const topLevelBindings = collectTopLevelVariableBindings(program);
+  const chunkProvidesFilename = topLevelBindings.has(FILENAME_BANNER_LINE.bindingName);
+  const chunkProvidesDirname = topLevelBindings.has(DIRNAME_BANNER_LINE.bindingName);
 
   for (const line of lines) {
-    if (line.bindingPattern.test(code)) {
+    if (topLevelBindings.has(line.bindingName)) {
       continue;
     }
 
@@ -93,9 +100,32 @@ export function buildNodeEsmCompatBanner(
   return [...imports, ...declarations].join("\n");
 }
 
+function collectTopLevelVariableBindings(program: ParsedProgram): ReadonlySet<string> {
+  const bindings = new Set<string>();
+
+  for (const statement of program.body) {
+    if (statement.type !== "VariableDeclaration") {
+      continue;
+    }
+
+    for (const declaration of statement.declarations ?? []) {
+      if (declaration.id.type === "Identifier" && declaration.id.name !== undefined) {
+        bindings.add(declaration.id.name);
+      }
+    }
+  }
+
+  return bindings;
+}
+
+interface BannerPluginContext {
+  parse(code: string): ParsedProgram;
+}
+
 interface BannerPlugin {
   readonly name: string;
   renderChunk(
+    this: BannerPluginContext,
     code: string,
     chunk?: { readonly fileName?: string },
   ): { code: string; map: SourceMap } | null;
@@ -120,7 +150,7 @@ export function createNodeEsmCompatBannerPlugin(
   return {
     name: "eve-node-esm-compat-banner",
     renderChunk(code, chunk) {
-      const banner = buildNodeEsmCompatBanner(code, options);
+      const banner = buildNodeEsmCompatBanner(this.parse(code), options);
 
       if (banner === "") {
         return null;

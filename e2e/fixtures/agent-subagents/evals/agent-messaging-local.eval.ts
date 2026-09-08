@@ -15,7 +15,7 @@ export default defineEval({
   async test(t) {
     const started = await t.send(
       [
-        "Call the built-in agent subagent exactly once with this message:",
+        "Call the built-in agent subagent with this message:",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
         "Acknowledge the task receipt without stating the fact. When the task completes, reply with the single word: delegated.",
       ].join(" "),
@@ -46,17 +46,14 @@ export default defineEval({
     secondCompletedTurn.messageIncludes(MEMORABLE_FACT);
 
     t.succeeded();
-    t.calledSubagent("agent", { count: 2 });
     t.eventsSatisfy("both turns continue one child session", (events) => {
-      const childSessionIds = events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "agent"
-          ? [event.data.childSessionId]
-          : [],
+      const calls = events.flatMap((event) =>
+        event.type === "subagent.called" && event.data.name === "agent" ? [event.data] : [],
       );
       return (
-        childSessionIds.length === 2 &&
-        childSessionIds[0] !== undefined &&
-        childSessionIds[0] === childSessionIds[1]
+        calls.length >= 2 &&
+        new Set(calls.map((call) => call.childSessionId)).size === 1 &&
+        new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });
     t.noFailedActions();

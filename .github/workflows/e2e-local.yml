@@ -145,6 +145,7 @@ jobs:
             .junit
             e2e/fixtures/*/.eve/evals
             apps/fixtures/*/.eve/evals
+            ${{ matrix.dir }}/.eve/traces
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

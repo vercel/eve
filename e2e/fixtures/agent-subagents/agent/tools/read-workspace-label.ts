@@ -3,8 +3,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 const workspaceLabelByMembership: Readonly<Record<string, string>> = {
-  "membership:alice": "ALICE_WORKSPACE_LABEL_7K4M",
-  "membership:bob": "BOB_WORKSPACE_LABEL_9P2R",
+  "membership:alice": "Maple Studio",
+  "membership:bob": "Cedar Workshop",
 };
 
 const membershipByPrincipal: Readonly<Record<string, string>> = {

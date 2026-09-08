@@ -795,6 +795,8 @@ describe("dispatchChannelRequest tracing", () => {
       const [span] = await finishedSpans();
       expect(span!.name).toBe("agent.channel.request");
       expect(span!.attributes["http.route"]).toBe("/slack");
+      expect(span!.attributes["operation.name"]).toBe("agent.channel.request");
+      expect(span!.attributes["resource.name"]).toBe("agent.channel.request");
     } finally {
       Reflect.deleteProperty(instrumentationRuntime, "instrumentationProviders");
     }
