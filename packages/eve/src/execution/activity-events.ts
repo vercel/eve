@@ -1,4 +1,4 @@
-import { normalizeActivityText } from "#execution/activity-text.js";
+import { normalizePresentationText } from "#shared/presentation-text.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -14,8 +14,9 @@ export function projectActivityEvents(input: {
       if (action.kind === "subagent-call" || action.kind === "remote-agent-call") return [];
       const kind = action.kind === "load-skill" ? ("skill" as const) : ("tool" as const);
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
-      const name = normalizeActivityText(rawName) || (kind === "skill" ? "Skill" : "Tool");
+      const name = normalizePresentationText(rawName) || (kind === "skill" ? "Skill" : "Tool");
       const id = actionId(lineage.id, action.callId);
+      const label = activityLabel(event.data.presentation?.[action.callId]?.label);
       return [
         {
           action: {
@@ -30,6 +31,16 @@ export function projectActivityEvents(input: {
           kind: "action.started" as const,
           startedAt: input.at,
         },
+        ...(label === undefined
+          ? []
+          : [
+              {
+                actionId: id,
+                eventId: `${id}:label`,
+                kind: "action.label.updated" as const,
+                label,
+              },
+            ]),
       ];
     });
   }
@@ -210,8 +221,9 @@ export function projectActivityEvents(input: {
   return [];
 }
 
-function activityLabel(value: string): string | undefined {
-  const normalized = normalizeActivityText(value);
+function activityLabel(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = normalizePresentationText(value);
   return normalized === "" ? undefined : normalized;
 }
 

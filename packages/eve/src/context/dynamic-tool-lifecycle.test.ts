@@ -1536,6 +1536,41 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
+  it("replays a label start callback", () => {
+    const ctx = createCtx();
+    const owner = {
+      sessionId: ctx.require(SessionIdKey),
+      scope: "turn" as const,
+      resolverSlug: "legacy",
+      entryKey: "legacy:deploy",
+    };
+    registerTestCallback("deploy", "execute", () => ({ ok: true }), owner);
+    registerTestCallback(
+      "deploy",
+      "labelStart",
+      (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
+      owner,
+    );
+    ctx.set(TurnDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          label: { start: { closure: {} } },
+          execute: { closure: {} },
+        },
+        description: "Deploy.",
+        entryKey: "legacy:deploy",
+        inputSchema: { type: "object" },
+        name: "deploy",
+        resolverSlug: "legacy",
+      },
+    ]);
+
+    expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
+      "Deploy to preview",
+    );
+    clearDurableDynamicCallbacks(owner.sessionId);
+  });
+
   it("replays phase-specific turn metadata", async () => {
     const ctx = createCtx();
     const approval = vi.fn(() => "user-approval" as const);

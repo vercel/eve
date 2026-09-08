@@ -9,6 +9,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
 import {
   getTurnClientContextState,
   setTurnClientContextState,
@@ -432,6 +433,46 @@ describe("emitStreamContent action requests", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("emits tool labels for provider-executed calls", async () => {
+    const emitted: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      emitted.push(event);
+    };
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { action: { queries: ["eve framework"] } },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map([
+          [
+            "web_search",
+            {
+              label: { start: resolveWebSearchActivityLabel },
+              description: "Search the web.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "web_search",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(emitted.find((event) => event.type === "actions.requested")?.data.presentation).toEqual({
+      "search-1": { label: "Search eve framework" },
+    });
   });
 
   it("emits a provider action batch before any provider result arrives", async () => {

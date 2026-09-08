@@ -2,13 +2,12 @@ import type { ToolSet, TypedToolCall } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
-import type { HarnessToolMap } from "#harness/types.js";
 import {
-  createActionResultEvent,
-  createActionsRequestedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+  collectActionPresentation,
+  createPresentedRuntimeActionRequestFromToolCall,
+} from "#harness/action-presentation.js";
+import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 import {
   getWorkflowSandboxInterrupt,
@@ -41,7 +40,7 @@ export function createWorkflowLifecycle(input: {
   };
 }
 
-type EmitWorkflowLifecycleEvent = (event: UnstampedMessageStreamEvent) => Promise<void>;
+type EmitWorkflowLifecycleEvent = HarnessEmitFn;
 
 /** Projects newly parked workflow calls onto eve's existing action stream. */
 export async function emitWorkflowActionsRequested(input: {
@@ -58,9 +57,14 @@ export async function emitWorkflowActionsRequested(input: {
       type: "tool-call",
     } as TypedToolCall<ToolSet>;
 
+    const projection = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall,
+      tools: input.tools,
+    });
     await input.emit(
       createActionsRequestedEvent({
-        actions: [createRuntimeActionRequestFromToolCall({ toolCall, tools: input.tools })],
+        actions: [projection.action],
+        presentation: collectActionPresentation([projection]),
         sequence: input.emissionState.sequence,
         stepIndex: input.emissionState.stepIndex,
         turnId: input.emissionState.turnId,

@@ -66,6 +66,25 @@ describe("Slack activity plan", () => {
         { eventId: "root", kind: "work.started", startedAt: "1", work: root },
         { eventId: "verifier", kind: "work.started", startedAt: "2", work: verifier },
         { eventId: "stage", kind: "work.started", startedAt: "3", work: stage },
+        {
+          action: {
+            id: "verify-action",
+            kind: "tool",
+            name: "verify",
+            parentWorkId: verifier.id,
+            rootTurnId: "turn",
+            stepIndex: 0,
+          },
+          eventId: "verify-action",
+          kind: "action.started",
+          startedAt: "3",
+        },
+        {
+          actionId: "verify-action",
+          eventId: "verify-action-label",
+          kind: "action.label.updated",
+          label: "Verify release",
+        },
       ],
     });
     const state = await renderer.render({
@@ -139,6 +158,7 @@ describe("Slack activity plan", () => {
       "chat.update",
     ]);
     expect(requests[1]!.body.get("chunks")).toContain("• verify_stage\\n");
+    expect(requests[1]!.body.get("chunks")).toContain("• Verify release\\n");
     expect(requests[2]!.body.get("chunks")).toContain('"id":"reviewer"');
     expect(requests[2]!.body.get("chunks")).toContain("• review_stage\\n");
     expect(requests[3]!.body.get("chunks")).toContain("✓ verify_stage\\n");
