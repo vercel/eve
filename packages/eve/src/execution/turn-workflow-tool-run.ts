@@ -1,4 +1,6 @@
+import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
+  WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
@@ -31,12 +33,32 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
+export async function handleWorkflowToolRunMessage(
+  input: HandlerInput<WorkflowToolRunMessage>,
+): Promise<RuntimeActionResult | undefined> {
+  const { message } = input;
+  switch (message.kind) {
+    case "outcome":
+      return await handleWorkflowToolRunOutcome({ ...input, message });
+    case "request":
+      await handleWorkflowToolRunRequest({ ...input, message });
+      return undefined;
+    case "report":
+      await emitWorkflowToolRunReportStep({
+        from: message.from,
+        parentWritable: input.cursor.parentWritable,
+        update: message.update,
+      });
+      return undefined;
+  }
+}
+
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
  * when the outcome does not bind to a run this turn owns.
  */
-export async function handleWorkflowToolRunOutcome(
+async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
@@ -98,7 +120,7 @@ async function settleSubagentOutcome(
   return result;
 }
 
-export async function handleWorkflowToolRunRequest(
+async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;

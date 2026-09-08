@@ -1,4 +1,4 @@
-import { agent } from "eve/workflow";
+import type { WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
 export const workflowAgentProbeInputSchema = z.strictObject({
@@ -7,9 +7,9 @@ export const workflowAgentProbeInputSchema = z.strictObject({
 
 export async function executeWorkflowAgentProbe(
   input: z.infer<typeof workflowAgentProbeInputSchema>,
-  ctx: Parameters<typeof agent>[0],
+  ctx: WorkflowToolContext,
 ): Promise<unknown> {
-  return await agent(ctx, {
+  return await ctx.agent({
     key: `local-${input.kind}`,
     message: `Run the ${input.kind} probe.`,
     target: input.kind === "hitl" ? "workflow-hitl" : "workflow-auth",

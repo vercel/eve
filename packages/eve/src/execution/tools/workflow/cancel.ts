@@ -20,10 +20,17 @@ export async function cancelWorkflowToolRun(
     await resumeHook(run.hookToken, cancel);
     return;
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
-    logError(log, "failed to signal a workflow tool run to cancel; cancelling it outright", error, {
-      runId: run.runId,
-    });
+    // A fresh run may not have registered its control hook yet.
+    if (!isTaskWorkflowTargetGone(error)) {
+      logError(
+        log,
+        "failed to signal a workflow tool run to cancel; cancelling it outright",
+        error,
+        {
+          runId: run.runId,
+        },
+      );
+    }
   }
 
   try {

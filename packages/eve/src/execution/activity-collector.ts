@@ -1,11 +1,6 @@
 import { createHook, sleep } from "#compiled/@workflow/core/index.js";
 
-import {
-  claimHookOwnership,
-  closeHookIterator,
-  disposeHook,
-  isHookConflictError,
-} from "#execution/hook-ownership.js";
+import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivityBatchV1, ActivitySnapshotV1 } from "#protocol/activity.js";
 import {
@@ -27,21 +22,19 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
 
   const batches = createHook<ActivityBatchV1>({ token: input.token });
   const iterator = batches[Symbol.asyncIterator]();
-  let ownsHook = false;
   let pendingRead: Promise<IteratorResult<ActivityBatchV1>> | undefined;
   const expiry = sleep(new Date(input.expiresAt)).then(() => ({ kind: "expired" as const }));
   let snapshot = createActivitySnapshot();
   let rendererStates: Readonly<Record<string, unknown>> = {};
 
   try {
-    try {
-      await claimHookOwnership(batches);
-      ownsHook = true;
-    } catch (error) {
-      if (isHookConflictError(error)) return;
-      throw error;
-    }
+    await claimHookOwnership(batches);
+  } catch (error) {
+    if (isHookConflictError(error)) return;
+    throw error;
+  }
 
+  try {
     while (true) {
       pendingRead ??= iterator.next();
       const next = await Promise.race([
@@ -77,14 +70,10 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       rendererStates = rendered.rendererStates;
     }
   } finally {
-    if (ownsHook) {
-      await closeHookIterator(iterator).catch(() => {});
-      await disposeHook(batches).catch(() => {});
-      await disposeSessionActivityStep({
-        rendererStates,
-        serializedContext: input.serializedContext,
-      }).catch(() => {});
-    }
+    await disposeSessionActivityStep({
+      rendererStates,
+      serializedContext: input.serializedContext,
+    }).catch(() => {});
   }
 }
 

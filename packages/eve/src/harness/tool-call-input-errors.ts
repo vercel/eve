@@ -1,7 +1,11 @@
 import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import {
+  createPresentedRuntimeActionRequestFromToolCall,
+  type RuntimeActionRequestProjection,
+} from "#harness/action-presentation.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
+import type { HarnessToolMap } from "#harness/types.js";
 
 /**
  * Returns true when the AI SDK marked the tool call `invalid` (typically
@@ -65,24 +69,26 @@ export function createInvalidToolCallInputError(input: {
  * Provider-executed calls skip the AI SDK's input validation, so malformed
  * JSON argument text reaches the harness only here.
  */
-export function resolveProviderToolCallRequest(toolCall: {
-  readonly input?: unknown;
-  readonly toolCallId: string;
-  readonly toolName: string;
-}):
-  | { readonly request: RuntimeToolCallActionRequest; readonly toolError?: undefined }
+export function resolveProviderToolCallRequest(
+  toolCall: {
+    readonly input?: unknown;
+    readonly toolCallId: string;
+    readonly toolName: string;
+  },
+  tools: HarnessToolMap,
+):
+  | { readonly request: RuntimeActionRequestProjection; readonly toolError?: undefined }
   | { readonly request?: undefined; readonly toolError: TypedToolError<ToolSet> } {
   try {
     return {
-      request: {
-        callId: toolCall.toolCallId,
-        input: resolveToolCallInputObject(toolCall.input, {
-          callId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-        }),
-        kind: "tool-call",
-        toolName: toolCall.toolName,
-      },
+      request: createPresentedRuntimeActionRequestFromToolCall({
+        toolCall: {
+          ...toolCall,
+          providerExecuted: true,
+          type: "tool-call",
+        } as TypedToolCall<ToolSet>,
+        tools,
+      }),
     };
   } catch (error) {
     if (!(error instanceof TypeError)) {

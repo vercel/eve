@@ -40,6 +40,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
+    ["WORKFLOW-WEBHOOK-START", "webhook_deploy"],
     ["WORKFLOW-AGENT-FANOUT-START", "fanout_agents"],
   ] as const) {
     if (!message.includes(directive)) continue;
@@ -53,7 +54,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }`;
   }
 
-  if (message.includes("update: WORKFLOW-REPORT-PROGRESS")) {
+  if (message.includes("WORKFLOW-REPORT-PROGRESS")) {
     return "WORKFLOW-REPORT-UPDATE-RECEIVED";
   }
   if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {

@@ -19,7 +19,12 @@ describe("defineSelfModificationAgent", () => {
     const agent = defineSelfModificationAgent();
     const definition = await agent.events["session.started"]?.({}, {} as never);
 
-    expect(definition).toMatchObject({ model: DEFAULT_SELF_MODIFICATION_MODEL });
+    expect(definition).toMatchObject({
+      description: expect.stringContaining(
+        "investigate, diagnose, or optimize the agent's behavior from local traces",
+      ),
+      model: DEFAULT_SELF_MODIFICATION_MODEL,
+    });
   });
 
   it("configures the subagent model", async () => {

@@ -22,6 +22,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
   SessionTraceSeedKey,
+  TurnDeliveryIdsKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -191,6 +192,22 @@ const threadContextAdapter: ChannelAdapter = {
     const thread = adapterCtx.ctx.ensure(ThreadKey, () => "unset");
     const message = payload.message ?? "";
 
+    // `attach:` delivers structured UserContent carrying a FilePart, the
+    // shape real channels produce for an uploaded image or document.
+    if (typeof message === "string" && message.startsWith("attach:")) {
+      return {
+        message: [
+          { text: `thread=${thread}; user=${message.slice("attach:".length)}`, type: "text" },
+          {
+            data: new URL("https://files.example/diagram.png"),
+            filename: "diagram.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ],
+      };
+    }
+
     return { message: `thread=${thread}; user=${message}` };
   },
 };
@@ -252,6 +269,46 @@ afterEach(() => {
 });
 
 describe("routeProxiedDeliverStep", () => {
+  it("replies to the saved child inbox after its continuation alias changes", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "request-1",
+          {
+            childContinuationToken: "stale-alias",
+            childSessionInbox: { sessionId: "original-child", version: 1 },
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "stale-alias",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { inputResponses: [{ requestId: "request-1", text: "yes" }] },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "eve:session:original-child:inbox",
+      expect.objectContaining({
+        kind: "deliver",
+        version: 1,
+        payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
+      }),
+    );
+  });
+
   it("forwards descendant input responses as session send commands", async () => {
     const auth = {
       attributes: {},
@@ -889,6 +946,7 @@ describe("dispatchCoordinationStep", () => {
 
     const result = await dispatchCoordinationStep({
       action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -951,7 +1009,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1015,7 +1073,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1092,7 +1150,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1103,6 +1161,93 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => async (stepSession) => {
+      await input.handleEvent?.({
+        type: "session.waiting",
+        data: { continuationToken: "continuation_test", wait: "next-user-message" },
+      });
+      return { next: null, session: stepSession };
+    });
+    const delivery = (ids: string[]): Parameters<typeof turnStep>[0]["input"] => ({
+      kind: "deliver",
+      payloads: ids.map((message) => ({ message })),
+      deliveryMetadata: ids.map((deliveryId, payloadIndex) => ({
+        channelKind: "eve",
+        channelName: "eve",
+        deliveryId,
+        payloadIndex,
+      })),
+    });
+
+    const first = await turnStep({
+      input: delivery(["delivery-a", "delivery-b"]),
+      parentWritable: createTestWritable("first"),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(first.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-a", "delivery-b"]);
+    const resumed = await turnStep({
+      input: undefined,
+      parentWritable: createTestWritable("resumed"),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+    expect(resumed.serializedContext[TurnDeliveryIdsKey.name]).toEqual([
+      "delivery-a",
+      "delivery-b",
+    ]);
+    const next = await turnStep({
+      input: delivery(["delivery-c"]),
+      parentWritable: createTestWritable("next"),
+      serializedContext: resumed.serializedContext,
+      sessionState: resumed.sessionState,
+    });
+    expect(next.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-c"]);
+    for (const [namespace, deliveryIds] of [
+      ["first", ["delivery-a", "delivery-b"]],
+      ["resumed", ["delivery-a", "delivery-b"]],
+      ["next", ["delivery-c"]],
+    ] as const) {
+      const events = (workflowWritesByNamespace.get(namespace) ?? []).map((chunk) =>
+        JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+      );
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "session.waiting",
+          meta: expect.objectContaining({ deliveryIds }),
+        }),
+      ]);
+    }
+  });
+
   it("defers before mutation when an inline step reaches another deployment", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
     const sessionState = createStubSessionState();
@@ -1521,15 +1666,27 @@ describe("turnStep", () => {
       input: {
         kind: "deliver",
         payloads: [{ message: "cancel this turn" }],
+        deliveryMetadata: [
+          {
+            channelKind: "eve",
+            channelName: "eve",
+            deliveryId: "cancelled-delivery",
+            payloadIndex: 0,
+          },
+        ],
       },
       parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
+      serializedContext: {
+        ...createSerializedContext(),
+        [TurnDeliveryIdsKey.name]: ["previous-delivery"],
+      },
       sessionState: createStubSessionState(),
     });
 
     expect(result).toMatchObject({
       action: "cancelled",
       serializedContext: {
+        [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
@@ -1539,6 +1696,56 @@ describe("turnStep", () => {
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
     expect(result.sessionState.snapshot?.session.history).toEqual([
       { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
+  });
+
+  it("preserves a cancelled turn message that carries an attachment", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "attach:look at this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({ action: "cancelled" });
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      {
+        content: [
+          { text: "thread=unset; user=look at this", type: "text" },
+          expect.objectContaining({ filename: "diagram.png", type: "file" }),
+        ],
+        role: "user",
+      },
     ]);
   });
 

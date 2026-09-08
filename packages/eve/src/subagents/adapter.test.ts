@@ -4,7 +4,7 @@ import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/ad
 import { buildSessionHandle } from "#channel/session.js";
 import { type SubagentAdapterState } from "#subagents/adapter-state.js";
 import { ContextContainer } from "#context/container.js";
-import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
+import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -141,6 +141,22 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
 });
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
+  it("advertises the driver version from durable context, even when the adapter is newer", async () => {
+    resumeHookMock.mockClear();
+    const ctx = makeContext();
+    ctx.ctx.set(SessionInboxKey, { sessionId: "child-session", version: 1 });
+
+    await SUBAGENT_INPUT_REQUESTED(
+      { requests: [sampleRequest()], sequence: 0, stepIndex: 0, turnId: "turn-1" },
+      ctx,
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "parent-token",
+      expect.objectContaining({ childSessionInbox: { sessionId: "child-session", version: 1 } }),
+    );
+  });
+
   it("forwards continuation HITL to the newly bound parent turn", async () => {
     resumeHookMock.mockClear();
     const rebound = await bindTurnCallerContextStep({

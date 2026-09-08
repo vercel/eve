@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   workflowToolRunOutcomeToTaskCommand,
+  workflowToolRunReportToTaskPayload,
   workflowToolRunRequestToTaskInputRequest,
 } from "#execution/tools/workflow/owner-inbox.js";
 
@@ -88,6 +89,36 @@ describe("workflow-tool task input", () => {
         },
       }),
     ).toThrow("A workflow agent request cannot be normalized as human input.");
+  });
+});
+
+describe("workflow-tool task reports", () => {
+  it("maps postMessage to a distinct parent delivery", () => {
+    expect(
+      workflowToolRunReportToTaskPayload(
+        { from, update: { kind: "eve:task-message", message: "Review this output." } },
+        "task-1",
+        2,
+      ),
+    ).toEqual({
+      callId: "call-1",
+      kind: "task-message",
+      message: "Review this output.",
+      messageEpoch: "task-1",
+      messageIndex: 2,
+    });
+  });
+
+  it("keeps untagged yields as progress", () => {
+    expect(
+      workflowToolRunReportToTaskPayload({ from, update: { progress: 0.5 } }, "task-1", 1),
+    ).toEqual({
+      callId: "call-1",
+      kind: "task-update",
+      message: '{"progress":0.5}',
+      updateEpoch: "task-1",
+      updateIndex: 1,
+    });
   });
 });
 

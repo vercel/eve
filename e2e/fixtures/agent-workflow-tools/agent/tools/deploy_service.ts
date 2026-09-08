@@ -1,22 +1,14 @@
-import { defineTool } from "eve/tools";
-import { sleep } from "workflow";
+import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
-import { describePlan, hashPlan } from "../lib/plan.ts";
+import { deployService } from "../lib/deploy.ts";
 
 /**
  * Waiting workflow tool: the turn parks while the run hashes the plan and
  * sleeps, then resumes with the return value as the tool result.
  */
-export default defineTool({
+export default defineWorkflowTool({
   description: "Deploy a service after planning it durably.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }, ctx) {
-    "use workflow";
-
-    const plan = describePlan(service);
-    const digest = await hashPlan(plan);
-    await sleep("50ms");
-    return { digest, plan, tool: ctx.toolName };
-  },
+  execute: deployService,
 });

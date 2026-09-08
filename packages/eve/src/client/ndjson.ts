@@ -86,9 +86,9 @@ export async function* readNdjsonStream(
     }
   } finally {
     if (!reachedEof) {
-      // Breaking an async iteration must close the response body; releasing
-      // its lock alone leaves the server-side stream open.
-      await reader.cancel().catch(() => {});
+      // A cloned response waits for both branches to cancel. Let the caller
+      // abort the fetch instead of blocking cleanup on a tracing reader.
+      void reader.cancel().catch(() => {});
     }
     reader.releaseLock();
   }
@@ -106,10 +106,9 @@ async function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   idleTimeoutMs: number | undefined,
 ): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
-  if (idleTimeoutMs === undefined) return await reader.read();
-
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    if (idleTimeoutMs === undefined) return await reader.read();
     return await Promise.race([
       reader.read(),
       new Promise<never>((_resolve, reject) => {
@@ -119,6 +118,12 @@ async function readWithIdleTimeout(
         );
       }),
     ]);
+  } catch (error) {
+    // Browsers use vendor-specific TypeError messages for response-body transport failures.
+    if (error instanceof TypeError) {
+      throw new Error("Session stream disconnected.", { cause: error });
+    }
+    throw error;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }

@@ -18,9 +18,10 @@ eve add memory/file
 
 After you choose **Install and set up**, eve creates or reuses one private
 Vercel Blob store for the linked project, connects it to production, preview,
-and development with `EVE_MEMORY_`-prefixed variables, and pulls the updated
-environment. It uses the project's first configured function region, falling
-back to `iad1`. Blob usage may incur charges.
+and development using OIDC, and pulls the updated environment. The connection
+sets `EVE_MEMORY_BLOB_STORE_ID` and `EVE_MEMORY_BLOB_WEBHOOK_PUBLIC_KEY`
+without adding a read-write token. It uses the project's first configured
+function region, falling back to `iad1`. Blob usage may incur charges.
 
 The registry writes:
 
@@ -96,13 +97,21 @@ provider: fileMemory({ backend: inMemory() });
 ### Vercel Blob
 
 Provisioned bindings use the `EVE_MEMORY_BLOB_*` namespace so file memory does
-not take over an application's own Blob store. `fileMemory()` checks Vercel
-credentials in this order:
+not take over an application's own Blob store. Vercel supplies the OIDC token;
+the Blob SDK resolves the current token for each operation and handles refresh.
+File-memory reads and writes need the store ID. The webhook public key is for upload callbacks
+and is not used by file memory.
 
-1. `EVE_MEMORY_BLOB_READ_WRITE_TOKEN`
-2. `EVE_MEMORY_BLOB_STORE_ID` with Vercel OIDC from the environment or request context
-3. `BLOB_READ_WRITE_TOKEN`
-4. `BLOB_STORE_ID` with Vercel OIDC from the environment or request context
+`fileMemory()` checks Vercel configuration in this order:
+
+1. `EVE_MEMORY_BLOB_STORE_ID` with Vercel OIDC from the environment or request context
+2. `EVE_MEMORY_BLOB_READ_WRITE_TOKEN`
+3. `BLOB_STORE_ID` with Vercel OIDC from the environment or request context
+4. `BLOB_READ_WRITE_TOKEN`
+
+Prefer OIDC on Vercel. You do not need to set a read-write token or copy
+`VERCEL_OIDC_TOKEN` into your configuration. Redeploy after connecting the
+store: changes to project environment variables apply to new deployments.
 
 Generic `BLOB_*` variables remain supported for a store you attach manually.
 Run setup again without reinstalling the memory definition when a previous
@@ -113,8 +122,11 @@ eve integration setup file-memory
 ```
 
 Setup repairs the deterministic unconnected private store left by a partial
-run and reuses a complete `EVE_MEMORY_` connection. It does not adopt an
-arbitrary application store, change a `BLOB_*` connection, or replace a public
+run and reuses a complete `EVE_MEMORY_BLOB` connection. If an earlier setup
+created an `EVE_MEMORY_` connection, reconnect that same store with the
+`EVE_MEMORY_BLOB` prefix and OIDC in Vercel, then redeploy. Keep the existing
+store to preserve its memory documents. Setup does not adopt an arbitrary
+application store, change a `BLOB_*` connection, or replace a public
 or incompatible store. If the linked project later moves to another primary
 region, setup preserves the existing memory store and warns about the drift
 instead of risking data loss.
@@ -134,7 +146,8 @@ provider: fileMemory({
 `vercelBlob()` accepts `token`, `oidcToken`, `storeId`, and `prefix`. The
 default prefix is `eve/memory/file`; documents are stored privately under
 `<prefix>/<scope key>/MEMORY.md`. Passing these options continues to override
-the generic environment defaults directly.
+the generic environment defaults directly. Leave `oidcToken` unset on Vercel
+so the Blob SDK can manage token refresh.
 
 ### Custom backend
 

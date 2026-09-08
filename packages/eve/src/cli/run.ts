@@ -5,7 +5,6 @@ import {
   Option,
 } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
-import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
@@ -49,9 +48,15 @@ import {
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { createDevBootProgressReporter } from "#cli/dev/boot-progress.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
-import { createLogger } from "#internal/logging.js";
+import { registerEveTelemetryCommands } from "#cli/telemetry/command.js";
+import {
+  canonicalCommand,
+  createEveCliTelemetry,
+  type EveCliTelemetry,
+} from "#cli/telemetry/index.js";
 import type {
   DevelopmentServer,
   DevelopmentServerOptions,
@@ -101,31 +106,6 @@ interface CliRuntimeDependencies {
 
 type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
 
-const devBootLog = createLogger("dev.boot");
-
-function createDevBootProgressReporter(
-  row: ReturnType<typeof startCliLiveRow> | undefined,
-): DevBootProgressReporter {
-  return (event) => {
-    switch (event.type) {
-      case "phase-started":
-        row?.update("Building your agent", event.phase);
-        devBootLog.debug(event.phase);
-        return;
-      case "phase-finished":
-        devBootLog.debug(`${event.phase} finished`, { ms: event.elapsedMs });
-        return;
-      case "before-first-paint":
-        row?.stop();
-        return;
-      default: {
-        const exhaustive: never = event;
-        return exhaustive;
-      }
-    }
-  };
-}
-
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
@@ -153,10 +133,11 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function createCliProgram(
+export function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
   applicationContext: CliApplicationContext,
+  telemetry: Pick<EveCliTelemetry, "trackDevContext" | "trackSetupStep" | "trackSetupTerminal">,
 ): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
@@ -195,6 +176,8 @@ function createCliProgram(
       await runChannelsListCommand(logger, applicationContext.project!, options);
     });
 
+  registerEveTelemetryCommands(program, logger);
+
   registerIntegrationCommands({ program, logger, applicationContext });
 
   const extension = program
@@ -202,8 +185,6 @@ function createCliProgram(
     .description("Create and build reusable eve extension packages.");
 
   extension
-    // Optional: a missing target scaffolds the current directory, matching
-    // `eve extension init .`.
     .command("init [target]")
     .description("Create a new eve extension package.")
     .option("-y, --yes", "Accepted for compatibility; has no effect")
@@ -213,7 +194,9 @@ function createCliProgram(
       }
 
       const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
-      await runExtensionInitCommand(logger, applicationContext.root, target);
+      await runExtensionInitCommand(logger, applicationContext.root, target, undefined, (step) => {
+        telemetry.trackSetupStep({ flow: "extension_init", step });
+      });
     });
 
   extension
@@ -230,8 +213,6 @@ function createCliProgram(
   registerRegistryCommands({ program, logger, applicationContext });
 
   program
-    // Optional: a missing target scaffolds or updates the current directory,
-    // matching `eve init .`.
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
@@ -263,12 +244,24 @@ function createCliProgram(
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, applicationContext.root, target, {
-          agents: options.agents,
-          channelWebNextjs: options.channelWebNextjs,
-          model: options.model,
-          reasoning: options.reasoning,
-        });
+        await runInitCommand(
+          logger,
+          applicationContext.root,
+          target,
+          {
+            agents: options.agents,
+            channelWebNextjs: options.channelWebNextjs,
+            model: options.model,
+            reasoning: options.reasoning,
+          },
+          undefined,
+          (step) => {
+            telemetry.trackSetupStep({ flow: "init", step });
+          },
+          (step, result) => {
+            telemetry.trackSetupTerminal({ flow: "init", step, result });
+          },
+        );
       },
     );
 
@@ -396,6 +389,7 @@ function createCliProgram(
       const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
+      telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
       if (mode === "headless") logger.log(eveCliBanner());
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
@@ -433,6 +427,8 @@ function createCliProgram(
             applicationRoot: applicationContext.root,
             existingLocalServer: existingLocalDevelopmentServer,
             lifecycle,
+            onOnboardingStep: telemetry.trackSetupStep,
+            onOnboardingTerminal: telemetry.trackSetupTerminal,
             options,
             remoteTarget,
             runDevelopmentTui: runtime.runDevelopmentTui,
@@ -534,6 +530,8 @@ function createCliProgram(
               applicationRoot: applicationContext.root,
               existingLocalServer: false,
               lifecycle,
+              onOnboardingStep: telemetry.trackSetupStep,
+              onOnboardingTerminal: telemetry.trackSetupTerminal,
               options,
               report: onBootProgress,
               runDevelopmentTui: runtime.runDevelopmentTui,
@@ -651,7 +649,8 @@ export async function runCli(
       return resolveEveProjectContext(applicationContext.root);
     },
   };
-  const program = createCliProgram(logger, runtime, applicationContext);
+  const telemetry = createEveCliTelemetry(resolveInstalledPackageInfo().version);
+  const program = createCliProgram(logger, runtime, applicationContext, telemetry);
   let input = argv;
   if (input.length === 0) {
     const findApplicationRoot = runtime.findApplicationRoot ?? findCliApplicationRoot;
@@ -664,22 +663,24 @@ export async function runCli(
       input = ["dev"];
     }
   }
+  const command = canonicalCommand(input);
+  telemetry.trackCommand(command);
+  if (command !== "telemetry") await telemetry.notify(logger);
 
   try {
     await program.parseAsync(input, {
       from: "user",
     });
+    telemetry.trackOutcome("success");
   } catch (error) {
-    if (error instanceof CommanderError) {
-      if (error.exitCode === 0) {
-        return;
-      }
+    if (error instanceof CommanderError && error.exitCode === 0) {
+      telemetry.trackOutcome("success");
+      return;
+    }
 
-      // A coding agent that fumbles `eve init` can trip commander before the
-      // init action runs, so the action's own agent detection never fires.
-      // Commander has already written its usage error to stderr; add the setup
-      // guide on stdout so the agent gets actionable next steps, but still fall
-      // through to throw so the malformed invocation keeps its nonzero exit.
+    telemetry.trackOutcome(error instanceof CommanderError ? "usage_error" : "error");
+    if (error instanceof CommanderError) {
+      // Commander can reject `eve init` before its action detects the coding agent.
       const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
       const agentLaunched = await detectCodingAgentLaunch();
       if (input[0] === "init" && agentLaunched) {
@@ -691,5 +692,7 @@ export async function runCli(
     }
 
     throw error;
+  } finally {
+    await telemetry.flush();
   }
 }

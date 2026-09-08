@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 describe("file-memory Vercel CLI client", () => {
-  it("uses authenticated API reads and a Vercel 57-compatible resource connection command", async () => {
+  it("connects the private store with namespaced OIDC configuration and no read-write token", async () => {
     captureVercel
       .mockResolvedValueOnce({
         ok: true,
@@ -57,7 +57,7 @@ describe("file-memory Vercel CLI client", () => {
         }),
       })
       .mockResolvedValueOnce({ ok: true, stdout: JSON.stringify({ store }) })
-      .mockResolvedValueOnce({ ok: true, stdout: "{}" })
+      .mockResolvedValueOnce({ ok: true, stdout: "" })
       .mockResolvedValueOnce({ ok: true, stdout: "" });
 
     const client = createFileMemoryVercelClient({ appRoot: "/project", project });
@@ -72,7 +72,7 @@ describe("file-memory Vercel CLI client", () => {
       environments: FILE_MEMORY_BLOB_ENVIRONMENTS,
       prefix: FILE_MEMORY_BLOB_PREFIX,
       projectId: project.projectId,
-      storeName: store.name,
+      storeId: store.id,
     });
     await client.pullEnvironment();
 
@@ -101,23 +101,26 @@ describe("file-memory Vercel CLI client", () => {
     expect(captureVercel).toHaveBeenNthCalledWith(
       6,
       [
-        "integration-resource",
-        "connect",
-        store.name,
-        project.projectId,
-        "--prefix",
-        FILE_MEMORY_BLOB_PREFIX,
-        "--environment",
-        "production",
-        "--environment",
-        "preview",
-        "--environment",
-        "development",
-        "--yes",
+        "api",
+        "/v1/storage/stores/store_memory/connections",
+        "-X",
+        "POST",
+        "--header",
+        "x-vercel-use-oidc: 1",
+        "--input",
+        "-",
         "--scope",
         "team_acme",
       ],
-      expect.objectContaining({ nonInteractive: true }),
+      expect.objectContaining({
+        nonInteractive: true,
+        stdin: JSON.stringify({
+          envVarEnvironments: ["production", "preview", "development"],
+          envVarPrefix: "EVE_MEMORY_BLOB",
+          projectId: project.projectId,
+          skipReadWriteToken: true,
+        }),
+      }),
     );
     expect(captureVercel).toHaveBeenNthCalledWith(
       7,

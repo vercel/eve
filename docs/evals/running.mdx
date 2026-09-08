@@ -35,6 +35,8 @@ Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then 
 
 An eval that calls `t.skip(reason)` is reported as skipped, does not count as passed or failed, and never changes the exit code.
 
+`eve eval --json` flushes the complete report before exiting, including when stdout is piped to another process or redirected to a file.
+
 ## Artifacts
 
 Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.

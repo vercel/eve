@@ -6,7 +6,7 @@ const RESULT = "EXPORT-COMPLETE";
 
 export default defineEval({
   description:
-    "An authored background defineTool posts one task update then completes; the parent sees both.",
+    "An authored background defineTool yields state and progress, explicitly posts a message, then completes; the parent sees both.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
     started.expectOk();
@@ -32,11 +32,9 @@ export default defineEval({
           events.some(
             (event) =>
               event.type === "message.received" &&
-              messageText(event.data.message).includes(
-                `Background task ${taskId} (export) update: ${PROGRESS}`,
-              ),
+              messageText(event.data.message).includes(`Export ${taskId}: ${PROGRESS}`),
           ),
-        "parent receives the executor update with task identity",
+        "parent receives the authored message with task identity",
       ),
     );
 

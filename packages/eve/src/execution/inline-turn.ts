@@ -25,11 +25,11 @@ export type InlineTurnOutcome =
   | {
       readonly initialCancellation?: TurnCancelPayload;
       readonly initialStep?: InitialTurnStep;
-      readonly kind: "child";
+      readonly kind: "child" | "continue";
     }
   | { readonly action: NextDriverAction; readonly kind: "result" };
 
-/** Runs ordinary same-deployment turn steps inline and hands complex work to the child path. */
+/** Runs same-deployment steps directly until they need the shared turn runner. */
 export async function runInlineTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
@@ -81,7 +81,7 @@ export async function runInlineTurn(input: {
     );
 
     if (result.requiresChildDispatch === true) {
-      return childOutcome(control);
+      return { initialCancellation: control.initialCancellation, kind: "child" };
     }
 
     const initialStep = { beforeStep, result } satisfies InitialTurnStep;
@@ -90,7 +90,7 @@ export async function runInlineTurn(input: {
       result.action === "cancelled" ||
       (result.backgroundTasks?.length ?? 0) > 0
     ) {
-      return childOutcome(control, initialStep);
+      return continueOutcome(control, initialStep);
     }
 
     if (result.action === "done") {
@@ -112,7 +112,7 @@ export async function runInlineTurn(input: {
       result.action === "dispatch-workflow-tasks" ||
       (result.action === "park" && result.pendingCoordinationCallIds !== undefined)
     ) {
-      return childOutcome(control, initialStep);
+      return continueOutcome(control, initialStep);
     }
 
     if (result.action === "park") {
@@ -120,7 +120,7 @@ export async function runInlineTurn(input: {
         result.hasPendingAuthorization ||
         (result.hasPendingInputBatch && input.capabilities?.requestInput === true) ||
         input.mode === "conversation";
-      if (!canPark) return childOutcome(control, initialStep);
+      if (!canPark) return continueOutcome(control, initialStep);
       return {
         action: {
           authorizationAttemptIds: result.authorizationAttemptIds,
@@ -146,14 +146,14 @@ export async function runInlineTurn(input: {
   }
 }
 
-function childOutcome(
+function continueOutcome(
   control: InlineTurnControl,
-  initialStep?: InitialTurnStep,
-): Extract<InlineTurnOutcome, { readonly kind: "child" }> {
+  initialStep: InitialTurnStep,
+): Exclude<InlineTurnOutcome, { readonly kind: "result" }> {
   return {
     initialCancellation: control.initialCancellation,
     initialStep,
-    kind: "child",
+    kind: "continue",
   };
 }
 

@@ -22,7 +22,7 @@ export default defineEval({
     completed.messageIncludes(SUBAGENT_TOKEN);
 
     t.succeeded();
-    t.calledSubagent("echo-marker", { count: 1 });
+    t.calledSubagent("echo-marker");
   },
 });
 

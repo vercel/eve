@@ -71,6 +71,7 @@ type AstNode = {
   kind?: string;
   local?: { name?: string } | null;
   name?: string;
+  object?: AstNode | null;
   source?: AstNode | null;
   start?: number;
   specifiers?: AstNode[];
@@ -427,7 +428,8 @@ function removeEveDefinerDefaultExport(
     const call = node.declaration;
     if (call?.type !== "CallExpression" || node.end === undefined) continue;
     const callee = call.callee;
-    if (callee?.type !== "Identifier" || !eveBindings.has(callee.name ?? "")) continue;
+    const binding = callee?.type === "MemberExpression" ? callee.object : callee;
+    if (binding?.type !== "Identifier" || !eveBindings.has(binding.name ?? "")) continue;
     removals.push({ end: node.end, start: node.start, text: "" });
   }
 

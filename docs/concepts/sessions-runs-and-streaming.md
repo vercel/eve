@@ -119,6 +119,10 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 - **`meta.id`** uniquely identifies the event. It is an `evt_`-prefixed [ULID](https://github.com/ulid/spec): a millisecond timestamp followed by random bits, so ids are broadly time-ordered.
 - **`meta.at`** is the ISO-8601 time the event was emitted.
+- **`meta.deliveryIds`**, when present, identifies the accepted messages that own
+  the turn. `POST /eve/v1/session/:sessionId` returns its `deliveryId`, allowing
+  clients to skip earlier turns when resuming from an old cursor. Coalesced
+  messages share the same turn events.
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 

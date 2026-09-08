@@ -551,7 +551,7 @@ describe("application Nitro creation", () => {
     ).toBeNull();
   });
 
-  it("merges framework and configured hosted dependencies", async () => {
+  it("includes configured hosted dependencies without tracing eve", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -568,9 +568,7 @@ describe("application Nitro creation", () => {
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(
-      expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
-    );
+    expect(traceDeps).toEqual(expect.arrayContaining(["sharp", "fixture-external"]));
     expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
       1,
     );
@@ -681,7 +679,7 @@ describe("application Nitro creation", () => {
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["@napi-rs/keyring"]);
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
   });
 
   it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {
@@ -773,7 +771,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("deduplicates defaults when the app also lists them", async () => {
+  it("deduplicates configured hosted dependencies", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -783,7 +781,7 @@ describe("application Nitro creation", () => {
     preparedHost.compileResult.manifest.config = {
       ...preparedHost.compileResult.manifest.config,
       build: {
-        externalDependencies: ["@napi-rs/keyring", "sharp", "fixture-external"],
+        externalDependencies: ["@napi-rs/keyring", "sharp", "fixture-external", "sharp"],
       },
     } as typeof preparedHost.compileResult.manifest.config;
 

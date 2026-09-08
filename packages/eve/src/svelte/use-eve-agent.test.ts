@@ -41,9 +41,12 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
-function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
   const response = createEagerStreamResponse(events);
-  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
   return response;
 }
 
@@ -103,7 +106,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
-      .mockResolvedValueOnce(createEagerStreamResponse([]));
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
     const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     useEveAgent({

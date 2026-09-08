@@ -1559,6 +1559,24 @@ describe("eveChannel — uploadPolicy enforcement", () => {
 });
 
 describe("eveChannel — continue session HITL (inputResponses)", () => {
+  it("returns the server-issued delivery id in an accepted message acknowledgement", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockResolvedValue({
+      sessionId: "test-session-id",
+      status: "accepted",
+      deliveryId: "accepted-delivery",
+    });
+    const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
+    expect(response.status).toBe(202);
+    expect(response.headers.get("x-eve-session-id")).toBe("test-session-id");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+      deliveryId: "accepted-delivery",
+    });
+  });
+
   it("returns a structured 500 when fixed-session delivery fails", async () => {
     const handler = createEveContinueHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));

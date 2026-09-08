@@ -18,6 +18,10 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import {
+  SESSION_INBOX_CONTEXT_KEY,
+  type SessionInboxAddress,
+} from "#execution/wire/session-inbox-contract.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -70,6 +74,7 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
+export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 /** Parent-verified local client provenance, valid only for the current dev host secret. */
@@ -84,6 +89,8 @@ export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+/** Accepted messages whose response owns the current turn's durable stream events. */
+export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
