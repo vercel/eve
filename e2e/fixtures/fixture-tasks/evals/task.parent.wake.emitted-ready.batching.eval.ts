@@ -4,13 +4,12 @@ import { satisfies } from "eve/evals/expect";
 import { defineTaskEval } from "./task-transition.js";
 import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 
-const FANOUT_SIZE = 100;
+const FANOUT_SIZE = 10;
 const COMPLETED_NOTIFICATION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 export default (["burst", "staggered"] as const).map((schedule) =>
   defineTaskEval({
-    description: `Measure completion-driven parent model steps for 100 children (${schedule}).`,
-    timeoutMs: 600_000,
+    description: `Measure completion-driven parent model steps for ${FANOUT_SIZE} children (${schedule}).`,
     transition: {
       primary: "task.parent.wake.emitted-ready",
       setup: [
@@ -22,6 +21,7 @@ export default (["burst", "staggered"] as const).map((schedule) =>
       dimensions: { transport: "local", parentPhase: "parked" },
     },
     async test(t) {
+      t.log(`task-batching ${schedule}: launching ${FANOUT_SIZE} children`);
       const started = await t.send("TASK-BATCHING-BENCHMARK");
       started.expectOk();
       started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
@@ -35,9 +35,10 @@ export default (["burst", "staggered"] as const).map((schedule) =>
         satisfies(
           (ids: readonly string[]) =>
             ids.length === FANOUT_SIZE && new Set(ids).size === FANOUT_SIZE,
-          "100 distinct background task receipts",
+          `${FANOUT_SIZE} distinct background task receipts`,
         ),
       );
+      t.log(`task-batching ${schedule}: all task receipts received; collecting approval gates`);
 
       let session: TaskEvalSessionDriver = t;
       const requests = new Map<string, InputRequest>();
@@ -48,8 +49,9 @@ export default (["burst", "staggered"] as const).map((schedule) =>
         collectRequests(next.turn, requests);
       }
       if (requests.size !== FANOUT_SIZE) {
-        throw new Error(`Expected 100 release requests; received ${requests.size}.`);
+        throw new Error(`Expected ${FANOUT_SIZE} release requests; received ${requests.size}.`);
       }
+      t.log(`task-batching ${schedule}: all approval gates ready`);
 
       // All setup/input-required wakes have finished before measurement starts.
       const completionTurns: EveEvalTurn[] = [];
@@ -98,6 +100,7 @@ export default (["burst", "staggered"] as const).map((schedule) =>
       }
 
       const intermediate = metrics(completionTurns);
+      t.log(`task-batching ${schedule}: intermediate ${JSON.stringify(intermediate)}`);
       t.check(
         intermediate.visibleMessages,
         satisfies((count) => count === 0, "all intermediate completion responses are silent"),

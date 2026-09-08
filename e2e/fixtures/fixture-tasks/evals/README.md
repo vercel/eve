@@ -2,11 +2,11 @@
 
 ## Completion batching measurement
 
-`task.parent.wake.emitted-ready.batching.eval.ts` launches 100 children behind
-approval gates. The burst case releases 99 together; the staggered case releases
+`task.parent.wake.emitted-ready.batching.eval.ts` launches ten children behind
+approval gates. The burst case releases nine together; the staggered case releases
 each child only after the parent has finished responding to the previous one.
 The last child stays blocked while the eval verifies silence and sends a user
-question, then completes to produce a report containing all 100 distinct results.
+question, then completes to produce a report containing all ten distinct results.
 
 Each case logs a JSON `task-batching` record with completion-driven parent turns,
 model steps, silent and visible messages, and completions per turn. Setup wakes
@@ -16,7 +16,7 @@ prompt ablation lives in `agent-task-reporting`.
 
 Run this workload unchanged on the baseline and a batching revision. The burst
 does not guarantee simultaneous callback arrival or a fully buffered cohort:
-compare the observed batch sizes and step counts, not an assumed 100-to-1 gain.
+compare the observed batch sizes and step counts, not an assumed ten-to-one gain.
 Counts are measurements, not fixed assertions that would prohibit improvements.
 The staggered case is a control for active-parent coalescing: it intentionally
 leaves no opportunity to merge adjacent completions. A policy that withholds all

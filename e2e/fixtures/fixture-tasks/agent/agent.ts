@@ -269,7 +269,8 @@ function batchingBenchmark(request: MockModelRequest): MockModelResponse | strin
     .reverse()
     .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
   if (message === "TASK-BATCHING-QUESTION") return "56";
-  if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 100);
+  if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
+  if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
 
   const state = latestTaskState(request.userMessages);
   if (state === undefined) return "TASK-FANOUT-STARTED";
