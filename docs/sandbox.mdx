@@ -18,7 +18,7 @@ The model already has shell and file access through the default tools:
 | `bash`                     | run a shell command in the sandbox  |
 | `read_file` / `write_file` | read/write files under `/workspace` |
 
-These tools run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
+These tools run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Authored runtime functions can get a live sandbox handle with `ctx.getSandbox()`. A `defineWorkflowTool` must opt in with `sandbox: true`, and only its `"use step"` functions may call the accessor; calling it from the `"use workflow"` executor throws.
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";
@@ -36,7 +36,10 @@ export default defineTool({
 });
 ```
 
-`ctx.getSandbox()` takes no arguments, is async, and only works inside authored runtime execution.
+`ctx.getSandbox()` takes no arguments and is async. For ordinary authored callbacks, it works
+inside eve-managed runtime execution. For workflow tools, it works only inside `"use step"`
+functions after the tool opts in with `sandbox: true`. See
+[Use the sandbox from steps](./tools/workflows#use-the-sandbox-from-steps).
 
 `/workspace` is one namespace across every backend, so `/workspace/foo` points at the same file whether the backend is local or Vercel. When you need to interpolate a path into a generated command, `sandbox.resolvePath("repo/build.py")` anchors a relative path to its absolute `/workspace/repo/build.py` form.
 
@@ -260,6 +263,9 @@ Permanently delete the current session sandbox from an authored runtime callback
 const sandbox = await ctx.getSandbox();
 await sandbox.delete();
 ```
+
+Workflow-tool steps do not support `delete()`. Delete the sandbox from another authored runtime
+callback that owns the session sandbox.
 
 eve stops compute first, deletes the physical sandbox and its disposable backend state, and clears the saved reconnect state. It preserves reusable template state that contains `bootstrap` and seeded workspace files.
 

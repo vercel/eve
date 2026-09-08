@@ -106,6 +106,11 @@ import template from "../../prompts/template.txt?raw";
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
 
+`WorkflowToolContext` adds `agent(input)` and `ask(request)`. It also includes `getSandbox()`, but
+a workflow tool must set `sandbox: true`, and only a `"use step"` function may call it. Calling
+`getSandbox()` from the `"use workflow"` executor throws. The returned workflow-step handle
+supports the live sandbox API except `delete()`.
+
 ## Imports at a glance
 
 | Import                                                                      | Holds                                                                                  |

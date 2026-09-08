@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: implemented
-last_updated: "2026-09-04"
+last_updated: "2026-09-05"
 ---
 
 # Tools as workflows
@@ -13,14 +13,16 @@ selects the eve tool contract and the directive marks the function's replay sema
 ## Authoring API
 
 ```ts
-import { defineWorkflowTool } from "eve/tools";
+import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
 export default defineWorkflowTool({
   description: "Review and deploy a service after approval.",
   inputSchema: z.object({ service: z.string() }),
+  sandbox: true,
   async execute({ service }, ctx) {
     "use workflow";
+    await stagePlan(ctx, service);
     const review = await ctx.agent({
       key: "review",
       target: "reviewer",
@@ -38,13 +40,21 @@ export default defineWorkflowTool({
     return { deployed: true, service };
   },
 });
+
+async function stagePlan(ctx: WorkflowToolContext, service: string) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ path: "deploy-plan.txt", content: service });
+}
 ```
 
 The executor receives `WorkflowToolContext`: `session`, `callId`, `toolName`, `abortSignal`,
-`agent(input)`, and `ask(request)`. Ordinary `ToolContext`, channel contexts, and schedule contexts
-have no `agent` or `ask` methods. Shared helpers can accept `WorkflowToolContext` explicitly.
-The turn-owned `getSandbox`, `getSkill`, `getToken`, and `requireAuth` methods are absent from this
-public type. Side effects and credential reads belong in top-level `"use step"` helpers.
+`agent(input)`, `ask(request)`, and `getSandbox()`. Ordinary `ToolContext`, channel contexts, and
+schedule contexts have no `agent` or `ask` methods. Shared helpers can accept
+`WorkflowToolContext` explicitly. `getSandbox()` works only in top-level `"use step"` helpers when
+the definition sets `sandbox: true`; calling it in the `"use workflow"` executor throws.
+`getSkill`, `getToken`, and `requireAuth` are absent from this public type. Side effects and
+credential reads belong in steps.
 
 Export `defineWorkflowTool({ ... })` directly as the default export of a static tool module.
 `execute` is an inline async function or async generator, or a reference to a top-level async
@@ -69,9 +79,11 @@ schedule handlers cannot be workflow executors. Dynamic resolvers cannot return 
 Standalone Workflow SDK functions used by workflow helpers retain their SDK semantics.
 
 The driver drops the definition and schema imports, then runs the registered executor with a
-context reconstructed for that run. `ctx.agent` and `ctx.ask` bind the existing invocation and
-input-request operations to that context. No callable helpers are serialized across the run
-boundary. This replaces call-site analysis with an explicit definition boundary and context types.
+serializable context reconstructed for that run. `ctx.agent` and `ctx.ask` bind the existing
+invocation and input-request operations to that context. For `sandbox: true`, owner-side dispatch
+eagerly opens the sandbox and captures a serializable reconnect reference before workflow
+admission. `ctx.getSandbox()` verifies that it is running in a step, then reconnects through the
+current runtime sandbox definition.
 
 ## Observable semantics
 
@@ -88,6 +100,10 @@ the run withdraws pending requests. The existing owner hooks and message protoco
 An async generator's `yield` reports progress. `ctx.abortSignal` remains durable and supports
 cleanup in steps after cancellation. Steps, retries, replay, and Workflow SDK primitives keep
 their existing behavior.
+
+Completed sandbox changes persist across steps and are not rolled back when a workflow fails,
+retries, or is cancelled. Live sandbox sessions, process handles, and streams remain step-scoped.
+Workflow steps support the live sandbox API, including `stop()`, but not `delete()`.
 
 ## Migration
 

@@ -61,6 +61,11 @@ const result = await sandbox.run({ command: "npm test" });
 
 The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
 
+For `defineWorkflowTool`, add `sandbox: true` to the definition and call `ctx.getSandbox()` only
+inside a `"use step"` function. The `"use workflow"` executor cannot access the sandbox. Workflow
+steps receive `stop()` but not `delete()`, and live sandbox or process handles cannot cross step
+boundaries. See [Workflow tools](../tools/workflows#use-the-sandbox-from-steps).
+
 ## `ctx.getSkill(identifier)`
 
 Call `ctx.getSkill(identifier)` to read a packaged skill's supporting files:
@@ -81,11 +86,15 @@ Use `defineState` for durable per-session values that tools, hooks, and channel 
 Runtime context is available:
 
 - inside `defineTool(...).execute(input, ctx)`;
+- inside a `defineWorkflowTool` step for tools that set `sandbox: true`;
 - inside connection `auth` and `headers` resolvers;
 - inside channel and agent hook callbacks that receive the full runtime `ctx`;
 - after asynchronous boundaries within the same authored execution chain.
 
-Runtime context is not available during top-level module evaluation, build scripts, or discovery. Declare reusable definitions and state handles at module scope, but call their context-dependent methods only from an eve-managed callback.
+Runtime context is not available during top-level module evaluation, build scripts, or discovery.
+`ctx.getSandbox()` is also unavailable in a workflow tool's `"use workflow"` executor. Declare
+reusable definitions and state handles at module scope, but call their context-dependent methods
+only from a supported eve-managed callback or workflow step.
 
 ## How it works
 
