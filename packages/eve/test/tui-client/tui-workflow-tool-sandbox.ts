@@ -10,12 +10,11 @@ const TOOL_NAME = "sandbox_workflow";
 
 run(
   {
-    app: "agent-tui-client",
+    app: "agent-workflow-tool-sandbox",
     kind: "local-build",
-    startEnv: { ...process.env, EVE_E2E_MODEL: "mock" },
   },
   async (target) => {
-    const startResponse = await fetch(`${target.baseUrl}/anchor/start`, {
+    const startResponse = await fetch(`${target.baseUrl}/workflow-sandbox/start`, {
       body: JSON.stringify({
         message: `Call ${TOOL_NAME} exactly once, then include its complete result in your reply.`,
         threadId: THREAD_ID,
@@ -25,12 +24,14 @@ run(
     });
     if (!startResponse.ok) {
       throw new Error(
-        `POST /anchor/start failed: ${startResponse.status} ${await startResponse.text()}`,
+        `POST /workflow-sandbox/start failed: ${startResponse.status} ${await startResponse.text()}`,
       );
     }
     const startBody = (await startResponse.json()) as { sessionId?: string };
     if (startBody.sessionId === undefined) {
-      throw new Error(`POST /anchor/start returned no sessionId: ${JSON.stringify(startBody)}`);
+      throw new Error(
+        `POST /workflow-sandbox/start returned no sessionId: ${JSON.stringify(startBody)}`,
+      );
     }
 
     const client = new Client({ host: target.baseUrl });
