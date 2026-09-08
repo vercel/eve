@@ -100,6 +100,10 @@ export default [false, true].map((laterTurn) =>
         child.calledTool("review_sheet", { count: 1 });
         child.noFailedActions();
         child.event("step.failed", { count: 0 });
+        child.event("step.completed", {
+          data: (data) => data.finishReason === "content-filter",
+          count: 0,
+        });
         child.eventsSatisfy("reviewer uses the real matrix model", usesMatrixModel);
         return reviewSchema.parse(
           child.toolCalls.find((call) => call.name === "review_sheet")?.output,
@@ -120,6 +124,10 @@ export default [false, true].map((laterTurn) =>
         turn.eventsSatisfy("parent uses the real matrix model", usesMatrixModel);
         turn.event("compaction.completed", { count: 0 });
         turn.event("step.failed", { count: 0 });
+        turn.event("step.completed", {
+          data: (data) => data.finishReason === "content-filter",
+          count: 0,
+        });
       }
 
       const completed = parentEvents.filter((event) => event.type === "step.completed");
