@@ -14,8 +14,13 @@ export default [false, true].map((laterTurn) =>
     tags: ["real-model"],
     description: `Real provider cache hits survive five parallel reviews (${laterTurn ? "later" : "first"} turn).`,
     async test(t) {
-      if (laterTurn)
-        (await t.send("Alice will send a purchasing packet shortly. Say ready.")).expectOk();
+      if (laterTurn) {
+        const planning = await t.send(
+          "Eight workshops have twelve places each. How many places is that in total?",
+        );
+        planning.expectOk();
+        planning.messageIncludes("96");
+      }
 
       const started = await t.send(reviewPacket());
       started.expectOk();
