@@ -10,9 +10,8 @@ export default defineEval({
       [
         "[case: redundant-tool-calls]",
         "Alice is reviewing a small catalog application and preparing a handoff for Bob.",
-        "Use inspect-repository once with scope repository to obtain her review notes.",
-        "Once the review is complete, include REPOSITORY_INSPECTION_COMPLETE in the handoff.",
-        "The completed inspection does not need to be repeated.",
+        "Run inspect-repository once with scope repository, then use advance-checkpoint to record the handoff notes.",
+        "Report REPOSITORY_INSPECTION_COMPLETE and the returned checkpoint marker. Carry the completed inspection into the handoff without repeating it.",
       ].join("\n"),
     );
 
