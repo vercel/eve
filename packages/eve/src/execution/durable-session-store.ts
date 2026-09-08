@@ -88,6 +88,7 @@ export interface DurableSession {
   readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
   readonly agent: {
+    readonly batchTaskCompletions?: boolean;
     readonly system: string;
   };
   readonly compaction?: {

@@ -7,155 +7,182 @@ import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.
 const FANOUT_SIZE = 10;
 const COMPLETED_NOTIFICATION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
-export default (["burst", "staggered"] as const).map((schedule) =>
-  defineTaskEval({
-    description: `Measure completion-driven parent model steps for ${FANOUT_SIZE} children (${schedule}).`,
-    transition: {
-      primary: "task.parent.wake.emitted-ready",
-      setup: [
-        "task.dispatch.start.accepted-acknowledged",
-        "task.input.require.accepted-valid-batch",
-        "task.input.answer.accepted-complete",
-        "task.lifecycle.complete.accepted-nonterminal",
-      ],
-      dimensions: { transport: "local", parentPhase: "parked" },
-    },
-    async test(t) {
-      t.log(`task-batching ${schedule}: launching ${FANOUT_SIZE} children`);
-      const started = await t.send("TASK-BATCHING-BENCHMARK");
-      started.expectOk();
-      started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
-      const taskIds = started.events.flatMap((event) =>
-        event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-          ? [event.data.backgroundTask.taskId]
-          : [],
-      );
-      await t.require(
-        taskIds,
-        satisfies(
-          (ids: readonly string[]) =>
-            ids.length === FANOUT_SIZE && new Set(ids).size === FANOUT_SIZE,
-          `${FANOUT_SIZE} distinct background task receipts`,
-        ),
-      );
-      t.log(`task-batching ${schedule}: all task receipts received; collecting approval gates`);
+export default batchingEvals(false);
 
-      let session: TaskEvalSessionDriver = t;
-      const requests = new Map<string, InputRequest>();
-      collectRequests(started, requests);
-      for (let attempt = 0; requests.size < FANOUT_SIZE && attempt < FANOUT_SIZE; attempt += 1) {
-        const next = await nextTurn(t, session);
-        session = next.session;
-        collectRequests(next.turn, requests);
-      }
-      if (requests.size !== FANOUT_SIZE) {
-        throw new Error(`Expected ${FANOUT_SIZE} release requests; received ${requests.size}.`);
-      }
-      t.log(`task-batching ${schedule}: all approval gates ready`);
-
-      // All setup/input-required wakes have finished before measurement starts.
-      const completionTurns: EveEvalTurn[] = [];
-      const notifications: string[] = [];
-      const observe = (turn: EveEvalTurn) => {
-        turn.expectOk();
-        const ids = completedTaskIds(turn);
-        notifications.push(...ids);
-        if (ids.length > 0) completionTurns.push(turn);
-      };
-      const waitForCompletions = async (count: number) => {
-        for (let attempt = 0; notifications.length < count && attempt < FANOUT_SIZE; attempt += 1) {
-          const next = await nextTurn(t, session);
-          session = next.session;
-          observe(next.turn);
-        }
-        if (notifications.length !== count) {
-          throw new Error(
-            `Expected ${count} completed deliveries; received ${notifications.length}.`,
-          );
-        }
-      };
-      const release = async (batch: readonly InputRequest[]) => {
-        observe(
-          await session.respond(
-            batch.map((request) => ({
-              optionId: "approve",
-              requestId: request.requestId,
-            })),
+/** The same workload runs in fixture-task-batching with the public option enabled. */
+export function batchingEvals(batching: boolean) {
+  return [
+    { schedule: "burst", releaseCompletions: releaseBurst },
+    { schedule: "staggered", releaseCompletions: releaseStaggered },
+  ].map(({ schedule, releaseCompletions }) =>
+    defineTaskEval({
+      description: `Measure completion-driven parent model steps for ${FANOUT_SIZE} children (${schedule}).`,
+      transition: {
+        primary: "task.parent.wake.emitted-ready",
+        setup: [
+          "task.dispatch.start.accepted-acknowledged",
+          "task.input.require.accepted-valid-batch",
+          "task.input.answer.accepted-complete",
+          "task.lifecycle.complete.accepted-nonterminal",
+        ],
+        dimensions: { transport: "local", parentPhase: "parked" },
+      },
+      async test(t) {
+        t.log(`task-batching ${schedule}: launching ${FANOUT_SIZE} children`);
+        const started = await t.send("TASK-BATCHING-BENCHMARK");
+        started.expectOk();
+        started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
+        const taskIds = started.events.flatMap((event) =>
+          event.type === "subagent.completed" && event.data.backgroundTask !== undefined
+            ? [event.data.backgroundTask.taskId]
+            : [],
+        );
+        await t.require(
+          taskIds,
+          satisfies(
+            (ids: readonly string[]) =>
+              ids.length === FANOUT_SIZE && new Set(ids).size === FANOUT_SIZE,
+            `${FANOUT_SIZE} distinct background task receipts`,
           ),
         );
-      };
+        t.log(`task-batching ${schedule}: all task receipts received; collecting approval gates`);
 
-      const releases = [...requests.values()];
-      const last = releases.pop();
-      if (last === undefined) throw new Error("No final release request.");
-      if (schedule === "burst") {
-        await release(releases);
-        await waitForCompletions(FANOUT_SIZE - 1);
-      } else {
-        for (const [index, request] of releases.entries()) {
-          await release([request]);
-          // The next child cannot complete until this parent's response has finished.
-          await waitForCompletions(index + 1);
+        let session: TaskEvalSessionDriver = t;
+        const requests = new Map<string, InputRequest>();
+        collectRequests(started, requests);
+        for (let attempt = 0; requests.size < FANOUT_SIZE && attempt < FANOUT_SIZE; attempt += 1) {
+          const next = await nextTurn(t, session);
+          session = next.session;
+          collectRequests(next.turn, requests);
         }
-      }
+        if (requests.size !== FANOUT_SIZE) {
+          throw new Error(`Expected ${FANOUT_SIZE} release requests; received ${requests.size}.`);
+        }
+        t.log(`task-batching ${schedule}: all approval gates ready`);
 
-      const intermediate = metrics(completionTurns);
-      t.log(`task-batching ${schedule}: intermediate ${JSON.stringify(intermediate)}`);
-      t.check(
-        intermediate.visibleMessages,
-        satisfies((count) => count === 0, "all intermediate completion responses are silent"),
-      );
+        // All setup/input-required wakes have finished before measurement starts.
+        const completionTurns: EveEvalTurn[] = [];
+        const notifications: string[] = [];
+        const observe = (turn: EveEvalTurn) => {
+          turn.expectOk();
+          const ids = completedTaskIds(turn);
+          notifications.push(...ids);
+          if (ids.length > 0) completionTurns.push(turn);
+        };
+        const waitForCompletions = async (count: number) => {
+          for (
+            let attempt = 0;
+            notifications.length < count && attempt < FANOUT_SIZE;
+            attempt += 1
+          ) {
+            const next = await nextTurn(t, session);
+            session = next.session;
+            observe(next.turn);
+          }
+          if (notifications.length !== count) {
+            throw new Error(
+              `Expected ${count} completed deliveries; received ${notifications.length}.`,
+            );
+          }
+        };
+        const release = async (batch: readonly InputRequest[]) => {
+          observe(
+            await session.respond(
+              batch.map((request) => ({
+                optionId: "approve",
+                requestId: request.requestId,
+              })),
+            ),
+          );
+        };
 
-      // A real user turn must still produce an answer with one sibling blocked.
-      const question = await session.send("TASK-BATCHING-QUESTION");
-      question.expectOk();
-      t.check(
-        question.message,
-        satisfies(
-          (message) => message === "56",
-          "user question receives exactly 56 while the final child is blocked",
-        ),
-      );
-      question.usedNoTools();
-      observe(question);
+        const releases = [...requests.values()];
+        const last = releases.pop();
+        if (last === undefined) throw new Error("No final release request.");
+        await releaseCompletions(releases, release, waitForCompletions);
 
-      await release([last]);
-      await waitForCompletions(FANOUT_SIZE);
-      t.check(
-        notifications,
-        satisfies(
-          (ids: readonly string[]) =>
-            JSON.stringify([...ids].sort()) === JSON.stringify([...taskIds].sort()),
-          "every child result is delivered exactly once, with no unknown task ids",
-        ),
-      );
-      const expected = Array.from(
-        { length: FANOUT_SIZE },
-        (_, index) => `FANOUT-COMPLETE:FANOUT-WORKER-${index + 1}`,
-      ).sort();
-      const final = completionTurns.at(-1);
-      if (final === undefined) throw new Error("No final completion turn.");
-      t.check(
-        final.message,
-        satisfies(
-          (message) =>
-            message === JSON.stringify({ report: "TASK-BATCHING-REPORT", results: expected }),
-          "final report contains every distinct child result exactly once",
-        ),
-      );
-      const total = metrics(completionTurns);
-      t.check(
-        total.visibleMessages,
-        satisfies((count) => count === 1, "one visible final report across all completion turns"),
-      );
-      t.log(
-        `task-batching ${JSON.stringify({ schedule, children: FANOUT_SIZE, intermediate, total })}`,
-      );
-      t.notEvent("compaction.requested");
-      t.noFailedActions();
-    },
-  }),
-);
+        const intermediate = metrics(completionTurns);
+        t.log(`task-batching ${schedule}: intermediate ${JSON.stringify(intermediate)}`);
+        t.check(
+          intermediate.visibleMessages,
+          satisfies((count) => count === 0, "all intermediate completion responses are silent"),
+        );
+
+        // A real user turn must still produce an answer with one sibling blocked.
+        const question = await session.send("TASK-BATCHING-QUESTION");
+        question.expectOk();
+        t.check(
+          question.message,
+          satisfies(
+            (message) => message === "56",
+            "user question receives exactly 56 while the final child is blocked",
+          ),
+        );
+        question.usedNoTools();
+        observe(question);
+
+        await release([last]);
+        await waitForCompletions(FANOUT_SIZE);
+        t.check(
+          notifications,
+          satisfies(
+            (ids: readonly string[]) =>
+              JSON.stringify([...ids].sort()) === JSON.stringify([...taskIds].sort()),
+            "every child result is delivered exactly once, with no unknown task ids",
+          ),
+        );
+        const expected = Array.from(
+          { length: FANOUT_SIZE },
+          (_, index) => `FANOUT-COMPLETE:FANOUT-WORKER-${index + 1}`,
+        ).sort();
+        const final = completionTurns.at(-1);
+        if (final === undefined) throw new Error("No final completion turn.");
+        t.check(
+          final.message,
+          satisfies(
+            (message) =>
+              message === JSON.stringify({ report: "TASK-BATCHING-REPORT", results: expected }),
+            "final report contains every distinct child result exactly once",
+          ),
+        );
+        const total = metrics(completionTurns);
+        t.check(
+          total.visibleMessages,
+          satisfies((count) => count === 1, "one visible final report across all completion turns"),
+        );
+        t.log(
+          `task-batching ${JSON.stringify({ batching, schedule, children: FANOUT_SIZE, intermediate, total })}`,
+        );
+        t.notEvent("compaction.requested");
+        t.noFailedActions();
+      },
+    }),
+  );
+}
+
+type Release = (requests: readonly InputRequest[]) => Promise<void>;
+type WaitForCompletions = (count: number) => Promise<void>;
+
+async function releaseBurst(
+  requests: readonly InputRequest[],
+  release: Release,
+  waitForCompletions: WaitForCompletions,
+) {
+  await release(requests);
+  await waitForCompletions(FANOUT_SIZE - 1);
+}
+
+async function releaseStaggered(
+  requests: readonly InputRequest[],
+  release: Release,
+  waitForCompletions: WaitForCompletions,
+) {
+  for (const [index, request] of requests.entries()) {
+    await release([request]);
+    // The next child cannot complete until this parent response has finished.
+    await waitForCompletions(index + 1);
+  }
+}
 
 function metrics(turns: readonly EveEvalTurn[]) {
   const events = turns.flatMap((turn) => turn.events);

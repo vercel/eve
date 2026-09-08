@@ -32,6 +32,7 @@ export type RuntimeDynamicModelReference = Readonly<
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 interface RuntimeTurnAgentBase {
+  readonly batchTaskCompletions?: boolean;
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
@@ -122,6 +123,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     nodeId: input.nodeId,
     outputSchema: config?.outputSchema,
     reasoning: config?.reasoning,
+    batchTaskCompletions: config?.experimental?.batchTaskCompletions,
     tools: [...input.tools],
     workspaceSpec: agent.workspaceSpec,
   };

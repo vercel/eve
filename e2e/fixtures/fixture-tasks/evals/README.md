@@ -14,9 +14,17 @@ and the user question are excluded. The scripted model always obeys the silence
 policy, so this measures the runtime cost of perfect compliance; the real-model
 prompt ablation lives in `agent-task-reporting`.
 
-Run this workload unchanged on the baseline and a batching revision. The burst
-does not guarantee simultaneous callback arrival or a fully buffered cohort:
-compare the observed batch sizes and step counts, not an assumed ten-to-one gain.
+The same cases run in two fixtures on every revision: `fixture-tasks` uses the
+default (batching off), and `fixture-task-batching` sets
+`experimental.batchTaskCompletions: true`. Both use the same mock and workers.
+The first completion's mock model call takes ten seconds, allowing later burst
+completions to enter the active parent's buffer. This delay belongs to the test
+model; the runtime adds no timer. The log includes the `batching` setting.
+
+Callback timing still varies across workflow worlds. Compare the observed batch
+sizes and model-step counts, not an assumed ten-to-one gain. The unit test at the
+delivery boundary separately proves that 100 buffered sibling completions become
+one parent turn with every payload and its metadata preserved.
 Counts are measurements, not fixed assertions that would prohibit improvements.
 The staggered case is a control for active-parent coalescing: it intentionally
 leaves no opportunity to merge adjacent completions. A policy that withholds all

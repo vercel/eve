@@ -46,6 +46,7 @@ export interface CompactionConfig {
  * Serializable agent configuration stored on the session.
  */
 interface SessionAgentBase {
+  readonly batchTaskCompletions?: boolean;
   /**
    * Optional model used only for compaction summaries.
    *

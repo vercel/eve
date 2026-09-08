@@ -10,6 +10,7 @@ import {
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
@@ -166,7 +167,12 @@ async function waitForNextSessionAction(input: {
     input.bufferedDeliveries.length > 0
   ) {
     return {
-      delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
+      delivery: takeBufferedTurnDelivery(
+        input.bufferedDeliveries,
+        input.stateCursor.sessionState.snapshot?.session.agent.batchTaskCompletions === true
+          ? getSessionTaskIndex(input.stateCursor.sessionState.snapshot.session.state)
+          : [],
+      ),
       kind: "delivery",
     };
   }
@@ -267,7 +273,10 @@ function isCancelledTaskDeliveryId(
   );
 }
 
-function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
+function takeBufferedTurnDelivery(
+  bufferedDeliveries: DeliverHookPayload[],
+  tasks: readonly SessionTaskIndexEntry[],
+): DeliverHookPayload {
   const first = bufferedDeliveries.shift();
   if (first === undefined) {
     throw new Error("Cannot take a turn delivery from an empty buffer.");
@@ -275,12 +284,13 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
 
   const turnDeliveries = [first];
   let caller = first.caller;
+  const cohort = completionCohort(first, tasks);
   while (bufferedDeliveries.length > 0) {
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
-      first.taskDeliveryId !== undefined ||
-      next.taskDeliveryId !== undefined ||
+      ((first.taskDeliveryId !== undefined || next.taskDeliveryId !== undefined) &&
+        (cohort === undefined || completionCohort(next, tasks) !== cohort)) ||
       (caller !== undefined && next.caller !== undefined)
     ) {
       break;
@@ -295,4 +305,14 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
   }
 
   return coalesceDeliveries(turnDeliveries);
+}
+
+/** Only successful sibling notifications can share their existing cohort context. */
+function completionCohort(
+  delivery: DeliverHookPayload,
+  tasks: readonly SessionTaskIndexEntry[],
+): string | undefined {
+  if (delivery.caller !== undefined) return undefined;
+  return tasks.find((task) => delivery.taskDeliveryId === `${task.taskId}:ready:completed`)
+    ?.createdByTurnId;
 }

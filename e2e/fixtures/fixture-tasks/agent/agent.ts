@@ -13,7 +13,9 @@ const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
 const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 const TASK_STATE_LABEL = "[Task state]\n";
 
-function respond(request: MockModelRequest): MockModelResponse | string {
+function respond(
+  request: MockModelRequest,
+): MockModelResponse | Promise<MockModelResponse | string> | string {
   if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
     return batchingBenchmark(request);
   }
@@ -264,7 +266,7 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
   return "TASK-FANOUT-STARTED";
 }
 
-function batchingBenchmark(request: MockModelRequest): MockModelResponse | string {
+async function batchingBenchmark(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = [...request.userMessages]
     .reverse()
     .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
@@ -272,6 +274,14 @@ function batchingBenchmark(request: MockModelRequest): MockModelResponse | strin
   if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
   if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
 
+  // Keep the first completion's model call active while the burst arrives.
+  // This is fixture inference time, not a runtime debounce or settlement wait.
+  const completionMessages = request.userMessages.filter(
+    (entry) => entry.startsWith("Background task ") && entry.includes(" is completed."),
+  );
+  if (completionMessages.length === 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
   const state = latestTaskState(request.userMessages);
   if (state === undefined) return "TASK-FANOUT-STARTED";
   // Script perfect compliance so the eval measures delivery cost, not model obedience.
