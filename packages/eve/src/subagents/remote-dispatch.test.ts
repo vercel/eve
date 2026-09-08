@@ -732,6 +732,43 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     });
   });
 
+  it.each([false, true])(
+    "rejects baggage overflow before dispatch (conversation addition: %s)",
+    async (withConversation) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const assertion = "eve.audience=private;ceiling=i0o0";
+      const baggage = `vendor=${"a".repeat(
+        8192 - "vendor=,".length - assertion.length + (withConversation ? 0 : 1),
+      )}`;
+
+      await expect(
+        startRemoteAgentSession({
+          action: createAction(),
+          auth: CURRENT_AUTH,
+          callbackBaseUrl: "https://caller.example.com",
+          originAudience: "private",
+          remote: {
+            ...createRemoteAgent(),
+            forwardPrincipal: true,
+            headers: { baggage },
+          },
+          session: createSession(),
+          parent: {
+            conversationId: withConversation ? "logical-conversation" : undefined,
+            traceContext: {
+              decision: { action: "record", recordInputs: false, recordOutputs: false },
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+          },
+        }),
+      ).rejects.toThrow("Cannot forward baggage: header exceeds 8192 bytes");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses unsampled trace flags as the only propagated drop signal", async () => {
     const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
     vi.stubGlobal("fetch", fetchMock);

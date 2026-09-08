@@ -83,7 +83,12 @@ export function replaceBaggageMember(
   const retained = baggageMembers(value ?? "").filter((entry) => baggageKey(entry) !== key);
   if (member !== undefined) {
     const result = [...retained, `${key}=${member}`].join(",");
-    if (encoder.encode(result).byteLength <= MAX_BAGGAGE_BYTES) return result;
+    if (encoder.encode(result).byteLength > MAX_BAGGAGE_BYTES) {
+      throw new Error(
+        "Cannot forward baggage: header exceeds 8192 bytes. Reduce remote.headers.baggage.",
+      );
+    }
+    return result;
   }
   return retained.join(",") || undefined;
 }

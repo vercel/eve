@@ -5,8 +5,9 @@ import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/life
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
-const { forceFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
+const { forceFlush, invocationFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
   forceFlush: vi.fn(async () => undefined),
+  invocationFlush: vi.fn(async () => undefined),
   internalTerminalState: vi.fn(),
   shutdown: vi.fn(async () => undefined),
 }));
@@ -29,6 +30,7 @@ vi.mock("#tracing/otel-registration.js", async (importOriginal) => {
 vi.mock("#tracing/agent-otel-provider.js", () => ({
   createAgentOtelInstrumentation: () => ({
     hook: {
+      flush: invocationFlush,
       events: {
         "turn.completed": (_event: unknown, ctx: { state: { get(): unknown } }) => {
           internalTerminalState(ctx.state.get());
@@ -48,6 +50,7 @@ const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 describe("installInstrumentationRuntime", () => {
   beforeEach(() => {
     forceFlush.mockClear();
+    invocationFlush.mockClear();
     internalTerminalState.mockClear();
     shutdown.mockClear();
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
@@ -80,6 +83,22 @@ describe("installInstrumentationRuntime", () => {
     });
     expect(shutdown).toHaveBeenCalledOnce();
     expect(providerShutdown).toHaveBeenCalledOnce();
+  });
+
+  it("materializes settled invocations without draining authored providers or the exporter", async () => {
+    const providerFlush = vi.fn();
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [{ flush: providerFlush, name: "test" }],
+      serviceName: "weather",
+    });
+
+    await runtime.flushSettledInvocations!();
+
+    expect(invocationFlush).toHaveBeenCalledOnce();
+    expect(providerFlush).not.toHaveBeenCalled();
+    expect(forceFlush).not.toHaveBeenCalled();
   });
 
   it.each(["session.completed", "session.failed"] as const)(

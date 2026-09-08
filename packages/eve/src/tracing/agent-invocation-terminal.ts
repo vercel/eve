@@ -10,6 +10,9 @@ import { boundedTraceError } from "#tracing/bounded-error.js";
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { createLogger, formatError } from "#internal/logging.js";
+
+const log = createLogger("tracing.agent-invocation-terminal");
 
 export function recordNestedAgentInvocationTerminal(input: {
   readonly callId: string;
@@ -89,14 +92,19 @@ export async function flushAgentInvocationTraces(
   serializedContext: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   if (serializedContext[AGENT_TRACE_CONTEXT_KEY] === undefined) return serializedContext;
-  const ctx = await deserializeContext(serializedContext);
   const runtime = getInstrumentationRuntime();
-  if (runtime === undefined) return serializedContext;
-  await contextStorage.run(ctx, () => runtime.forceFlush());
-  return {
-    ...serializedContext,
-    [AGENT_TRACE_CONTEXT_KEY]: serializeContext(ctx)[AGENT_TRACE_CONTEXT_KEY],
-  };
+  if (runtime?.flushSettledInvocations === undefined) return serializedContext;
+  try {
+    const ctx = await deserializeContext(serializedContext);
+    await contextStorage.run(ctx, runtime.flushSettledInvocations);
+    return {
+      ...serializedContext,
+      [AGENT_TRACE_CONTEXT_KEY]: serializeContext(ctx)[AGENT_TRACE_CONTEXT_KEY],
+    };
+  } catch (error) {
+    log.warn("could not materialize settled invocation traces", { error: formatError(error) });
+    return serializedContext;
+  }
 }
 
 export function invocationError(value: unknown): Error {

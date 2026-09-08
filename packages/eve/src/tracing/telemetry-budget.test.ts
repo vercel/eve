@@ -17,4 +17,14 @@ describe("trace text bounds", () => {
       expect(truncated).not.toContain("\ufffd");
     }
   });
+
+  it.each([16, 17, 32, 4096])(
+    "does not emit a surrogate split at the %i-byte prefix",
+    (maxBytes) => {
+      const text = "a".repeat(maxBytes) + String.fromCodePoint(0x1f600) + "tail";
+      expect(truncateTelemetryText(text, maxBytes)).toBe(
+        "a".repeat(maxBytes - "... [truncated]".length) + "... [truncated]",
+      );
+    },
+  );
 });

@@ -31,6 +31,7 @@ import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
   flushAgentInvocationTraces,
@@ -83,6 +84,9 @@ function createRuntime() {
     idGenerator,
     ownsAgentSpans: true,
     otelSettings: { recordInputs: true, recordOutputs: true, traceChannelRequests: false },
+    flushSettledInvocations: async () => {
+      await agent.hook.flush?.();
+    },
     forceFlush: async () => {
       await agent.hook.flush?.();
       await provider.forceFlush();
@@ -113,6 +117,9 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 describe("exported agent telemetry contract", () => {
   it("flushes 1000 settled invocations without closing the session or retaining their errors", async () => {
     const runtime = createRuntime();
+    const exporterFlush = vi.spyOn(runtime.provider, "forceFlush").mockImplementation(() => {
+      throw new Error("Exporter unavailable");
+    });
     const registered = vi
       .spyOn(instrumentation, "getInstrumentationRuntime")
       .mockReturnValue(runtime);
@@ -160,11 +167,38 @@ describe("exported agent telemetry contract", () => {
       }
       await flushAgentInvocationTraces(serializeContext(ctx));
       expect(runtime.exporter.getFinishedSpans()).toHaveLength(count);
+      expect(exporterFlush).not.toHaveBeenCalled();
     } finally {
+      exporterFlush.mockRestore();
       registered.mockRestore();
       await runtime.shutdown();
     }
   });
+
+  it.each(["throw", "reject"] as const)(
+    "preserves the settlement context when invocation materialization fails (%s)",
+    async (failure) => {
+      const runtime = createRuntime();
+      const flush = vi.spyOn(runtime, "flushSettledInvocations").mockImplementation(() => {
+        const error = new Error("Span processor unavailable");
+        if (failure === "throw") throw error;
+        return Promise.reject(error);
+      });
+      const registered = vi
+        .spyOn(instrumentation, "getInstrumentationRuntime")
+        .mockReturnValue(runtime);
+      const serializedContext = { [AGENT_TRACE_CONTEXT_KEY]: {} };
+      try {
+        await expect(flushAgentInvocationTraces(serializedContext)).resolves.toBe(
+          serializedContext,
+        );
+        expect(flush).toHaveBeenCalledOnce();
+      } finally {
+        registered.mockRestore();
+        await runtime.shutdown();
+      }
+    },
+  );
 
   it.each(["session.completed", "session.failed"] as const)(
     "only marks unfinished invocations as errors on %s",

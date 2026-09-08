@@ -147,6 +147,8 @@ export interface BoundInstrumentationSession {
 
 /** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
+  /** Materializes settled invocation spans without draining the exporter pipeline. */
+  readonly flushSettledInvocations?: () => Promise<void>;
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
@@ -200,13 +202,13 @@ export function bindInstrumentationRuntime(
   ctx: ContextContainer,
   boundSession: BoundInstrumentationSession,
 ): ExecutionInstrumentation | undefined {
-  if (runtime === undefined) return undefined;
   if (readConversationId(ctx.get(ConversationIdKey)) === undefined) {
     ctx.set(
       ConversationIdKey,
       ctx.get(ParentSessionKey)?.rootSessionId ?? boundSession.rootSessionId,
     );
   }
+  if (runtime === undefined) return undefined;
   const baseHooks = runtime.hooks;
   const readSessionContext = () => {
     const context = contextStorage.getStore() ?? ctx;

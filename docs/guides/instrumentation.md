@@ -181,8 +181,13 @@ Activation spans retain `gen_ai.usage.input_tokens` and
 Model spans carry `gen_ai.usage.*`; step and dispatch spans report
 `agent.usage.*`. Do not sum usage across these levels.
 
-Nested dispatch spans are exported when the child settles, and their completed
-records are removed from durable state. Cancelled or abandoned dispatches retain
+Nested dispatch spans are materialized when the child settles and handed to
+span processors; successful materialization removes their completed records
+from durable state. Settlement does not drain exporters or authored providers.
+Materialization failures are logged without failing settlement, and exporter
+draining follows the runtime's normal flush lifecycle.
+
+Cancelled or abandoned dispatches retain
 their outcome without error status. Error messages and stacks on eve spans count as
 output content, including errors reconstructed after a worker replacement.
 Metadata-only capture retains failure status without those details. Error logging

@@ -92,6 +92,20 @@ describe("readForwardedAudienceBaggage", () => {
 });
 
 describe("writeForwardedAudienceBaggage", () => {
+  it("preserves the assertion at the byte limit and rejects overflow", () => {
+    const assertion = "eve.audience=public;ceiling=i0o1";
+    const baggage = `vendor=${"a".repeat(8192 - assertion.length - "vendor=,".length)}`;
+    const result = writeForwardedAudienceBaggage(baggage, PUBLIC_OUTPUTS);
+    expect(new TextEncoder().encode(result).byteLength).toBe(8192);
+    expect(readForwardedAudienceBaggage(result!)).toEqual(PUBLIC_OUTPUTS);
+    expect(() => writeForwardedAudienceBaggage(`${baggage}a`, PUBLIC_OUTPUTS)).toThrow(
+      "Cannot forward baggage: header exceeds 8192 bytes",
+    );
+    expect(() => writeForwardedAudienceBaggage(`${baggage}\u00e9`, PUBLIC_OUTPUTS)).toThrow(
+      "Cannot forward baggage: header exceeds 8192 bytes",
+    );
+  });
+
   it("preserves unrelated entries and replaces authored Eve assertions", () => {
     expect(
       writeForwardedAudienceBaggage(

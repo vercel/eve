@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Replace the `agent.session` span with replay-stable, per-activation traces in schema v4, linked to their callers and correlated by conversation ID. Dispatch uses `agent.action` and `execute_tool` spans with prompt settlement export; `invoke_agent` retains standard GenAI token totals, and eve's trace-content policy governs error details without changing unrelated logging.
+Advance `agent.trace.schema.version` from 3 to 4 and remove `agent.session`: update dashboards to use per-activation `invoke_agent` spans, linked to callers and grouped by `gen_ai.conversation.id`. Dispatch uses `agent.action` and `execute_tool`, preserves standard GenAI usage totals and trace-content restrictions, and rejects baggage overflow; settlement materializes spans without draining exporters, and conversation IDs remain available without instrumentation.

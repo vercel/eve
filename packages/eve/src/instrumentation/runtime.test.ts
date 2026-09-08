@@ -351,13 +351,13 @@ describe("initializeSessionInstrumentation", () => {
 });
 
 describe("bindInstrumentationRuntime", () => {
-  it("returns no worker controls when no runtime is loaded", () => {
+  it("initializes conversation identity without worker controls when no runtime is loaded", () => {
     const ctx = new ContextContainer();
     expect(bindInstrumentationRuntime(undefined, ctx, boundSession)).toBeUndefined();
-    expect(ctx.get(ConversationIdKey)).toBeUndefined();
+    expect(ctx.get(ConversationIdKey)).toBe(boundSession.rootSessionId);
   });
 
-  it("uses the effective parent root to initialize correlation without replacing it", () => {
+  it.each([true, false])("preserves effective correlation (runtime installed: %s)", (installed) => {
     const ctx = createContext();
     ctx.set(ParentSessionKey, {
       callId: "call",
@@ -365,7 +365,9 @@ describe("bindInstrumentationRuntime", () => {
       rootSessionId: "effective-root",
       turn: { id: "turn", sequence: 0 },
     });
-    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });
+    const runtime = installed
+      ? createRuntime({ capturesContent: true, publish: vi.fn() })
+      : undefined;
     bindInstrumentationRuntime(runtime, ctx, boundSession);
     expect(ctx.get(ConversationIdKey)).toBe("effective-root");
     ctx.set(ConversationIdKey, "original-conversation");
