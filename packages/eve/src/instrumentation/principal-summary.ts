@@ -7,6 +7,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import { TELEMETRY_PRINCIPAL_ID_BYTES, telemetryByteLength } from "#tracing/telemetry-budget.js";
 
 const PRINCIPAL_TYPES = new Set<InstrumentationPrincipalType>([
   "anonymous",
@@ -26,7 +27,13 @@ export function summarizeInstrumentationPrincipal(
   const type = PRINCIPAL_TYPES.has(principal.principalType as InstrumentationPrincipalType)
     ? (principal.principalType as InstrumentationPrincipalType)
     : "other";
-  if (!shouldCaptureInstrumentationContent(audience)) return { type };
+  if (
+    !shouldCaptureInstrumentationContent(audience) ||
+    principal.principalId.length === 0 ||
+    principal.principalId.length > TELEMETRY_PRINCIPAL_ID_BYTES ||
+    telemetryByteLength(principal.principalId) > TELEMETRY_PRINCIPAL_ID_BYTES
+  )
+    return { type };
   return { id: principal.principalId, type };
 }
 

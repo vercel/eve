@@ -10,6 +10,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { boundedTraceError } from "#tracing/bounded-error.js";
+import { TELEMETRY_PRINCIPAL_ID_BYTES, telemetryByteLength } from "#tracing/telemetry-budget.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
 
@@ -300,7 +301,12 @@ function deserializeError(value: unknown): Error | undefined {
 }
 
 function readPrincipalId(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= TELEMETRY_PRINCIPAL_ID_BYTES &&
+    telemetryByteLength(value) <= TELEMETRY_PRINCIPAL_ID_BYTES
+    ? value
+    : undefined;
 }
 
 function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {

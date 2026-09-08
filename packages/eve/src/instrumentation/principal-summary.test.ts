@@ -12,6 +12,21 @@ const principal = {
 };
 
 describe("summarizeInstrumentationPrincipal", () => {
+  it("omits oversized IDs without truncating or changing authentication records", () => {
+    const oversized = { ...principal, principalId: "x".repeat(1025) };
+    expect(summarizeInstrumentationPrincipal(oversized, "public")).toEqual({ type: "other" });
+    expect(oversized.principalId).toHaveLength(1025);
+    expect(
+      summarizeInstrumentationPrincipal(
+        {
+          ...principal,
+          principalId: String.fromCodePoint(0x1f600).repeat(300),
+        },
+        "public",
+      ),
+    ).toEqual({ type: "other" });
+  });
+
   it("preserves none and bounds authored principal types", () => {
     expect(summarizeInstrumentationPrincipal(null, "public")).toEqual({
       type: "none",

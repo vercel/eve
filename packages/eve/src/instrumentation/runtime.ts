@@ -50,6 +50,7 @@ import {
   ChannelInstrumentationKey,
   ConversationIdKey,
   OtelTraceEnabledKey,
+  ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";

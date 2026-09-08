@@ -1,3 +1,5 @@
+export const TELEMETRY_PRINCIPAL_ID_BYTES = 1024;
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MARKER = "... [truncated]";

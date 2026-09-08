@@ -9,8 +9,10 @@ import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
+  AuthKey,
   ChannelInstrumentationKey,
   ConversationIdKey,
+  InitiatorAuthKey,
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -98,6 +100,18 @@ function createRuntime() {
 function contextFor(audience: "public" | "private") {
   const ctx = new ContextContainer();
   ctx.set(ChannelInstrumentationKey, { kind: "http", metadata: { audience } });
+  ctx.set(AuthKey, {
+    principalId: "current-user",
+    principalType: "service",
+    authenticator: "api-key",
+    attributes: { secret: "auth-only-secret" },
+  });
+  ctx.set(InitiatorAuthKey, {
+    principalId: "initiator-user",
+    principalType: "user",
+    authenticator: "oidc",
+    attributes: { secret: "auth-only-secret" },
+  });
   return ctx;
 }
 
@@ -241,9 +255,13 @@ describe("exported agent telemetry contract", () => {
     },
   );
 
-  it.each(["public", "private"] as const)(
-    "round-trips %s channel, approval, delegated error and usage spans through the readers",
-    async (audience) => {
+  it.each(
+    (["public", "private"] as const).flatMap((audience) =>
+      (["completed", "failed", "cancelled"] as const).map((outcome) => ({ audience, outcome })),
+    ),
+  )(
+    "round-trips $audience $outcome channel, approval, delegation and usage spans through the readers",
+    async ({ audience, outcome }) => {
       const runtime = createRuntime();
       let parent = contextFor(audience);
       parent.set(ConversationIdKey, "original-conversation");
@@ -422,7 +440,12 @@ describe("exported agent telemetry contract", () => {
           output: "private failure",
           outcome: {
             kind: "terminal",
-            result: { kind: "failed", error: { message: "private failure" } },
+            result:
+              outcome === "failed"
+                ? { kind: "failed", error: { message: "private failure" } }
+                : outcome === "cancelled"
+                  ? { kind: "cancelled" }
+                  : { kind: "succeeded", output: "private output" },
             usageDelta: {
               inputTokens: 10,
               outputTokens: 5,
@@ -469,7 +492,7 @@ describe("exported agent telemetry contract", () => {
           idempotencyKey: turnIdempotencyKey("parent", "turn_0"),
           sessionId: "parent",
           turnId: "turn_0",
-          type: "turn.completed",
+          type: outcome === "cancelled" ? "turn.cancelled" : "turn.completed",
         });
         await hooks.publish({
           idempotencyKey: sessionIdempotencyKey("parent"),
@@ -512,7 +535,19 @@ describe("exported agent telemetry contract", () => {
           .sort(),
       ).toEqual(["invoke_agent child", "invoke_agent parent"]);
       expect(parsed.filter(isAgentTurnSpan)).toHaveLength(2);
+      for (const activation of parsed.filter(isAgentTurnSpan)) {
+        expect(activation.attributes["agent.principal.current.type"]).toBe("service");
+        expect(activation.attributes["agent.principal.initiator.type"]).toBe("user");
+        expect(activation.attributes["agent.principal.current.id"]).toBe(
+          audience === "public" ? "current-user" : undefined,
+        );
+        expect(activation.attributes["agent.principal.initiator.id"]).toBe(
+          audience === "public" ? "initiator-user" : undefined,
+        );
+      }
+      expect(new TextDecoder().decode(bytes)).not.toContain("auth-only-secret");
       const caller = parsed.find((span) => span.attributes["agent.invocation.role"] === "caller")!;
+      expect(caller.attributes["agent.action.outcome"]).toBe(outcome);
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
       )!;
@@ -567,8 +602,56 @@ describe("exported agent telemetry contract", () => {
       );
       expect(metadata).not.toContain("private ");
       if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
-      else expect(new TextDecoder().decode(bytes)).toContain("private failure");
+      else if (outcome === "failed")
+        expect(new TextDecoder().decode(bytes)).toContain("private failure");
       await runtime.shutdown();
     },
   );
+
+  it("exports new current principals but the same initiator on resumed activations", async () => {
+    const runtime = createRuntime();
+    const ctx = contextFor("public");
+    const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "public" });
+    const binding = bindInstrumentationRuntime(runtime, ctx, {
+      agentName: "parent",
+      rootSessionId: "parent",
+      sessionId: "parent",
+    })!;
+    await contextStorage.run(ctx, async () => {
+      for (const [sequence, principalId] of ["first", "second"].entries()) {
+        ctx.set(AuthKey, {
+          principalId,
+          principalType: "user",
+          authenticator: "api-key",
+          attributes: {},
+        });
+        const turnId = `turn_${sequence}`;
+        await binding.preparePreamble({ sequence, sessionStarted: sequence > 0, turnId });
+        await hooks.publish({
+          idempotencyKey: turnIdempotencyKey("parent", turnId),
+          sessionId: "parent",
+          turnId,
+          type: "turn.completed",
+        });
+        await hooks.publish({
+          idempotencyKey: sessionIdempotencyKey("parent"),
+          sessionId: "parent",
+          turnId,
+          type: "session.waiting",
+        });
+      }
+    });
+    await runtime.forceFlush();
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(spans.map((span) => span.attributes["agent.principal.current.id"])).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(spans.map((span) => span.attributes["agent.principal.initiator.id"])).toEqual([
+      "initiator-user",
+      "initiator-user",
+    ]);
+    expect(new Set(spans.map((span) => span.spanContext().traceId)).size).toBe(2);
+    await runtime.shutdown();
+  });
 });
