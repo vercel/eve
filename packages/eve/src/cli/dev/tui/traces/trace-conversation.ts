@@ -9,7 +9,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
-import { agentTurnIdentity, isAgentCallerSpan } from "#tracing/agent-span-contract.js";
+import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -206,8 +206,7 @@ function turnSubagent(
     };
   }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent === undefined || (parent.name !== "agent.action" && !isAgentCallerSpan(parent)))
-    return undefined;
+  if (parent === undefined || parent.name !== "agent.action") return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");

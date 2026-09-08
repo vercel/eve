@@ -49,10 +49,8 @@ export function batchSpanProcessor(
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Exports are chained rather than raced so a flush cannot interleave two
   // batches into the same exporter.
-  let pending: Promise<void> | undefined;
-  const deadlines = new WeakMap<Promise<void>, Promise<boolean>>();
+  let pending: Promise<void> = Promise.resolve();
   let stopped = false;
-  let droppedSpans = 0;
 
   function cancelTimer(): void {
     if (timer === undefined) return;
@@ -102,7 +100,6 @@ export function batchSpanProcessor(
   return {
     async forceFlush() {
       if (stopped) return;
-      reportDrops();
       const drained = await waitForExporter(pendingDrain(), "span export");
       if (!drained || exporter.forceFlush === undefined) return;
       await waitForExporter(
@@ -113,10 +110,7 @@ export function batchSpanProcessor(
     onEnd(span) {
       if (stopped) return;
       if (!isSampled(span)) return;
-      if (buffer.length >= maxQueueSize) {
-        droppedSpans += 1;
-        return;
-      }
+      if (buffer.length >= maxQueueSize) return;
 
       buffer.push(span);
       if (buffer.length >= maxExportBatchSize) {
@@ -128,7 +122,6 @@ export function batchSpanProcessor(
     onStart() {},
     async shutdown() {
       stopped = true;
-      reportDrops();
       const draining = pendingDrain();
       const drained = await waitForExporter(draining, "span export");
       if (!drained) {
@@ -142,31 +135,18 @@ export function batchSpanProcessor(
     },
   };
 
-  function reportDrops(): void {
-    if (droppedSpans === 0) return;
-    log.warn("span export queue dropped spans", { droppedSpans, maxQueueSize });
-    droppedSpans = 0;
-  }
-
   function pendingDrain(): Promise<void> {
     cancelTimer();
-    pending ??= Promise.resolve()
-      .then(async () => {
-        while (buffer.length > 0) {
-          const batch = buffer.splice(0, maxExportBatchSize);
-          await exportBatch(batch);
-        }
-      })
-      .finally(() => {
-        pending = undefined;
-        if (buffer.length > 0) scheduleDrain();
-      });
+    pending = pending.then(async () => {
+      while (buffer.length > 0) {
+        const batch = buffer.splice(0, maxExportBatchSize);
+        await exportBatch(batch);
+      }
+    });
     return pending;
   }
 
-  function waitForExporter(operation: Promise<void>, name: string): Promise<boolean> {
-    const existing = deadlines.get(operation);
-    if (existing !== undefined) return existing;
+  async function waitForExporter(operation: Promise<void>, name: string): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<false>((resolve) => {
       timer = setTimeout(() => {
@@ -178,9 +158,11 @@ export function batchSpanProcessor(
       timer.unref?.();
     });
     const completed = operation.then(() => true);
-    const deadline = Promise.race([completed, timeout]).finally(() => clearTimeout(timer));
-    deadlines.set(operation, deadline);
-    return deadline;
+    try {
+      return await Promise.race([completed, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function settleExporter(name: string, operation: () => Promise<void>): Promise<void> {

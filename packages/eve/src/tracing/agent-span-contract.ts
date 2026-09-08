@@ -29,12 +29,6 @@ interface AgentSpanRecord {
   readonly attributes: Readonly<Record<string, unknown>>;
 }
 
-export function isAgentCallerSpan(span: AgentSpanRecord): boolean {
-  return (
-    span.name === AGENT_SPAN_NAMES.action && span.attributes["agent.invocation.role"] === "caller"
-  );
-}
-
 export function isAgentActivationSpan(span: AgentSpanRecord): boolean {
   return (
     span.name === "agent.turn" ||

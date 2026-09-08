@@ -17,11 +17,7 @@ import type {
   InstrumentationSessionTransitionEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import {
-  AGENT_INVOCATION_ROLES,
-  AGENT_TRACE_ATTRIBUTES,
-  agentTraceIdentityAttributes,
-} from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
@@ -140,7 +136,7 @@ export function createAgentActionInstrumentation(input: {
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,
-                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.caller,
+                  "agent.invocation.role": "caller",
                 }
               : undefined),
           },

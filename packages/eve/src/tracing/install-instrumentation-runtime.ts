@@ -9,13 +9,15 @@ import {
   registerInstrumentationRuntime,
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
-import { createInstrumentationDrain } from "#instrumentation/drain.js";
+import { createLogger, formatError } from "#internal/logging.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
+
+const log = createLogger("tracing.install-instrumentation-runtime");
 
 /**
  * Installs the process instrumentation runtime around a collected pipeline.
@@ -70,19 +72,11 @@ export function installInstrumentationRuntime(input: {
   }
 
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
-  const providerFlushes = allProviders.map((provider) =>
-    createInstrumentationDrain(`${provider.name}.flush`, () => provider.flush?.()),
-  );
-  const providerShutdowns = allProviders.map((provider) =>
-    createInstrumentationDrain(`${provider.name}.shutdown`, () => provider.shutdown?.()),
-  );
-  const flushOtel = createInstrumentationDrain("otel.flush", () => otelRuntime?.forceFlush());
-  const shutdownOtel = createInstrumentationDrain("otel.shutdown", () => otelRuntime?.shutdown());
   let shutdown: Promise<void> | undefined;
   return registerInstrumentationRuntime({
     forceFlush: async () => {
-      await Promise.all(providerFlushes.map((flush) => flush()));
-      await flushOtel();
+      await settleAll(allProviders.map((provider) => () => provider.flush?.()));
+      await settleAll(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]);
     },
     hooks: createInstrumentationHooks({
       parallel: input.providers,
@@ -100,8 +94,8 @@ export function installInstrumentationRuntime(input: {
     samplesTrace: otelRuntime?.samplesTrace,
     shutdown: () => {
       shutdown ??= (async () => {
-        await Promise.all(providerShutdowns.map((close) => close()));
-        await shutdownOtel();
+        await settleAll(allProviders.map((provider) => () => provider.shutdown?.()));
+        await settleAll(otelRuntime === undefined ? [] : [otelRuntime.shutdown]);
       })();
       return shutdown;
     },
@@ -123,4 +117,14 @@ function sessionReleaseProvider(
     name: "eve.session-release",
     stateNamespace: "internal:session-release",
   };
+}
+
+/** One failing drain must not take the others or the step awaiting them with it. */
+async function settleAll(operations: readonly (() => void | PromiseLike<void>)[]): Promise<void> {
+  const results = await Promise.allSettled(operations.map(async (run) => run()));
+  for (const result of results) {
+    if (result.status === "rejected") {
+      log.warn("instrumentation drain failed", { error: formatError(result.reason) });
+    }
+  }
 }

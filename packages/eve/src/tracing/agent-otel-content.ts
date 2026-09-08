@@ -8,16 +8,8 @@ import { isUserMessageKind } from "#harness/messages.js";
  * payloads stay valid JSON through every truncation path.
  */
 
-import {
-  boundedTelemetryJson,
-  TELEMETRY_CONTENT_BYTES,
-  telemetryByteLength,
-  truncateTelemetryText,
-} from "#tracing/telemetry-budget.js";
-
-export const CONTENT_ATTRIBUTE_LIMIT = TELEMETRY_CONTENT_BYTES;
-const MESSAGE_LIMIT = 128;
-const PART_LIMIT = 64;
+/** Content attributes are capped so a giant payload cannot bloat a span segment. */
+export const CONTENT_ATTRIBUTE_LIMIT = 32 * 1024;
 
 /** Provider transport noise stripped from messages (not tool data). */
 const CONTENT_NOISE_KEYS = new Set(["providerOptions", "providerMetadata"]);
@@ -32,9 +24,15 @@ const TRUNCATED_MESSAGES_KEY = "eve.truncated";
  */
 export function contentAttribute(value: unknown, strip = true): string | undefined {
   if (value === undefined) return undefined;
-  return boundedTelemetryJson(value, CONTENT_ATTRIBUTE_LIMIT, {
-    omitKeys: strip ? CONTENT_NOISE_KEYS : undefined,
-  });
+  const prepared = strip ? stripContentNoise(value, 0) : value;
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(prepared);
+  } catch {
+    return undefined;
+  }
+  if (json === undefined) return undefined;
+  return textContentAttribute(json);
 }
 
 /**
@@ -44,30 +42,23 @@ export function contentAttribute(value: unknown, strip = true): string | undefin
  */
 export function messagesContentAttribute(messages: unknown): string | undefined {
   if (!Array.isArray(messages)) return contentAttribute(messages);
-  const selected = messages.slice(-MESSAGE_LIMIT);
-  const offset = messages.length - selected.length;
-  for (let omitted = 0; omitted < selected.length; omitted += 1) {
-    const prefix =
-      omitted + offset === 0
-        ? []
-        : [{ [TRUNCATED_MESSAGES_KEY]: { omittedMessages: omitted + offset } }];
-    const json = boundedTelemetryJson(
-      [...prefix, ...selected.slice(omitted)],
-      CONTENT_ATTRIBUTE_LIMIT,
-      {
-        omitKeys: CONTENT_NOISE_KEYS,
-        truncate: false,
-      },
-    );
-    if (json !== undefined) return json;
+  const stripped = stripContentNoise(messages, 0) as unknown[];
+  const full = stringifyContent(stripped);
+  if (full !== undefined && full.length <= CONTENT_ATTRIBUTE_LIMIT) return full;
+  for (let omitted = 1; omitted < stripped.length; omitted += 1) {
+    const json = stringifyContent([
+      { [TRUNCATED_MESSAGES_KEY]: { omittedMessages: omitted } },
+      ...stripped.slice(omitted),
+    ]);
+    if (json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT) return json;
   }
-  return truncateSingleMessage(selected, offset);
+  return truncateSingleMessage(stripped);
 }
 
 /** Serializes model messages using the OpenTelemetry GenAI message schema. */
 export function genAiInputMessagesAttribute(messages: unknown): string | undefined {
   if (!Array.isArray(messages)) return undefined;
-  const formatted = messages.slice(-MESSAGE_LIMIT).flatMap((message) => {
+  const formatted = messages.flatMap((message) => {
     if (!isRecord(message) || message.role === "system" || typeof message.role !== "string") {
       return [];
     }
@@ -83,17 +74,13 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
     const json = semanticJsonAttribute(formatted.slice(start));
     if (json !== undefined) return json;
   }
-  return formatted.length === 0
-    ? semanticJsonAttribute([])
-    : fitLastSemanticMessage(formatted[formatted.length - 1]!);
+  return semanticJsonAttribute([]);
 }
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
 export function genAiSystemInstructionsAttribute(instructions: unknown): string | undefined {
   const text = systemPromptAttribute(instructions);
-  return text === undefined
-    ? undefined
-    : semanticJsonAttribute([{ content: truncateTelemetryText(text, 8192), type: "text" }]);
+  return text === undefined ? undefined : semanticJsonAttribute([{ content: text, type: "text" }]);
 }
 
 /** Serializes one model response using the OpenTelemetry GenAI message schema. */
@@ -102,11 +89,13 @@ export function genAiOutputMessagesAttribute(
   finishReason: string,
 ): string | undefined {
   const parts = semanticParts(content);
-  return fitLastSemanticMessage({
-    finish_reason: finishReason === "tool-calls" ? "tool_call" : finishReason,
-    parts,
-    role: "assistant",
-  });
+  return semanticJsonAttribute([
+    {
+      finish_reason: finishReason === "tool-calls" ? "tool_call" : finishReason,
+      parts,
+      role: "assistant",
+    },
+  ]);
 }
 
 /**
@@ -119,11 +108,10 @@ export function toolResultsContentAttribute(
   results: readonly Record<string, unknown>[],
 ): string | undefined {
   if (results.length === 0) return undefined;
-  const selected = results.slice(0, PART_LIMIT);
-  const full = results.length === selected.length ? stringifyContent(selected) : undefined;
+  const full = stringifyContent(results);
   if (full !== undefined && full.length <= CONTENT_ATTRIBUTE_LIMIT) return full;
   for (let cap = CONTENT_ATTRIBUTE_LIMIT; cap >= 0; cap = cap >= 256 ? Math.floor(cap / 2) : -1) {
-    const json = stringifyContent(selected.map((entry) => cappedToolResult(entry, cap)));
+    const json = stringifyContent(results.map((entry) => cappedToolResult(entry, cap)));
     if (json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT) return json;
   }
   return undefined;
@@ -134,8 +122,8 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
   for (const key of ["input", "output", "error"]) {
     if (!(key in entry)) continue;
     const value = entry[key];
-    const text = typeof value === "string" ? value : (boundedTelemetryJson(value) ?? "");
-    out[key] = truncateTelemetryText(text, cap);
+    const text = typeof value === "string" ? value : (stringifyContent(value) ?? "");
+    out[key] = text.length <= cap ? text : `${text.slice(0, cap)}… [truncated]`;
   }
   return out;
 }
@@ -144,19 +132,15 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
 export function systemPromptAttribute(instructions: unknown): string | undefined {
   if (typeof instructions === "string") return textContentAttribute(instructions);
   if (!isRecord(instructions) && !Array.isArray(instructions)) return undefined;
-  const messages = Array.isArray(instructions)
-    ? instructions.slice(0, MESSAGE_LIMIT)
-    : [instructions];
+  const messages = Array.isArray(instructions) ? instructions : [instructions];
   const texts: string[] = [];
   for (const message of messages) {
     if (!isRecord(message)) continue;
-    if (typeof message.content === "string")
-      texts.push(truncateTelemetryText(message.content, CONTENT_ATTRIBUTE_LIMIT));
+    if (typeof message.content === "string") texts.push(message.content);
     else if (Array.isArray(message.content))
-      for (const part of message.content.slice(0, PART_LIMIT))
+      for (const part of message.content)
         if (isRecord(part) && part.type === "text" && typeof part.text === "string")
-          texts.push(truncateTelemetryText(part.text, CONTENT_ATTRIBUTE_LIMIT));
-    if (texts.join("\n\n").length >= CONTENT_ATTRIBUTE_LIMIT) break;
+          texts.push(part.text);
   }
   const joined = texts.join("\n\n").trim();
   return joined.length === 0 ? undefined : textContentAttribute(joined);
@@ -165,22 +149,32 @@ export function systemPromptAttribute(instructions: unknown): string | undefined
 /** Caps plain text, marking the cut. */
 export function textContentAttribute(text: string): string | undefined {
   if (text.length === 0) return undefined;
-  return truncateTelemetryText(text, CONTENT_ATTRIBUTE_LIMIT);
+  return text.length <= CONTENT_ATTRIBUTE_LIMIT
+    ? text
+    : `${text.slice(0, CONTENT_ATTRIBUTE_LIMIT)}… [truncated]`;
 }
 
-function truncateSingleMessage(messages: unknown[], offset = 0): string | undefined {
+function stripContentNoise(value: unknown, depth: number): unknown {
+  if (depth > 32 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((e) => stripContentNoise(e, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value))
+    if (!CONTENT_NOISE_KEYS.has(k)) out[k] = stripContentNoise(v, depth + 1);
+  return out;
+}
+
+function truncateSingleMessage(messages: unknown[]): string | undefined {
   if (messages.length === 0) return undefined;
   const last = messages[messages.length - 1];
   if (!isRecord(last)) return undefined;
-  const marker = { [TRUNCATED_MESSAGES_KEY]: { omittedMessages: offset + messages.length - 1 } };
+  const marker = { [TRUNCATED_MESSAGES_KEY]: { omittedMessages: messages.length - 1 } };
   const role = typeof last.role === "string" ? last.role : "user";
   let text = "";
-  if (typeof last.content === "string")
-    text = truncateTelemetryText(last.content, CONTENT_ATTRIBUTE_LIMIT);
+  if (typeof last.content === "string") text = last.content;
   else if (Array.isArray(last.content))
-    for (const part of last.content.slice(0, PART_LIMIT))
+    for (const part of last.content)
       if (isRecord(part) && part.type === "text" && typeof part.text === "string")
-        text += (text ? "\n" : "") + truncateTelemetryText(part.text, CONTENT_ATTRIBUTE_LIMIT);
+        text += (text ? "\n" : "") + part.text;
   for (let len = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); len > 0; len -= 256) {
     const cut = len >= text.length ? text : `${text.slice(0, len)}… [truncated]`;
     const json = stringifyContent([marker, { role, content: cut }]);
@@ -190,22 +184,23 @@ function truncateSingleMessage(messages: unknown[], offset = 0): string | undefi
 }
 
 function stringifyContent(value: unknown): string | undefined {
-  return boundedTelemetryJson(value, CONTENT_ATTRIBUTE_LIMIT, { truncate: false });
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function semanticJsonAttribute(value: unknown): string | undefined {
   const json = stringifyContent(value);
-  return json !== undefined && telemetryByteLength(json) <= CONTENT_ATTRIBUTE_LIMIT
-    ? json
-    : undefined;
+  return json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT ? json : undefined;
 }
 
 function semanticParts(content: unknown): Record<string, unknown>[] {
-  if (typeof content === "string")
-    return [{ content: truncateTelemetryText(content, 8192), type: "text" }];
+  if (typeof content === "string") return [{ content, type: "text" }];
   if (!Array.isArray(content)) return [];
   const parts: Record<string, unknown>[] = [];
-  for (const part of content.slice(-PART_LIMIT)) {
+  for (const part of content) {
     const formatted = semanticPart(part);
     if (formatted !== undefined) parts.push(formatted);
   }
@@ -218,13 +213,11 @@ function semanticPart(value: unknown): Record<string, unknown> | undefined {
     case "text":
     case "reasoning": {
       const content = typeof value.text === "string" ? value.text : value.content;
-      return typeof content === "string"
-        ? { content: truncateTelemetryText(content, 8192), type: value.type }
-        : undefined;
+      return typeof content === "string" ? { content, type: value.type } : undefined;
     }
     case "tool-call":
       return {
-        arguments: boundedSemanticValue(value.input),
+        arguments: value.input,
         id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
         name: value.toolName,
         type: "tool_call",
@@ -232,46 +225,18 @@ function semanticPart(value: unknown): Record<string, unknown> | undefined {
     case "tool-result":
       return {
         id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
-        response: boundedSemanticValue(toolResponse(value.output)),
+        response: toolResponse(value.output),
         type: "tool_call_response",
       };
     case "tool-error":
       return {
         id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
-        response: boundedSemanticValue(
-          value.error instanceof Error ? value.error.message : value.error,
-        ),
+        response: value.error instanceof Error ? value.error.message : value.error,
         type: "tool_call_response",
       };
     default:
       return { type: value.type };
   }
-}
-
-function boundedSemanticValue(value: unknown): unknown {
-  const json = boundedTelemetryJson(value, 8192);
-  return json === undefined ? undefined : JSON.parse(json);
-}
-
-function fitLastSemanticMessage(message: {
-  readonly parts: readonly Record<string, unknown>[];
-  readonly role: string;
-  readonly finish_reason?: string;
-}): string | undefined {
-  const full = semanticJsonAttribute([message]);
-  if (full !== undefined) return full;
-  for (let omitted = 1; omitted < message.parts.length; omitted++) {
-    const json = semanticJsonAttribute([
-      {
-        ...message,
-        parts: [{ type: "text", content: "... [truncated]" }, ...message.parts.slice(omitted)],
-      },
-    ]);
-    if (json !== undefined) return json;
-  }
-  return semanticJsonAttribute([
-    { ...message, parts: [{ type: "text", content: "... [truncated]" }] },
-  ]);
 }
 
 function toolResponse(output: unknown): unknown {

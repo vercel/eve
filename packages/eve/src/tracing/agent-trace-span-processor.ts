@@ -14,10 +14,8 @@ interface SpanLike {
 export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
-  readonly #activeTraceIds = new Set<string>();
   readonly #completedTraceIds = new Set<string>();
   readonly #rememberedTraceIds = new Set<string>();
-  readonly #sessionTraceIds = new Map<string, Set<string>>();
   readonly #traceOwners = new Map<string, string>();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
@@ -32,14 +30,10 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     const sessionId = span.attributes["agent.session.id"];
     if (typeof sessionId === "string") {
       const traceId = span.spanContext().traceId;
-      const known = this.#ownedTraceIds.has(traceId);
-      this.#ownedTraceIds.add(traceId);
+      const known = this.#ownedTraceIds.has(traceId) || this.#rememberedTraceIds.has(traceId);
       if (!known) {
-        this.#activeTraceIds.add(traceId);
+        this.#ownedTraceIds.add(traceId);
         this.#traceOwners.set(traceId, sessionId);
-        const owned = this.#sessionTraceIds.get(sessionId) ?? new Set<string>();
-        owned.add(traceId);
-        this.#sessionTraceIds.set(sessionId, owned);
       }
     }
     if (!this.#accepts(span)) return;
@@ -60,20 +54,14 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
 
   /** Trace IDs protected by an unfinished activation or pending final writes. */
   activeTraceIds(): ReadonlySet<string> {
-    return this.#activeTraceIds;
+    return this.#ownedTraceIds;
   }
 
   /** Called only after writes drain; recently completed IDs still accept late descendants. */
   releaseCompletedTraces(): boolean {
     if (this.#completedTraceIds.size === 0) return false;
     for (const traceId of this.#completedTraceIds) {
-      this.#activeTraceIds.delete(traceId);
-      const owner = this.#traceOwners.get(traceId);
-      if (owner !== undefined) {
-        const owned = this.#sessionTraceIds.get(owner);
-        owned?.delete(traceId);
-        if (owned?.size === 0) this.#sessionTraceIds.delete(owner);
-      }
+      this.#ownedTraceIds.delete(traceId);
       this.#traceOwners.delete(traceId);
       this.#rememberedTraceIds.add(traceId);
     }
@@ -81,27 +69,21 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     while (this.#rememberedTraceIds.size > REMEMBERED_TRACE_LIMIT) {
       const oldest = this.#rememberedTraceIds.values().next().value!;
       this.#rememberedTraceIds.delete(oldest);
-      this.#ownedTraceIds.delete(oldest);
     }
     return true;
   }
 
-  /**
-   * Forgets every trace one root session owned, reporting whether it owned any.
-   * A subagent child owns none, so releasing one reports `false` and leaves the
-   * shared trace pinned until its root finishes.
-   */
+  /** Releases only traces owned by this session. */
   releaseSession(sessionId: string): boolean {
-    const owned = this.#sessionTraceIds.get(sessionId);
-    if (owned === undefined) return false;
-    for (const traceId of owned) {
+    let released = false;
+    for (const [traceId, owner] of this.#traceOwners) {
+      if (owner !== sessionId) continue;
+      released = true;
       this.#ownedTraceIds.delete(traceId);
-      this.#activeTraceIds.delete(traceId);
       this.#completedTraceIds.delete(traceId);
       this.#traceOwners.delete(traceId);
     }
-    this.#sessionTraceIds.delete(sessionId);
-    return true;
+    return released;
   }
 
   async shutdown(): Promise<void> {
@@ -111,7 +93,8 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   #accepts(span: SpanLike): boolean {
     return (
       span.instrumentationScope?.name !== "workflow" &&
-      this.#ownedTraceIds.has(span.spanContext().traceId)
+      (this.#ownedTraceIds.has(span.spanContext().traceId) ||
+        this.#rememberedTraceIds.has(span.spanContext().traceId))
     );
   }
 }

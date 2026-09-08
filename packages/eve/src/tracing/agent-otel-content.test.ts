@@ -117,7 +117,7 @@ describe("toolResultsContentAttribute", () => {
     const parsed = JSON.parse(json!) as Array<Record<string, unknown>>;
     expect(parsed[0]!.toolName).toBe("web_search");
     expect(parsed[0]!.input).toBe('{"query":"weather"}');
-    expect(parsed[0]!.output).toContain("[truncated]");
+    expect(parsed[0]!.output).toContain("… [truncated]");
   });
 
   it("preserves the error key through truncation", () => {
@@ -130,7 +130,7 @@ describe("toolResultsContentAttribute", () => {
     ]);
     const parsed = JSON.parse(json!) as Array<Record<string, unknown>>;
     expect(parsed[0]!.error).toContain("quota exceeded");
-    expect(parsed[0]!.error).toContain("[truncated]");
+    expect(parsed[0]!.error).toContain("… [truncated]");
     expect(parsed[0]!.output).toBeUndefined();
   });
 

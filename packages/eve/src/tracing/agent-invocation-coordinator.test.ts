@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
-import { AgentSpanIdGenerator, deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
+import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 
@@ -20,15 +19,8 @@ const sessionState = {
   ],
 };
 
-const RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
-
-afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[RUNTIME_KEY];
-});
-
 describe("agent invocation trace coordinator", () => {
   it("keeps parallel invocation identities and caller contexts independent", async () => {
-    installRuntime();
     let serializedContext = await contextWithActionAnchor();
 
     const first = prepare(serializedContext, "workflow:first");
@@ -57,7 +49,6 @@ describe("agent invocation trace coordinator", () => {
   });
 
   it("replays one invocation with the same caller coordinates", async () => {
-    installRuntime();
     const serializedContext = await contextWithActionAnchor();
 
     const first = prepare(serializedContext, "workflow:first");
@@ -68,7 +59,6 @@ describe("agent invocation trace coordinator", () => {
   });
 
   it("upgrades the built-in subagent action instead of creating a duplicate caller", async () => {
-    installRuntime();
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
@@ -100,7 +90,6 @@ describe("agent invocation trace coordinator", () => {
   });
 
   it("uses the persisted action anchor after the live action is gone", async () => {
-    installRuntime();
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
@@ -162,7 +151,6 @@ describe("agent invocation trace coordinator", () => {
   });
 
   it("records settlement on the matching invocation only", async () => {
-    installRuntime();
     const first = prepare(await contextWithActionAnchor(), "workflow:first");
     const second = prepare(first.serializedContext, "workflow:second");
     const serializedContext = settleAgentInvocationTrace({
@@ -250,20 +238,4 @@ function outerAction() {
     stepIndex: 0,
     turnId: "turn-1",
   };
-}
-
-function installRuntime(): void {
-  registerInstrumentationRuntime({
-    forceFlush: async () => undefined,
-    hooks: undefined as never,
-    idGenerator: new AgentSpanIdGenerator(),
-    otelSettings: undefined,
-    prepareSessionTrace: async () => ({
-      spanId: "4".repeat(16),
-      traceFlags: 1,
-      traceId: "5".repeat(32),
-    }),
-    runInContext: (_operation, callback) => callback(),
-    shutdown: async () => undefined,
-  });
 }

@@ -96,9 +96,6 @@ export interface AgentTraceStateStore {
   getAction(
     idempotencyKey: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
-  getInvocation(
-    idempotencyKey: string,
-  ): AgentInvocationTraceState | undefined | PromiseLike<AgentInvocationTraceState | undefined>;
   getSession(
     sessionId: string,
   ): AgentSessionTraceState | undefined | PromiseLike<AgentSessionTraceState | undefined>;
@@ -197,10 +194,6 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
 
   getAction(idempotencyKey: string): AgentActionTraceState | undefined {
     return this.#actions.get(idempotencyKey);
-  }
-
-  getInvocation(idempotencyKey: string): AgentInvocationTraceState | undefined {
-    return this.#invocations.get(idempotencyKey);
   }
 
   getSession(sessionId: string): AgentSessionTraceState | undefined {

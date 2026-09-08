@@ -406,10 +406,6 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
     return contextStorage.getStore()?.get(AgentTraceContextKey)?.actions[idempotencyKey];
   }
 
-  getInvocation(idempotencyKey: string): AgentInvocationTraceState | undefined {
-    return contextStorage.getStore()?.get(AgentTraceContextKey)?.invocations[idempotencyKey];
-  }
-
   getSession(sessionId: string): AgentSessionTraceState | undefined {
     return contextStorage.getStore()?.get(AgentTraceContextKey)?.sessions[sessionId];
   }

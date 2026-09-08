@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Emit one bounded OpenTelemetry trace per agent activation, linking a child's first activation to its caller and retaining `agent.*` lifecycle spans. Trace capture now preserves error privacy across worker replacement, bounds telemetry work, and keeps local delegation labels and usage totals consistent with the exported spans.
+Emit a separate OpenTelemetry trace per agent activation, linked to its caller and correlated by conversation ID. Dispatch uses `agent.action` and `execute_tool` spans; only agent execution uses `invoke_agent`, with error privacy and usage preserved across worker replacement.
