@@ -1,6 +1,6 @@
 /**
  * Scope-parameterized authorization flow shared by MCP connections and
- * authored tools that declare `auth`.
+ * authored tools and workflow steps using inline providers.
  *
  * A *scope* names the framework-owned callback URL — a connection name for
  * an MCP connection, a tool name for tool-hosted auth. Connection-hosted
@@ -12,7 +12,13 @@
  */
 
 import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import {
+  type ConnectionAuthorizationChallenge,
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
@@ -54,6 +60,131 @@ export interface ScopedAuthorization {
   readonly scope: string;
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connection: ConnectionAuthorizationContext;
+}
+
+/** One execution's token capability and authorization interruption boundary. */
+export function createAuthorizationExecution(
+  options: {
+    readonly completeAuthorization?: typeof completeScopedAuthorization;
+  } = {},
+) {
+  const justAuthorized = new Set<string>();
+
+  async function complete(scoped: ScopedAuthorization): Promise<void> {
+    const key = scoped.instanceId ?? scoped.scope;
+    if (
+      !justAuthorized.has(key) &&
+      (await (options.completeAuthorization ?? completeScopedAuthorization)(scoped))
+    ) {
+      justAuthorized.add(key);
+    }
+  }
+
+  function requireAuth(scoped: ScopedAuthorization, cause?: unknown): never {
+    throw new ScopedAuthorizationRequiredError(
+      scoped,
+      justAuthorized.has(scoped.instanceId ?? scoped.scope),
+      cause,
+    );
+  }
+
+  return {
+    complete,
+    async getToken(scoped: ScopedAuthorization): Promise<TokenResult> {
+      await complete(scoped);
+      try {
+        return await resolveScopedToken(scoped);
+      } catch (error) {
+        if (!isConnectionAuthorizationRequiredError(error)) throw error;
+        return requireAuth(scoped, error);
+      }
+    },
+    requireAuth,
+    async handleError(error: unknown, scoped?: ScopedAuthorization): Promise<AuthorizationSignal> {
+      if (scoped !== undefined && isConnectionAuthorizationRequiredError(error)) {
+        return await handleAuthorizationError(
+          new ScopedAuthorizationRequiredError(
+            scoped,
+            justAuthorized.has(scoped.instanceId ?? scoped.scope),
+            error,
+          ),
+          // Connection transports evict refused bearers when classifying their errors.
+          { evictToken: false },
+        );
+      }
+      return await handleAuthorizationError(error);
+    },
+    run: executeWithAuthorization,
+  };
+}
+
+class ScopedAuthorizationRequiredError extends Error {
+  readonly scoped: ScopedAuthorization;
+  readonly justAuthorized: boolean;
+
+  constructor(scoped: ScopedAuthorization, justAuthorized: boolean, cause?: unknown) {
+    super("Authorization required.", { cause });
+    this.name = "ScopedAuthorizationRequiredError";
+    this.scoped = scoped;
+    this.justAuthorized = justAuthorized;
+  }
+}
+
+function isScopedAuthorizationRequiredError(
+  error: unknown,
+): error is ScopedAuthorizationRequiredError {
+  return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
+}
+
+/** Produces the shared challenge; the caller owns parking and resumption. */
+export async function handleAuthorizationError(
+  error: unknown,
+  options: { readonly evictToken: boolean } = { evictToken: true },
+): Promise<AuthorizationSignal> {
+  if (!isScopedAuthorizationRequiredError(error)) throw error;
+  const { scoped } = error;
+  if (error.justAuthorized) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
+      reason: "token_rejected_after_authorization",
+      retryable: false,
+    });
+  }
+
+  if (options.evictToken) await evictScopedToken(scoped);
+  const signal = await startScopedAuthorization(scoped);
+  if (signal !== undefined) return signal;
+
+  if (supportsInteractiveAuthorization(scoped.authorization)) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Authorization for "${scoped.scope}" requires sign-in, but no authorization callback URL could be minted for this run (missing session context).`,
+      reason: "authorization_callback_unavailable",
+      retryable: false,
+    });
+  }
+  throw error.cause ?? new ConnectionAuthorizationRequiredError(scoped.scope);
+}
+
+function executeWithAuthorization(
+  execute: () => unknown,
+): Promise<unknown> | AsyncIterable<unknown> {
+  // Keep generator results as iterables, including errors raised during iteration.
+  try {
+    const output = execute();
+    return isAsyncIterable(output)
+      ? handleIterable(output)
+      : Promise.resolve(output).catch(handleAuthorizationError);
+  } catch (error) {
+    return handleAuthorizationError(error);
+  }
+}
+
+async function* handleIterable(output: AsyncIterable<unknown>): AsyncIterable<unknown> {
+  try {
+    for await (const value of output) yield value;
+  } catch (error) {
+    yield await handleAuthorizationError(error);
+  }
 }
 
 /**

@@ -1,59 +1,11 @@
-/**
- * Tool-hosted authorization wiring for authored tools that resolve auth
- * providers inline with {@link ToolContext.getToken} and
- * {@link ToolContext.requireAuth}.
- *
- * Mirrors the connection authorization flow used by connection search but scopes the
- * per-step token cache and framework-owned callback URL by the tool's
- * path-derived name and provider key instead of a connection name. All the shared
- * machinery — principal resolution, cache reads/writes, the park/resume
- * webhook dance, and the loop guard — lives in
- * `runtime/connections/scoped-authorization.ts`; this module is the thin
- * execution-layer adapter that wraps one tool's `execute`.
- */
-
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import {
-  ConnectionAuthorizationFailedError,
-  ConnectionAuthorizationRequiredError,
-  isConnectionAuthorizationRequiredError,
-} from "#connections/errors.js";
 import type { ApprovalResponseAuth } from "#approval/definition.js";
-import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#tools/definition.js";
-import { type AuthorizationChallenge, requestAuthorization } from "#harness/authorization.js";
-import {
-  type AuthorizationDefinition,
-  supportsInteractiveAuthorization,
-  type TokenResult,
-} from "#shared/connection-types.js";
-import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
-import {
-  completeScopedAuthorization,
-  evictScopedToken,
-  resolveScopedToken,
-  startScopedAuthorization,
-  type ScopedAuthorization,
-} from "#runtime/connections/scoped-authorization.js";
-import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { ToolAuthOptions, ToolContext, ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
-import { isAsyncIterable } from "#shared/async-iterable.js";
+import { createAuthorizationContext } from "#runtime/authorization-context.js";
+import { handleAuthorizationError } from "#runtime/connections/scoped-authorization.js";
 
-/**
- * Wraps one authored tool's `execute` with a context that supports inline
- * provider auth (`ctx.getToken(connect("..."))`).
- *
- * On a thrown provider-scoped authorization request — implicit from
- * `ctx.getToken(provider)` or explicit via `ctx.requireAuth(provider)` — the
- * wrapper either fails terminally (token rejected immediately after sign-in)
- * or evicts the rejected token from the per-step cache and starts the
- * interactive flow, returning an `AuthorizationSignal` to park the turn.
- * Interactive strategies never rethrow the raw `Required` into the model: if
- * no callback URL can be minted, they fail with a classified
- * {@link ConnectionAuthorizationFailedError} instead. Non-interactive
- * strategies rethrow the original error because they have no consent flow to
- * park on.
- */
 type ToolExecuteWithAuthInput<TInput> = {
   readonly scope: string;
 } & (
@@ -67,101 +19,37 @@ type ToolExecuteWithAuthInput<TInput> = {
     }
 );
 
-export function createToolExecuteWithAuth<TInput>(
-  input: ToolExecuteWithAuthInput<TInput>,
-): (
-  toolInput: TInput,
-  options: ToolExecuteOptions,
-  task?: TaskExec,
-) => Promise<unknown> | AsyncIterable<unknown> {
-  const { scope } = input;
-
-  // An async wrapper would turn an async generator into Promise<AsyncIterable>,
-  // which the AI SDK treats as one non-serializable terminal output.
-  return (
-    toolInput: TInput,
-    options: ToolExecuteOptions,
-    task?: TaskExec,
-  ): Promise<unknown> | AsyncIterable<unknown> => {
-    const justAuthorizedScopes = new Set<string>();
-    const ctx = buildToolContext({
-      inlineAuthState: {},
-      justAuthorizedScopes,
-      options,
-      scope,
-    });
-
-    try {
-      let output: unknown;
+/** Supplies the shared auth capability to one authored tool execution. */
+export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInput<TInput>) {
+  return (toolInput: TInput, options: ToolExecuteOptions, task?: TaskExec) => {
+    const auth = createAuthorizationContext({ scope: input.scope });
+    const ctx: ToolContext = {
+      ...buildBaseToolContext({ options, toolName: input.scope }),
+      getToken: auth.getToken,
+      requireAuth: auth.requireAuth,
+    };
+    return auth.run(() => {
       if (input.execution === "background") {
-        if (task === undefined) {
+        if (task === undefined)
           throw new Error("Background tool execution requires a task runtime.");
-        }
-        output = input.execute(toolInput, ctx, task);
-      } else {
-        output = input.execute(toolInput, ctx, task);
+        return input.execute(toolInput, ctx, task);
       }
-      if (isAsyncIterable(output)) {
-        return handleToolIterableErrors(output);
-      }
-      return Promise.resolve(output).catch(handleToolError);
-    } catch (err) {
-      return handleToolError(err);
-    }
-
-    async function handleToolError(error: unknown): Promise<unknown> {
-      if (isToolAuthorizationRequiredError(error)) {
-        return await handleAuthorizationRequests(error.requests);
-      }
-      throw error;
-    }
-
-    async function* handleToolIterableErrors(
-      output: AsyncIterable<unknown>,
-    ): AsyncIterable<unknown> {
-      try {
-        for await (const value of output) {
-          yield value;
-        }
-      } catch (error) {
-        yield await handleToolError(error);
-      }
-    }
+      return input.execute(toolInput, ctx, task);
+    });
   };
 }
 
-/** Builds the narrow token capability used by approval response authorizers. */
+/** Binds the same capability to the person responding to an approval. */
 export function buildApprovalResponseAuth(input: {
   readonly responder: SessionAuthContext;
   readonly scope: string;
 }): ApprovalResponseAuth {
-  const inlineAuthState: InlineAuthState = {};
-  const justAuthorizedScopes = new Set<string>();
+  const auth = createAuthorizationContext({ scope: input.scope, boundResponder: input.responder });
   return {
-    async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
-      if (provider === undefined) throw missingProviderError("ctx.getToken");
-      return await resolveInlineToken({
-        boundResponder: input.responder,
-        inlineAuthState,
-        justAuthorizedScopes,
-        options: namespaceApprovalAuthOptions(input.scope, options),
-        provider,
-        toolScope: input.scope,
-      });
-    },
-    requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
-      if (provider === undefined) throw missingProviderError("ctx.requireAuth");
-      const scoped = buildInlineScopedAuthorization({
-        boundResponder: input.responder,
-        inlineAuthState,
-        options: namespaceApprovalAuthOptions(input.scope, options),
-        provider,
-        toolScope: input.scope,
-      });
-      throw new ToolAuthorizationRequiredError([
-        { justAuthorized: justAuthorizedScopes.has(scoped.scope), scoped },
-      ]);
-    },
+    getToken: (provider, options) =>
+      auth.getToken(provider, namespaceApprovalAuthOptions(input.scope, options)),
+    requireAuth: (provider, options) =>
+      auth.requireAuth(provider, namespaceApprovalAuthOptions(input.scope, options)),
   };
 }
 
@@ -176,243 +64,5 @@ function namespaceApprovalAuthOptions(
 
 /** Starts authorization requested by an approval response authorizer. */
 export async function handleApprovalResponsePolicyError(error: unknown): Promise<unknown> {
-  if (!isToolAuthorizationRequiredError(error)) throw error;
-  return await handleAuthorizationRequests(error.requests);
-}
-
-function buildToolContext(input: {
-  readonly options: ToolExecuteOptions;
-  readonly scope: string;
-  readonly justAuthorizedScopes: Set<string>;
-  readonly inlineAuthState: InlineAuthState;
-}): ToolContext {
-  const { scope, justAuthorizedScopes, inlineAuthState } = input;
-  const base = buildBaseToolContext({ options: input.options, toolName: scope });
-  return {
-    ...base,
-    async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
-      if (provider === undefined) throw missingProviderError("ctx.getToken");
-      return await resolveInlineToken({
-        inlineAuthState,
-        justAuthorizedScopes,
-        options,
-        provider,
-        toolScope: scope,
-      });
-    },
-    requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
-      if (provider === undefined) throw missingProviderError("ctx.requireAuth");
-      const scoped = buildInlineScopedAuthorization({
-        inlineAuthState,
-        options,
-        provider,
-        toolScope: scope,
-      });
-      throw new ToolAuthorizationRequiredError([
-        {
-          justAuthorized: justAuthorizedScopes.has(scoped.scope),
-          scoped,
-        },
-      ]);
-    },
-  };
-}
-
-async function resolveInlineToken(input: {
-  readonly boundResponder?: SessionAuthContext;
-  readonly toolScope: string;
-  readonly provider: ToolAuthProvider;
-  readonly options?: ToolAuthOptions;
-  readonly justAuthorizedScopes: Set<string>;
-  readonly inlineAuthState: InlineAuthState;
-}): Promise<TokenResult> {
-  const { justAuthorizedScopes } = input;
-  const scoped = buildInlineScopedAuthorization(input);
-  if (!justAuthorizedScopes.has(scoped.scope) && (await completeScopedAuthorization(scoped))) {
-    justAuthorizedScopes.add(scoped.scope);
-  }
-
-  try {
-    return await resolveScopedToken(scoped);
-  } catch (err) {
-    if (!isConnectionAuthorizationRequiredError(err)) throw err;
-    throw new ToolAuthorizationRequiredError([
-      {
-        cause: err,
-        justAuthorized: justAuthorizedScopes.has(scoped.scope),
-        scoped,
-      },
-    ]);
-  }
-}
-
-async function handleAuthorizationRequests(
-  requests: readonly ToolAuthorizationRequiredRequest[],
-): Promise<unknown> {
-  const challenges: AuthorizationChallenge[] = [];
-  let nonInteractiveError: Error | undefined;
-
-  for (const request of requests) {
-    const { scoped } = request;
-
-    // Loop guard: a token minted this turn that is still rejected
-    // means the grant itself is broken — fail terminally instead of
-    // re-prompting into an infinite sign-in loop.
-    if (request.justAuthorized) {
-      throw new ConnectionAuthorizationFailedError(scoped.scope, {
-        message: `Tool "${scoped.scope}" rejected the token immediately after authorization.`,
-        reason: "token_rejected_after_authorization",
-        retryable: false,
-      });
-    }
-
-    // The resolved bearer was rejected (a downstream 401 mapped to
-    // requireAuth, or getToken re-reporting Required). Drop it from
-    // every cache layer — eve's per-step cache and the strategy's own
-    // (e.g. the @vercel/connect token cache) — so the
-    // re-authorization re-resolves a genuinely fresh token instead of
-    // re-reading the rejected one. Mirrors the MCP client.
-    await evictScopedToken(scoped);
-
-    const signal = await startScopedAuthorization(scoped);
-    if (signal !== undefined) {
-      challenges.push(...signal.challenges);
-      continue;
-    }
-
-    // No park signal. For an interactive strategy this means the
-    // framework could not mint a callback URL (no session id / base
-    // URL in context). Never let the raw `Required` reach the model —
-    // it improvises by surfacing the auth URL as text and loops
-    // (see research/per-tool-auth-known-issues.md, issue 2). Fail with
-    // a classified, terminal authorization error instead. Non-interactive
-    // strategies have no consent flow, so their original error is the
-    // right thing for the model to see.
-    if (supportsInteractiveAuthorization(scoped.authorization)) {
-      throw new ConnectionAuthorizationFailedError(scoped.scope, {
-        message:
-          `Tool "${scoped.scope}" requires sign-in, but no authorization callback URL ` +
-          `could be minted for this run (missing session context).`,
-        reason: "authorization_callback_unavailable",
-        retryable: false,
-      });
-    }
-
-    nonInteractiveError ??=
-      request.cause instanceof Error
-        ? request.cause
-        : new ConnectionAuthorizationRequiredError(scoped.scope);
-  }
-
-  if (challenges.length > 0) {
-    return requestAuthorization(challenges);
-  }
-
-  throw nonInteractiveError ?? new Error("Tool authorization is required.");
-}
-
-function buildInlineScopedAuthorization(input: {
-  readonly boundResponder?: SessionAuthContext;
-  readonly toolScope: string;
-  readonly provider: ToolAuthProvider;
-  readonly options?: ToolAuthOptions;
-  readonly inlineAuthState: InlineAuthState;
-}): ScopedAuthorization {
-  const authorization = normalizeInlineProvider(input.provider, input.options);
-  return {
-    authorization,
-    boundResponder: input.boundResponder,
-    connection: input.options?.connection ?? { url: "" },
-    scope:
-      input.options?.authKey === undefined
-        ? deriveInlineScope({
-            authorization,
-            inlineAuthState: input.inlineAuthState,
-            provider: input.provider,
-            toolScope: input.toolScope,
-          })
-        : validateInlineAuthKey(input.options.authKey),
-  };
-}
-
-function normalizeInlineProvider(
-  provider: ToolAuthProvider,
-  options: ToolAuthOptions | undefined,
-): AuthorizationDefinition {
-  const authorization = normalizeAuthorizationSpec(provider, "ctx.getToken:", "provider");
-  if (options?.displayName === undefined) {
-    return authorization;
-  }
-  if (options.displayName.length === 0) {
-    throw new Error(`ctx.getToken: The "options.displayName" field must be a non-empty string.`);
-  }
-  return { ...authorization, displayName: options.displayName };
-}
-
-function deriveInlineScope(input: {
-  readonly toolScope: string;
-  readonly authorization: AuthorizationDefinition;
-  readonly provider: ToolAuthProvider;
-  readonly inlineAuthState: InlineAuthState;
-}): string {
-  const connector = input.authorization.vercelConnect?.connector;
-  if (connector !== undefined) {
-    return `${input.toolScope}__${sanitizeScopeSegment(connector)}`;
-  }
-
-  if (input.inlineAuthState.anonymousProvider === undefined) {
-    input.inlineAuthState.anonymousProvider = input.provider;
-  } else if (input.inlineAuthState.anonymousProvider !== input.provider) {
-    throw new Error(
-      `ctx.getToken: Multiple inline auth providers without provider metadata need explicit auth keys. ` +
-        `Pass options.authKey for each provider, for example ` +
-        `ctx.getToken(auth, { authKey: "github" }).`,
-    );
-  }
-
-  return `${input.toolScope}__inline_auth`;
-}
-
-function validateInlineAuthKey(authKey: string): string {
-  if (!/^[A-Za-z0-9_.:-]+$/u.test(authKey)) {
-    throw new Error(
-      `ctx.getToken: The "options.authKey" field must contain only letters, digits, "_", "-", ".", or ":".`,
-    );
-  }
-  return authKey;
-}
-
-function sanitizeScopeSegment(value: string): string {
-  const sanitized = value.replace(/[^A-Za-z0-9_.:-]+/gu, "_").replace(/^_+|_+$/gu, "");
-  return sanitized.length > 0 ? sanitized : "provider";
-}
-
-interface ToolAuthorizationRequiredRequest {
-  readonly scoped: ScopedAuthorization;
-  readonly justAuthorized: boolean;
-  readonly cause?: unknown;
-}
-
-interface InlineAuthState {
-  anonymousProvider?: ToolAuthProvider;
-}
-
-class ToolAuthorizationRequiredError extends Error {
-  readonly requests: readonly ToolAuthorizationRequiredRequest[];
-
-  constructor(requests: readonly ToolAuthorizationRequiredRequest[]) {
-    super("Tool authorization required.");
-    this.name = "ToolAuthorizationRequiredError";
-    this.requests = requests;
-  }
-}
-
-function isToolAuthorizationRequiredError(err: unknown): err is ToolAuthorizationRequiredError {
-  return err instanceof Error && err.name === "ToolAuthorizationRequiredError";
-}
-
-function missingProviderError(method: "ctx.getToken" | "ctx.requireAuth"): Error {
-  return new Error(
-    `${method}: Pass an auth provider, for example ${method}(connect("github/myagent")).`,
-  );
+  return await handleAuthorizationError(error);
 }
