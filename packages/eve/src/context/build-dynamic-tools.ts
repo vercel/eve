@@ -111,8 +111,18 @@ export function replayDynamicTools(
       "labelComplete",
       entry.callbacks.label?.complete,
     );
-    const labelDelta = bindDynamicCallback(entry, owner, "labelDelta", entry.callbacks.label?.delta);
-    const labelStart = bindDynamicCallback(entry, owner, "labelStart", entry.callbacks.label?.start);
+    const labelDelta = bindDynamicCallback(
+      entry,
+      owner,
+      "labelDelta",
+      entry.callbacks.label?.delta,
+    );
+    const labelStart = bindDynamicCallback(
+      entry,
+      owner,
+      "labelStart",
+      entry.callbacks.label?.start,
+    );
     const toModelOutput = bindDynamicCallback(
       entry,
       owner,
