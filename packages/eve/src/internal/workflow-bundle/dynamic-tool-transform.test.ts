@@ -52,6 +52,7 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
+        label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
@@ -77,7 +78,10 @@ async function transformAndEval(
   };
 }
 
-type StampedCallbacks = Record<string, { callback: Function; closure: Record<string, unknown> }>;
+type StampedCallback = { callback: Function; closure: Record<string, unknown> };
+type StampedCallbacks = Record<string, StampedCallback> & {
+  label?: { complete?: StampedCallback; delta?: StampedCallback; start?: StampedCallback };
+};
 
 function durableCallbacks(tool: unknown): StampedCallbacks {
   return (tool as Record<symbol, StampedCallbacks>)[
@@ -104,7 +108,10 @@ import { defineDynamic, defineTool } from "eve/tools";
 export default defineDynamic({
   events: {
     "session.started": async () => {
+      const labelPrefix = "Deploy";
       const executePrefix = "execute";
+      const resultPrefix = "Deployed to";
+      const updateSuffix = " sources";
       const requestReason = "confirm";
       const allowedResponder = "user-123";
       const projectionPrefix = "visible";
@@ -112,6 +119,17 @@ export default defineDynamic({
         guarded: defineTool({
           description: "Guarded",
           inputSchema: { type: "object" },
+          label: {
+            start(input) {
+              return labelPrefix + " " + input.value;
+            },
+            complete(_input, output) {
+              return resultPrefix + " " + output.url;
+            },
+            delta(_input, partial) {
+              return partial.phase + updateSuffix;
+            },
+          },
           approval: {
             request(ctx) {
               return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
@@ -142,18 +160,29 @@ export default defineDynamic({
 
     expect(Object.keys(callbacks)).toEqual([
       "execute",
+      "label",
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
     ]);
     expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
+    expect(callbacks.label?.start?.closure).toEqual({ labelPrefix: "Deploy" });
+    expect(callbacks.label?.complete?.closure).toEqual({ resultPrefix: "Deployed to" });
+    expect(callbacks.label?.delta?.closure).toEqual({ updateSuffix: " sources" });
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
-    expect(new Set(Object.values(callbacks).map((callback) => callback!.callback)).size).toBe(4);
-    for (const callback of Object.values(callbacks)) {
-      expect(callback!.callback).toBeTypeOf("function");
-    }
+    const callbackValues = [
+      callbacks.execute,
+      callbacks.label?.start,
+      callbacks.label?.complete,
+      callbacks.label?.delta,
+      callbacks.approvalRequest,
+      callbacks.approvalResponse,
+      callbacks.toModelOutput,
+    ];
+    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(7);
+    for (const callback of callbackValues) expect(callback!.callback).toBeTypeOf("function");
   });
 
   it("preserves top-level function-form approval properties", async () => {

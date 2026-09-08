@@ -985,19 +985,20 @@ describe("createToolLoopHarness", () => {
     ["literal", EMPTY_DELIVERY_SENTINEL],
     ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],
   ])(
-    "parks without delivery when a terminal response contains the %s sentinel",
+    "parks without delivery when a terminal response is only the %s sentinel",
     async (_, sentinel) => {
+      const message = ` \n${sentinel}\t `;
       setupMockAgent({
         finishReason: "stop",
         response: {
           messages: [
             {
-              content: `internal ${sentinel} trailing`,
+              content: message,
               role: "assistant",
             },
           ],
         },
-        text: `internal ${sentinel} trailing`,
+        text: message,
         toolCalls: [],
         toolResults: [],
       });
@@ -1011,6 +1012,43 @@ describe("createToolLoopHarness", () => {
       expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
       expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
       expect(events).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message: null }),
+          type: "message.completed",
+        }),
+      );
+    },
+  );
+
+  it.each([EMPTY_DELIVERY_SENTINEL, "&lt;eve-empty-delivery/&gt;"])(
+    "delivers and persists explanations that quote %s",
+    async (sentinel) => {
+      const message = `The pending-task instruction requires \`${sentinel}\` and no other text.`;
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: message, role: "assistant" }] },
+        text: message,
+        toolCalls: [],
+        toolResults: [],
+      });
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const result = await runStep(createTestSession(), { message: "Hi" });
+
+      expect(result.next).toBeNull();
+      expect(result.session.history).toEqual([
+        { content: "Hi", role: "user" },
+        { content: message, role: "assistant" },
+      ]);
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message }),
+          type: "message.completed",
+        }),
+      );
+      expect(events).not.toContainEqual(
         expect.objectContaining({
           data: expect.objectContaining({ message: null }),
           type: "message.completed",

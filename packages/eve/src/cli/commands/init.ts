@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
+import type { EveCliSetupStep, EveCliSetupTerminalResult } from "#cli/telemetry/index.js";
 import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -128,10 +129,6 @@ function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): st
   return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
 }
 
-/**
- * Adds the agent to an existing project and returns the
- * detected manager, which drives the install and dev handoff.
- */
 async function addToExistingProject(
   targetPath: string,
   options: InitCommandOptions,
@@ -173,10 +170,6 @@ async function addToExistingProject(
   };
 }
 
-/**
- * The manager a fresh scaffold will be owned by: an existing ancestor project
- * manager first, then the package runner that launched the CLI, then pnpm.
- */
 async function resolveScaffoldPackageManager(
   projectPath: string,
   dependencies: InitCommandDependencies,
@@ -360,8 +353,9 @@ async function runInitSteps(input: {
   options: InitCommandOptions;
   parentDirectory: string;
   target: string | undefined;
+  trackStep?: (step: EveCliSetupStep) => void;
 }): Promise<InitResult> {
-  const { dependencies, logger, options, parentDirectory, target } = input;
+  const { dependencies, logger, options, parentDirectory, target, trackStep } = input;
   const debug = isLogLevelEnabled("debug");
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const initTarget = await resolveInitTarget({ parentDirectory, target });
@@ -371,6 +365,7 @@ async function runInitSteps(input: {
   progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
+    trackStep?.("scaffold");
     progress.update(initTarget.kind === "fresh" ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
     const agentStartedAt = dependencies.now();
@@ -462,6 +457,7 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger);
     }
 
+    trackStep?.("install_dependencies");
     progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
@@ -532,6 +528,7 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
+      trackStep?.("initialize_git");
       progress.update("Initializing Git repository");
       initLog.debug("initializing git repository");
       return {
@@ -549,25 +546,16 @@ async function runInitSteps(input: {
   }
 }
 
-/**
- * Creates a new eve agent (`target` is a project name), or adds one to an
- * existing project (`target` is a directory), without external provisioning.
- * A fresh in-place scaffold asks whether to use the current directory or a new
- * subdirectory when the current directory is not empty. Coding-agent launches
- * must pass an explicit subdirectory instead.
- *
- * Runs launched by a coding agent get the dev command printed instead of
- * spawned after scaffolding, since the dev TUI would wedge the launching agent.
- *
- * For extension packages, use `eve extension init` instead.
- */
 export async function runInitCommand(
   logger: InitCliLogger,
   parentDirectory: string,
   target: string | undefined,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
+  trackStep?: (step: EveCliSetupStep) => void,
+  trackTerminal?: (step: EveCliSetupStep, result: EveCliSetupTerminalResult) => void,
 ): Promise<void> {
+  trackStep?.("resolve_target");
   if (
     await addAgentsToWorkspace(
       logger,
@@ -576,17 +564,31 @@ export async function runInitCommand(
       options,
       dependencies.validateModelSlug,
     )
-  )
+  ) {
+    trackStep?.("handoff");
+    trackTerminal?.("handoff", "completed");
     return;
+  }
 
   let result: InitResult;
   try {
-    result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
+    result = await runInitSteps({
+      dependencies,
+      logger,
+      options,
+      parentDirectory,
+      target,
+      trackStep,
+    });
   } catch (error) {
-    if (error instanceof WizardCancelledError) return;
+    if (error instanceof WizardCancelledError) {
+      trackTerminal?.("resolve_target", "cancelled");
+      return;
+    }
     throw error;
   }
 
+  trackStep?.("handoff");
   if (result.kind === "created") {
     logger.log(
       `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
@@ -618,8 +620,6 @@ export async function runInitCommand(
     }
   }
 
-  // A workspace has no implicit primary agent. Let `eve dev` ask the person
-  // which member to run, rather than silently selecting the first --agents value.
   const baseDevArguments = eveDevArguments(result.packageManager);
   const agentDevCommand = [result.packageManager, ...baseDevArguments].join(" ");
   const agentHandoff = initAgentDevHandoff({

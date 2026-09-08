@@ -137,7 +137,7 @@ export function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
   applicationContext: CliApplicationContext,
-  telemetry: Pick<EveCliTelemetry, "trackDevContext">,
+  telemetry: Pick<EveCliTelemetry, "trackDevContext" | "trackSetupStep" | "trackSetupTerminal">,
 ): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
@@ -185,8 +185,6 @@ export function createCliProgram(
     .description("Create and build reusable eve extension packages.");
 
   extension
-    // Optional: a missing target scaffolds the current directory, matching
-    // `eve extension init .`.
     .command("init [target]")
     .description("Create a new eve extension package.")
     .option("-y, --yes", "Accepted for compatibility; has no effect")
@@ -196,7 +194,9 @@ export function createCliProgram(
       }
 
       const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
-      await runExtensionInitCommand(logger, applicationContext.root, target);
+      await runExtensionInitCommand(logger, applicationContext.root, target, undefined, (step) => {
+        telemetry.trackSetupStep({ flow: "extension_init", step });
+      });
     });
 
   extension
@@ -213,8 +213,6 @@ export function createCliProgram(
   registerRegistryCommands({ program, logger, applicationContext });
 
   program
-    // Optional: a missing target scaffolds or updates the current directory,
-    // matching `eve init .`.
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
@@ -246,12 +244,24 @@ export function createCliProgram(
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, applicationContext.root, target, {
-          agents: options.agents,
-          channelWebNextjs: options.channelWebNextjs,
-          model: options.model,
-          reasoning: options.reasoning,
-        });
+        await runInitCommand(
+          logger,
+          applicationContext.root,
+          target,
+          {
+            agents: options.agents,
+            channelWebNextjs: options.channelWebNextjs,
+            model: options.model,
+            reasoning: options.reasoning,
+          },
+          undefined,
+          (step) => {
+            telemetry.trackSetupStep({ flow: "init", step });
+          },
+          (step, result) => {
+            telemetry.trackSetupTerminal({ flow: "init", step, result });
+          },
+        );
       },
     );
 
@@ -417,6 +427,8 @@ export function createCliProgram(
             applicationRoot: applicationContext.root,
             existingLocalServer: existingLocalDevelopmentServer,
             lifecycle,
+            onOnboardingStep: telemetry.trackSetupStep,
+            onOnboardingTerminal: telemetry.trackSetupTerminal,
             options,
             remoteTarget,
             runDevelopmentTui: runtime.runDevelopmentTui,
@@ -518,6 +530,8 @@ export function createCliProgram(
               applicationRoot: applicationContext.root,
               existingLocalServer: false,
               lifecycle,
+              onOnboardingStep: telemetry.trackSetupStep,
+              onOnboardingTerminal: telemetry.trackSetupTerminal,
               options,
               report: onBootProgress,
               runDevelopmentTui: runtime.runDevelopmentTui,
@@ -666,11 +680,7 @@ export async function runCli(
 
     telemetry.trackOutcome(error instanceof CommanderError ? "usage_error" : "error");
     if (error instanceof CommanderError) {
-      // A coding agent that fumbles `eve init` can trip commander before the
-      // init action runs, so the action's own agent detection never fires.
-      // Commander has already written its usage error to stderr; add the setup
-      // guide on stdout so the agent gets actionable next steps, but still fall
-      // through to throw so the malformed invocation keeps its nonzero exit.
+      // Commander can reject `eve init` before its action detects the coding agent.
       const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
       const agentLaunched = await detectCodingAgentLaunch();
       if (input[0] === "init" && agentLaunched) {

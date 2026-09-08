@@ -62,6 +62,17 @@ describe("definition helper exact inputs", () => {
 
   it("accepts async-generator tool executors", () => {
     const streamedTool = defineTool({
+      label: {
+        start: () => "Build report",
+        complete(_input, output) {
+          expectTypeOf(output.phase).toEqualTypeOf<string>();
+          return `Report ${output.phase}`;
+        },
+        delta(_input, partial) {
+          expectTypeOf(partial.phase).toEqualTypeOf<string>();
+          return partial.phase;
+        },
+      },
       description: "Stream report progress.",
       inputSchema: { type: "object" },
       async *execute() {
@@ -80,6 +91,7 @@ describe("definition helper exact inputs", () => {
 
   it("preserves ordinary async tool executor return types", () => {
     const ordinaryTool = defineTool({
+      label: { start: (input) => `React with ${input.reaction}` },
       description: "React to a message.",
       inputSchema: z.object({ reaction: z.string() }),
       async execute(input) {

@@ -6,6 +6,7 @@ import {
   buildSlackActivityRenderers,
   experimental_slackActivityTree,
   experimental_slackActivityStatus,
+  selectSlackActivityStatus,
 } from "#public/channels/slack/activity.js";
 
 const root = {
@@ -79,6 +80,37 @@ describe("Slack activity activity", () => {
         ],
       ]),
     );
+  });
+
+  it("uses action labels in the activity tree and status", () => {
+    const labeled = reduceActivityBatch(snapshot(), {
+      events: [
+        {
+          actionId: `${grandchild.id}:search`,
+          eventId: "search-label",
+          kind: "action.label.updated",
+          label: "Search Slack docs",
+        },
+      ],
+      version: 1,
+    });
+
+    expect(activityMessages(labeled).get("turn")).toContain("Search Slack docs");
+    expect(selectSlackActivityStatus(labeled)).toBe("Search Slack docs");
+
+    const completed = reduceActivityBatch(labeled, {
+      events: [
+        {
+          actionId: `${grandchild.id}:search`,
+          eventId: "search-complete-label",
+          kind: "action.label.updated",
+          label: "Found Slack docs",
+        },
+      ],
+      version: 1,
+    });
+    expect(activityMessages(completed).get("turn")).toContain("Found Slack docs");
+    expect(selectSlackActivityStatus(completed)).toBe("Found Slack docs");
   });
 
   it("renders a background task instead of its duplicate initiating tool action", () => {
