@@ -14,7 +14,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       .find(
         (entry) =>
           entry.includes("BACKGROUND-EXPORT-") || /^(?:Background task|Export) task_/u.test(entry),
-      ) ?? "";
+      ) ??
+    request.userMessages.at(-1) ??
+    "";
 
   const examplePrefix = "Alice is documenting conditional delivery. Return exactly this example:\n";
   if (message.startsWith(examplePrefix)) {
