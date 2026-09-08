@@ -28,26 +28,16 @@ export default [false, true].map((laterTurn) =>
         ),
       );
       started.calledSubagent("busy-worker", { count: WORKER_COUNT });
-      started.event("actions.requested", {
-        count: 1,
-        data: {
-          actions: (actions) =>
-            actions.filter(
-              (action) => action.kind === "tool-call" && action.toolName === "busy-worker",
-            ).length === WORKER_COUNT,
-        },
+      started.eventsSatisfy("five workers launched in the same model step", (events) => {
+        const steps = events
+          .filter((event) => event.type === "actions.requested")
+          .flatMap((event) =>
+            event.data.actions
+              .filter((action) => action.kind === "tool-call" && action.toolName === "busy-worker")
+              .map(() => `${event.data.turnId}:${event.data.stepIndex}`),
+          );
+        return steps.length === WORKER_COUNT && new Set(steps).size === 1;
       });
-      const calls = started.events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "busy-worker" ? [event.data] : [],
-      );
-      await t.require(
-        calls,
-        satisfies(
-          (entries: typeof calls) =>
-            new Set(entries.map((entry) => entry.childSessionId)).size === WORKER_COUNT,
-          "five distinct child sessions",
-        ),
-      );
       const taskIds = started.events.flatMap((event) =>
         event.type === "subagent.completed" && event.data.backgroundTask !== undefined
           ? [event.data.backgroundTask.taskId]
@@ -62,28 +52,9 @@ export default [false, true].map((laterTurn) =>
         ),
       );
 
-      const children = await Promise.all(
-        calls.map((call) => t.target.watchTurn(call.childSessionId).result()),
-      );
-      const intervals = children.map((child) => {
-        child.expectOk();
-        child.calledTool("hold", { count: 1 });
-        return z
-          .object({ startedAt: z.number(), completedAt: z.number() })
-          .parse(child.toolCalls.find((call) => call.name === "hold")?.output);
-      });
-      await t.require(
-        intervals,
-        satisfies(
-          (values: typeof intervals) =>
-            Math.max(...values.map((value) => value.startedAt)) <
-            Math.min(...values.map((value) => value.completedAt)),
-          "all five child tool executions overlap",
-        ),
-      );
-
       let session: TaskEvalSessionDriver = t;
       let turn: EveEvalTurn = started;
+      const parentTurns = [started];
       for (
         let attempt = 0;
         attempt < WORKER_COUNT * 2 && !(turn.message ?? "").includes("task-prompt-prefix-complete");
@@ -93,6 +64,7 @@ export default [false, true].map((laterTurn) =>
           startIndex: requireSessionStreamIndex(session, "Parallel task completion"),
         });
         turn = await live.result();
+        parentTurns.push(turn);
         turn.expectOk();
         await t.require(
           turn.message,
@@ -116,6 +88,40 @@ export default [false, true].map((laterTurn) =>
           },
         });
       }
+      const calls = parentTurns.flatMap((parent) =>
+        parent.events.flatMap((event) =>
+          event.type === "subagent.called" && event.data.name === "busy-worker" ? [event.data] : [],
+        ),
+      );
+      await t.require(
+        calls,
+        satisfies(
+          (entries: typeof calls) =>
+            entries.length === WORKER_COUNT &&
+            new Set(entries.map((entry) => entry.childSessionId)).size === WORKER_COUNT,
+          "five distinct child sessions",
+        ),
+      );
+      const children = await Promise.all(
+        calls.map((call) => t.target.watchTurn(call.childSessionId).result()),
+      );
+      const intervals = children.map((child) => {
+        child.expectOk();
+        child.calledTool("hold", { count: 1 });
+        return z
+          .object({ startedAt: z.number(), completedAt: z.number() })
+          .parse(child.toolCalls.find((call) => call.name === "hold")?.output);
+      });
+      await t.require(
+        intervals,
+        satisfies(
+          (values: typeof intervals) =>
+            Math.max(...values.map((value) => value.startedAt)) <
+            Math.min(...values.map((value) => value.completedAt)),
+          "all five child tool executions overlap",
+        ),
+      );
+
       t.noFailedActions();
     },
   }),
