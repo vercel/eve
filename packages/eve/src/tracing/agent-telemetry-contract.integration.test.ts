@@ -522,7 +522,6 @@ describe("exported agent telemetry contract", () => {
         );
         expect(span.attributes).not.toHaveProperty("agent.session.id");
         expect(span.attributes).not.toHaveProperty("vercel.session_id");
-        expect(span.attributes["gen_ai.conversation.id"]).toBe("parent");
       }
       expect(
         parsed

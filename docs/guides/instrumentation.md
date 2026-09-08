@@ -203,7 +203,7 @@ Principal IDs require a content-visible audience and a resolved trace decision t
 
 ## Query exported traces
 
-Use a trace to investigate one activation's work. Use session and conversation attributes to find the other activations. Exporting to Datadog, Honeycomb, or Sentry does not turn a conversation into one continuous waterfall.
+Use a trace to investigate one activation's work. Use session and conversation attributes to find the other activations. Exporting to an OpenTelemetry backend does not turn a conversation into one continuous waterfall.
 
 This workflow applies to schema v4 from the [instrumentation provider layout](./instrumentation-providers). Configure third-party exporters through `otelIntegration()` so they receive the same framework spans as local tracing and Agent Runs. The legacy `instrumentation.ts` setup emits the [authored trace hierarchy](#authored-trace-hierarchy), not this contract.
 
@@ -217,12 +217,7 @@ This workflow applies to schema v4 from the [instrumentation provider layout](./
 | One Vercel Workflow run  | `vercel.session_id=<session ID>`                                        |
 | Delegated dispatches     | `agent.invocation.role=caller`                                          |
 
-Start with an activation filter for latency, failure, or turn-count dashboards.
-Every activation is a trace root. Within a conversation, group by trace ID,
-order activations by `agent.turn.sequence` or start time, and open the selected
-trace ID. Child activations link to their caller with `eve.link.type=agent.dispatch`;
-remote workflows keep their own execution lineage, so use conversation IDs and
-caller links for cross-deployment correlation.
+Start with an activation filter for latency, failure, or turn-count dashboards. Every activation is a trace root. Within a conversation, group by trace ID, order activations by `agent.turn.sequence` or start time, and open the selected trace ID. Child activations link to their caller with `eve.link.type=agent.dispatch`; remote workflows keep their own execution lineage, so use conversation IDs and caller links for cross-deployment correlation.
 
 For example, the built-in `agent` tool dispatches research into a new workflow and trace, and the next user turn starts another trace:
 
@@ -252,32 +247,9 @@ The conversation filter finds all three retained traces. eve initializes the con
 
 Activation duration is elapsed time for that activation, including waits inside it, not the lifetime of the conversation or CPU time. Idle time between ended activations is not part of their durations. For token totals, choose one level: filter to `chat` model spans and sum `gen_ai.usage.*`, or filter to activations and sum their `agent.usage.input_tokens` and `agent.usage.output_tokens`. Exclude caller summaries from the activation total. Query cache usage on model spans. Do not add model, step, activation, and caller counters together.
 
-### Datadog
+### Search traces
 
-eve supplies explicit [operation and resource names](#exported-span-names-and-outcomes). Use correlation attributes to find activations across traces.
-
-For service `v`, search APM spans for activations:
-
-```text
-service:v @agent.trace.schema.version:4 @gen_ai.operation.name:invoke_agent
-```
-
-Then select one session or the whole conversation:
-
-```text
-service:v @agent.session.id:SESSION_ID
-@gen_ai.conversation.id:CONVERSATION_ID
-```
-
-Datadog's built-in search fields are `operation_name` and `resource_name`, without `@`; custom span attributes use `@`. With the naming attributes preserved, `operation_name:invoke_agent resource_name:"invoke_agent v"` selects that named activation without a caller exclusion. Omit `service:v` when finding the whole conversation across remote services. Use span search rather than only a service's primary-operation view.
-
-APM export does not by itself configure a backend's separate LLM observability product.
-
-### Honeycomb and Sentry
-
-In [Honeycomb's Query Builder](https://docs.honeycomb.io/investigate/query/build/), filter the same session or conversation attributes, group activations by session or trace ID, and open the trace waterfall for one activation. Use the OTel span name and `gen_ai.operation.name`; Datadog's operation/resource split is not required for this workflow.
-
-For Sentry, use an approved OTel export path and filter the indexed span attributes by the same session or conversation ID. Sentry's [direct OTLP intake](https://docs.sentry.io/concepts/otlp/direct/traces/) is currently in open beta: it drops span events and displays span links without making those links searchable or aggregatable. Use `agent.turn.outcome`, OTel status, and scalar correlation attributes rather than relying on turn events or links. Preserve eve's ownership of the OTel provider; do not register a second provider merely to add a destination.
+Use your destination's span-search surface to filter by the attributes in the table, group activations by session or trace ID, and open one activation's trace waterfall. Use the OTel span name and `gen_ai.operation.name` to identify the operation. Preserve eve's ownership of the OTel provider; do not register a second provider merely to add a destination.
 
 ### Sampling and completeness
 
