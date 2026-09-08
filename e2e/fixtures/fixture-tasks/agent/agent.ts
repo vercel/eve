@@ -443,7 +443,7 @@ function hasTaskNotification(
 }
 
 function isScenarioMessage(message: string): boolean {
-  return /^(TASK-|CHILD-TASK-|Background task task_)/u.test(message);
+  return !/^(?:\[Agents\]|\[Task state\]|Background task (?:reporting|control))/u.test(message);
 }
 
 function scenarioUserMessageCount(request: MockModelRequest): number {
