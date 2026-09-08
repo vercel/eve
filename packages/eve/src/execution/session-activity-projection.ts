@@ -52,7 +52,12 @@ export function projectSessionActivity(input: {
     });
   }
   events.push(
-    ...projectActivityEvents({ at: input.event.meta.at, event: input.event, lineage: work }),
+    ...projectActivityEvents({
+      at: input.event.meta.at,
+      event: input.event,
+      eventId: input.event.meta.id,
+      lineage: work,
+    }),
   );
   return events;
 }

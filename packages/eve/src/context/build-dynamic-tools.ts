@@ -24,6 +24,7 @@ import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
+  type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
@@ -104,13 +105,24 @@ export function replayDynamicTools(
         : lookupDurableDynamicCallback(owner, "approvalKey");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
-    const toModelOutputReference = entry.callbacks.toModelOutput;
-    const toModelOutput =
-      toModelOutputReference === undefined
-        ? undefined
-        : lookupDurableDynamicCallback(owner, "toModelOutput");
+    const labelComplete = bindDynamicCallback(
+      entry,
+      owner,
+      "labelComplete",
+      entry.callbacks.label?.complete,
+    );
+    const labelDelta = bindDynamicCallback(entry, owner, "labelDelta", entry.callbacks.label?.delta);
+    const labelStart = bindDynamicCallback(entry, owner, "labelStart", entry.callbacks.label?.start);
+    const toModelOutput = bindDynamicCallback(
+      entry,
+      owner,
+      "toModelOutput",
+      entry.callbacks.toModelOutput,
+    );
 
-    return {
+    const replayed: {
+      -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
+    } = {
       description: entry.description,
       execute:
         entry.execution === "background"
@@ -169,22 +181,31 @@ export function replayDynamicTools(
             },
           }),
       outputSchema: toOutputSchema(entry.outputSchema),
-      ...(toModelOutputReference === undefined
-        ? {}
-        : {
-            toModelOutput: (output: unknown) => {
-              if (toModelOutput === undefined) {
-                throw missingCallbackError(entry, "toModelOutput");
-              }
-              return callDurableDynamicCallback(
-                toModelOutput!,
-                toModelOutputReference.closure,
-                output,
-              );
-            },
-          }),
     };
+    if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+      replayed.label = {
+        complete: labelComplete,
+        delta: labelDelta,
+        start: labelStart,
+      };
+    }
+    if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
+    return replayed;
   });
+}
+
+function bindDynamicCallback(
+  entry: CurrentDynamicToolMetadata,
+  owner: DynamicToolCallbackOwner,
+  phase: DurableDynamicCallbackPhase,
+  reference: DurableDynamicCallbackReference | undefined,
+): ((...args: unknown[]) => any) | undefined {
+  if (reference === undefined) return undefined;
+  const callback = lookupDurableDynamicCallback(owner, phase);
+  return (...args) => {
+    if (callback === undefined) throw missingCallbackError(entry, phase);
+    return callDurableDynamicCallback(callback, reference.closure, ...args);
+  };
 }
 
 function requireCurrentDynamicToolMetadata(

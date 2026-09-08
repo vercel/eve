@@ -40,6 +40,15 @@ interface ToolDefinitionBase {
   readonly execution?: ToolExecution;
 }
 
+export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
+  /** Returns the presentation-safe label when one action invocation starts. */
+  start(input: Readonly<TInput>): string;
+  /** Projects one preliminary output snapshot into presentation-safe label text. */
+  delta?(input: Readonly<TInput>, partial: Readonly<TOutput>): string;
+  /** Projects a successful final output into presentation-safe settlement text. */
+  complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
+}
+
 /**
  * Internal/compiled tool definition shape. Carries `name` because the
  * compiler stamps a path-derived identifier onto every tool entry.
@@ -47,7 +56,14 @@ interface ToolDefinitionBase {
  * Authored public definitions (see {@link PublicToolDefinition}) do not
  * carry `name`; identity comes from the file path.
  */
+export interface InternalToolLabelDefinition {
+  readonly complete?: (input: unknown, output: unknown) => string;
+  readonly delta?: (input: unknown, partial: unknown) => string;
+  readonly start?: (input: unknown) => string;
+}
+
 export interface InternalToolDefinition extends ToolDefinitionBase {
+  label?: InternalToolLabelDefinition;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -70,6 +86,7 @@ export interface PublicToolDefinition<
   TInput = unknown,
   TOutput = unknown,
 > extends ToolDefinitionBase {
+  label?: ToolLabelDefinition<TInput, TOutput>;
   inputSchema: PublicToolInputSchema<TInput>;
   /**
    * Optional schema describing the value returned by the tool executor.
@@ -256,6 +273,10 @@ export function defineTool<
   inputSchema: TSchema;
   outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
+  label?: BackgroundToolDefinition<
+    StandardSchemaV1.InferOutput<TSchema>,
+    BackgroundToolOutputFromExecuteReturn<TReturn>
+  >["label"];
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   approvalKey?: BackgroundToolDefinition<
     StandardSchemaV1.InferOutput<TSchema>,
@@ -282,6 +303,10 @@ export function defineTool<
   inputSchema: TInputSchema;
   outputSchema: TOutputSchema;
   execute(input: StandardSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
+  label?: ToolDefinition<
+    StandardSchemaV1.InferOutput<TInputSchema>,
+    StandardJSONSchemaV1.InferOutput<TOutputSchema>
+  >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
@@ -301,6 +326,10 @@ export function defineTool<
   inputSchema: TSchema;
   outputSchema?: JsonObject;
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
+  label?: ToolDefinition<
+    StandardSchemaV1.InferOutput<TSchema>,
+    ToolOutputFromExecuteReturn<TReturn>
+  >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
@@ -320,6 +349,10 @@ export function defineTool<
   inputSchema: JsonObject;
   outputSchema: TOutputSchema;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
+  label?: ToolDefinition<
+    Record<string, unknown>,
+    StandardJSONSchemaV1.InferOutput<TOutputSchema>
+  >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
@@ -336,6 +369,7 @@ export function defineTool<TReturn>(definition: {
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
+  label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
@@ -357,6 +391,7 @@ export function stampToolDefinition<
   T extends {
     readonly description: string;
     readonly execute: (...args: never[]) => unknown;
+    readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
@@ -372,6 +407,7 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
+      label: definition.label,
       approval: definition.approval,
       approvalKey: definition.approvalKey,
       execute: definition.execute,

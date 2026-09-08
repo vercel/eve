@@ -1,7 +1,7 @@
 export const MAX_ACTIVITY_TEXT_LENGTH = 500;
 
 /** Normalizes bounded untrusted presentation text before it reaches a renderer. */
-export function normalizeActivityText(text: string): string {
+export function normalizePresentationText(text: string): string {
   return (
     text
       // Control bytes are untrusted presentation data, not meaningful activity text.

@@ -9,6 +9,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
 import {
   getTurnClientContextState,
   setTurnClientContextState,
@@ -434,6 +435,46 @@ describe("emitStreamContent action requests", () => {
     }
   });
 
+  it("emits tool labels for provider-executed calls", async () => {
+    const emitted: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      emitted.push(event);
+    };
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { action: { queries: ["eve framework"] } },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map([
+          [
+            "web_search",
+            {
+              label: { start: resolveWebSearchActivityLabel },
+              description: "Search the web.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "web_search",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(emitted.find((event) => event.type === "actions.requested")?.data.presentation).toEqual({
+      "search-1": { label: "Search eve framework" },
+    });
+  });
+
   it("emits a provider action batch before any provider result arrives", async () => {
     const events: Parameters<HarnessEmitFn>[0][] = [];
     const emit: HarnessEmitFn = async (event) => {
@@ -542,6 +583,12 @@ describe("emitStreamContent action requests", () => {
       [
         "web_search",
         {
+          label: {
+            complete: (_input, output) =>
+              `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
+            delta: (_input, partial) =>
+              `Found ${(partial as { results: unknown[] }).results.length}\u0000 results`,
+          },
           description: "Search the web.",
           execute: async () => ({ results: [] }),
           inputSchema: jsonSchema({ type: "object" }),
@@ -609,9 +656,15 @@ describe("emitStreamContent action requests", () => {
       data: { result: { output: { results: ["partial"] } } },
       type: "action.partial",
     });
+    expect(localEvents[3]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 results" } } },
+    });
     expect(localEvents[4]).toMatchObject({
       data: { result: { output: { results: ["eve"] } } },
       type: "action.result",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 final results" } } },
     });
     expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
@@ -674,6 +727,118 @@ describe("emitStreamContent action requests", () => {
       },
       type: "subagent.completed",
     });
+  });
+
+  it("marks a background subagent receipt on subagent.completed", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Delegate work to a subagent.",
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          resultKind: "subagent",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { message: "research the release" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        {
+          output: { status: "working", taskId: "task-1" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-result",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "actions.requested",
+      "subagent.completed",
+      "action.result",
+    ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        backgroundTask: { status: "working", taskId: "task-1" },
+        callId: "call-delegate",
+        subagentName: "delegate",
+      },
+      type: "subagent.completed",
+    });
+  });
+
+  it("does not fail tool streaming when label projections throw", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "build_report",
+        {
+          label: {
+            complete: () => {
+              throw new Error("result projection failed");
+            },
+            delta: () => {
+              throw new Error("update projection failed");
+            },
+          },
+          description: "Build a report.",
+          execute: async () => ({ phase: "complete" }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "build_report",
+        },
+      ],
+    ]);
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: {},
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-call",
+        },
+        {
+          output: { phase: "collecting" },
+          preliminary: true,
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-result",
+        },
+        {
+          output: { phase: "complete" },
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-result",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    expect(vi.mocked(emit).mock.calls.map(([event]) => event.type)).toEqual([
+      "actions.requested",
+      "action.partial",
+      "action.result",
+    ]);
+    expect(vi.mocked(emit).mock.calls[1]?.[0]).not.toHaveProperty("data.presentation");
+    expect(vi.mocked(emit).mock.calls[2]?.[0]).not.toHaveProperty("data.presentation");
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

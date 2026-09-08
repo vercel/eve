@@ -18,6 +18,7 @@ import {
 } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -69,6 +70,7 @@ export function createAgentOtelSessionContext(
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
             "agent.trace.schema.version": 3,
+            ...agentSpanNamingAttributes("agent.session"),
           },
           root: true,
         });
@@ -96,6 +98,7 @@ export function createAgentOtelSessionContext(
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
         "agent.trace.schema.version": 3,
+        ...agentSpanNamingAttributes("agent.session"),
       },
       root: true,
     });

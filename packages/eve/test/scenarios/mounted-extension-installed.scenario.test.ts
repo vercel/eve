@@ -249,7 +249,7 @@ describe("mounted extension installed under node_modules", () => {
     );
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
-    ).toMatchObject({ requires: { channel: 18, schedule: 10, subagent: 9 } });
+    ).toMatchObject({ requires: { channel: 19, schedule: 11, subagent: 10 } });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,

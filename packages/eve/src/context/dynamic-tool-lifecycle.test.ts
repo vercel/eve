@@ -1536,6 +1536,62 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
+  it("replays label callbacks", () => {
+    const ctx = createCtx();
+    const owner = {
+      sessionId: ctx.require(SessionIdKey),
+      scope: "turn" as const,
+      resolverSlug: "legacy",
+      entryKey: "legacy:deploy",
+    };
+    registerTestCallback("deploy", "execute", () => ({ ok: true }), owner);
+    registerTestCallback(
+      "deploy",
+      "labelStart",
+      (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
+      owner,
+    );
+    registerTestCallback(
+      "deploy",
+      "labelComplete",
+      (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+      owner,
+    );
+    registerTestCallback(
+      "deploy",
+      "labelDelta",
+      (_closure, _input, partial) => String((partial as { phase: unknown }).phase),
+      owner,
+    );
+    ctx.set(TurnDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          label: {
+            complete: { closure: {} },
+            delta: { closure: {} },
+            start: { closure: {} },
+          },
+          execute: { closure: {} },
+        },
+        description: "Deploy.",
+        entryKey: "legacy:deploy",
+        inputSchema: { type: "object" },
+        name: "deploy",
+        resolverSlug: "legacy",
+      },
+    ]);
+
+    const tool = buildDynamicTools(ctx)[0];
+    expect(tool?.label?.start?.({ environment: "preview" })).toBe("Deploy to preview");
+    expect(
+      tool?.label?.complete?.({ environment: "preview" }, { url: "preview.example.com" }),
+    ).toBe("Deployed to preview.example.com");
+    expect(tool?.label?.delta?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
+      "Uploading",
+    );
+    clearDurableDynamicCallbacks(owner.sessionId);
+  });
+
   it("replays phase-specific turn metadata", async () => {
     const ctx = createCtx();
     const approval = vi.fn(() => "user-approval" as const);

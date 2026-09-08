@@ -19,6 +19,7 @@ import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
@@ -118,6 +119,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.session.id": event.sessionId,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
+            ...agentSpanNamingAttributes("agent.channel.delivery"),
           },
           kind: SpanKind.CONSUMER,
           links:
