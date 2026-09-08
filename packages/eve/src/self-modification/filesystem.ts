@@ -10,9 +10,11 @@ export async function createSelfModificationFilesystem(input: {
 }): Promise<IFileSystem> {
   const { MountableFs, OverlayFs, ReadWriteFs } = input.justBash;
   const traceRoot = resolve(input.appRoot, ".eve/traces/v1");
+  const logsRoot = resolve(input.appRoot, ".eve/logs");
   await Promise.all([
     input.defaultFilesystem.mkdir("/source", { recursive: true }),
     mkdir(traceRoot, { recursive: true }),
+    mkdir(logsRoot, { recursive: true }),
   ]);
   return new MountableFs({
     base: input.defaultFilesystem,
@@ -32,6 +34,14 @@ export async function createSelfModificationFilesystem(input: {
           root: traceRoot,
         }),
         mountPoint: "/traces",
+      },
+      {
+        filesystem: new OverlayFs({
+          mountPoint: "/",
+          readOnly: true,
+          root: logsRoot,
+        }),
+        mountPoint: "/logs",
       },
       {
         filesystem: new OverlayFs({
