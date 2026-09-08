@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { discover } from "./migratew.mjs";
 
 const wire = "packages/eve/src/execution/wire/";
@@ -6,16 +7,20 @@ const sessionInbox = `${wire}session-inbox/`;
 const migrations = `${sessionInbox}migrations/`;
 const generated = `${sessionInbox}generated/`;
 const machinery = new Set([
-  "scripts/migratew.mjs",
-  "scripts/migratew.test.mjs",
-  "scripts/guard-wire-changes.mjs",
+  "packages/eve/scripts/migratew.mjs",
+  "packages/eve/scripts/migratew.test.mjs",
+  "packages/eve/scripts/guard-wire-changes.mjs",
   "scripts/guard-invariants.mjs",
 ]);
 
 /** Version additions supply contracts and transforms; machinery changes ship separately. */
-export async function checkWireChanges(root, baseRef = "origin/main") {
+export async function checkWireChanges(repoRoot, baseRef = "origin/main") {
   const git = (...args) =>
-    execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", args, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   let base;
   try {
     base = git("merge-base", baseRef, "HEAD").trim();
@@ -36,7 +41,7 @@ export async function checkWireChanges(root, baseRef = "origin/main") {
     );
     return schema || migration ? [Number((schema ?? migration)[1])] : [];
   });
-  const { versions } = await discover(root, "session-inbox");
+  const { versions } = await discover(join(repoRoot, "packages/eve"), "session-inbox");
   if (versions.at(-1) <= Math.max(0, ...baseVersions)) return;
 
   // Comparing the merge base to the worktree includes committed, staged, and unstaged edits.

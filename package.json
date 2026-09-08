@@ -29,8 +29,8 @@
     "typecheck": "turbo run typecheck",
     "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs",
     "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
-    "migratew": "node ./scripts/migratew.mjs",
-    "test:migratew": "node --test scripts/migratew.test.mjs"
+    "migratew": "pnpm --dir packages/eve run migratew",
+    "test:migratew": "pnpm --dir packages/eve run test:migratew"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.1",

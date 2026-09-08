@@ -131,14 +131,15 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
-import { generateCatalog } from "./migratew.mjs";
-import { checkWireChanges } from "./guard-wire-changes.mjs";
+import { generateCatalog } from "../packages/eve/scripts/migratew.mjs";
+import { checkWireChanges } from "../packages/eve/scripts/guard-wire-changes.mjs";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
 const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
+const EVE_PACKAGE_ROOT = join(REPO_ROOT, "packages/eve");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
 
 const SKIP_DIRS = new Set([
@@ -957,7 +958,7 @@ async function checkRule40WireContracts() {
     ),
   );
   try {
-    await generateCatalog(REPO_ROOT, "session-inbox", true);
+    await generateCatalog(EVE_PACKAGE_ROOT, "session-inbox", true);
     await checkWireChanges(REPO_ROOT);
   } catch (error) {
     violations.push({

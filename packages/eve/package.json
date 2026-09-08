@@ -428,7 +428,7 @@
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
-    "build:compiled": "node ../../scripts/migratew.mjs --sync && node ./scripts/vendor-compiled.mjs",
+    "build:compiled": "pnpm run migratew --sync && node ./scripts/vendor-compiled.mjs",
     "build:js": "pnpm run build:compiled && pnpm run clean && pnpm run build:types && node ./scripts/copy-compiled-assets.mjs && node --conditions=eve-source ./scripts/build-rolldown.mjs && node ./scripts/copy-runtime-assets.mjs",
     "build:types": "pnpm run build:compiled && tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
@@ -442,6 +442,8 @@
     "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
+    "migratew": "node ./scripts/migratew.mjs",
+    "test:migratew": "node --test scripts/migratew.test.mjs",
     "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs",
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },
@@ -465,6 +467,7 @@
     "@clack/core": "1.3.1",
     "@eve/catalog": "workspace:*",
     "@linqapp/chat-sdk-adapter": "^0.5.1",
+    "@microsoft/api-extractor": "7.59.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@nuxt/kit": "^4.0.0",
     "@nuxt/schema": "^4.0.0",
@@ -509,6 +512,7 @@
     "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",
+    "oxfmt": "0.66.0",
     "picocolors": "catalog:",
     "react": "catalog:",
     "react-test-renderer": "19.2.6",

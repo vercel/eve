@@ -1334,6 +1334,9 @@ importers:
       '@linqapp/chat-sdk-adapter':
         specifier: ^0.5.1
         version: 0.5.1(chat@4.34.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
+      '@microsoft/api-extractor':
+        specifier: 7.59.0
+        version: 7.59.0(@types/node@24.13.3)
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
@@ -1466,6 +1469,9 @@ importers:
       next:
         specifier: 'catalog:'
         version: 16.3.4(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      oxfmt:
+        specifier: 0.66.0
+        version: 0.66.0(svelte@5.56.1(@typescript-eslint/types@8.59.4))
       picocolors:
         specifier: 'catalog:'
         version: 1.1.1
