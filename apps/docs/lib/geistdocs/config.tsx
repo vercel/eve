@@ -29,6 +29,7 @@ export const config = defineConfig({
   siteId,
   siteUrl: getSiteOrigin(),
   translations,
+  webmcp: { enabled: true },
   // Built-in edit link hardcodes `/edit/` and a `content/docs/` prefix; we
   // render our own `/blob/` link instead (see EditOnGithubAction).
   pageActions: { editSource: false },
