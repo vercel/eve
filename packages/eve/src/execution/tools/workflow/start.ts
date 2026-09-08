@@ -14,7 +14,6 @@ import type {
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import { codeModeWorkflowReference } from "#execution/code-mode/workflow-reference.js";
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
@@ -53,8 +52,7 @@ export async function startWorkflowTask(input: {
   try {
     const started = await startWorkflowToolRun({
       callId: task.callId,
-      codeMode:
-        task.workflowId === codeModeWorkflowReference.workflowId ? input.codeMode : undefined,
+      codeMode: input.codeMode,
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,

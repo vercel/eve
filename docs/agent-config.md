@@ -348,7 +348,10 @@ Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model
 step's catalog; eligible discovered tools become callable through `code_mode`. When names overlap, step-scoped definitions override turn-scoped,
 session-scoped, and static definitions, in that order. Each program keeps the
-tool catalog and captured values from the model step that dispatched it.
+tool catalog and captured values from the model step that dispatched it. Nested
+calls run against a snapshot of the session taken at dispatch: they see the
+conversation history as of that step, and session state a tool writes during
+the program is not carried back into the parent session.
 
 If a nested tool requires authorization, eve displays its authorization
 request and waits for the matching callback before retrying that call. Earlier

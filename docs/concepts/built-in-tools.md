@@ -373,7 +373,7 @@ export default disableTool();
 
 ### `connection_search`
 
-`connection_search` discovers tools across declared [connections](../connections) and makes matches available by qualified name, such as `linear__list_issues`. Eligible matches can be called through `code_mode`, and remain directly callable in eager mode. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+`connection_search` discovers tools across declared [connections](../connections) and makes matches available by qualified name, such as `linear__list_issues`. When `experimental.codeMode` is enabled, eligible matches are called through `code_mode`; otherwise they are directly callable. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
 
 An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
 

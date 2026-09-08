@@ -105,9 +105,10 @@ export type CodeModeToolOutcome = (
  * a crash therefore re-parks at the same calls rather than re-firing anything.
  *
  * A `Promise.all` in the program parks several calls in one continuation. The
- * body settles them concurrently and hands the results back together; the
- * sandbox only resumes once the last one lands, and the intermediate
- * `continue` calls are pure bookkeeping on the continuation.
+ * body settles them concurrently and hands the results back together. Each
+ * `continue` re-runs the program from its source with the signed resolution
+ * ledger replayed, so a batch of k calls costs k sandbox runs inside this step
+ * and the ledger (every prior call's output) travels with each step payload.
  */
 export async function runCodeModeProgramStep(input: {
   readonly callId: string;
@@ -134,11 +135,10 @@ export async function runCodeModeProgramStep(input: {
         hostTools,
       });
       if (tool.execute === undefined) throw new Error("code_mode has no executor.");
+      // `ToolSet[string]` erases the input type; the sandbox tool accepts `{ js }`.
       raw = await tool.execute(
         { js: input.program.js } as never,
-        {
-          toolCallId: input.callId,
-        } as never,
+        { messages: [], toolCallId: input.callId } as never,
       );
     } else {
       let current = input.resume[0]?.interrupt;

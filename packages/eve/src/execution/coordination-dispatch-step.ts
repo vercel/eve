@@ -5,6 +5,7 @@ import {
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
+import { codeModeWorkflowReference } from "#execution/code-mode/workflow-reference.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
@@ -44,10 +45,13 @@ export async function dispatchCoordinationStep(
       const started = await startWorkflowTask({
         auth: prepared.auth,
         batchEvent: batch.event,
-        codeMode: {
-          serializedContext: prepared.serializedContext,
-          sessionState: createDurableSessionState({ session: nextSession }),
-        },
+        codeMode:
+          entry.task.workflowId === codeModeWorkflowReference.workflowId
+            ? {
+                serializedContext: prepared.serializedContext,
+                sessionState: createDurableSessionState({ session: nextSession }),
+              }
+            : undefined,
         initiatorAuth: prepared.initiatorAuth,
         owner: input.workflowToolRunOwner,
         parentSession: prepared.parentSession,
