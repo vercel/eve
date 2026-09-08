@@ -3,7 +3,6 @@ import type { HistoryState } from "#context/keys.js";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
-  readonly historyKey?: keyof HistoryState;
 }
 
 interface CurrentMessagesOptions {
@@ -22,6 +21,7 @@ export function createCurrentMessages(
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, options?: AddCurrentMessageOptions): void;
+  addAnnouncements(announcements: HistoryState): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
@@ -50,18 +50,27 @@ export function createCurrentMessages(
   const canAppendUserMessages =
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
+  function add(message: string, { cacheFriendly = true }: AddCurrentMessageOptions = {}): boolean {
+    if (cacheFriendly && canAppendUserMessages) {
+      const entry = { role: "user" as const, content: message };
+      nonSystemMessages.splice(userInsertionIndex, 0, entry);
+      durableMessages.splice(historyInsertionIndex, 0, entry);
+      userInsertionIndex += 1;
+      historyInsertionIndex += 1;
+      return true;
+    }
+    systemMessages.push({ role: "system", content: message });
+    return false;
+  }
+
   return {
-    add(message, { cacheFriendly = true, historyKey } = {}) {
-      if (historyKey !== undefined && historyState[historyKey] === message) return;
-      if (cacheFriendly && canAppendUserMessages) {
-        const entry = { role: "user" as const, content: message };
-        nonSystemMessages.splice(userInsertionIndex, 0, entry);
-        durableMessages.splice(historyInsertionIndex, 0, entry);
-        userInsertionIndex += 1;
-        historyInsertionIndex += 1;
-        if (historyKey !== undefined) historyState[historyKey] = message;
-      } else {
-        systemMessages.push({ role: "system", content: message });
+    add,
+    addAnnouncements(announcements) {
+      for (const key of ["availableSkills", "taskState", "deliveryInstruction"] as const) {
+        const message = announcements[key];
+        if (message === undefined || message.length === 0 || historyState[key] === message)
+          continue;
+        if (add(message)) historyState[key] = message;
       }
     },
     addSystem(messages) {

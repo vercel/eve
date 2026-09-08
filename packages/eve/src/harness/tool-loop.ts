@@ -1248,20 +1248,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
-      const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(skillAnnouncement, { historyKey: "availableSkills" });
-      }
-      if (ctx.get(TurnTaskDeliveryKey) === "initiating") {
-        const taskContext = resolveInitiatingTaskContext({ state: session.state, turnId });
-        if (taskContext !== undefined) {
-          currentMessages.add(taskContext.context, { historyKey: "taskState" });
-        }
-      }
     }
-    if (deliveryPolicy.instruction !== undefined) {
-      currentMessages.add(deliveryPolicy.instruction, { historyKey: "deliveryInstruction" });
-    }
+    const taskContext =
+      ctx?.get(TurnTaskDeliveryKey) === "initiating"
+        ? resolveInitiatingTaskContext({ state: session.state, turnId })
+        : undefined;
+    currentMessages.addAnnouncements({
+      availableSkills: ctx?.get(PendingSkillAnnouncementKey),
+      taskState: taskContext?.context,
+      deliveryInstruction: deliveryPolicy.instruction,
+    });
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );

@@ -84,10 +84,9 @@ describe("createCurrentMessages", () => {
       historyState: recorded,
     });
 
-    current.add("working", { historyKey: "taskState" });
-    current.add("completed", { historyKey: "taskState" });
-    current.add("completed", { historyKey: "taskState" });
-    current.add("completed", { historyKey: "availableSkills" });
+    current.addAnnouncements({ taskState: "working" });
+    current.addAnnouncements({ taskState: "completed" });
+    current.addAnnouncements({ taskState: "completed", availableSkills: "completed" });
 
     expect(recorded).toEqual({ taskState: "working" });
     expect(current.historyState).toEqual({ taskState: "completed", availableSkills: "completed" });
@@ -96,6 +95,27 @@ describe("createCurrentMessages", () => {
       "completed",
       "completed",
     ]);
+  });
+
+  it("keeps announcement order stable and ignores empty or absent values", () => {
+    const current = createCurrentMessages([]);
+    current.addAnnouncements({
+      deliveryInstruction: "report",
+      taskState: "working",
+      availableSkills: "skills",
+    });
+    current.addAnnouncements({ availableSkills: "", taskState: undefined });
+
+    expect(current.history.map((message) => message.content)).toEqual([
+      "skills",
+      "working",
+      "report",
+    ]);
+    expect(current.historyState).toEqual({
+      availableSkills: "skills",
+      taskState: "working",
+      deliveryInstruction: "report",
+    });
   });
 
   it("persists additions without storing client context or replacing projected history", () => {
@@ -142,7 +162,7 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.add("task state", { historyKey: "taskState" });
+    current.addAnnouncements({ taskState: "task state" });
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
