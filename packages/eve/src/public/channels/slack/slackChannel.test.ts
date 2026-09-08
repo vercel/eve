@@ -922,7 +922,7 @@ describe("slackChannel() default event handlers", () => {
         type: "container",
         title: { type: "plain_text", text: "Tool input" },
         is_collapsible: true,
-        default_collapsed: false,
+        default_collapsed: true,
         child_blocks: [
           {
             type: "section",
@@ -3904,7 +3904,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               type: "container",
               title: { type: "plain_text", text: "Tool input" },
               is_collapsible: true,
-              default_collapsed: false,
+              default_collapsed: true,
               child_blocks: [
                 { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":451}\n```' } },
               ],
@@ -3935,7 +3935,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               type: "container",
               title: { type: "plain_text", text: "Tool input" },
               is_collapsible: true,
-              default_collapsed: false,
+              default_collapsed: true,
               child_blocks: [
                 { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":508}\n```' } },
               ],

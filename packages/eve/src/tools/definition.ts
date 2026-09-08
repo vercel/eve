@@ -289,7 +289,10 @@ export function defineTool<
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
-  approvalPrompt?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalPrompt"];
+  approvalPrompt?: ToolDefinition<
+    StandardSchemaV1.InferOutput<TInputSchema>,
+    unknown
+  >["approvalPrompt"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -385,6 +388,7 @@ export function stampToolDefinition<
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;
+    readonly approvalPrompt?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
