@@ -2447,16 +2447,24 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
     const metadata = [
       { name: "discovered", approval: never() },
       { name: "gated_dynamic", approval: always() },
     ].map(({ name, approval }) => {
       const descriptor = readDurableDynamicCallback(approval)!;
-      registerDurableDynamicCallback({ toolName: name, phase: "execute", callback: () => "ok" });
+      const owner = {
+        sessionId: "test-session",
+        scope: "step" as const,
+        resolverSlug: "dynamic",
+        entryKey: name,
+        name,
+      };
+      registerDurableDynamicCallback({ callback: () => "ok", phase: "execute", owner });
       registerDurableDynamicCallback({
-        toolName: name,
-        phase: "approvalRequest",
         callback: descriptor.callback,
+        phase: "approvalRequest",
+        owner,
       });
       return {
         name,
@@ -2487,7 +2495,7 @@ describe("createToolLoopHarness", () => {
     });
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
     const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
-    expect(Object.keys(advertised ?? {}).sort()).toEqual(["code_mode", "gated_dynamic"]);
+    expect(Object.keys(advertised ?? {}).sort()).toEqual(["add", "code_mode", "gated_dynamic"]);
     expect(advertised?.code_mode?.description).toContain("discovered");
   });
 

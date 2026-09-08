@@ -8,6 +8,7 @@ import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.j
 import { restoreDynamicToolCallbacks } from "#context/dynamic-tool-lifecycle.js";
 import {
   SessionDynamicToolMetadataKey,
+  SessionIdKey,
   TurnDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
 } from "#context/keys.js";
@@ -238,7 +239,7 @@ export async function executeCodeModeToolStep(
   } as ToolExecuteOptions;
   const toolContext = () => {
     const serialized = serializeContext(ctx);
-    delete serialized[AuthorizationHookTokenKey.name];
+    delete serialized[AuthorizationHookKey.name];
     delete serialized[PendingAuthorizationResultKey.name];
     return serialized;
   };
@@ -316,17 +317,20 @@ async function hydrateTurnTools(input: {
   const runtime = buildRuntimeIdentity(node);
   const connections = bindDynamicConnections(ctx, bundle.resolvedAgent);
   const rehydrateConnections = () => connections.rehydrate(emission, runtime, false);
-  const metadata = [
-    SessionDynamicToolMetadataKey,
-    TurnDynamicToolMetadataKey,
-    StepDynamicToolMetadataKey,
-  ].flatMap((key) => ctx.get(key) ?? []);
-  if (
-    metadata.some(
+  const sessionId = ctx.require(SessionIdKey);
+  const scopedMetadata = [
+    ["session", SessionDynamicToolMetadataKey],
+    ["turn", TurnDynamicToolMetadataKey],
+    ["step", StepDynamicToolMetadataKey],
+  ] as const;
+  const needsRestore = scopedMetadata.some(([scope, key]) =>
+    (ctx.get(key) ?? []).some(
       (entry) =>
-        !isCurrentDynamicToolMetadata(entry) || hasUnregisteredDurableDynamicCallbacks([entry]),
-    )
-  ) {
+        !isCurrentDynamicToolMetadata(entry) ||
+        hasUnregisteredDurableDynamicCallbacks([entry], { sessionId, scope }),
+    ),
+  );
+  if (needsRestore) {
     await withContextScope(ctx, session, async (enriched) => {
       await rehydrateConnections();
       await restoreDynamicToolCallbacks({

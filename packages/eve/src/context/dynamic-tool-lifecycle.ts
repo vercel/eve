@@ -385,11 +385,13 @@ export async function restoreDynamicToolCallbacks(input: {
   readonly events: readonly UnstampedMessageStreamEvent[];
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
+  const sessionId = input.ctx.require(SessionIdKey);
   for (const event of input.events) {
     const key = durableKeyForEvent(event.type);
     if (key === undefined) continue;
     const persisted = input.ctx.get(key) ?? [];
     if (persisted.length === 0) continue;
+    const scope = event.type.split(".")[0] as DynamicToolCallbackScope;
     const owners = new Set(persisted.map((entry) => entry.resolverSlug));
     const resolved = await resolveToolsFromEvent(
       input.ctx,
@@ -404,7 +406,7 @@ export async function restoreDynamicToolCallbacks(input: {
             candidate.name === entry.name && candidate.resolverSlug === entry.resolverSlug,
         ) ||
         !isCurrentDynamicToolMetadata(entry) ||
-        hasUnregisteredDurableDynamicCallbacks([entry])
+        hasUnregisteredDurableDynamicCallbacks([entry], { sessionId, scope })
       ) {
         throw new Error(`Dynamic tool "${entry.name}" could not restore its dispatched callbacks.`);
       }

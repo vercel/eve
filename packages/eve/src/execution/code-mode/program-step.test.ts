@@ -30,6 +30,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   registerDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
+  clearDurableDynamicCallbacks,
 } from "#tools/durable-callbacks.js";
 import * as sandbox from "#shared/workflow-sandbox.js";
 import { defineTool } from "#tools/definition.js";
@@ -121,6 +122,22 @@ function nested(
   });
 }
 
+function registerLookupCallbacks(): void {
+  for (const scope of ["session", "turn", "step"] as const) {
+    registerDurableDynamicCallback({
+      callback: (closure) => closure.value,
+      phase: "execute",
+      owner: {
+        sessionId: "parent-session",
+        scope,
+        resolverSlug: "lookup",
+        entryKey: "lookup",
+        name: "lookup",
+      },
+    });
+  }
+}
+
 function dynamic(value: string): CurrentDynamicToolMetadata {
   return {
     name: "lookup",
@@ -206,11 +223,7 @@ describe("executeCodeModeToolStep", () => {
           }),
         });
       });
-      const registry = Reflect.get(globalThis, Symbol.for("eve:dynamic-tool-callbacks")) as Map<
-        string,
-        unknown
-      >;
-      registry.delete("tracker__list_issues");
+      clearDurableDynamicCallbacks("parent-session");
 
       await expect(nested("tracker__list_issues")).resolves.toEqual(
         allowed
@@ -253,7 +266,7 @@ describe("executeCodeModeToolStep", () => {
       },
     } as never);
     state.ctx!.set(StepDynamicToolMetadataKey, [
-      { ...dynamic("dispatched"), name: "cold", resolverSlug: "cold" },
+      { ...dynamic("dispatched"), name: "cold", resolverSlug: "cold", entryKey: "cold" },
     ]);
     await expect(nested("cold")).resolves.toEqual({ status: "completed", output: "dispatched" });
     expect(resolver).toHaveBeenCalledOnce();
@@ -318,11 +331,7 @@ describe("executeCodeModeToolStep", () => {
 
   it("uses the advertised step override ahead of turn, session, and authored definitions", async () => {
     state.tools.set("lookup", definition("lookup", { execute: async () => "authored" }));
-    registerDurableDynamicCallback({
-      toolName: "lookup",
-      phase: "execute",
-      callback: (closure) => closure.value,
-    });
+    registerLookupCallbacks();
     state.ctx!.set(StepDynamicToolMetadataKey, [dynamic("step")]);
     state.ctx!.set(TurnDynamicToolMetadataKey, [dynamic("turn")]);
     state.ctx!.set(SessionDynamicToolMetadataKey, [dynamic("session")]);
@@ -359,11 +368,7 @@ describe("executeCodeModeToolStep", () => {
         workflowId: "workflow//eve//codeModeWorkflow",
       }),
     );
-    registerDurableDynamicCallback({
-      toolName: "lookup",
-      phase: "execute",
-      callback: (closure) => closure.value,
-    });
+    registerLookupCallbacks();
     state.ctx!.set(StepDynamicToolMetadataKey, [dynamic("discovered")]);
     const harnessTools = buildResponseAuthorizationTools({
       authoredTools: state.tools,
