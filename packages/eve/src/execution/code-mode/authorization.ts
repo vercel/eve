@@ -5,7 +5,11 @@ import {
   matchAuthorizationCallbacks,
   type MatchedAuthorizationCallback,
 } from "#execution/authorization-callback-match.js";
-import { executeCodeModeToolStep } from "#execution/code-mode/program-step.js";
+import {
+  executeCodeModeToolStep,
+  type CodeModeToolCall,
+  type CodeModeToolOutcome,
+} from "#execution/code-mode/program-step.js";
 import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
@@ -18,106 +22,118 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import type { ToolContext } from "#tools/definition.js";
 
-/** Owns callbacks for one nested call; the parent only forwards its authorization events. */
+type CodeModeToolContext = Pick<ToolContext, "abortSignal" | "callId" | "toolName">;
+
+/** Owns the callback hook until this nested tool call completes or fails. */
 export async function executeCodeModeTool(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
-  input: Omit<
-    Parameters<typeof executeCodeModeToolStep>[0],
-    "authorizationHookToken" | "authorizationResults"
-  >,
+  ctx: CodeModeToolContext,
+  input: CodeModeToolCall,
 ): Promise<CodeModeCallResolution> {
   const callbacks = createHook<DeliverHookPayload>();
-  const iterator = callbacks[Symbol.asyncIterator]();
-  let ownsCallbacks = false;
-  let pending: readonly AuthorizationChallenge[] = [];
+  await claimHookOwnership(callbacks);
   try {
-    await claimHookOwnership(callbacks);
-    ownsCallbacks = true;
+    const iterator = callbacks[Symbol.asyncIterator]();
     const call = { ...input, authorizationHookToken: callbacks.token };
     let outcome = await executeCodeModeToolStep(call);
     while (outcome.status === "authorization-required") {
-      pending = outcome.challenges;
-      if (pending.length === 0) throw new Error("Authorization returned no challenge.");
-      for (const challenge of pending) {
-        await publishAuthorizationEvent(
-          ctx,
-          createAuthorizationRequiredEvent({
-            ...coordinates(ctx),
-            attemptId: challenge.attemptId,
-            authorization: challenge.challenge,
-            candidateId: challenge.candidateId,
-            description:
-              challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
-            name: challenge.name,
-            webhookUrl: challenge.hookUrl,
-          }),
-        );
-      }
-      let remaining = pending;
-      const results: MatchedAuthorizationCallback["result"][] = [];
-      while (remaining.length > 0) {
-        const next = await nextCallback(iterator, ctx.abortSignal);
-        if (next.done) throw new Error("Authorization callback hook closed without a result.");
-        if (next.value.kind !== "deliver") continue;
-        const { matches } = matchAuthorizationCallbacks(
-          { challenges: remaining },
-          next.value.payloads,
-        );
-        results.push(...matches.map((match) => match.result));
-        remaining = remaining.filter(
-          (challenge) =>
-            !matches.some(
-              ({ result }) =>
-                result.name === challenge.name && result.attemptId === challenge.attemptId,
-            ),
-        );
-      }
-      outcome = await executeCodeModeToolStep({ ...call, authorizationResults: results });
-      for (const challenge of pending) {
-        await publishAuthorizationEvent(
-          ctx,
-          createAuthorizationCompletedEvent({
-            ...coordinates(ctx),
-            attemptId: challenge.attemptId,
-            authorization: challenge.challenge,
-            candidateId: challenge.candidateId,
-            name: challenge.name,
-            outcome: outcome.status === "failed" ? "failed" : "authorized",
-            reason: outcome.status === "failed" ? outcome.error : undefined,
-          }),
-        );
-      }
-      pending = [];
+      outcome = await resumeAfterAuthorization(ctx, call, iterator, outcome.challenges);
     }
     return outcome;
-  } catch (error) {
-    for (const challenge of pending) {
+  } finally {
+    await disposeHook(callbacks);
+  }
+}
+
+async function resumeAfterAuthorization(
+  ctx: CodeModeToolContext,
+  call: CodeModeToolCall & { readonly authorizationHookToken: string },
+  callbacks: AsyncIterator<DeliverHookPayload>,
+  challenges: readonly AuthorizationChallenge[],
+): Promise<CodeModeToolOutcome> {
+  if (challenges.length === 0) throw new Error("Authorization returned no challenge.");
+  try {
+    for (const challenge of challenges) {
       await publishAuthorizationEvent(
         ctx,
-        createAuthorizationCompletedEvent({
+        createAuthorizationRequiredEvent({
           ...coordinates(ctx),
           attemptId: challenge.attemptId,
           authorization: challenge.challenge,
           candidateId: challenge.candidateId,
+          description:
+            challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
           name: challenge.name,
-          outcome: "failed",
-          reason: toErrorMessage(error),
+          webhookUrl: challenge.hookUrl,
         }),
       );
     }
+    const authorizationResults = await waitForAuthorizationCallbacks(
+      callbacks,
+      challenges,
+      ctx.abortSignal,
+    );
+    const outcome = await executeCodeModeToolStep({ ...call, authorizationResults });
+    await publishAuthorizationCompletion(ctx, challenges, outcome);
+    return outcome;
+  } catch (error) {
+    await publishAuthorizationCompletion(ctx, challenges, {
+      status: "failed",
+      error: toErrorMessage(error),
+    });
     throw error;
-  } finally {
-    if (ownsCallbacks) await disposeHook(callbacks);
   }
 }
 
-function coordinates(ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">) {
+async function waitForAuthorizationCallbacks(
+  callbacks: AsyncIterator<DeliverHookPayload>,
+  challenges: readonly AuthorizationChallenge[],
+  signal: AbortSignal,
+): Promise<MatchedAuthorizationCallback["result"][]> {
+  let remaining = challenges;
+  const results: MatchedAuthorizationCallback["result"][] = [];
+  while (remaining.length > 0) {
+    const next = await nextCallback(callbacks, signal);
+    if (next.done) throw new Error("Authorization callback hook closed without a result.");
+    if (next.value.kind !== "deliver") continue;
+    const { matches } = matchAuthorizationCallbacks({ challenges: remaining }, next.value.payloads);
+    for (const { result } of matches) {
+      results.push(result);
+      remaining = remaining.filter(
+        (challenge) => challenge.name !== result.name || challenge.attemptId !== result.attemptId,
+      );
+    }
+  }
+  return results;
+}
+
+async function publishAuthorizationCompletion(
+  ctx: CodeModeToolContext,
+  challenges: readonly AuthorizationChallenge[],
+  outcome: CodeModeToolOutcome,
+): Promise<void> {
+  for (const challenge of challenges) {
+    await publishAuthorizationEvent(
+      ctx,
+      createAuthorizationCompletedEvent({
+        ...coordinates(ctx),
+        attemptId: challenge.attemptId,
+        authorization: challenge.challenge,
+        candidateId: challenge.candidateId,
+        name: challenge.name,
+        outcome: outcome.status === "failed" ? "failed" : "authorized",
+        reason: outcome.status === "failed" ? outcome.error : undefined,
+      }),
+    );
+  }
+}
+
+function coordinates(ctx: CodeModeToolContext) {
   const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
   return { sequence, stepIndex, turnId };
 }
 
 async function publishAuthorizationEvent(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  ctx: CodeModeToolContext,
   event: SubagentAuthorizationEvent,
 ): Promise<void> {
   const from = readWorkflowToolRunRef(ctx);

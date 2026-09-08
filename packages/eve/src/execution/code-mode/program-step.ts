@@ -191,16 +191,7 @@ export async function runCodeModeProgramStep(input: {
   }
 }
 
-/**
- * Executes one ordinary claimed tool with the turn's context rebuilt from its
- * serialized form. The sandbox and connections resolve through the same
- * providers a turn step uses, so `bash`, `read_file`, connection tools, and
- * authored tools all run unchanged; the parent materialized the sandbox before
- * dispatching, so this step only reconnects to it.
- */
-export async function executeCodeModeToolStep(input: {
-  readonly authorizationHookToken: string;
-  readonly authorizationResults?: readonly MatchedAuthorizationCallback["result"][];
+export interface CodeModeToolCall {
   readonly callId: string;
   readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly serializedContext: Record<string, unknown>;
@@ -208,7 +199,21 @@ export async function executeCodeModeToolStep(input: {
   readonly toolCallId: string;
   readonly toolInput: unknown;
   readonly toolName: string;
-}): Promise<CodeModeToolOutcome> {
+}
+
+/**
+ * Executes one ordinary claimed tool with the turn's context rebuilt from its
+ * serialized form. The sandbox and connections resolve through the same
+ * providers a turn step uses, so `bash`, `read_file`, connection tools, and
+ * authored tools all run unchanged; the parent materialized the sandbox before
+ * dispatching, so this step only reconnects to it.
+ */
+export async function executeCodeModeToolStep(
+  input: CodeModeToolCall & {
+    readonly authorizationHookToken: string;
+    readonly authorizationResults?: readonly MatchedAuthorizationCallback["result"][];
+  },
+): Promise<CodeModeToolOutcome> {
   "use step";
 
   const { ctx, harnessTools, session, rehydrateConnections } = await hydrateTurnTools(input);

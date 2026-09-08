@@ -176,6 +176,73 @@ describe("code mode authorization", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps authorization rounds separate when the same connection challenges again", async () => {
+    hook([callback(), callback("service", "service-second-attempt")]);
+    mocks.execute
+      .mockResolvedValueOnce({ status: "authorization-required", challenges: [challenge()] })
+      .mockResolvedValueOnce({
+        status: "authorization-required",
+        challenges: [{ ...challenge(), attemptId: "service-second-attempt" }],
+      })
+      .mockResolvedValueOnce({ status: "completed", output: "done" });
+
+    await expect(executeCodeModeTool(context(), input)).resolves.toEqual({
+      status: "completed",
+      output: "done",
+    });
+    expect(mocks.execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        authorizationResults: [expect.objectContaining({ attemptId: "service-attempt" })],
+      }),
+    );
+    expect(mocks.execute).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        authorizationResults: [expect.objectContaining({ attemptId: "service-second-attempt" })],
+      }),
+    );
+    expect(
+      mocks.publish.mock.calls.map((call) => {
+        const event = call[1].request.event.event;
+        return [event.type, event.data.attemptId];
+      }),
+    ).toEqual([
+      ["authorization.required", "service-attempt"],
+      ["authorization.completed", "service-attempt"],
+      ["authorization.required", "service-second-attempt"],
+      ["authorization.completed", "service-second-attempt"],
+    ]);
+    expect(mocks.createHook).toHaveBeenCalledOnce();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not execute or dispose again when claiming the hook fails", async () => {
+    hook([]);
+    mocks.claim.mockRejectedValueOnce(new Error("Hook already claimed"));
+    await expect(executeCodeModeTool(context(), input)).rejects.toThrow("Hook already claimed");
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.dispose).not.toHaveBeenCalled();
+  });
+
+  it("settles the pending challenge and disposes the hook if callbacks close early", async () => {
+    const { next } = hook([]);
+    next.mockResolvedValueOnce({ done: true, value: undefined });
+    mocks.execute.mockResolvedValueOnce({
+      status: "authorization-required",
+      challenges: [challenge()],
+    });
+    await expect(executeCodeModeTool(context(), input)).rejects.toThrow(
+      "Authorization callback hook closed without a result.",
+    );
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.publish.mock.calls[1]?.[1].request.event.event.data).toMatchObject({
+      outcome: "failed",
+      reason: "Authorization callback hook closed without a result.",
+    });
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
   it("reports failed token completion and returns a catchable tool failure", async () => {
     hook([callback()]);
     mocks.execute
