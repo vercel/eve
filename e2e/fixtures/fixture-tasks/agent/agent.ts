@@ -14,6 +14,9 @@ const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred u
 const TASK_STATE_LABEL = "[Task state]\n";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
+    return batchingBenchmark(request);
+  }
   if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
     const taskState = latestTaskState(request.userMessages);
     if (taskState !== undefined) return handleRedundantReviewWake(taskState);
@@ -259,6 +262,25 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
     };
   }
   return "TASK-FANOUT-STARTED";
+}
+
+function batchingBenchmark(request: MockModelRequest): MockModelResponse | string {
+  const message = [...request.userMessages]
+    .reverse()
+    .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
+  if (message === "TASK-BATCHING-QUESTION") return "56";
+  if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 100);
+
+  const state = latestTaskState(request.userMessages);
+  if (state === undefined) return "TASK-FANOUT-STARTED";
+  // Script perfect compliance so the eval measures delivery cost, not model obedience.
+  if (state.tasks.some((task) => task.status === "pending")) return EMPTY_DELIVERY_SENTINEL;
+  const results = state.tasks.flatMap((task) =>
+    task.output?.type === "result" && typeof task.output.data === "string"
+      ? [task.output.data]
+      : [],
+  );
+  return JSON.stringify({ report: "TASK-BATCHING-REPORT", results: results.sort() });
 }
 
 const FAN_IN_CALL_IDS = ["task-fan-in-1", "task-fan-in-2"] as const;

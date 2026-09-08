@@ -1,5 +1,28 @@
 # Task eval transitions
 
+## Completion batching measurement
+
+`task.parent.wake.emitted-ready.batching.eval.ts` launches 100 children behind
+approval gates. The burst case releases 99 together; the staggered case releases
+each child only after the parent has finished responding to the previous one.
+The last child stays blocked while the eval verifies silence and sends a user
+question, then completes to produce a report containing all 100 distinct results.
+
+Each case logs a JSON `task-batching` record with completion-driven parent turns,
+model steps, silent and visible messages, and completions per turn. Setup wakes
+and the user question are excluded. The scripted model always obeys the silence
+policy, so this measures the runtime cost of perfect compliance; the real-model
+prompt ablation lives in `agent-task-reporting`.
+
+Run this workload unchanged on the baseline and a batching revision. The burst
+does not guarantee simultaneous callback arrival or a fully buffered cohort:
+compare the observed batch sizes and step counts, not an assumed 100-to-1 gain.
+Counts are measurements, not fixed assertions that would prohibit improvements.
+The staggered case is a control for active-parent coalescing: it intentionally
+leaves no opportunity to merge adjacent completions. A policy that withholds all
+intermediate deliveries until cohort settlement needs a different driver because
+this case waits for each delivery before releasing the next child.
+
 ## Remote callback routing regression
 
 `task.input.answer.accepted-complete.remote.eval.ts` reuses the existing remote
