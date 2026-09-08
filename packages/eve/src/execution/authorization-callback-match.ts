@@ -44,7 +44,9 @@ export function matchAuthorizationCallbacks(
     if (
       challenge === undefined ||
       attemptKey === undefined ||
-      (challenge.principal === undefined && callback.legacy !== true) ||
+      (challenge.principal === undefined &&
+        challenge.senderAuthentication === undefined &&
+        callback.legacy !== true) ||
       matchedAttemptKeys.has(attemptKey)
     ) {
       continue;
@@ -61,6 +63,7 @@ export function matchAuthorizationCallbacks(
         name: challenge.name,
         principal: challenge.principal,
         resume: challenge.resume,
+        senderAuthentication: challenge.senderAuthentication,
       },
     });
   }

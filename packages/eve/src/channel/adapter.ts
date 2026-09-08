@@ -11,6 +11,11 @@ import type {
   FetchFileFunction,
 } from "#shared/channel-definition.js";
 import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
+import type {
+  ChannelAuthenticationCallbackInput,
+  ChannelAuthenticationResolution,
+} from "#channel/authentication.js";
+import type { SessionAuthContext } from "#channel/types.js";
 
 const log = createLogger("channel.adapter");
 
@@ -146,6 +151,17 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * return void to use the default payload projection.
    */
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
+
+  authenticateSender?(
+    event: unknown,
+    callbackUrl: string,
+    ctx: TCtx,
+  ): Promise<ChannelAuthenticationResolution>;
+
+  completeSenderAuthentication?(
+    input: ChannelAuthenticationCallbackInput,
+    ctx: TCtx,
+  ): Promise<SessionAuthContext>;
 
   /**
    * Optional factory that builds the adapter context for this adapter.

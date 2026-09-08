@@ -6,6 +6,10 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
 import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
+import type {
+  ChannelAuthenticationCallbackInput,
+  ChannelAuthenticationResolution,
+} from "#channel/authentication.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -63,6 +67,17 @@ export interface GenericChannelDefinition<
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
+  /** @internal Channel factories use this to install a durable sender-auth gate. */
+  authenticateSender?(
+    event: unknown,
+    callbackUrl: string,
+    ctx: TCtx,
+  ): Promise<ChannelAuthenticationResolution>;
+  /** @internal Completes a sender-auth interaction started by `authenticateSender`. */
+  completeSenderAuthentication?(
+    input: ChannelAuthenticationCallbackInput,
+    ctx: TCtx,
+  ): Promise<SessionAuthContext>;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's

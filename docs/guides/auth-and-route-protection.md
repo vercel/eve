@@ -1,11 +1,12 @@
 ---
 title: "Authentication"
-description: "Secure your agent's HTTP routes with an ordered auth walk, verifier helpers, and connection OAuth via Vercel Connect."
+description: "Secure HTTP routes, resolve channel senders, and authorize outbound tools and connections."
 ---
 
-eve has two independent auth systems:
+eve has three auth boundaries:
 
 - **Route auth** (inbound) decides who can reach your agent's HTTP routes. It runs at the channel layer, gating the request before any model work runs.
+- **Channel sender auth** (inbound) resolves the person represented by an accepted platform message. A durable channel can pause that message for sign-in before any model or tool work runs.
 - **Tool and connection auth** (outbound) is how your agent signs in to an external service it calls, like an OAuth MCP server. It happens later, when a tool or connection actually reaches out.
 
 Start with route auth.
@@ -36,10 +37,11 @@ export default eveChannel({
 
 ## The ordered auth walk
 
-`auth` takes a single `AuthFn` or an array that eve walks in order. Each entry has three possible outcomes:
+`auth` takes a single `AuthFn` or an array that eve walks in order. Each entry has four possible outcomes:
 
 - returns a `SessionAuthContext`: accept the request and stop the walk
 - returns `null` / `undefined`: skip to the next entry
+- returns `{ interaction: "required", ... }`: on an eve create or message request, accept and park the input for sign-in
 - **throws**: reject with a specific status
 
 If every entry skips, the request gets a `401` whose `WWW-Authenticate` header advertises the challenge scheme(s) the configured entries declare — `Basic` for `httpBasic()`, `Bearer` for the token-based helpers (`jwtHmac`, `jwtEcdsa`, `oidc`, `vercelOidc`), both when you mix them, and `Bearer` as a fallback for entries that don't declare a scheme (custom `AuthFn`s, or an empty array). See [`withAuthChallenges`](#custom-verifiers) to declare a scheme on a custom `AuthFn`.
@@ -82,6 +84,36 @@ throw new ForbiddenError({ message: "Not allowed on this workspace." }); // 403
 ```
 
 Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
+
+### Interactive eve channel auth
+
+An eve create or follow-up message can pause for sign-in before model or tool execution. Return an `AuthInteractionRequired` result from the `AuthFn<Request>` that handles those two POST routes:
+
+```ts title="agent/channels/eve.ts"
+import { type AuthFn } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+import { readAppSession, requiredSignIn, transportSession } from "@/lib/auth";
+
+const appAuth: AuthFn<Request> = async (request) => {
+  const url = new URL(request.url);
+  const isMessage =
+    request.method === "POST" &&
+    (url.pathname === "/eve/v1/session" || /^\/eve\/v1\/session\/[^/]+$/.test(url.pathname));
+
+  if (!isMessage) return transportSession(request);
+
+  const session = await readAppSession(request);
+  return session?.auth ?? requiredSignIn();
+};
+
+export default eveChannel({ auth: appAuth });
+```
+
+eve creates or attaches the durable session, stores the message, emits `authorization.required`, and parks before dynamic capabilities, the model, or tools run. After the callback, `completeAuthorization` supplies `SessionAuthContext` and eve resumes the stored message. `onMessage` may return an explicit `auth` property as a final override; `{ auth: null }` bypasses the configured walk, while `{}` preserves it.
+
+The same `auth` function still protects the info, stream, and control routes. Those routes cannot park, so they need an immediate `SessionAuthContext` or a fallthrough to another accepting strategy. A browser commonly uses an application session for route access while requiring a stronger account mapping for message POSTs.
+
+Only the selected strategy index and a scrubbed request descriptor cross into the durable workflow. eve removes headers, cookies, credentials, query parameters, and the body. The strategy must recreate the same interactive result from stable application configuration; carry callback-specific JSON state through `startAuthorization`'s `resume` result. Interactive eve auth is not accepted for `operationId`, forwarded-principal, delegated callback, or `inputResponses` requests because those operations require an identity at the HTTP boundary.
 
 ## Verifier helpers
 
@@ -262,6 +294,16 @@ Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolv
 
 Route auth does not enforce session ownership. If multiple users or tenants can reach the same route, you must implement the per-user, per-tenant, or per-session authorization your application requires.
 
+## Channel sender auth
+
+Route auth proves that a request may reach a channel; sender auth decides which person an accepted message represents. Slack mentions and DMs resolve a workspace-scoped Slack user by default. The eve channel can turn an interactive result from its message-route auth walk into sender auth. Set `auth` on either channel when the sender must map to an application account or complete sign-in first.
+
+Slack walks one `AuthFn<SlackEvent>` or an array in order. A strategy can return a `SessionAuthContext`, return `null` or `undefined` to try the next strategy, or return `{ interaction: "required", ... }` to claim the message and begin interactive sign-in. eve stores the accepted input, emits `authorization.required`, and parks the session before creating a model execution. After the callback, `completeAuthorization` returns the final `SessionAuthContext`; eve installs it and resumes the stored input.
+
+Message hooks still own admission. Returning `null` from `onAppMention`, `onDirectMessage`, or `onMessage` drops the message. Returning an object with an explicit `auth` property is a final override—even `{ auth: null }`—and bypasses the configured sender-auth walk. See [Authenticate Slack senders](../channels/slack#authenticate-slack-senders) for the API and an example.
+
+`routeAuth(...)` still rejects `AuthInteractionRequired` because a generic HTTP route has no durable input to park. `eveChannel(...)` handles the result specially on its create and follow-up message routes and hands the accepted input to the shared durable sender-auth gate.
+
 ## Tool and connection auth
 
 Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Connections declare `auth` on the connection definition. Tools should resolve providers inline with `ctx.getToken(provider)` and call `ctx.requireAuth(provider)` only when a downstream service rejects a token; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
@@ -311,7 +353,7 @@ export default eveChannel({
 
 Keep `principalId` stable for the same person, and include an `issuer` when the same app may accept users from multiple identity providers. The connection token cache keys user credentials by issuer and principal id so two providers cannot accidentally share a grant.
 
-Built-in platform channels that identify a human sender, such as Slack, Discord, Teams, Telegram, Twilio, Linear, and GitHub, attach a user principal for that sender by default. A Slack mention, DM, or button click can therefore authorize a user-scoped connection for the Slack user who sent it without adding a separate browser-session auth function.
+Built-in platform channels that identify a human sender attach a user principal for that sender by default. A Slack mention or DM can therefore authorize a user-scoped connection for the Slack user who sent it without adding a separate application sign-in. Configure Slack sender auth when that platform identity must resolve to a different principal.
 
 ### On a connection
 

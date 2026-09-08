@@ -54,7 +54,7 @@ import {
   FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
   formatTraceContentCeiling,
 } from "#shared/forwarded-trace-policy.js";
-import { routeAuth } from "#public/channels/auth.js";
+import { resolveAuth, routeAuth, type AuthInteractionMatch } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
@@ -80,17 +80,35 @@ import {
   resolveOnMessage,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
+import {
+  authenticateEveSender,
+  completeEveSenderAuthentication,
+  createEveSenderAuthenticationEvent,
+} from "#eve-channel/authentication.js";
 
 export * from "#eve-channel/types.js";
 
 const log = createLogger("eve.channel");
+
+function interactionRejectedResponse(): Response {
+  return Response.json(
+    {
+      error:
+        "Interactive sign-in is only supported for top-level eve message requests without operationId.",
+      ok: false,
+    },
+    { headers: { "www-authenticate": "Bearer" }, status: 401 },
+  );
+}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session,
  * ID-addressed POST routes deliver follow-ups and controls, and GET streams a
  * session's NDJSON event feed). Every route
- * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * runs {@link EveChannelInput.auth} before dispatching. Message routes can
+ * hand an interactive result to the durable sender-auth gate; all other routes
+ * require an immediate route-auth result.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
@@ -100,6 +118,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
   return defineChannel<undefined, EveEventContext>({
     cors: normalizeEveCors(input.cors),
     turnPolicy: input.turnPolicy,
+    async authenticateSender(event, callbackUrl) {
+      return await authenticateEveSender(input.auth, event, callbackUrl);
+    },
+    async completeSenderAuthentication(callback) {
+      return await completeEveSenderAuthentication(input.auth, callback);
+    },
     routes: [
       GET(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
       HEAD(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
@@ -133,23 +157,37 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       DELETE(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
 
       POST(EVE_SESSION_ROUTE_PATH, async (req, args) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await resolveAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
+        let interaction: AuthInteractionMatch | undefined;
+        let authenticatedAuth: SessionAuthContext | undefined;
+        if ("interaction" in authResult) interaction = authResult;
+        else authenticatedAuth = authResult;
 
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
         const tokenRejection = rejectSessionContinuationToken(payload);
         if (tokenRejection !== null) return tokenRejection;
 
-        const forwarded = await resolveForwardedPrincipal({
-          trustedForwarders: input.trustedForwarders,
-          forwarder: authResult,
-          payload,
-        });
-        if (forwarded instanceof Response) return forwarded;
-
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        if (
+          interaction !== undefined &&
+          (payload.forwardedPrincipal !== undefined ||
+            body.callback !== undefined ||
+            body.operationId !== undefined)
+        ) {
+          return interactionRejectedResponse();
+        }
+        const forwarded =
+          interaction === undefined
+            ? await resolveForwardedPrincipal({
+                trustedForwarders: input.trustedForwarders,
+                forwarder: authenticatedAuth!,
+                payload,
+              })
+            : { accepted: false as const, auth: null };
+        if (forwarded instanceof Response) return forwarded;
         // Top-level sessions own their trace. Callback sessions are delegated
         // remote agents and intentionally continue the dispatching agent trace.
         const parsedParentTraceContext =
@@ -160,7 +198,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
-        if (body.operationId !== undefined && forwarded.auth.principalType === "anonymous") {
+        if (body.operationId !== undefined && forwarded.auth?.principalType === "anonymous") {
           return Response.json(
             { error: "operationId requires an authenticated principal.", ok: false },
             { status: 400 },
@@ -170,7 +208,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           body.operationId === undefined
             ? undefined
             : await deriveOperationContinuationToken({
-                auth: forwarded.auth,
+                auth: forwarded.auth!,
                 operationId: body.operationId,
               });
         if (operationToken !== undefined) {
@@ -213,18 +251,18 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
         if (forwardedTraceAssertion === "malformed") {
           log.warn("using metadata-only policy for malformed forwarded audience baggage", {
-            forwarder: authResult.principalId,
+            forwarder: "principalId" in authResult ? authResult.principalId : "interactive",
           });
         } else if (typeof forwardedTraceAssertion === "object") {
           if (acceptedForwardedTracePolicy !== undefined) {
             log.info("accepted forwarded trace policy", {
               audience: forwardedTraceAssertion.originAudience,
               ceiling: formatTraceContentCeiling(forwardedTraceAssertion.ceiling),
-              forwarder: authResult.principalId,
+              forwarder: "principalId" in authResult ? authResult.principalId : "interactive",
             });
           } else {
             log.warn("ignoring forwarded trace policy without an accepted sampled principal", {
-              forwarder: authResult.principalId,
+              forwarder: "principalId" in authResult ? authResult.principalId : "interactive",
             });
           }
         }
@@ -236,6 +274,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           request: req,
         });
         if (messageResult instanceof Response) return messageResult;
+        const senderAuthentication =
+          interaction === undefined || messageResult.hasAuthOverride
+            ? undefined
+            : { event: createEveSenderAuthenticationEvent(req, interaction) };
+        const dispatchAuth = messageResult.hasAuthOverride
+          ? (messageResult.auth ?? null)
+          : forwarded.auth;
         const createSession = readRouteSessionCreator(args);
         if (createSession === undefined) {
           return Response.json(
@@ -248,7 +293,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           handle = await createSession({
             activityObserver: body.activityObserver,
-            auth: messageResult.auth,
+            auth: dispatchAuth,
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
@@ -259,6 +304,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 message: body.message,
                 context: messageResult.context,
                 outputSchema: body.outputSchema,
+                senderAuthentication,
               },
               body.context,
             ),
@@ -287,27 +333,43 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
+        const authResult = await resolveAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
+        let interaction: AuthInteractionMatch | undefined;
+        let authenticatedAuth: SessionAuthContext | undefined;
+        if ("interaction" in authResult) interaction = authResult;
+        else authenticatedAuth = authResult;
 
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
-        const forwarded = await resolveForwardedPrincipal({
-          trustedForwarders: input.trustedForwarders,
-          forwarder: authResult,
-          payload,
-        });
-        if (forwarded instanceof Response) return forwarded;
         const body = parseSessionMessageBody(payload);
         if (body instanceof Response) return body;
+        if (
+          interaction !== undefined &&
+          (payload.forwardedPrincipal !== undefined ||
+            body.callback !== undefined ||
+            body.inputResponses !== undefined)
+        ) {
+          return interactionRejectedResponse();
+        }
+        const forwarded =
+          interaction === undefined
+            ? await resolveForwardedPrincipal({
+                trustedForwarders: input.trustedForwarders,
+                forwarder: authenticatedAuth!,
+                payload,
+              })
+            : { accepted: false as const, auth: null };
+        if (forwarded instanceof Response) return forwarded;
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
         let context: readonly string[] | undefined;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
+        let senderAuthentication: { readonly event: unknown } | undefined;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
             auth: forwarded.auth,
@@ -318,7 +380,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           });
           if (messageResult instanceof Response) return messageResult;
           context = messageResult.context;
-          dispatchAuth = messageResult.auth;
+          if (messageResult.hasAuthOverride) {
+            dispatchAuth = messageResult.auth ?? null;
+          } else if (interaction !== undefined) {
+            senderAuthentication = { event: createEveSenderAuthenticationEvent(req, interaction) };
+          }
         }
 
         let result: Awaited<ReturnType<Session["send"]>>;
@@ -331,6 +397,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               callback: body.callback,
               context,
               outputSchema: body.outputSchema,
+              senderAuthentication,
               turnPolicy: body.turnPolicy,
             },
             body.context,

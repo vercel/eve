@@ -517,9 +517,11 @@ export interface RunInput {
    */
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
-    readonly message: string | UserContent;
     readonly context?: readonly string[];
+    readonly message: string | UserContent;
     readonly outputSchema?: JsonObject;
+    /** @internal Durable channel sender-auth input carried into the first delivery. */
+    readonly senderAuthentication?: { readonly event: unknown };
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;

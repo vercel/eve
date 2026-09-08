@@ -41,10 +41,14 @@ export function formatConnectionDisplayName(connectionName: string): string {
 export function buildAuthRequiredPublicText(input: {
   readonly displayName: string;
   readonly hasUser: boolean;
+  readonly purpose?: "connection" | "session";
 }): string {
   if (!input.hasUser) {
-    return `Authorization required for ${input.displayName} (no triggering user)`;
+    return input.purpose === "session"
+      ? "Sign-in required (no triggering user)"
+      : `Authorization required for ${input.displayName} (no triggering user)`;
   }
+  if (input.purpose === "session") return "Sign in to continue";
   return `Connect with ${input.displayName} to continue`;
 }
 
@@ -56,13 +60,18 @@ export function buildAuthRequiredPublicText(input: {
 export function buildAuthCompletedText(input: {
   readonly displayName: string;
   readonly outcome: ConnectionAuthorizationOutcome;
+  readonly purpose?: "connection" | "session";
   readonly reason?: string;
 }): string {
   if (input.outcome === "authorized") {
-    return `:white_check_mark: ${input.displayName} connected`;
+    return input.purpose === "session"
+      ? ":white_check_mark: Signed in"
+      : `:white_check_mark: ${input.displayName} connected`;
   }
   const tail = input.reason !== undefined ? ` (${input.reason})` : "";
-  return `:x: ${input.displayName} authorization ${input.outcome}${tail}`;
+  return input.purpose === "session"
+    ? `:x: Sign-in ${input.outcome}${tail}`
+    : `:x: ${input.displayName} authorization ${input.outcome}${tail}`;
 }
 
 /**

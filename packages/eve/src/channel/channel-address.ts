@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { copyChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { readChannelAuthenticationPayload } from "#channel/authentication.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -152,6 +153,7 @@ export function createChannelAddress<TState = undefined>(input: {
           context: payload.context,
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
+          senderAuthentication: readChannelAuthenticationPayload(payload),
         },
         mode: options.mode ?? "conversation",
         requestId: metadata.requestId,

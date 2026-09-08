@@ -8,6 +8,7 @@
 import { decodeJwt } from "#compiled/jose/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
@@ -31,6 +32,8 @@ import {
   type RuntimeIpAllowList,
 } from "#channel/ip-allow-list.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
+import type { JsonValue } from "#shared/json.js";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -509,19 +512,57 @@ export class ForbiddenError extends Error {
 }
 
 /**
- * Route auth callback. Returned value semantics inside {@link routeAuth}:
+ * Interactive sign-in request returned by a channel auth strategy.
  *
- * - A {@link SessionAuthContext} accepts the request and halts the walk.
- * - `null` or `undefined` skips to the next entry.
+ * The channel runtime mints {@link startAuthorization.callbackUrl}, journals
+ * `resume`, parks the accepted input, and calls `completeAuthorization` when
+ * the callback arrives. Returning this value claims the auth walk; later
+ * strategies are not evaluated.
+ */
+export interface AuthInteractionRequired<Resume extends JsonValue = JsonValue> {
+  readonly interaction: "required";
+  startAuthorization(opts: { readonly callbackUrl: string }): Promise<{
+    readonly challenge: ConnectionAuthorizationChallenge;
+    readonly resume?: Resume;
+  }>;
+  completeAuthorization(opts: {
+    readonly callback: AuthorizationCallback;
+    readonly callbackUrl: string;
+    readonly resume?: Resume;
+  }): Promise<SessionAuthContext>;
+}
+
+/** Result accepted from one {@link AuthFn}. */
+export type AuthResult = SessionAuthContext | AuthInteractionRequired;
+
+export function isAuthInteractionRequired(value: unknown): value is AuthInteractionRequired {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { readonly interaction?: unknown }).interaction === "required" &&
+    typeof (value as { readonly startAuthorization?: unknown }).startAuthorization === "function" &&
+    typeof (value as { readonly completeAuthorization?: unknown }).completeAuthorization ===
+      "function"
+  );
+}
+
+/**
+ * Authentication strategy shared by route and sender-auth walks.
  *
- * If every entry skips (including the empty `[]` case), the walker returns a
- * 401. To reject with a specific response, throw an
- * {@link UnauthenticatedError} or {@link ForbiddenError}. To accept anonymous
- * traffic, include {@link none} as the final entry.
+ * A {@link SessionAuthContext} accepts and `null` or `undefined` falls through
+ * to the next strategy. Durable channel sender-auth gates additionally accept
+ * {@link AuthInteractionRequired}; route auth rejects that result because an
+ * HTTP request cannot be parked for a callback.
  */
 export type AuthFn<TEvent = Request> = (
   event: TEvent,
-) => SessionAuthContext | null | undefined | Promise<SessionAuthContext | null | undefined>;
+) => AuthResult | null | undefined | Promise<AuthResult | null | undefined>;
+
+/** An interactive auth result together with the strategy that claimed the walk. */
+export interface AuthInteractionMatch {
+  readonly interaction: AuthInteractionRequired;
+  readonly strategyIndex: number;
+}
 
 /**
  * OAuth protected-resource metadata attached to an inbound auth policy.
@@ -590,6 +631,11 @@ export function oauthResource(
   const composed: AuthFn<Request> = async (request) => {
     for (const fn of list) {
       const result = await fn(request);
+      if (isAuthInteractionRequired(result)) {
+        throw new Error(
+          "Interactive sign-in requires a durable channel sender-auth gate and cannot run during HTTP route authentication.",
+        );
+      }
       if (result) return result;
     }
     return null;
@@ -703,13 +749,35 @@ export async function routeAuth(
   request: Request,
   auth: AuthFn<Request> | readonly AuthFn<Request>[],
 ): Promise<SessionAuthContext | Response> {
+  const result = await resolveAuth(request, auth);
+  if ("interaction" in result) {
+    throw new Error(
+      "Interactive sign-in requires a durable channel sender-auth gate and cannot run during HTTP route authentication.",
+    );
+  }
+  return result;
+}
+
+/**
+ * Resolves an auth walk while preserving an interactive result for a channel
+ * factory that can hand it to a durable sender-auth gate. Most HTTP routes
+ * should call {@link routeAuth}; accepting an interaction requires the route
+ * to durably retain the input before returning.
+ */
+export async function resolveAuth(
+  request: Request,
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): Promise<SessionAuthContext | AuthInteractionMatch | Response> {
   const list: readonly AuthFn<Request>[] = Array.isArray(auth)
     ? (auth as readonly AuthFn<Request>[])
     : [auth as AuthFn<Request>];
 
   try {
-    for (const fn of list) {
+    for (const [strategyIndex, fn] of list.entries()) {
       const result = await fn(request);
+      if (isAuthInteractionRequired(result)) {
+        return { interaction: result, strategyIndex };
+      }
       if (result) return result;
     }
   } catch (error) {

@@ -45,6 +45,8 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "createAdapterContext",
   "fetchFile",
   "instrumentation",
+  "authenticateSender",
+  "completeSenderAuthentication",
 ]);
 
 /**
@@ -171,6 +173,13 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   if (adapter.createAdapterContext !== undefined) {
+    return true;
+  }
+
+  if (
+    adapter.authenticateSender !== undefined ||
+    adapter.completeSenderAuthentication !== undefined
+  ) {
     return true;
   }
 
