@@ -595,7 +595,9 @@ describe("exported agent telemetry contract", () => {
       const metadata = new TextDecoder().decode(
         JsonTraceSerializer.serializeRequest(runtime.metadata.getFinishedSpans())!,
       );
-      const metadataSpans = parseLocalTraceSegment(metadata, traceId);
+      const metadataSpans = traceIds.flatMap((traceId) =>
+        parseLocalTraceSegment(metadata, traceId),
+      );
       expect(metadataSpans.map((span) => [span.name, span.attributes["resource.name"]])).toEqual(
         parsed.map((span) => [span.name, span.name]),
       );
