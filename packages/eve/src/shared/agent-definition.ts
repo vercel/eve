@@ -271,6 +271,7 @@ export interface AgentWorkflowDefinition {
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
 export type InternalAgentDefinition = {
+  delegationModels?: readonly string[];
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
@@ -292,6 +293,8 @@ export type InternalAgentDefinition = {
  * a `name` field.
  */
 type PublicAgentDefinitionBase = {
+  /** Allow fresh local delegations to select one of these gateway model IDs. Omit to keep execution settings fixed. */
+  readonly delegationModels?: readonly string[];
   /**
    * Human-readable description of the agent's purpose. Required for
    * subagents (authored under `subagents/<id>/agent.ts`): surfaced to

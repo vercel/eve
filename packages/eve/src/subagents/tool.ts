@@ -14,6 +14,7 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
+import { SUBAGENT_EXECUTION_SCHEMA } from "#tools/framework/agent-contract.js";
 
 /**
  * Pending task batch event metadata needed for child run lineage.
@@ -128,6 +129,14 @@ export function buildSubagentRunInput(input: {
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  if (action.input.execution !== undefined) {
+    const { maxCostUsd } = SUBAGENT_EXECUTION_SCHEMA.parse(action.input.execution);
+    if (maxCostUsd !== undefined) {
+      const inherited = inheritedLimits.maxTokenCostUsdPerSession;
+      inheritedLimits.maxTokenCostUsdPerSession =
+        typeof inherited === "number" ? Math.min(inherited, maxCostUsd) : maxCostUsd;
+    }
+  }
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,

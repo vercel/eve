@@ -83,6 +83,7 @@ export async function compileAgentConfig(
       thresholdPercent?: number;
     };
     defaultTools?: boolean;
+    delegationModels?: readonly string[];
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
     name: string;
@@ -98,6 +99,9 @@ export async function compileAgentConfig(
 
   if (definition.defaultTools !== undefined) {
     compiledConfig.defaultTools = definition.defaultTools;
+  }
+  if (definition.delegationModels !== undefined) {
+    compiledConfig.delegationModels = [...definition.delegationModels];
   }
 
   if (definition.description !== undefined) {

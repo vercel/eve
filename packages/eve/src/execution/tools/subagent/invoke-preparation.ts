@@ -16,7 +16,11 @@ import type { JsonObject } from "#shared/json.js";
 import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
+import {
+  AGENT_TOOL_DESCRIPTION,
+  AGENT_TOOL_NAME,
+  SUBAGENT_EXECUTION_SCHEMA,
+} from "#tools/framework/agent-contract.js";
 import {
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
@@ -25,6 +29,7 @@ import {
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import {
   isAgentHandleAction,
+  createAgentErrorResult,
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#subagents/handle-dispatch.js";
@@ -103,6 +108,34 @@ export function planAgentDispatch(input: {
   const rawAgentId = input.action.input.agentId;
   const agentId =
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
+  if (input.action.input.execution !== undefined) {
+    const registered = input.bundle.subagentRegistry.subagentsByNodeId.get(input.action.nodeId);
+    const models =
+      registered?.definition.kind === "subagent"
+        ? registered.definition.delegationModels
+        : undefined;
+    const parsed = SUBAGENT_EXECUTION_SCHEMA.safeParse(input.action.input.execution);
+    const error =
+      agentId !== undefined
+        ? "Execution settings cannot change when resuming a child. Start a new child to change models."
+        : models === undefined
+          ? "This subagent does not allow execution overrides."
+          : !parsed.success
+            ? "Invalid execution settings: provide model, optional supported reasoning, and a positive finite maxCostUsd."
+            : !models.includes(parsed.data.model)
+              ? `Select an authorized delegation model: ${models.join(", ")}.`
+              : undefined;
+    if (error !== undefined) {
+      return {
+        kind: "reject",
+        result: createAgentErrorResult({
+          action: input.action,
+          code: "invalid_execution",
+          message: error,
+        }),
+      };
+    }
+  }
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
     if (knownAgentIds.has(agentId)) {
       const dynamicSubagentSelection =
@@ -260,12 +293,14 @@ function resolveAgentInvocationAction(input: {
     throw new Error(`Agent target "${input.input.target}" is not available to this agent.`);
   }
   const actionInput: {
+    execution?: JsonObject;
     agentId?: string;
     message: string;
     outputSchema?: JsonObject;
   } = { message: input.input.message };
   if (input.input.agentId !== undefined) actionInput.agentId = input.input.agentId;
   if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
+  if (input.input.execution !== undefined) actionInput.execution = input.input.execution;
   const common = {
     callId: input.invocationId,
     description: definition.description ?? "",

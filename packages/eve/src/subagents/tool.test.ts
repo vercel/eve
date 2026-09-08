@@ -52,6 +52,25 @@ function makeInheritingGraph(nodeId: string) {
 }
 
 describe("buildSubagentRunInput", () => {
+  it.each([
+    { requested: 0.25, expected: 0.25 },
+    { requested: 20, expected: 2 },
+  ])("caps requested cost $requested at the inherited batch share", ({ requested, expected }) => {
+    const session = { ...makeSession(), limits: { maxTokenCostUsdPerSession: 4 } };
+    const action = makeAction();
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: {
+        ...action,
+        input: { ...action.input, execution: { model: "openai/gpt-5.5", maxCostUsd: requested } },
+      },
+      auth: null,
+      initiatorAuth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      fanoutSize: 2,
+      session,
+    });
+    expect(runInput.limits?.maxTokenCostUsdPerSession).toBe(expected);
+  });
   it("forwards parent capabilities to the child run input", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

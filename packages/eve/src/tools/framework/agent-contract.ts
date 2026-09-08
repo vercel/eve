@@ -29,3 +29,21 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
     )
     .optional(),
 });
+
+export const SUBAGENT_EXECUTION_SCHEMA = z.strictObject({
+  model: z.string().min(1),
+  reasoning: z
+    .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .optional(),
+  maxCostUsd: z.number().finite().positive().optional(),
+});
+
+export function createSubagentInputSchema(models: readonly string[]) {
+  return SUBAGENT_TOOL_INPUT_SCHEMA.extend({
+    execution: SUBAGENT_EXECUTION_SCHEMA.extend({ model: z.enum(models) })
+      .describe(
+        "Optional execution settings for a new child only. Omit when resuming with agentId. Cost can only lower inherited limits. Reasoning support depends on the model.",
+      )
+      .optional(),
+  });
+}

@@ -5,6 +5,38 @@ description: "Delegate work to root-agent copies or declared specialists with th
 
 eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
+## Per-call execution for declared subagents
+
+A declared local subagent can opt into model selection by listing `delegationModels`
+in its `defineAgent` configuration. Its default model must be static. For example:
+
+```ts
+export default defineAgent({
+  description: "Complete a bounded assignment using the shared workspace.",
+  model: "openai/gpt-5.5",
+  delegationModels: ["openai/gpt-5.5", "google/gemini-2.5-flash"],
+  limits: { maxTokenCostUsdPerSession: 2 },
+});
+```
+
+The parent can then call that subagent with:
+
+```ts
+worker({
+  message: "Read the assigned transcripts and save your findings.",
+  execution: {
+    model: "google/gemini-2.5-flash",
+    maxCostUsd: 0.25,
+  },
+});
+```
+
+`execution.reasoning` optionally selects an existing eve reasoning level; model
+support still applies. Omit `execution` to keep authored settings. It is only
+accepted for fresh children, not `agentId` follow-ups, remote agents or root copies.
+An explicit cost ceiling cannot raise the inherited parent quota or authored child
+limit. This does not reserve cost across overlapping dispatch batches.
+
 ## The built-in `agent` tool
 
 The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:

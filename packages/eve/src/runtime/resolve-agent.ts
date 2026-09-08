@@ -189,6 +189,7 @@ function createResolvedAgentConfig(
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
+    delegationModels?: readonly string[];
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
@@ -197,6 +198,7 @@ function createResolvedAgentConfig(
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
     name: manifest.config.name,
+    delegationModels: manifest.config.delegationModels,
   };
 
   if (manifest.config.defaultTools !== undefined) {

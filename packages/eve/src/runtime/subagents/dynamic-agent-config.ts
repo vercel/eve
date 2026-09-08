@@ -43,6 +43,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (definition.defaultTools !== undefined) {
     throw new Error(`${message} The "defaultTools" field cannot be selected at runtime.`);
   }
+  if (definition.delegationModels !== undefined) {
+    throw new Error(
+      `${message} The "delegationModels" field requires a statically declared local subagent.`,
+    );
+  }
   if (definition.experimental !== undefined) {
     throw new Error(`${message} The "experimental" field cannot be selected at runtime.`);
   }

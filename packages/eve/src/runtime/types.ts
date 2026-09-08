@@ -283,6 +283,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
       kind: "subagent";
+      delegationModels?: readonly string[];
       name: string;
     } & (
       | {

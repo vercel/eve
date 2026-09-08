@@ -21,6 +21,7 @@ import type { ToolContext } from "#tools/definition.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
 export type InternalAgentInput = {
+  readonly execution?: JsonObject;
   readonly agentId?: string;
   readonly message: string;
   readonly outputSchema?: JsonObject;

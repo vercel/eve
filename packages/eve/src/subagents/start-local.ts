@@ -8,6 +8,8 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { SUBAGENT_EXECUTION_SCHEMA } from "#tools/framework/agent-contract.js";
+import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -37,37 +39,69 @@ export async function startLocalSubagent(input: {
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
-  const childRuntime = createWorkflowRuntime({
-    compiledArtifactsSource: input.bundle.compiledArtifactsSource,
-    dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
-    nodeId: action.nodeId,
-  });
-  const { childContinuationToken, runInput } = buildSubagentRunInput({
-    action,
-    auth: input.auth,
-    batchEvent: input.batchEvent,
-    capabilities: input.capabilities,
-    channelMetadata: input.channelMetadata,
-    fanoutSize: input.fanoutSize,
-    initiatorAuth: input.initiatorAuth,
-    graph: input.bundle.graph,
-    parentContinuationToken: input.parentContinuationToken,
-    parentTraceContext: input.parentTraceContext,
-    activityObserver: input.activityObserver,
-    sandboxSessionId: input.sandboxSessionId,
-    session: input.session,
-    selfAgent: source.type === "runtime",
-    source,
-    taskId: input.taskId,
-  });
-
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
-  let childSessionId: string;
   try {
+    let agentConfig = input.dynamicSubagentAgentConfig;
+    if (action.input.execution !== undefined) {
+      const execution = SUBAGENT_EXECUTION_SCHEMA.parse(action.input.execution);
+      const base = input.bundle.graph.nodesByNodeId.get(action.nodeId)?.agent.config;
+      if (base === undefined || !base.delegationModels?.includes(execution.model)) {
+        throw new Error("Delegation execution settings are not authorized for this child.");
+      }
+      const selected = await resolveRuntimeModelSelection({
+        durability: "durable",
+        selection: { model: execution.model },
+        state: new ContextContainer(),
+      });
+      agentConfig = {
+        description: base.description ?? action.description,
+        model: selected.reference,
+        reasoning: execution.reasoning ?? base.reasoning,
+        limits: base.limits,
+        outputSchema: base.outputSchema,
+        compaction: base.compaction,
+      };
+    }
+    const childRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: input.bundle.compiledArtifactsSource,
+      dynamicSubagentAgentConfig: agentConfig,
+      nodeId: action.nodeId,
+    });
+    const { childContinuationToken, runInput } = buildSubagentRunInput({
+      action,
+      auth: input.auth,
+      batchEvent: input.batchEvent,
+      capabilities: input.capabilities,
+      channelMetadata: input.channelMetadata,
+      fanoutSize: input.fanoutSize,
+      initiatorAuth: input.initiatorAuth,
+      graph: input.bundle.graph,
+      parentContinuationToken: input.parentContinuationToken,
+      parentTraceContext: input.parentTraceContext,
+      activityObserver: input.activityObserver,
+      sandboxSessionId: input.sandboxSessionId,
+      session: input.session,
+      selfAgent: source.type === "runtime",
+      source,
+      taskId: input.taskId,
+    });
+
     await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
       childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    const childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    return {
+      address: {
+        continuationToken: childContinuationToken,
+        kind: targetKind,
+        sessionId: childSessionId,
+      },
+      callId: action.callId,
+      kind: "called",
+      name: action.name,
+      session: input.currentSession,
+      toolName: action.subagentName,
+    };
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,
@@ -90,18 +124,4 @@ export async function startLocalSubagent(input: {
       session: input.currentSession,
     };
   }
-
-  const address = {
-    continuationToken: childContinuationToken,
-    kind: targetKind,
-    sessionId: childSessionId,
-  } as const;
-  return {
-    address,
-    callId: action.callId,
-    kind: "called",
-    name: action.name,
-    session: input.currentSession,
-    toolName: action.subagentName,
-  };
 }

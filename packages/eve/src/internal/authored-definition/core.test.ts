@@ -10,6 +10,40 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("retains an explicit delegation model allowlist", () => {
+    expect(
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          delegationModels: ["openai/gpt-5.5", "google/gemini-2.5-flash"],
+        },
+        FAILURE_MESSAGE,
+      ).delegationModels,
+    ).toEqual(["openai/gpt-5.5", "google/gemini-2.5-flash"]);
+  });
+
+  it.each(
+    [[], ["model"], ["provider/"], ["/model"], [" provider/model"], [null]].map(
+      (delegationModels) => ({ delegationModels }),
+    ),
+  )("rejects invalid delegation model allowlists: %j", ({ delegationModels }) => {
+    expect(() =>
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", delegationModels }, FAILURE_MESSAGE),
+    ).toThrow();
+  });
+
+  it("rejects competing dynamic and per-delegation model selection", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: defineDynamic({ events: { "session.started": () => "openai/gpt-5.5" } }),
+          delegationModels: ["openai/gpt-5.5"],
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow("requires a static default model");
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

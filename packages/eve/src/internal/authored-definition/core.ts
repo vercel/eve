@@ -50,6 +50,7 @@ export function normalizeAgentDefinition(
       "build",
       "compaction",
       "defaultTools",
+      "delegationModels",
       "description",
       "experimental",
       "limits",
@@ -80,6 +81,22 @@ export function normalizeAgentDefinition(
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
+  }
+
+  if (record.delegationModels !== undefined) {
+    if (!Array.isArray(record.delegationModels) || record.delegationModels.length === 0) {
+      throw new Error(`${message} delegationModels must be a non-empty list of model IDs.`);
+    }
+    definition.delegationModels = record.delegationModels.map((model) => {
+      const id = expectString(model, message);
+      if (id.trim() !== id || id.indexOf("/") <= 0 || id.endsWith("/")) {
+        throw new Error(`${message} delegationModels must contain provider/model IDs.`);
+      }
+      return id;
+    });
+    if (isDynamicSentinel(definition.model)) {
+      throw new Error(`${message} delegationModels requires a static default model.`);
+    }
   }
 
   if (record.defaultTools !== undefined) {

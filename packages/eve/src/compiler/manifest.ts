@@ -607,6 +607,7 @@ const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
+  delegationModels: z.array(z.string()).nonempty().optional(),
   description: z.string().optional(),
   experimental: z
     .object({
@@ -1220,6 +1221,8 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     name: config.name,
     outputSchema: config.outputSchema,
     reasoning: config.reasoning,
+    delegationModels:
+      config.delegationModels === undefined ? undefined : [...config.delegationModels],
     limits:
       config.limits === undefined
         ? undefined

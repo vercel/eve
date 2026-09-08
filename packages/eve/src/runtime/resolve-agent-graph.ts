@@ -254,6 +254,8 @@ async function resolveRuntimeSubagent(input: {
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
     ...variant,
     kind: "subagent",
+    delegationModels:
+      "config" in input.sourceRef.agent ? input.sourceRef.agent.config.delegationModels : undefined,
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
     nodeId: toRuntimeNodeId(input.sourceRef.nodeId),

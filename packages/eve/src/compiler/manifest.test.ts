@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
   compiledAgentManifestSchema,
@@ -12,6 +13,17 @@ import {
 } from "#compiler/validate-artifact.js";
 
 describe("compiled agent manifest v48", () => {
+  it("preserves delegation model choices through compilation and serialization", async () => {
+    const models = ["openai/gpt-5.4", "google/gemini-2.5-flash"];
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      agent: defineAgent({ model: "openai/gpt-5.4", delegationModels: models }),
+    });
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+    expect(parsed.config.delegationModels).toEqual(models);
+    expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       limits: { maxTokenCostUsdPerSession: 1.5 },
