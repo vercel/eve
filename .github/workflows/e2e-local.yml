@@ -73,8 +73,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: agent-background-tools
-            dir: e2e/fixtures/agent-background-tools
+          - name: fixture-tasks
+            dir: e2e/fixtures/fixture-tasks
             model_name: mock
             model_id: mock
 

@@ -7,6 +7,8 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
+import { PREFIX_REQUEST, respondPromptPrefix } from "./lib/prompt-prefix";
+
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
@@ -14,12 +16,13 @@ const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred u
 const TASK_STATE_LABEL = "[Task state]\n";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.userMessages.includes(PREFIX_REQUEST)) return respondPromptPrefix(request);
   if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
     const taskState = latestTaskState(request.userMessages);
     if (taskState !== undefined) return handleRedundantReviewWake(taskState);
   }
 
-  // Framework agent-list notes are model context, not scenario turns.
+  // Framework announcements are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
     return "TASK-UPDATE-RECEIVED";
@@ -410,7 +413,7 @@ function hasTaskNotification(
 }
 
 function isScenarioMessage(message: string): boolean {
-  return !message.startsWith("[Agents]");
+  return !/^(?:\[Agents\]|\[Task state\]|Background task (?:reporting|control))/u.test(message);
 }
 
 function scenarioUserMessageCount(request: MockModelRequest): number {
