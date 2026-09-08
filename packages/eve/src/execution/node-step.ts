@@ -102,10 +102,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    codeMode:
-      input.node.agent.config?.experimental?.codeMode === false
-        ? undefined
-        : input.node.agent.config?.experimental?.codeMode,
+    codeMode: input.node.agent.config?.experimental?.codeMode === true,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -217,8 +214,7 @@ function resolveHarnessToolDefinition(input: {
 
   if (
     input.tool.name === CODE_MODE_TOOL_NAME &&
-    (input.node.agent.config?.experimental?.codeMode === undefined ||
-      input.node.agent.config.experimental.codeMode === false)
+    input.node.agent.config?.experimental?.codeMode !== true
   ) {
     return null;
   }

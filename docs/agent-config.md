@@ -287,7 +287,7 @@ for the retry behavior.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-Set `experimental.codeMode` to `{}` to
+Set `experimental.codeMode: true` to
 expose eligible tools through a framework-managed `code_mode` tool. The model writes a
 JavaScript program that calls `tools.<name>(input)`; `code_mode` runs it as a
 durable workflow in which every nested call is its own step, so a crash
@@ -310,21 +310,18 @@ for later calls and the parent session. Updates also survive a later program
 failure. Concurrent writes to the same state field fail with
 `CODE_MODE_STATE_CONFLICT` instead of overwriting newer state. Tool side effects
 already completed are not rolled back.
-The former `mode` selector is removed. Migrate either `{ mode: "eager" }` or
-`{ mode: "lazy" }` to `{}`, retaining `maxSubagents` if configured.
 
-Each program can invoke at most 100 subagents by default. Set `maxSubagents` to
-change that limit; sequential calls, parallel calls, retries, and calls that
-continue an existing child all count. Excess calls reject with
-`CODE_MODE_SUBAGENT_LIMIT_REACHED` before starting a child and can be caught by
-the program. Ordinary tool calls do not consume this budget.
+Each program can invoke at most 100 subagents; sequential calls, parallel
+calls, retries, and calls that continue an existing child all count. Excess
+calls reject with `CODE_MODE_SUBAGENT_LIMIT_REACHED` before starting a child and
+can be caught by the program. Ordinary tool calls do not consume this budget.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "openai/gpt-5.5",
-  experimental: { codeMode: { maxSubagents: 25 } },
+  experimental: { codeMode: true },
 });
 ```
 

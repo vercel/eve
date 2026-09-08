@@ -111,7 +111,7 @@ async function createWaitToolRuntime(
     },
   );
   const runtime = await createTestRuntime({
-    agent: { name: agentName, experimental: { codeMode: codeMode ? {} : false } },
+    agent: { name: agentName, experimental: { codeMode } },
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -822,7 +822,7 @@ describe("turn cancellation integration", () => {
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
     const runtime = await createTestRuntime({
-      agent: { name: "turn-cancel-hitl", experimental: { codeMode: {} } },
+      agent: { name: "turn-cancel-hitl", experimental: { codeMode: true } },
     });
     const continuationToken = "http:turn-cancel-hitl";
 

@@ -10,46 +10,25 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
-  it.each(["eager", "lazy"])("rejects the removed mode selector %s", (mode) => {
-    expect(() =>
-      normalizeAgentDefinition(
-        { model: "test/model", experimental: { codeMode: { mode } } },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow();
-  });
-
-  it("accepts code mode with a program subagent budget", () => {
+  it.each([true, false])("accepts boolean code mode %j", (codeMode) => {
     const definition = normalizeAgentDefinition(
-      {
-        model: "test/model",
-        experimental: { codeMode: { maxSubagents: 2 } },
-      },
+      { model: "test/model", experimental: { codeMode } },
       FAILURE_MESSAGE,
     );
-    expect(definition.experimental?.codeMode).toEqual({ maxSubagents: 2 });
+    expect(definition.experimental?.codeMode).toBe(codeMode);
   });
 
-  it.each([0, -1, 1.5, "2"])("rejects invalid code mode maxSubagents %j", (maxSubagents) => {
-    expect(() =>
-      normalizeAgentDefinition(
-        {
-          model: "test/model",
-          experimental: { codeMode: { maxSubagents } },
-        },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow("maxSubagents");
-  });
-
-  it("rejects the removed string code mode configuration", () => {
-    expect(() =>
-      normalizeAgentDefinition(
-        { model: "test/model", experimental: { codeMode: "eager" } },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow("codeMode");
-  });
+  it.each([{}, { maxSubagents: 2 }, { mode: "lazy" }, "eager", 1])(
+    "rejects non-boolean code mode %j",
+    (codeMode) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "test/model", experimental: { codeMode } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow("codeMode");
+    },
+  );
 
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(

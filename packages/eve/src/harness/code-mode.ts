@@ -42,7 +42,6 @@ const DISCOVERY_INSTRUCTION =
 export async function applyCodeModeTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
-  readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<{
   readonly harnessTools: HarnessToolMap;
@@ -54,7 +53,7 @@ export async function applyCodeModeTool(input: {
     return { harnessTools: input.harnessTools, modelTools: input.tools };
   }
 
-  const maxSubagents = input.maxSubagents ?? DEFAULT_CODE_MODE_MAX_SUBAGENTS;
+  const maxSubagents = DEFAULT_CODE_MODE_MAX_SUBAGENTS;
   const modelTools: ToolSet = {};
   const toolCatalog: CodeModeToolCatalogEntry[] = [];
   for (const [name, tool] of Object.entries(input.tools)) {

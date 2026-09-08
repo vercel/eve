@@ -198,20 +198,14 @@ export interface AgentLimitsDefinition {
   readonly maxTokenCostUsdPerSession?: number | false;
 }
 
-/** Configuration for the framework `code_mode` orchestration tool. */
-export interface AgentCodeModeDefinition {
-  /** Maximum subagent calls per program, including retries and continuations. @default 100 */
-  readonly maxSubagents?: number;
-}
-
 /**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
-  /** Exposes eligible tools through the framework `code_mode` workflow tool. */
-  readonly codeMode?: false | AgentCodeModeDefinition;
+  /** Enables the framework `code_mode` workflow tool for programmatic tool orchestration. */
+  readonly codeMode?: boolean;
   /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.

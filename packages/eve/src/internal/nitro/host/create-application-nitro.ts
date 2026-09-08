@@ -83,8 +83,7 @@ function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   return nodes.some((node) => {
     if (!("config" in node) || typeof node.config !== "object" || node.config === null)
       return false;
-    const codeMode = (node.config as CompiledAgentManifest["config"]).experimental?.codeMode;
-    return codeMode !== undefined && codeMode !== false;
+    return (node.config as CompiledAgentManifest["config"]).experimental?.codeMode === true;
   });
 }
 

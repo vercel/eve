@@ -20,7 +20,7 @@ type AdvertisedToolDefinitionsInput = {
 };
 
 type AdvertisedModelToolsInput = {
-  readonly codeMode?: { readonly maxSubagents?: number };
+  readonly codeMode?: boolean;
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
@@ -65,12 +65,11 @@ async function getAdvertisedModelTools(
   let modelTools = input.modelTools;
   let session = input.session;
 
-  if (input.codeMode !== undefined) {
+  if (input.codeMode === true) {
     session = ensureWorkflowContinuationSecurity(session);
     const applied = await applyCodeModeTool({
       continuationSecurity: getWorkflowContinuationSecurity(session),
       harnessTools,
-      maxSubagents: input.codeMode.maxSubagents,
       tools: modelTools,
     });
     harnessTools = applied.harnessTools;

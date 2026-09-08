@@ -14,7 +14,10 @@ import {
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { always } from "#tools/approval/policies.js";
-import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import {
+  DEFAULT_CODE_MODE_MAX_SUBAGENTS,
+  parseCodeModeWorkflowInput,
+} from "#execution/code-mode/schema.js";
 import { codeModeWorkflowReference } from "#execution/code-mode/workflow-reference.js";
 
 const continuationSecurity = { signingKey: "code-mode-test-key" };
@@ -117,20 +120,25 @@ describe("applyCodeModeTool", () => {
     },
   );
 
-  it("pins the configured subagent budget", async () => {
+  it("pins the default subagent budget", async () => {
     const harnessTools = new Map([[CODE_MODE_TOOL_NAME, codeModeDefinition()]]);
     const applied = await applyCodeModeTool({
       continuationSecurity,
       harnessTools,
-      maxSubagents: 300,
       tools: buildToolSet({ tools: harnessTools }),
     });
     const input = applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({
       js: "return null;",
     });
-    expect(parseCodeModeWorkflowInput(JSON.parse(JSON.stringify(input))).maxSubagents).toBe(300);
-    expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain("at most 300 subagents");
-    expect(codeModeBridgeRequestLimit(300)).toBeGreaterThan(300);
+    expect(parseCodeModeWorkflowInput(JSON.parse(JSON.stringify(input))).maxSubagents).toBe(
+      DEFAULT_CODE_MODE_MAX_SUBAGENTS,
+    );
+    expect(applied.modelTools[CODE_MODE_TOOL_NAME]?.description).toContain(
+      `at most ${DEFAULT_CODE_MODE_MAX_SUBAGENTS} subagents`,
+    );
+    expect(codeModeBridgeRequestLimit(DEFAULT_CODE_MODE_MAX_SUBAGENTS)).toBeGreaterThan(
+      DEFAULT_CODE_MODE_MAX_SUBAGENTS,
+    );
   });
 
   it("describes subagents as awaited results inside programs and receipts outside", async () => {

@@ -281,8 +281,8 @@ export interface ToolLoopHarnessConfig {
   readonly capabilities?: SessionCapabilities;
   /** Clears model-message history without running a model turn. */
   readonly clearOnly?: boolean;
-  /** Catalog mode for the framework `code_mode` workflow tool. */
-  readonly codeMode?: import("#shared/agent-definition.js").AgentCodeModeDefinition;
+  /** Enables the framework `code_mode` workflow tool. */
+  readonly codeMode?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
   readonly handleEvent?: HandleEventFn;

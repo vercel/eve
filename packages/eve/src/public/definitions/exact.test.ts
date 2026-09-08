@@ -62,11 +62,8 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(
-      defineAgent({
-        model: "test/model",
-        experimental: { codeMode: { maxSubagents: 6 } },
-      }).experimental.codeMode.maxSubagents,
-    ).toBe(6);
+      defineAgent({ model: "test/model", experimental: { codeMode: true } }).experimental?.codeMode,
+    ).toBe(true);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
@@ -251,10 +248,8 @@ function typeOnlyFixtures(): void {
   defineAgent({
     model: "test/model",
     experimental: {
-      codeMode: {
-        // @ts-expect-error code_mode maxSubagents must be a number.
-        maxSubagents: "6",
-      },
+      // @ts-expect-error codeMode must be a boolean.
+      codeMode: { maxSubagents: 6 },
     },
   });
 

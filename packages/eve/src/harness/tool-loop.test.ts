@@ -1902,7 +1902,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const config = createTestConfig("conversation", undefined, {
-      codeMode: {},
+      codeMode: true,
       tools: new Map([
         ...createDelegationToolMap(),
         [
@@ -2479,7 +2479,7 @@ describe("createToolLoopHarness", () => {
     const base = createTestConfig();
     const runStep = createToolLoopHarness({
       ...base,
-      codeMode: {},
+      codeMode: true,
       tools: new Map([
         ...base.tools,
         [

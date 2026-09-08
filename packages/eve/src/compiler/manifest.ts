@@ -594,14 +594,7 @@ const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
-      codeMode: z
-        .union([
-          z.literal(false),
-          z.strictObject({
-            maxSubagents: z.number().int().positive().optional(),
-          }),
-        ])
-        .optional(),
+      codeMode: z.boolean().optional(),
       instrumentationProviders: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })

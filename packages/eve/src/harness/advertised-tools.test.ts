@@ -67,7 +67,7 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession({ rootSessionId: "root-session" }),
       tools,
-      codeMode: {},
+      codeMode: true,
     });
 
     expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
@@ -84,7 +84,7 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession(),
       tools,
-      codeMode: {},
+      codeMode: true,
     });
 
     expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
