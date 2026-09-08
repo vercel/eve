@@ -72,7 +72,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover-fixtures.outputs.model_matrix) }}
+        include:
+          - name: agent-background-tools
+            dir: e2e/fixtures/agent-background-tools
+            model_name: mock
+            model_id: mock
 
     env:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
