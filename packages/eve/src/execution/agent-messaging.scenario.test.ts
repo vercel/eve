@@ -135,7 +135,10 @@ export default defineAgent({
 `;
 
 const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
+  dependencies: { "just-bash": "3.1.0" },
   files: {
+    "agent/sandbox.ts":
+      'import { defineSandbox } from "eve/sandbox";\nimport { justbash } from "eve/sandbox/just-bash";\nexport default defineSandbox({ backend: justbash() });\n',
     "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
@@ -160,7 +163,10 @@ const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
 
 function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
+    dependencies: { "just-bash": "3.1.0" },
     files: {
+      "agent/sandbox.ts":
+        'import { defineSandbox } from "eve/sandbox";\nimport { justbash } from "eve/sandbox/just-bash";\nexport default defineSandbox({ backend: justbash() });\n',
       "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",

@@ -66,8 +66,10 @@ export default defineTool({
 
 function createParentDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
-    dependencies: { zod: "^4.3.6" },
+    dependencies: { zod: "^4.3.6", "just-bash": "3.1.0" },
     files: {
+      "agent/sandbox.ts":
+        'import { defineSandbox } from "eve/sandbox";\nimport { justbash } from "eve/sandbox/just-bash";\nexport default defineSandbox({ backend: justbash() });\n',
       "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
