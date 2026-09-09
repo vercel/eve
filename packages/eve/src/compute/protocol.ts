@@ -174,6 +174,17 @@ export interface SendRequest {
   idempotencyKey: string;
 }
 
+/** Idempotency options for durable message admission. */
+export interface SendOptions {
+  idempotencyKey: string;
+}
+
+/** Authored value paired with its definition schema version. */
+export interface VersionedInput<T = unknown> {
+  version: number;
+  value: T;
+}
+
 /** Durable receipt returned after message admission commits. */
 export interface MessageReceipt {
   cellId: Id;
@@ -197,4 +208,47 @@ export interface EventRecord {
   sequence: Counter;
   value: WireValue;
   source: { operationId: Id; attemptId: Id | null };
+}
+
+/** Inspectable namespace deployment and quota state. */
+export interface NamespaceView {
+  namespaceId: Id;
+  deploymentEpoch: Counter;
+  admissionMode: "open" | "staging" | "frozen";
+  desiredDeployment: Digest | null;
+  usedBytes: Counter;
+  quotaBytes: Counter;
+}
+
+/** Finite event-read options; following streams arrive in milestone A5. */
+export interface ReadEventsOptions {
+  after?: Counter;
+  follow?: boolean;
+  limit?: number;
+}
+
+/** Internal fenced ownership identity used by compute executors. */
+export interface LeaseToken {
+  resourceId: Id;
+  assignmentId: Id;
+  ownerId: Id;
+  epoch: Counter;
+  cancellationGeneration: Counter;
+  deployment: Digest;
+}
+
+export interface DeploymentManifest {
+  protocol: 1;
+  image: Digest;
+  artifactManifestHash: Digest;
+  definitions: Array<{
+    id: DefinitionId;
+    kind: "cell" | "effect" | "resumable_task";
+    module: string;
+    export: string;
+    inputVersion: number;
+    stateVersion: number | null;
+    outputVersion: number | null;
+    retry: RetryPolicy | null;
+  }>;
 }

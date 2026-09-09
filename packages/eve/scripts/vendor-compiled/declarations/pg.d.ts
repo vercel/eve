@@ -1,4 +1,4 @@
-export interface QueryResult<Row extends Record<string, unknown>> {
+export interface QueryResult<Row extends object> {
   rows: Row[];
   rowCount: number | null;
 }
@@ -11,7 +11,7 @@ export interface PoolConfig {
 }
 
 export interface PoolClient {
-  query<Row extends Record<string, unknown>>(
+  query<Row extends object>(
     text: string,
     parameters?: unknown[],
   ): Promise<QueryResult<Row> | QueryResult<Row>[]>;
@@ -20,7 +20,7 @@ export interface PoolClient {
 
 export declare class Pool {
   constructor(config?: PoolConfig);
-  query<Row extends Record<string, unknown>>(
+  query<Row extends object>(
     text: string,
     parameters?: unknown[],
   ): Promise<QueryResult<Row> | QueryResult<Row>[]>;

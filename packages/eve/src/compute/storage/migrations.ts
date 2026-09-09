@@ -20,6 +20,12 @@ export const COMPUTE_SCHEMA_MIGRATIONS: readonly ComputeMigration[] = [
     name: "baseline",
     load: () => readFile(new URL("./migrations/0001_baseline.sql", import.meta.url), "utf8"),
   },
+  {
+    version: 2,
+    name: "cell_quarantine_reason",
+    load: () =>
+      readFile(new URL("./migrations/0002_cell_quarantine_reason.sql", import.meta.url), "utf8"),
+  },
 ];
 
 // Serialize schema changes without holding a lock beyond the migration transaction.

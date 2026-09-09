@@ -1,12 +1,12 @@
 export type SqlParameter = string | number | bigint | boolean | Date | Uint8Array | null;
 
-export interface ComputeQueryResult<Row extends Record<string, unknown>> {
+export interface ComputeQueryResult<Row extends object> {
   rows: Row[];
   rowCount: number;
 }
 
 export interface ComputeQueryExecutor {
-  query<Row extends Record<string, unknown> = Record<string, unknown>>(
+  query<Row extends object = Record<string, unknown>>(
     text: string,
     parameters?: readonly SqlParameter[],
   ): Promise<ComputeQueryResult<Row>>;

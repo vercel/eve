@@ -5,7 +5,8 @@
  * from their production owner. Resumable-task and later-milestone contracts
  * remain reference-only until their implementation milestones.
  */
-export { ComputeError, defineCell, defineEffect } from "../../packages/eve/src/compute/index.js";
+export { defineCell, defineEffect } from "../../packages/eve/src/compute/definitions.js";
+export { ComputeError } from "../../packages/eve/src/compute/errors.js";
 export type * from "../../packages/eve/src/compute/protocol.js";
 
 import type {
@@ -19,6 +20,7 @@ import type {
   EffectRequest,
   Id,
   Json,
+  LeaseToken,
   PayloadRef,
   Result,
   RetryPolicy,
@@ -123,15 +125,6 @@ export declare function defineResumableTask<I, C, O>(
   definition: ResumableTaskDefinition<I, C, O>,
 ): ResumableTaskDefinition<I, C, O>;
 
-export interface LeaseToken {
-  resourceId: Id;
-  assignmentId: Id;
-  ownerId: Id;
-  epoch: Counter;
-  cancellationGeneration: Counter;
-  deployment: Digest;
-}
-
 export interface RunnerAssignment {
   namespaceId: Id;
   token: LeaseToken;
@@ -190,22 +183,6 @@ export type SupervisorToRunner =
       }>;
     }
   | { type: "dependency_changed"; assignmentId: Id; dependencyId: Id };
-
-export interface DeploymentManifest {
-  protocol: 1;
-  image: Digest;
-  artifactManifestHash: Digest;
-  definitions: Array<{
-    id: DefinitionId;
-    kind: "cell" | "effect" | "resumable_task";
-    module: string;
-    export: string;
-    inputVersion: number;
-    stateVersion: number | null;
-    outputVersion: number | null;
-    retry: RetryPolicy | null;
-  }>;
-}
 
 export interface ActivateRequest {
   deployment: Digest;

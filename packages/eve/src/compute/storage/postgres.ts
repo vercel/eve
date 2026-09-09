@@ -15,13 +15,13 @@ export interface PostgresStorageOptions {
 }
 
 function createQueryExecutor(client: {
-  query<Row extends Record<string, unknown>>(
+  query<Row extends object>(
     text: string,
     parameters?: unknown[],
   ): Promise<{ rows: Row[]; rowCount: number | null } | { rows: Row[]; rowCount: number | null }[]>;
 }): ComputeQueryExecutor {
   return {
-    async query<Row extends Record<string, unknown>>(
+    async query<Row extends object>(
       text: string,
       parameters: readonly SqlParameter[] = [],
     ): Promise<ComputeQueryResult<Row>> {

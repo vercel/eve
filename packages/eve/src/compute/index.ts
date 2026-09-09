@@ -1,3 +1,5 @@
+export { ComputeClient } from "#compute/client.js";
+export type { ComputeClientOptions } from "#compute/client.js";
 export { defineCell, defineEffect } from "#compute/definitions.js";
 export { ComputeError } from "#compute/errors.js";
 export type {
@@ -8,6 +10,7 @@ export type {
   ChildStart,
   Counter,
   DefinitionId,
+  DeploymentManifest,
   DeliveryContext,
   Digest,
   DurableEvent,
@@ -20,14 +23,18 @@ export type {
   Id,
   Json,
   MessageReceipt,
+  NamespaceView,
   PayloadRef,
+  ReadEventsOptions,
   Result,
   RetryPolicy,
+  SendOptions,
   SendRequest,
   SystemMessage,
   TimerRequest,
   Transition,
   ValueSchema,
+  VersionedInput,
   VersionedValue,
   WireValue,
 } from "#compute/protocol.js";

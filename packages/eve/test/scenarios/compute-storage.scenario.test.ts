@@ -9,10 +9,27 @@ import { promisify } from "node:util";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { ComputeClient, defineCell } from "../../src/compute/index.js";
 import {
+  COMPUTE_SCHEMA_MIGRATIONS,
+  admitMessage,
+  commitCellTransition,
+  createComputeAuthenticator,
+  createComputeGatewayServer,
+  createComputeHttpHandler,
   createPostgresStorage,
+  decodeWireValue,
+  encodeWireValue,
+  executeCellTransition,
+  hashComputeCredential,
   migrateComputeStorage,
+  prepareCellTransition,
+  readCellEvents,
+  readCellView,
   type ComputeMigration,
+  type ComputeFailpoints,
+  type ComputeStorage,
+  type LeaseToken,
 } from "../../src/compute/platform.js";
 
 const runFile = promisify(execFile);
@@ -20,6 +37,10 @@ const repositoryRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const composeFile = join(repositoryRoot, "apps/compute-platform/compose.yaml");
 const workerEntrypoint = join(repositoryRoot, "apps/compute-platform/src/worker.ts");
 const composeProject = `eve-compute-a1-${process.pid}`;
+const CELL_DEFINITION_ID = "cells/counter";
+const EFFECT_DEFINITION_ID = "effects/log";
+const DEPLOYMENT_DIGEST = `sha256:${"a".repeat(64)}` as const;
+const MANIFEST_DIGEST = `sha256:${"b".repeat(64)}` as const;
 
 let postgresPort = 0;
 let composeCommand: { command: string; prefix: string[] };
@@ -199,6 +220,221 @@ function inlineMigration(version: number, name: string, sql: string): ComputeMig
   return { version, name, load: async () => sql };
 }
 
+interface CounterState {
+  sequences: string[];
+  total: number;
+}
+
+interface CounterMessage {
+  operations?: boolean;
+  value: number;
+}
+
+function parseCounterState(value: unknown): CounterState {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !("sequences" in value) ||
+    !Array.isArray(value.sequences) ||
+    !value.sequences.every((sequence) => typeof sequence === "string") ||
+    !("total" in value) ||
+    typeof value.total !== "number"
+  ) {
+    throw new Error("Invalid counter state.");
+  }
+  return { sequences: [...value.sequences], total: value.total };
+}
+
+function parseCounterMessage(value: unknown): CounterMessage {
+  if (value === null || typeof value !== "object") {
+    throw new Error("Invalid counter message.");
+  }
+  const candidate = value as { operations?: unknown; value?: unknown };
+  if (
+    typeof candidate.value !== "number" ||
+    (candidate.operations !== undefined && typeof candidate.operations !== "boolean")
+  ) {
+    throw new Error("Invalid counter message.");
+  }
+  return typeof candidate.operations === "boolean"
+    ? { value: candidate.value, operations: candidate.operations }
+    : { value: candidate.value };
+}
+
+function counterDefinitionForNamespace(namespaceId: string) {
+  return defineCell<CounterState, CounterMessage>({
+    stateVersion: 1,
+    messageVersion: 1,
+    stateSchema: { parse: parseCounterState },
+    messageSchema: { parse: parseCounterMessage },
+    initial: () => ({ sequences: [], total: 0 }),
+    receive(state, message, context) {
+      if ("kind" in message) throw new Error("Unexpected system message.");
+      const next = {
+        sequences: [...state.sequences, context.sequence],
+        total: state.total + message.value,
+      };
+      if (!message.operations) return { state: next };
+      return {
+        state: next,
+        effects: [
+          {
+            key: "effect",
+            definition: EFFECT_DEFINITION_ID,
+            inputVersion: 1,
+            input: { value: next.total },
+          },
+        ],
+        sends: [
+          {
+            key: "send",
+            destination: {
+              namespaceId,
+              definition: CELL_DEFINITION_ID,
+              key: "sink",
+            },
+            messageVersion: 1,
+            message: { value: next.total },
+          },
+        ],
+        timers: [
+          {
+            action: "set",
+            key: "wake",
+            deadline: "2026-09-10T00:00:00Z",
+            messageVersion: 1,
+            message: { value: 0 },
+          },
+        ],
+        events: [{ key: "applied", value: { total: next.total } }],
+      };
+    },
+    migrateState: (_version, value) => parseCounterState(value),
+    migrateMessage: (_version, value) => parseCounterMessage(value),
+  });
+}
+
+function deploymentManifest() {
+  return {
+    protocol: 1,
+    image: DEPLOYMENT_DIGEST,
+    artifactManifestHash: MANIFEST_DIGEST,
+    definitions: [
+      {
+        id: CELL_DEFINITION_ID,
+        kind: "cell",
+        module: "cells/counter.ts",
+        export: "default",
+        inputVersion: 1,
+        stateVersion: 1,
+        outputVersion: null,
+        retry: null,
+      },
+      {
+        id: EFFECT_DEFINITION_ID,
+        kind: "effect",
+        module: "effects/log.ts",
+        export: "default",
+        inputVersion: 1,
+        stateVersion: null,
+        outputVersion: 1,
+        retry: { mode: "manual", timeoutMs: 120_000 },
+      },
+    ],
+  };
+}
+
+async function setupA2Database(database: ScenarioDatabase): Promise<{
+  namespaceId: string;
+  storage: ComputeStorage;
+}> {
+  const migrator = createPostgresStorage({
+    applicationName: "eve-compute-a2-migrator",
+    connectionString: database.migrator,
+    maxConnections: 2,
+  });
+  const namespaceId = randomUUID();
+  try {
+    await migrateComputeStorage(migrator);
+    await migrator.query(
+      "INSERT INTO compute.namespaces(namespace_id, project_id) VALUES ($1, 'a2-scenario')",
+      [namespaceId],
+    );
+    await migrator.query("INSERT INTO compute.namespace_usage(namespace_id) VALUES ($1)", [
+      namespaceId,
+    ]);
+    await migrator.query(
+      "INSERT INTO compute.deployments(" +
+        "namespace_id, digest, manifest, manifest_hash, status" +
+        ") VALUES ($1, $2, $3::jsonb, $4, 'ready')",
+      [namespaceId, DEPLOYMENT_DIGEST, JSON.stringify(deploymentManifest()), MANIFEST_DIGEST],
+    );
+    await migrator.query(
+      "UPDATE compute.namespaces SET desired_deployment = $2, deployment_epoch = 1 " +
+        "WHERE namespace_id = $1",
+      [namespaceId, DEPLOYMENT_DIGEST],
+    );
+  } finally {
+    await migrator.close();
+  }
+  await grantRuntimeAccess(database);
+  return {
+    namespaceId,
+    storage: createPostgresStorage({
+      applicationName: "eve-compute-a2-runtime",
+      connectionString: database.runtime,
+      maxConnections: 32,
+    }),
+  };
+}
+
+async function leaseCell(
+  storage: ComputeStorage,
+  namespaceId: string,
+  cellId: string,
+): Promise<LeaseToken> {
+  const workerId = randomUUID();
+  const assignmentId = randomUUID();
+  await storage.query(
+    "INSERT INTO compute.workers(" +
+      "namespace_id, worker_id, deployment_digest, status, heartbeat_at, cell_slots, effect_slots" +
+      ") VALUES ($1, $2, $3, 'ready', clock_timestamp(), 1, 0)",
+    [namespaceId, workerId, DEPLOYMENT_DIGEST],
+  );
+  const result = await storage.query<{
+    generation: string;
+    lease_epoch: string;
+  }>(
+    "UPDATE compute.cells SET owner_id = $3, assignment_id = $4, " +
+      "lease_epoch = lease_epoch + 1, lease_until = clock_timestamp() + interval '5 minutes', " +
+      "ready_at = NULL WHERE namespace_id = $1 AND cell_id = $2 " +
+      "RETURNING generation, lease_epoch",
+    [namespaceId, cellId, workerId, assignmentId],
+  );
+  const cell = result.rows[0];
+  if (cell === undefined) throw new Error("Cell lease fixture did not find the cell.");
+  return {
+    resourceId: cellId,
+    assignmentId,
+    ownerId: workerId,
+    epoch: cell.lease_epoch as LeaseToken["epoch"],
+    cancellationGeneration: cell.generation as LeaseToken["cancellationGeneration"],
+    deployment: DEPLOYMENT_DIGEST,
+  };
+}
+
+function failOnce(name: Parameters<ComputeFailpoints["hit"]>[0]): ComputeFailpoints {
+  let pending = true;
+  return {
+    async hit(candidate) {
+      if (pending && candidate === name) {
+        pending = false;
+        throw new Error(`failpoint:${name}`);
+      }
+    },
+  };
+}
+
 async function stopWorker(worker: ChildProcess): Promise<void> {
   if (worker.exitCode !== null || worker.signalCode !== null) return;
   const exited = once(worker, "exit");
@@ -267,10 +503,10 @@ describe("compute PostgreSQL foundation", () => {
           migrateComputeStorage(storage),
           migrateComputeStorage(concurrentStorage),
         ]);
-        expect(concurrentResults.map((result) => result.applied).sort()).toEqual([[], [1]]);
+        expect(concurrentResults.map((result) => result.applied).sort()).toEqual([[], [1, 2]]);
         await expect(migrateComputeStorage(storage)).resolves.toEqual({
           applied: [],
-          currentVersion: 1,
+          currentVersion: 2,
         });
 
         const conformanceSource = await readFile(
@@ -307,37 +543,31 @@ describe("compute PostgreSQL foundation", () => {
         connectionString: database.migrator,
         maxConnections: 1,
       });
-      const first = inlineMigration(
-        1,
-        "previous",
-        `
-          CREATE SCHEMA compute;
-          CREATE TABLE compute.schema_migrations (
-            version integer PRIMARY KEY CHECK (version > 0),
-            checksum bytea NOT NULL CHECK (octet_length(checksum) = 32),
-            applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
-          );
-          CREATE TABLE compute.migration_probe (value text NOT NULL);
-        `,
-      );
-      const second = inlineMigration(
-        2,
-        "current",
-        "ALTER TABLE compute.migration_probe ADD COLUMN revision integer NOT NULL DEFAULT 0;",
-      );
+      const first = COMPUTE_SCHEMA_MIGRATIONS[0];
+      const second = COMPUTE_SCHEMA_MIGRATIONS[1];
+      if (first === undefined || second === undefined) {
+        throw new Error("Expected the A2 production migration chain.");
+      }
       try {
-        await expect(migrateComputeStorage(storage, [first])).resolves.toMatchObject({
+        await expect(migrateComputeStorage(storage, [first])).resolves.toEqual({
           applied: [1],
+          currentVersion: 1,
         });
-        await expect(migrateComputeStorage(storage, [first, second])).resolves.toEqual({
+        await expect(migrateComputeStorage(storage, COMPUTE_SCHEMA_MIGRATIONS)).resolves.toEqual({
           applied: [2],
           currentVersion: 2,
         });
         await expect(
-          storage.query("INSERT INTO compute.migration_probe(value, revision) VALUES ('ready', 2)"),
-        ).resolves.toMatchObject({ rowCount: 1 });
+          storage.query<{ column_name: string }>(
+            "SELECT column_name FROM information_schema.columns " +
+              "WHERE table_schema = 'compute' AND table_name = 'cells' " +
+              "AND column_name = 'quarantine_reason'",
+          ),
+        ).resolves.toMatchObject({
+          rows: [{ column_name: "quarantine_reason" }],
+        });
 
-        const changedFirst = inlineMigration(1, "previous", `${await first.load()}\n-- changed`);
+        const changedFirst = inlineMigration(1, first.name, `${await first.load()}\n-- changed`);
         await expect(migrateComputeStorage(storage, [changedFirst, second])).rejects.toThrow(
           /Checksum mismatch/u,
         );
@@ -404,8 +634,8 @@ describe("compute PostgreSQL foundation", () => {
 
       try {
         await expect(Promise.all(workers.map(waitForWorker))).resolves.toEqual([
-          { role: "supervisor", schemaVersion: 1, status: "ready", workerId: "scenario-a" },
-          { role: "supervisor", schemaVersion: 1, status: "ready", workerId: "scenario-b" },
+          { role: "supervisor", schemaVersion: 2, status: "ready", workerId: "scenario-a" },
+          { role: "supervisor", schemaVersion: 2, status: "ready", workerId: "scenario-b" },
         ]);
 
         const inspector = createPostgresStorage({
@@ -428,6 +658,330 @@ describe("compute PostgreSQL foundation", () => {
         }
       } finally {
         await Promise.all(workers.map(stopWorker));
+      }
+    });
+  });
+});
+
+describe("compute A2 admission and fenced transitions", () => {
+  it("orders one application per unique ID across 1,000 concurrent sends", async () => {
+    await withScenarioDatabase(async (database) => {
+      const { namespaceId, storage } = await setupA2Database(database);
+      try {
+        const message = { version: 1, value: encodeWireValue({ value: 1 }) };
+        const receipts = await Promise.all(
+          Array.from({ length: 1000 }, (_, index) =>
+            admitMessage(storage, {
+              namespaceId,
+              principalId: "scenario-sender",
+              request: {
+                address: { definition: CELL_DEFINITION_ID, key: "ordered" },
+                message,
+                idempotencyKey: `delivery-${index % 100}`,
+              },
+            }),
+          ),
+        );
+
+        expect(new Set(receipts.map((receipt) => receipt.messageId)).size).toBe(100);
+        for (let key = 0; key < 100; key++) {
+          const group = receipts.filter((_, index) => index % 100 === key);
+          expect(new Set(group.map((receipt) => receipt.messageId)).size).toBe(1);
+          expect(new Set(group.map((receipt) => receipt.sequence)).size).toBe(1);
+        }
+
+        const cellId = receipts[0]!.cellId;
+        const orderedSequences = [...new Set(receipts.map((receipt) => BigInt(receipt.sequence)))]
+          .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+          .map(String);
+        expect(orderedSequences).toEqual(
+          Array.from({ length: 100 }, (_, index) => String(index + 1)),
+        );
+
+        const token = await leaseCell(storage, namespaceId, cellId);
+        const definition = counterDefinitionForNamespace(namespaceId);
+        for (let sequence = 1; sequence <= 100; sequence++) {
+          await executeCellTransition({
+            command: {
+              commandSequence: String(sequence) as LeaseToken["epoch"],
+              requestId: randomUUID(),
+            },
+            definition,
+            definitionId: CELL_DEFINITION_ID,
+            namespaceId,
+            storage,
+            token,
+          });
+        }
+
+        const view = await readCellView(storage, namespaceId, cellId);
+        expect(view.revision).toBe("100");
+        expect(view.state).not.toBeNull();
+        const state = parseCounterState(decodeWireValue(view.state!.value));
+        expect(state.total).toBe(100);
+        expect(state.sequences).toEqual(
+          Array.from({ length: 100 }, (_, index) => String(index + 1)),
+        );
+        await expect(
+          storage.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM compute.messages " +
+              "WHERE namespace_id = $1 AND cell_id = $2 AND status = 'applied'",
+            [namespaceId, cellId],
+          ),
+        ).resolves.toMatchObject({ rows: [{ count: "100" }] });
+      } finally {
+        await storage.close();
+      }
+    });
+  }, 120_000);
+
+  it("survives admission and transition failures on both sides of commit", async () => {
+    await withScenarioDatabase(async (database) => {
+      const { namespaceId, storage } = await setupA2Database(database);
+      try {
+        const definition = counterDefinitionForNamespace(namespaceId);
+        const request = {
+          address: { definition: CELL_DEFINITION_ID, key: "crash" },
+          message: {
+            version: 1,
+            value: encodeWireValue({ operations: true, value: 5 }),
+          },
+          idempotencyKey: "crash-delivery",
+        };
+
+        await expect(
+          admitMessage(storage, {
+            failpoints: failOnce("admission.before_commit"),
+            namespaceId,
+            principalId: "scenario-sender",
+            request: { ...request, idempotencyKey: "before-commit" },
+          }),
+        ).rejects.toThrow("failpoint:admission.before_commit");
+        await expect(
+          storage.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM compute.messages WHERE namespace_id = $1",
+            [namespaceId],
+          ),
+        ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+
+        await expect(
+          admitMessage(storage, {
+            failpoints: failOnce("admission.after_commit"),
+            namespaceId,
+            principalId: "scenario-sender",
+            request,
+          }),
+        ).rejects.toThrow("failpoint:admission.after_commit");
+        const receipt = await admitMessage(storage, {
+          namespaceId,
+          principalId: "scenario-sender",
+          request,
+        });
+        expect(receipt.sequence).toBe("1");
+
+        const token = await leaseCell(storage, namespaceId, receipt.cellId);
+        const prepared = await prepareCellTransition({
+          definition,
+          definitionId: CELL_DEFINITION_ID,
+          namespaceId,
+          storage,
+          token,
+        });
+        const command = {
+          commandSequence: "1" as const,
+          requestId: randomUUID(),
+        };
+        await expect(
+          commitCellTransition({
+            command,
+            failpoints: failOnce("transition.before_commit"),
+            prepared,
+            storage,
+          }),
+        ).rejects.toThrow("failpoint:transition.before_commit");
+        await expect(
+          storage.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM compute.effects WHERE namespace_id = $1",
+            [namespaceId],
+          ),
+        ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+        expect((await readCellView(storage, namespaceId, receipt.cellId)).state).toBeNull();
+
+        await expect(
+          commitCellTransition({
+            command,
+            failpoints: failOnce("transition.after_commit"),
+            prepared,
+            storage,
+          }),
+        ).rejects.toThrow("failpoint:transition.after_commit");
+        await storage.query(
+          "UPDATE compute.cells SET owner_id = NULL, assignment_id = NULL, lease_until = NULL " +
+            "WHERE namespace_id = $1 AND cell_id = $2",
+          [namespaceId, receipt.cellId],
+        );
+        await expect(commitCellTransition({ command, prepared, storage })).resolves.toEqual({
+          control: "continue",
+          revision: "1",
+        });
+
+        for (const table of ["effects", "outbox", "timers", "events"]) {
+          await expect(
+            storage.query<{ count: string }>(
+              `SELECT count(*)::text AS count FROM compute.${table} WHERE namespace_id = $1`,
+              [namespaceId],
+            ),
+          ).resolves.toMatchObject({ rows: [{ count: "1" }] });
+        }
+        const events = await readCellEvents(storage, namespaceId, receipt.cellId, 0n, 100);
+        expect(events).toHaveLength(1);
+        expect(decodeWireValue(events[0]!.value)).toEqual({ total: 5 });
+        const view = await readCellView(storage, namespaceId, receipt.cellId);
+        expect(view.revision).toBe("1");
+        expect(parseCounterState(decodeWireValue(view.state!.value))).toMatchObject({
+          total: 5,
+        });
+      } finally {
+        await storage.close();
+      }
+    });
+  });
+
+  it("rejects stale commits, quarantines poison messages, and enforces HTTP access", async () => {
+    await withScenarioDatabase(async (database) => {
+      const { namespaceId, storage } = await setupA2Database(database);
+      try {
+        const definition = counterDefinitionForNamespace(namespaceId);
+        const staleReceipt = await admitMessage(storage, {
+          namespaceId,
+          principalId: "scenario-sender",
+          request: {
+            address: { definition: CELL_DEFINITION_ID, key: "stale" },
+            message: { version: 1, value: encodeWireValue({ value: 1 }) },
+            idempotencyKey: "stale-delivery",
+          },
+        });
+        const staleToken = await leaseCell(storage, namespaceId, staleReceipt.cellId);
+        const stalePrepared = await prepareCellTransition({
+          definition,
+          definitionId: CELL_DEFINITION_ID,
+          namespaceId,
+          storage,
+          token: staleToken,
+        });
+        await storage.query(
+          "UPDATE compute.cells SET lease_epoch = lease_epoch + 1 " +
+            "WHERE namespace_id = $1 AND cell_id = $2",
+          [namespaceId, staleReceipt.cellId],
+        );
+        await expect(
+          commitCellTransition({
+            command: { commandSequence: "1", requestId: randomUUID() },
+            prepared: stalePrepared,
+            storage,
+          }),
+        ).rejects.toMatchObject({ code: "STALE_EXECUTION" });
+
+        const poisonToken = await leaseCell(storage, namespaceId, staleReceipt.cellId);
+        const poisonDefinition = defineCell<CounterState, CounterMessage>({
+          ...definition,
+          receive() {
+            throw new Error("private handler detail");
+          },
+        });
+        await expect(
+          prepareCellTransition({
+            definition: poisonDefinition,
+            definitionId: CELL_DEFINITION_ID,
+            namespaceId,
+            storage,
+            token: poisonToken,
+          }),
+        ).rejects.toMatchObject({
+          code: "INVALID_INPUT",
+          message: "Cell transition handler failed.",
+        });
+        await expect(
+          storage.query<{ status: string }>(
+            "SELECT status FROM compute.cells WHERE namespace_id = $1 AND cell_id = $2",
+            [namespaceId, staleReceipt.cellId],
+          ),
+        ).resolves.toMatchObject({ rows: [{ status: "quarantined" }] });
+        await expect(
+          storage.query<{ quarantine_reason: unknown }>(
+            "SELECT quarantine_reason FROM compute.cells " +
+              "WHERE namespace_id = $1 AND cell_id = $2",
+            [namespaceId, staleReceipt.cellId],
+          ),
+        ).resolves.toMatchObject({
+          rows: [
+            {
+              quarantine_reason: {
+                code: "INVALID_INPUT",
+                message: "Cell transition handler failed.",
+                messageId: staleReceipt.messageId,
+              },
+            },
+          ],
+        });
+
+        const token = "0123456789abcdef0123456789abcdef";
+        const handler = createComputeHttpHandler({
+          authenticator: createComputeAuthenticator([
+            {
+              credentialHash: hashComputeCredential(token),
+              namespaceId,
+              permissions: ["send", "read"],
+              principalId: "http-client",
+            },
+          ]),
+          storage,
+        });
+        const gateway = createComputeGatewayServer(handler);
+        const endpoint = await gateway.listen(0);
+        try {
+          const client = new ComputeClient({ endpoint, namespaceId, token });
+          const receipt = await client.send(
+            { definition: CELL_DEFINITION_ID, key: "http" },
+            { version: 1, value: { value: 2 } },
+            { idempotencyKey: "http-delivery" },
+          );
+          await expect(client.readReceipt(receipt.messageId)).resolves.toEqual(receipt);
+          await expect(client.readState(receipt.cellId)).resolves.toMatchObject({
+            cellId: receipt.cellId,
+            state: null,
+          });
+          await expect(client.readNamespace()).resolves.toMatchObject({
+            namespaceId,
+            deploymentEpoch: "1",
+          });
+          await expect(
+            client.send(
+              { definition: CELL_DEFINITION_ID, key: "http" },
+              { version: 1, value: { value: 3 } },
+              { idempotencyKey: "http-delivery" },
+            ),
+          ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+          const forged = new ComputeClient({
+            endpoint,
+            namespaceId: randomUUID(),
+            token,
+          });
+          await expect(forged.readNamespace()).rejects.toMatchObject({
+            code: "UNAUTHORIZED",
+          });
+          await expect(
+            client.send(
+              { definition: CELL_DEFINITION_ID, key: "large" },
+              { version: 1, value: { text: "x".repeat(300_000), value: 1 } },
+              { idempotencyKey: "large-delivery" },
+            ),
+          ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+        } finally {
+          await gateway.close();
+        }
+      } finally {
+        await storage.close();
       }
     });
   });
