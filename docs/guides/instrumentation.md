@@ -152,6 +152,16 @@ The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 | `agent.approval`        | Approval waiting beneath its action                      |
 | `agent.channel.request` | Optional HTTP request span in the provider layout        |
 
+For background tools and subagents, the AI SDK's `execute_tool` span ends when
+the model receives the task receipt. The enclosing `agent.action` span remains
+open until the background task completes, fails, or is cancelled. Its duration,
+outcome, and usage describe the background task rather than the receipt.
+Background tool results follow the output-content policy. Recorded task failure
+details become bounded exception and status messages; redacted spans retain only
+the failure outcome, error status, and error type. The initiating turn can
+finish or be cancelled while the action remains open. Ending the session closes
+an action whose task never reported a terminal result.
+
 Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.
 Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use
 `agent.action` with `agent.invocation.role=caller`; the built-in `agent` tool

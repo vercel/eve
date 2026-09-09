@@ -49,6 +49,7 @@ import {
   redactSpanInputs,
   redactSpanOutputs,
 } from "#tracing/span-export-policy.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
   actionIdempotencyKey,
@@ -58,6 +59,12 @@ import {
   sessionIdempotencyKey,
   turnIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
+import {
+  rememberInstrumentationActionScope,
+  rememberInstrumentationBackgroundTask,
+  takeInstrumentationActionScopeForTask,
+} from "#instrumentation/state.js";
+import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;
@@ -2091,6 +2098,169 @@ describe("createAgentOtelInstrumentation", () => {
     expect(byName(spans, "agent.action")).toHaveLength(0);
     expect(byName(spans, "execute_tool weather")).toHaveLength(1);
     expect(byName(spans, "agent.step")).toHaveLength(1);
+  });
+
+  it("keeps a background action open after its initiating turn is cancelled", async () => {
+    const runtime = createRuntime();
+    const ctx = new ContextContainer();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1");
+
+    await contextStorage.run(ctx, async () => {
+      await publishTurnStarted({
+        hooks: runtime.hooks,
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        turnSequence: 0,
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: attemptIdempotencyKey(scope),
+        operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+        scope,
+        type: "step.attempt.started",
+      });
+      rememberInstrumentationActionScope(actionKey, scope);
+      await runtime.hooks.publish({
+        callId: "tool-1",
+        idempotencyKey: actionKey,
+        input: { report: "weekly" },
+        kind: "tool-call",
+        name: "publish",
+        scope,
+        type: "action.started",
+      });
+      rememberInstrumentationBackgroundTask("task-1", { idempotencyKey: actionKey, scope });
+      await runtime.hooks.publish({
+        idempotencyKey: attemptIdempotencyKey(scope),
+        scope,
+        type: "step.attempt.completed",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        type: "turn.cancelled",
+      });
+    });
+    await runtime.provider.forceFlush();
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.action")).toHaveLength(0);
+
+    const restored = await deserializeContext(
+      preserveSerializedBackgroundTaskObservabilityState({}, serializeContext(ctx), [
+        { taskId: "task-1" },
+      ]),
+    );
+    const acceptedAtMs = Date.now() + 1_000;
+    await contextStorage.run(restored, async () => {
+      const correlation = takeInstrumentationActionScopeForTask("task-1")!;
+      await runtime.hooks.publish({
+        acceptedAtMs,
+        idempotencyKey: correlation.idempotencyKey,
+        outcome: "completed",
+        output: { output: { reportId: "report-1" }, type: "result" },
+        scope: correlation.scope,
+        type: "action.completed",
+      });
+    });
+    await runtime.provider.forceFlush();
+
+    const action = byName(runtime.exporter.getFinishedSpans(), "agent.action")[0]!;
+    expect(action.attributes).toMatchObject({
+      "agent.action.outcome": "completed",
+      "gen_ai.tool.call.result": expect.stringContaining("report-1"),
+    });
+    expect(nanos(action.endTime)).toBe(BigInt(acceptedAtMs) * 1_000_000n);
+  });
+
+  it("records serialized task error detail only when output content is admitted", async () => {
+    const taskError = {
+      code: "PUBLISH_FAILED",
+      detail: "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2),
+      message: "private publish failure",
+    };
+    const run = async (runtime: TestRuntime, sessionId: string): Promise<ReadableSpan> => {
+      const scope: InstrumentationAttemptScope = {
+        attemptId: `${sessionId}:turn-1:0:0`,
+        attemptIndex: 0,
+        sessionId,
+        stepIndex: 0,
+        turnId: "turn-1",
+      };
+      await publishTurnStarted({
+        hooks: runtime.hooks,
+        sessionId,
+        turnId: scope.turnId,
+        turnSequence: 0,
+      });
+      await runtime.hooks.publish({
+        callId: "tool-1",
+        idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, "tool-1"),
+        input: {},
+        kind: "tool-call",
+        name: "publish",
+        scope,
+        type: "action.started",
+      });
+      await runtime.hooks.publish({
+        error: taskError,
+        errorCode: "BACKGROUND_TASK_FAILED",
+        idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, "tool-1"),
+        outcome: "failed",
+        scope,
+        type: "action.failed",
+      });
+      await runtime.provider.forceFlush();
+      return byName(runtime.exporter.getFinishedSpans(), "agent.action")[0]!;
+    };
+
+    const recorded = await run(createRuntime(), "recorded");
+    expect(recorded.attributes).toMatchObject({
+      "agent.action.error.code": "BACKGROUND_TASK_FAILED",
+      "agent.action.outcome": "failed",
+      "error.type": "BACKGROUND_TASK_FAILED",
+    });
+    expect(recorded.status.code).toBe(SpanStatusCode.ERROR);
+    expect(recorded.status.message).toContain("private publish failure");
+    expect(recorded.status.message).toContain("... [truncated]");
+    expect(recorded.status.message!.length).toBeLessThan(CONTENT_ATTRIBUTE_LIMIT + 32);
+    expect(recorded.events).toContainEqual(
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          "exception.message": recorded.status.message,
+          "exception.type": "BACKGROUND_TASK_FAILED",
+        }),
+        name: "exception",
+      }),
+    );
+
+    const redacted = await run(
+      createRuntime(new InMemoryAgentTraceStateStore(), () => ({
+        emit: true,
+        recordInputs: true,
+        recordOutputs: false,
+      })),
+      "redacted",
+    );
+    expect(redacted.attributes).toMatchObject({
+      "agent.action.error.code": "BACKGROUND_TASK_FAILED",
+      "agent.action.outcome": "failed",
+      "error.type": "BACKGROUND_TASK_FAILED",
+    });
+    expect(redacted.status).toEqual({ code: SpanStatusCode.ERROR });
+    expect(redacted.events.filter((event) => event.name === "exception")).toEqual([]);
+    expect(
+      JSON.stringify({
+        attributes: redacted.attributes,
+        events: redacted.events,
+        status: redacted.status,
+      }),
+    ).not.toContain("private publish failure");
   });
 
   it("records a failed attempt on model, tool, and action spans still open", async () => {

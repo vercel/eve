@@ -29,6 +29,10 @@ import {
   publishInputResolutions,
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
+import {
+  createBackgroundTaskInstrumentation,
+  type BackgroundTaskInstrumentation,
+} from "#instrumentation/background-task-runtime.js";
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
@@ -179,7 +183,7 @@ export interface SessionInstrumentation {
   ) => Promise<TResult>;
 }
 
-export interface ExecutionInstrumentation {
+export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation {
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
     readonly turnId?: string;
@@ -470,6 +474,11 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
+    ...createBackgroundTaskInstrumentation({
+      ctx,
+      hooks: () => bindHooks(readSessionContext()),
+      sessionId: boundSession.sessionId,
+    }),
     createHandleEvent: (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({

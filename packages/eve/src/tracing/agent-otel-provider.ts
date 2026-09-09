@@ -280,9 +280,6 @@ export function createAgentOtelInstrumentation(
   };
 
   const onTurnTerminal = async (event: InstrumentationTurnTerminalEvent): Promise<void> => {
-    if (event.type === "turn.cancelled" || event.type === "turn.failed") {
-      await actions.deleteForTurn(event.sessionId, event.turnId);
-    }
     await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
       ...turn,
       terminal:

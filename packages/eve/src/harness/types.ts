@@ -222,6 +222,7 @@ export interface StepResult {
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
   readonly backgroundTasks?: readonly {
+    readonly callId?: string;
     readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;

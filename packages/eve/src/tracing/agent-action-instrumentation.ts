@@ -18,7 +18,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
-import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -40,7 +40,6 @@ export interface AgentActionInstrumentation {
     "action.completed" | "action.failed" | "action.started"
   >;
   deleteForSession(sessionId: string): void | PromiseLike<void>;
-  deleteForTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   failForAttempt(scope: InstrumentationAttemptScope, error: unknown): Promise<void>;
   flushSettledInvocations(): Promise<void>;
   flushForSessionTransition(event: InstrumentationSessionTransitionEvent): Promise<void>;
@@ -166,7 +165,6 @@ export function createAgentActionInstrumentation(input: {
       await input.stateStore.deleteActionAnchors(sessionId);
       await input.stateStore.deleteInvocations(sessionId);
     },
-    deleteForTurn: (sessionId, turnId) => input.stateStore.deleteActions(sessionId, turnId),
     async failForAttempt(scope, error) {
       const keys = byAttempt.get(scope.attemptId);
       if (keys === undefined) return;
@@ -228,9 +226,9 @@ export function createAgentActionInstrumentation(input: {
       if (event.errorCode !== undefined) {
         span.setAttribute("agent.action.error.code", event.errorCode);
       }
-      recordError(span, event.error, event.errorCode);
+      recordActionError(span, event.error, event.errorCode);
     } else if (event.output.type === "error") {
-      recordError(span, event.output.error);
+      recordActionError(span, event.output.error);
     } else {
       if (event.usage !== undefined) {
         setAgentUsage(span, event.usage);
@@ -287,4 +285,28 @@ function contextFromActionState(state: AgentActionTraceState): Context {
 
 function isAgentInvocation(kind: InstrumentationActionKind): boolean {
   return kind === "subagent-call" || kind === "remote-agent-call";
+}
+
+function recordActionError(span: Span, error: unknown, errorType?: string): void {
+  if (error instanceof Error || error === undefined) {
+    recordError(span, error, errorType);
+    return;
+  }
+  const detail = serializedErrorDetail(error);
+  if (detail === undefined) {
+    recordError(span, undefined, errorType);
+    return;
+  }
+  const normalized = new Error(detail);
+  if (errorType !== undefined) normalized.name = errorType;
+  recordError(span, normalized, errorType);
+}
+
+function serializedErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "string") return textContentAttribute(error);
+  const serialized = contentAttribute(error, false);
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return serialized;
+  const message = Reflect.get(error, "message");
+  if (typeof message !== "string") return serialized;
+  return textContentAttribute(serialized === undefined ? message : `${message}\n${serialized}`);
 }
