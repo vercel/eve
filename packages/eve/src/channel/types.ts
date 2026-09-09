@@ -476,6 +476,8 @@ export interface SessionCapabilities {
  */
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
+  /** Creates a durable session that waits for its first explicit send. */
+  readonly start?: "idle";
   /** Framework task that owns this run, when the run is a task executor. */
   readonly taskId?: string;
   /**
@@ -539,6 +541,7 @@ export interface RunInput {
    */
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
+    /** Ignored for an initially idle session. */
     readonly message: string | UserContent;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;

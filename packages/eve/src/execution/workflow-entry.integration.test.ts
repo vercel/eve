@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
 import { createChannelAddress } from "#channel/channel-address.js";
@@ -791,6 +791,79 @@ describe("workflowEntry integration", () => {
       }
     });
   });
+
+  it("creates a ready idle session, appends history, then starts its first turn", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-idle" } });
+
+    await runtime.run(async () => {
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const session = await createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: "workflow-entry-idle",
+        runtime: workflowRuntime,
+      }).create({ auth: null });
+
+      expect(await workflowRuntime.getStreamTailIndex(session.id)).toBe(-1);
+      await expect(
+        session.appendHistory({
+          messages: [
+            {
+              content: [
+                {
+                  input: { query: "approved" },
+                  toolCallId: "call-1",
+                  toolName: "lookup",
+                  type: "tool-call",
+                },
+                {
+                  approvalId: "approval-1",
+                  toolCallId: "call-1",
+                  type: "tool-approval-request",
+                },
+              ],
+              role: "assistant",
+            },
+            {
+              content: [
+                {
+                  approvalId: "approval-1",
+                  approved: true,
+                  type: "tool-approval-response",
+                },
+                {
+                  output: { type: "text", value: "approved result" },
+                  toolCallId: "call-1",
+                  toolName: "lookup",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+          ],
+          operationId: "research:initial",
+        }),
+      ).resolves.toMatchObject({ outcome: "appended", status: "ok" });
+      expect(await workflowRuntime.getStreamTailIndex(session.id)).toBe(-1);
+
+      const run = getRun(session.id);
+      const stream = captureTurnEvents(run);
+      try {
+        await expect(session.send("Start research", { auth: null })).resolves.toMatchObject({
+          sessionId: session.id,
+          status: "accepted",
+        });
+        const firstTurn = await stream.nextTurn();
+        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(firstTurn, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
 
   it("publishes the session ID as the waiting address for an ID-only session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-id-only" } });

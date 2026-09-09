@@ -11,10 +11,11 @@ function createRuntime(): Runtime {
   return {
     createSession: vi.fn(),
     dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
-    dispatchSession: vi.fn(),
+    dispatchSession: vi.fn().mockResolvedValue({ sessionId: "sess_idle", status: "accepted" }),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
+    waitForSessionReady: vi.fn().mockResolvedValue({ sessionId: "sess_idle" }),
   };
 }
 
@@ -28,6 +29,82 @@ describe("createChannelAddress", () => {
         runtime: createRuntime(),
       }),
     ).toThrow("reserved session namespace");
+  });
+
+  it("creates an idle session without a model delivery", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_idle",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const session = await address.create({ auth: null, title: "Private research" });
+
+    expect(session.id).toBe("sess_idle");
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(runtime.waitForSessionReady).toHaveBeenCalledWith("slack:C1:T1");
+    await expect(session.send("Research this", { auth: null })).resolves.toEqual({
+      sessionId: "sess_idle",
+      status: "accepted",
+    });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess_idle" }),
+    );
+    expect(runtime.createSession).toHaveBeenCalledWith({
+      adapter: { kind: "slack" },
+      auth: null,
+      capabilities: { requestInput: true },
+      channelName: "slack",
+      continuationToken: "slack:C1:T1",
+      initiatorAuth: undefined,
+      input: { message: "" },
+      mode: "conversation",
+      start: "idle",
+      title: "Private research",
+    });
+  });
+
+  it("returns the authoritative owner when the address is already owned", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.resolveContinuation).mockResolvedValue({ sessionId: "sess_existing" });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    await expect(address.create({ auth: null })).resolves.toMatchObject({ id: "sess_existing" });
+    expect(runtime.createSession).not.toHaveBeenCalled();
+  });
+
+  it("converges concurrent idle creation on the authoritative address owner", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.resolveContinuation).mockResolvedValue(undefined);
+    vi.mocked(runtime.createSession)
+      .mockResolvedValueOnce({ events: new ReadableStream(), sessionId: "candidate-1" })
+      .mockResolvedValueOnce({ events: new ReadableStream(), sessionId: "candidate-2" });
+    vi.mocked(runtime.waitForSessionReady!).mockResolvedValue({ sessionId: "winner" });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const [first, second] = await Promise.all([
+      address.create({ auth: null }),
+      address.create({ auth: null }),
+    ]);
+
+    expect(first.id).toBe("winner");
+    expect(second.id).toBe("winner");
   });
 
   it("sends directly through the address and returns a fixed session handle", async () => {

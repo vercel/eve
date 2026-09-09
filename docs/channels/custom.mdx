@@ -151,6 +151,25 @@ Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
 address's current owner as a fixed handle.
 
+Use `from(address).create({ auth, ... })` when application code needs to reserve
+an address and initialize a session before its first model turn. The returned
+fixed `Session` starts normal execution only when its `send()` method is called;
+idle creation itself does not emit model, tool, or channel events. `create()`
+waits until the session owns the address, so an immediate fixed-handle operation
+is safe. `create()` is get-or-create: concurrent calls converge on the address
+winner, and an existing owner's auth, state, title, and other configuration are
+not replaced by later options. Use an operation-specific address for private work:
+
+```ts
+const research = await from("private-research:op_123").create({ auth });
+await registerResearchExecution(research.id);
+await research.appendHistory({
+  operationId: "op_123:initial",
+  messages: priorHistory,
+});
+await research.send("Research the approved question.", { auth });
+```
+
 ## Operation semantics
 
 - `cancel` cooperatively stops the active turn. Confirm it with `turn.cancelled`

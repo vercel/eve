@@ -40,6 +40,7 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly start?: "idle";
   readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
@@ -90,6 +91,7 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+    initialHistory: input.start === "idle" ? "empty" : undefined,
     taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
     workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,

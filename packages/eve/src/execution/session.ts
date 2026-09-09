@@ -71,6 +71,7 @@ export interface CreateSessionInput {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnAgent: RuntimeTurnAgent;
+  readonly initialHistory?: "empty";
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly systemPromptAdditions?: readonly string[];
@@ -96,7 +97,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
-    history: [...(turnAgent.initialMessages ?? [])],
+    history: input.initialHistory === "empty" ? [] : [...(turnAgent.initialMessages ?? [])],
     sessionId: input.sessionId,
   };
 

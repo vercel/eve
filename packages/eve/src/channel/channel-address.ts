@@ -39,12 +39,21 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
   ? BaseChannelAddressDeliveryOptions
   : BaseChannelAddressDeliveryOptions & { readonly state?: Partial<TState> };
 
+/** Options for creating an idle channel session before its first message. */
+export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefined]
+  ? Pick<BaseChannelAddressDeliveryOptions, "auth" | "initiatorAuth" | "mode" | "title">
+  : Pick<BaseChannelAddressDeliveryOptions, "auth" | "initiatorAuth" | "mode" | "title"> & {
+      readonly state?: Partial<TState>;
+    };
+
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
  * Only {@link send} may create a session when the address is unowned.
  */
 export interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
+  /** Creates an idle session at this address. Its first fixed-handle send starts execution. */
+  create(options: ChannelCreateOptions<TState>): Promise<Session>;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   send(
     message: string | UserContent,
@@ -83,6 +92,44 @@ export function createChannelAddress<TState = undefined>(input: {
 
   return {
     continuationToken: input.continuationToken,
+    async create(options) {
+      const existing = await input.runtime.resolveContinuation(namespacedToken);
+      if (existing !== undefined) {
+        return createSession(existing.sessionId, input.runtime, {
+          ...metadata,
+          turnPolicy: input.turnPolicy,
+        });
+      }
+      const state = (options as { readonly state?: TState }).state;
+      const adapter =
+        state === undefined
+          ? input.adapter
+          : {
+              ...input.adapter,
+              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
+            };
+      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      await input.runtime.createSession({
+        adapter,
+        auth: options.auth,
+        capabilities: options.mode === "task" ? undefined : { requestInput: true },
+        channelName: input.channelName,
+        continuationToken: namespacedToken,
+        initiatorAuth: options.initiatorAuth,
+        input: { message: "" },
+        mode: options.mode ?? "conversation",
+        start: "idle",
+        title: options.title,
+      });
+      if (input.runtime.waitForSessionReady === undefined) {
+        throw new Error("This eve runtime does not support idle session readiness.");
+      }
+      const owner = await input.runtime.waitForSessionReady(namespacedToken);
+      return createSession(owner.sessionId, input.runtime, {
+        ...metadata,
+        turnPolicy: input.turnPolicy,
+      });
+    },
     async deliver(sendInput, options) {
       const delivery =
         metadata.channelKind !== undefined && metadata.channelName !== undefined

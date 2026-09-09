@@ -211,6 +211,7 @@ export function createWorkflowRuntime(config: {
       } = {
         input: input.input,
         limits: input.limits,
+        start: input.start,
         serializedContext,
       };
       const taskId = input.taskId ?? input.callback?.taskId;

@@ -5,6 +5,7 @@ import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import {
   createChannelAddressFn,
   type ChannelAddressDeliveryOptions,
+  type ChannelCreateOptions,
 } from "#channel/channel-address.js";
 import type { SendPayload } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -25,6 +26,8 @@ import {
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+
+export type { ChannelCreateOptions } from "#channel/channel-address.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
@@ -54,6 +57,8 @@ export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOption
 
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
+  /** Creates an idle session. Its first fixed-session send starts a turn. */
+  create(options: ChannelCreateOptions<TState>): Promise<Session>;
   /** Starts or resumes a turn with a user message. May create a session. */
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /** Answers pending input requests. Never creates a session. */
@@ -107,6 +112,9 @@ export function createChannelOperations<TState = undefined>(input: {
     from(address) {
       const bound = channelAddress(address);
       const source: InternalChannelSource<TState> = {
+        async create(options) {
+          return await bound.create(options);
+        },
         async send(message, options) {
           return await bound.deliver(
             {

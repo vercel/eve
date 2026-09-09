@@ -75,6 +75,25 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
   });
 
+  it("does not seed static user messages into an idle session", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: { config: {} },
+      turnAgent: {
+        ...TestTurnAgent,
+        initialMessages: [{ content: "Static user instruction", role: "user" }],
+      },
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "private:research",
+      sessionId: "sess-idle",
+      start: "idle",
+    });
+
+    expect(state.snapshot?.session.history).toEqual([]);
+  });
+
   it("defaults root sessions to the root input token budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {

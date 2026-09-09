@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type {
+  ChannelCreateOptions,
   ChannelReceiveContext,
   ChannelRespondOptions,
   ChannelSendOptions,
@@ -10,6 +11,7 @@ import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import { type InputResponse, inputResponseSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
+  | ChannelCreateOptions<TState>
   | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
   | (ChannelRespondOptions<TState> & { readonly inputResponses: readonly InputResponse[] });
 
@@ -25,6 +27,9 @@ export function mockChannelContext<TState = undefined>(
   return {
     from(continuationToken) {
       const source: InternalChannelSource<TState> = {
+        async create(options) {
+          return (await observeDelivery(continuationToken, options)) as never;
+        },
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },

@@ -56,8 +56,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 20,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20],
+    current: 21,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },

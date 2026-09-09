@@ -69,6 +69,7 @@ export interface WorkflowEntryInput {
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
+  readonly start?: "idle";
   readonly taskId?: string;
 }
 
@@ -204,6 +205,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
             outputSchema: input.input.outputSchema,
             rootSessionId: rootSessionIdFromParent,
             sessionId,
+            start: input.start,
             taskId: input.taskId,
           }),
           commandInbox.claimStable(stableCommandToken),
@@ -250,31 +252,34 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         capabilities,
         commandInbox,
         driverWritable,
-        initialInput: {
-          deliveryMetadata:
-            input.serializedContext["eve.channelDelivery"] === undefined
-              ? undefined
-              : [
-                  {
-                    ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
-                      RunInput["delivery"]
-                    >),
-                    payloadIndex: 0,
-                  },
+        initialInput:
+          input.start === "idle"
+            ? undefined
+            : {
+                deliveryMetadata:
+                  input.serializedContext["eve.channelDelivery"] === undefined
+                    ? undefined
+                    : [
+                        {
+                          ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
+                            RunInput["delivery"]
+                          >),
+                          payloadIndex: 0,
+                        },
+                      ],
+                kind: "deliver",
+                payloads: [
+                  attachClientContext(
+                    {
+                      message: input.input.message,
+                      context: input.input.context,
+                      outputSchema: input.input.outputSchema,
+                    },
+                    readClientContext(input.input),
+                  ),
                 ],
-          kind: "deliver",
-          payloads: [
-            attachClientContext(
-              {
-                message: input.input.message,
-                context: input.input.context,
-                outputSchema: input.input.outputSchema,
+                requestId: readChannelRequestId(input.serializedContext),
               },
-              readClientContext(input.input),
-            ),
-          ],
-          requestId: readChannelRequestId(input.serializedContext),
-        },
         crashCleanupState,
         mode,
         serializedContext: input.serializedContext,
@@ -388,7 +393,7 @@ async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionCommandInbox;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly initialInput: HookPayload;
+  readonly initialInput: HookPayload | undefined;
   readonly crashCleanupState: CrashCleanupState;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
@@ -538,9 +543,35 @@ async function runDriverLoop(input: {
   try {
     await sessionTimeout?.start();
 
-    let action: TurnDriverAction = await runTurn(input.initialInput);
+    let action: TurnDriverAction | undefined =
+      input.initialInput === undefined ? undefined : await runTurn(input.initialInput);
 
     while (true) {
+      if (action === undefined) {
+        const next = await nextParkedActivity({ expectedAttemptIds: [] });
+        if (next.kind === "turn") {
+          action = await runTurn(next.delivery);
+          continue;
+        }
+        if (next.kind === "clear" || next.kind === "compact") {
+          action = await runTurn({ kind: next.kind });
+          continue;
+        }
+        if (next.kind === "reset" || next.kind === "closed" || next.kind === "expired") {
+          return {
+            kind: "result",
+            result: await finalizeExpiredSession({
+              caller: input.crashCleanupState.caller,
+              driverWritable: input.driverWritable,
+              mode: input.mode,
+              serializedContext: stateCursor.serializedContext,
+              sessionState: stateCursor.sessionState,
+              terminalState: input.crashCleanupState,
+            }),
+          };
+        }
+        continue;
+      }
       if (action.kind === "done") {
         return {
           kind: "result",

@@ -15,6 +15,7 @@ export {
   type CompactSessionResult,
   type ResetSessionResult,
   type Channel,
+  type ChannelCreateOptions,
   type ChannelAudience,
   type ChannelAudienceMetadata,
   type ChannelFrom,
