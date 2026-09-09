@@ -6,6 +6,16 @@ last_updated: "2026-09-01"
 
 # Turn performance and Workflow overhead
 
+## Owned platform alternatives
+
+The follow-up [keyed cells implementation plan](./keyed-cells-platform.md)
+specifies an owned PostgreSQL and Node worker platform, and the
+[resumable tasks implementation plan](./resumable-tasks-platform.md)
+adds an explicit-checkpoint execution model on that foundation. These are
+proposed alternatives to the Workflow runtime discussed below, not changes to
+the measurements or shipped behavior
+recorded in this investigation.
+
 ## Summary
 
 eve's hosted turn latency is a product problem, not a model-speed problem. The deterministic
