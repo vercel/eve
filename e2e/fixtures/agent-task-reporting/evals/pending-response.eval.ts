@@ -16,14 +16,14 @@ import {
 
 function pendingResponseEval(pendingInstruction: PendingInstruction, silence: Assertion) {
   return defineEval({
-    description: `After an intermediate task wake, the parent answers a user before settlement, then reports all results (pending instruction ${pendingInstruction}).`,
+    description: `After the same guided intermediate wake, the parent answers a user before settlement, then reports all results (retained pending instruction ${pendingInstruction}).`,
     tags: ["real-model", "pending-response"],
     metadata: { pendingInstruction },
     async test(t) {
-      const run = await startWarehouseLookups(t, reportingControl(pendingInstruction));
+      const run = await startWarehouseLookups(t);
       await waitForPartialCompletion(t, run);
 
-      const question = await sendQuestion(t, run);
+      const question = await sendQuestion(t, run, reportingControl(pendingInstruction));
       question.messageIncludes(/\b56\b/u);
       question.usedNoTools();
       t.log(

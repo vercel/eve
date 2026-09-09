@@ -18,12 +18,9 @@ interface ReportingRun {
   session: EveEvalSession | EveEvalContext;
 }
 
-export async function startWarehouseLookups(
-  t: EveEvalContext,
-  control = "",
-): Promise<ReportingRun> {
+export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
   const started =
-    await t.send(`${control}Please find the inventory item at each of our three sample warehouses using the built-in agent tool. Start all three lookups in the background without waiting for their results. Delegate the lookups instead of calling probe yourself.
+    await t.send(`Please find the inventory item at each of our three sample warehouses using the built-in agent tool. Start all three lookups in the background without waiting for their results. Delegate the lookups instead of calling probe yourself.
 
 1. "Call probe with check=first and report its result value."
 2. "Call probe with check=second and report its result value."
@@ -91,8 +88,12 @@ export async function waitForPartialCompletion(
   );
 }
 
-export async function sendQuestion(t: EveEvalContext, run: ReportingRun): Promise<EveEvalTurn> {
-  let live = await run.session.start(QUESTION);
+export async function sendQuestion(
+  t: EveEvalContext,
+  run: ReportingRun,
+  control = "",
+): Promise<EveEvalTurn> {
+  let live = await run.session.start(`${control}${QUESTION}`);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const turn = await readTurn(t, run, live);
     if (receivedQuestion(turn)) return turn;

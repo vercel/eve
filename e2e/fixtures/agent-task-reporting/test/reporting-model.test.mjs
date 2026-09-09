@@ -14,12 +14,11 @@ const user = (text) => ({ role: "user", content: [{ type: "text", text }] });
 async function transform(variant) {
   const prompt = [
     { role: "system", content: "You are a helpful assistant." },
-    user(`${reportingControl(variant)}Start the lookups.`),
+    user("Start the lookups."),
     user('[Task state]\n{"tasks":[{"status":"pending"}]}'),
     user(pending),
     user("Background task task_1 is completed.\nResult: oranges"),
-    { role: "assistant", content: [{ type: "text", text: "<eve-empty-delivery/>" }] },
-    user("How many jars?"),
+    user(`${reportingControl(variant)}How many jars?`),
   ];
   const params = { prompt, maxOutputTokens: 100 };
   const original = structuredClone(params);
@@ -31,12 +30,24 @@ async function transform(variant) {
 test("the two arms differ only by the real pending instruction", async () => {
   const on = await transform("on");
   const off = await transform("off");
-  assert.equal(on.prompt[1].content[0].text, "Start the lookups.");
+  assert.equal(on.prompt.at(-1).content[0].text, "How many jars?");
   assert.deepEqual(off, {
     ...on,
     prompt: on.prompt.filter((message) => message.content[0]?.text !== pending),
   });
   assert.equal(on.prompt.length - off.prompt.length, 1);
+});
+
+test("the pending instruction stays enabled until the user question selects an arm", async () => {
+  const params = {
+    prompt: [
+      user("Start the lookups."),
+      user(pending),
+      user("Background task task_1 is completed.\nResult: oranges"),
+    ],
+  };
+  const result = await reportingMiddleware.transformParams({ params });
+  assert.deepEqual(result, params);
 });
 
 test("ordinary turns and settled instructions are preserved", async () => {
