@@ -2893,6 +2893,18 @@ async function finishConversationTurn(input: {
 
   const structured = extractFinalOutput(result);
   if (structured === undefined) {
+    const initiatingTasks = resolveInitiatingTaskContext({
+      state: session.state,
+      turnId: emissionState.turnId,
+    });
+    if (initiatingTasks !== undefined) {
+      if (emit) {
+        emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+        session = setHarnessEmissionState(session, emissionState);
+      }
+      return { next: null, session };
+    }
+
     // The schema belongs to the settled turn. A later conversation turn that
     // omits outputSchema must not inherit a failed turn's contract.
     session = { ...session, outputSchema: undefined };

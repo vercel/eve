@@ -69,7 +69,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { cacheTerminalTaskView, recordSessionTask } from "#tasks/session-index.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
@@ -2748,6 +2748,76 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(result.session.outputSchema).toBeUndefined();
+  });
+
+  it("keeps requested structured output pending while background work is active", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [{ content: "The background work is still running.", role: "assistant" }],
+      },
+      text: "The background work is still running.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const schema = { type: "object" };
+    const session = recordBackgroundTask(createTestSession({ outputSchema: schema }));
+
+    const result = await runStep(session, { message: "Run the background work." });
+
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toBeUndefined();
+    expect(result.session.outputSchema).toEqual(schema);
+    expect(getCompatibilityEventTypes(events)).not.toContain("turn.failed");
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ code: "OUTPUT_SCHEMA_NOT_FULFILLED" }),
+        type: "step.failed",
+      }),
+    );
+  });
+
+  it("fails requested structured output after background work settles", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [{ content: "The background work completed.", role: "assistant" }],
+      },
+      text: "The background work completed.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const withTask = recordBackgroundTask(createTestSession({ outputSchema: { type: "object" } }));
+    const session = {
+      ...withTask,
+      state: cacheTerminalTaskView(withTask.state, {
+        lastOutput: { data: "done", type: "result" },
+        metadata: { kind: "report-probe", name: "analysis" },
+        status: "completed",
+        taskId: "analysis",
+      }),
+    };
+
+    const result = await runStep(session, { message: "Report the completed work." });
+
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: "The agent could not produce a result matching the requested schema.",
+    });
+    expect(result.session.outputSchema).toBeUndefined();
+    expect(getCompatibilityEventTypes(events)).toContain("turn.failed");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ code: "OUTPUT_SCHEMA_NOT_FULFILLED" }),
+        type: "step.failed",
+      }),
+    );
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {
