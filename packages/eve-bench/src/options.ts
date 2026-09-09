@@ -18,20 +18,31 @@ export const paths = {
 export interface TaskSelection {
   readonly lock: DatasetLock;
   readonly tasks: readonly string[];
+  readonly taskDirs: readonly string[];
 }
 
 export async function selectTasks(input: {
   cohort?: string;
   dataset?: string;
   task?: readonly string[];
+  taskDir?: readonly string[];
 }): Promise<TaskSelection> {
+  const localTaskDirs = input.taskDir?.map((dir) => resolve(dir)) ?? [];
+  if (localTaskDirs.length > 0 && !input.cohort && !input.dataset && !input.task?.length) {
+    return {
+      lock: { name: "local", version: "0", commit: "", gitUrl: "", tasks: [] },
+      tasks: [],
+      taskDirs: localTaskDirs,
+    };
+  }
+
   if (input.cohort) {
     const cohort = await readCohort(join(paths.datasetsRoot, "cohorts", `${input.cohort}.json`));
     const entry = await lock(cohort.dataset);
     const tasks = input.task?.length
       ? cohort.tasks.filter((task) => input.task!.includes(task))
       : cohort.tasks;
-    return { lock: entry, tasks };
+    return { lock: entry, tasks, taskDirs: localTaskDirs };
   }
 
   const entry = await lock(input.dataset ?? (await defaultDataset()));
@@ -42,7 +53,7 @@ export async function selectTasks(input: {
     const missing = input.task.filter((task) => !tasks.includes(task));
     throw new Error(`tasks not in ${entry.name}@${entry.version}: ${missing.join(", ")}`);
   }
-  return { lock: entry, tasks };
+  return { lock: entry, tasks, taskDirs: localTaskDirs };
 }
 
 export function jobDir(nameOrPath: string): string {

@@ -1,0 +1,12 @@
+[task]
+name = "stress-verifier-timeout"
+
+[agent]
+timeout_sec = 30
+
+[verifier]
+timeout_sec = 3
+
+[environment]
+build_timeout_sec = 60
+allow_internet = false

@@ -27,6 +27,7 @@ pnpm bench tasks list --cohort smoke                    # print a cohort's task 
 AI_GATEWAY_API_KEY=... pnpm bench run --model zai/glm-5.2 --cohort smoke --attempts 3 --concurrency 8
 pnpm bench run --harness oracle --cohort smoke           # reference solutions; validates the runner, no model
 pnpm bench run --model zai/glm-5.2 --task fix-git --eve 0.35.0   # benchmark a published eve release
+pnpm bench run --harness oracle --task-dir ./path/to/task # run a local Terminal-Bench task
 
 pnpm bench report <job> --format junit --out junit.xml
 pnpm bench diff <base-job> <candidate-job>
@@ -37,6 +38,10 @@ Every command accepts `--json` and never prompts. Jobs live in
 skipping trials that already have a `trial.json`. Ctrl-C aborts in-flight
 trials and removes their containers.
 
+Pass `--task-dir <path>` more than once to run one or more local Terminal-Bench
+task directories. A local-only run does not sync a dataset and records its
+dataset as `local`.
+
 ## How a trial runs
 
 1. Pull the task's prebuilt image (or build `environment/Dockerfile` once).
@@ -46,6 +51,32 @@ trials and removes their containers.
    verifier always runs, so the reward reflects what the agent left behind.
 4. Read `/logs/verifier/reward.txt`, copy `/logs/agent` and `/logs/verifier`
    to the trial directory, remove the container, and write `trial.json`.
+
+Each runner-owned log (`container.log`, `agent.log`, and `verifier.log`) is
+capped at 64 MiB. The runner appends a truncation notice when a log exceeds the
+cap.
+
+Containers carry the labels `eve-bench=1`, `eve-bench.job=<job>`, and
+`eve-bench.task=<task>`. Find any leftovers with:
+
+```bash
+docker ps -a --filter label=eve-bench=1
+```
+
+At the start of a job, the runner removes stale containers with the same
+`eve-bench.job` label before starting new trials.
+
+## Stress tests
+
+Run the Docker-backed stress suite separately from the default test suite:
+
+```bash
+pnpm run test:stress
+```
+
+The suite requires Docker and takes about 30 seconds. It covers the happy path,
+agent and verifier timeouts, a bad image, SIGINT abort and resume, and concurrent
+trials.
 
 ## Harnesses
 
@@ -89,9 +120,11 @@ attempt count, and eve source.
 touch this package or its design document and requires every task attempt to
 resolve. It uploads the job directory and `junit.xml` as artifacts.
 
-The `eve-smoke` job runs only through `workflow_dispatch`, accepts `model` and
-`cohort` inputs, and requires `AI_GATEWAY_API_KEY`. It uploads its job directory
-and can optionally diff the result against a downloaded base-job artifact.
+The real-model `eve-smoke` job runs through `workflow_dispatch` or when the
+`bench:eve` label is added to a pull request. It accepts `model` and `cohort`
+inputs for manual runs and requires `AI_GATEWAY_API_KEY`, which is unavailable
+to pull requests from forks. It uploads its job directory and can optionally
+diff the result against a downloaded base-job artifact.
 
 ## Layout
 

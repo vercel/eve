@@ -1,0 +1,12 @@
+[task]
+name = "stress-abort-a"
+
+[agent]
+timeout_sec = 180
+
+[verifier]
+timeout_sec = 30
+
+[environment]
+build_timeout_sec = 60
+allow_internet = false

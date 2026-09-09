@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Writable } from "node:stream";
+import { createWriteStream } from "node:fs";
+import { Writable } from "node:stream";
+
+const CAPTURE_LIMIT_BYTES = 16 * 1024 * 1024;
+const LOG_LIMIT_BYTES = 64 * 1024 * 1024;
+const LOG_TRUNCATED_LINE = "[eve-bench] log truncated at 64 MiB\n";
 
 export interface ProcessResult {
   readonly exitCode: number | null;
@@ -21,9 +26,19 @@ export interface ExecOptions {
 export interface ContainerOptions {
   readonly image: string;
   readonly name: string;
+  readonly job: string;
+  readonly task: string;
   readonly cpus?: number;
   readonly memoryMb?: number;
   readonly network: boolean;
+}
+
+export interface RunnerContainer {
+  readonly id: string;
+  readonly name: string;
+  readonly job: string;
+  readonly task: string;
+  readonly createdAt: string;
 }
 
 export class Container {
@@ -34,7 +49,20 @@ export class Container {
   }
 
   static async start(options: ContainerOptions, signal?: AbortSignal): Promise<Container> {
-    const args = ["run", "--detach", "--name", options.name, "--entrypoint", "sh"];
+    const args = [
+      "run",
+      "--detach",
+      "--name",
+      options.name,
+      "--label",
+      "eve-bench=1",
+      "--label",
+      `eve-bench.job=${options.job}`,
+      "--label",
+      `eve-bench.task=${options.task}`,
+      "--entrypoint",
+      "sh",
+    ];
     if (options.cpus !== undefined) args.push("--cpus", String(options.cpus));
     if (options.memoryMb !== undefined) args.push("--memory", `${options.memoryMb}m`);
     if (!options.network) args.push("--network", "none");
@@ -87,6 +115,81 @@ export class Container {
   }
 }
 
+export async function assertDockerAvailable(): Promise<void> {
+  try {
+    await dockerOk(["version", "--format", "{{.Server.Version}}"], { timeoutMs: 10_000 });
+  } catch {
+    throw new Error("Docker is unavailable; start the Docker daemon and retry.");
+  }
+}
+
+export async function listRunnerContainers(
+  filter: {
+    job?: string;
+  } = {},
+): Promise<RunnerContainer[]> {
+  const args = [
+    "ps",
+    "-a",
+    "--filter",
+    "label=eve-bench=1",
+    ...(filter.job ? ["--filter", `label=eve-bench.job=${filter.job}`] : []),
+    "--format",
+    "{{json .}}",
+  ];
+  const result = await dockerOk(args, { timeoutMs: 30_000 });
+  return result.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const row = JSON.parse(line) as Record<string, string>;
+      return {
+        id: row.ID ?? "",
+        name: row.Names ?? "",
+        job: labelValue(row.Labels, "eve-bench.job"),
+        task: labelValue(row.Labels, "eve-bench.task"),
+        createdAt: row.CreatedAt ?? "",
+      };
+    });
+}
+
+export async function removeRunnerContainers(
+  filter: {
+    job?: string;
+  } = {},
+): Promise<RunnerContainer[]> {
+  const containers = await listRunnerContainers(filter);
+  if (containers.length > 0) {
+    await dockerOk(["rm", "--force", "--volumes", ...containers.map((container) => container.id)], {
+      timeoutMs: 60_000,
+    });
+  }
+  return containers;
+}
+
+export function createBoundedLog(path: string): Writable {
+  return createBoundedWritable(createWriteStream(path), LOG_LIMIT_BYTES);
+}
+
+export function createBoundedWritable(output: Writable, limitBytes: number): Writable {
+  let written = 0;
+  let truncated = false;
+  return new Writable({
+    write(chunk: Buffer | string, encoding, callback) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+      const remaining = Math.max(0, limitBytes - written);
+      const kept = bytes.subarray(0, remaining);
+      written += kept.length;
+      if (kept.length < bytes.length) truncated = true;
+      if (kept.length === 0) callback();
+      else output.write(kept, callback);
+    },
+    final(callback) {
+      output.end(truncated ? LOG_TRUNCATED_LINE : undefined, callback);
+    },
+  });
+}
+
 export async function imageExists(tag: string): Promise<boolean> {
   const result = await docker(["image", "inspect", tag], { timeoutMs: 30_000 });
   return result.exitCode === 0;
@@ -132,6 +235,8 @@ function docker(args: readonly string[], options: ExecOptions): Promise<ProcessR
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let timedOut = false;
     let aborted = false;
     const timer =
@@ -148,11 +253,11 @@ function docker(args: readonly string[], options: ExecOptions): Promise<ProcessR
     options.signal?.addEventListener("abort", onAbort, { once: true });
     if (options.signal?.aborted) onAbort();
     child.stdout.on("data", (chunk: Buffer) => {
-      stdout.push(chunk);
+      stdoutBytes = appendHead(stdout, stdoutBytes, chunk, CAPTURE_LIMIT_BYTES);
       options.log?.write(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr.push(chunk);
+      stderrBytes = appendHead(stderr, stderrBytes, chunk, CAPTURE_LIMIT_BYTES);
       options.log?.write(chunk);
     });
     child.once("error", (error) => {
@@ -174,4 +279,20 @@ function docker(args: readonly string[], options: ExecOptions): Promise<ProcessR
       options.signal?.removeEventListener("abort", onAbort);
     }
   });
+}
+
+function appendHead(chunks: Buffer[], size: number, chunk: Buffer, limit: number): number {
+  const kept = chunk.subarray(0, Math.max(0, limit - size));
+  if (kept.length > 0) chunks.push(kept);
+  return size + kept.length;
+}
+
+function labelValue(labels: string | undefined, key: string): string {
+  const prefix = `${key}=`;
+  return (
+    labels
+      ?.split(",")
+      .find((label) => label.startsWith(prefix))
+      ?.slice(prefix.length) ?? ""
+  );
 }

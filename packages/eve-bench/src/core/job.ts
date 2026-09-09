@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DatasetLock } from "./dataset.ts";
+import { assertDockerAvailable, listRunnerContainers, removeRunnerContainers } from "./docker.ts";
 import type { Harness } from "./harness.ts";
 import { summarize, type JobResult, type TrialResult } from "./result.ts";
 import type { Task } from "./task.ts";
@@ -19,10 +20,19 @@ export interface JobInput {
   readonly concurrency: number;
   readonly forwardEnv: Readonly<Record<string, string>>;
   readonly signal: AbortSignal;
+  readonly onLog?: (message: string) => void;
   readonly onTrial?: (trial: TrialResult, resumed: boolean) => void;
 }
 
 export async function runJob(input: JobInput): Promise<JobResult> {
+  await assertDockerAvailable();
+  const leftovers = await listRunnerContainers({ job: input.name });
+  if (leftovers.length > 0) {
+    await removeRunnerContainers({ job: input.name });
+    for (const container of leftovers) {
+      input.onLog?.(`Removed leftover container ${container.name} from job ${input.name}`);
+    }
+  }
   await mkdir(input.dir, { recursive: true });
   const bundle = await input.harness.prepare({ model: input.model, cacheDir: input.cacheDir });
   await writeFile(
@@ -69,6 +79,7 @@ export async function runJob(input: JobInput): Promise<JobResult> {
         bundle,
         model: input.model,
         forwardEnv: input.forwardEnv,
+        job: input.name,
         dir,
         signal: input.signal,
       });
@@ -76,7 +87,11 @@ export async function runJob(input: JobInput): Promise<JobResult> {
       input.onTrial?.(trial, false);
     }
   });
-  await Promise.all(workers);
+  const outcomes = await Promise.allSettled(workers);
+  if (input.signal.aborted) await removeRunnerContainers({ job: input.name });
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") throw outcome.reason;
+  }
 
   trials.sort((a, b) => a.task.localeCompare(b.task) || a.attempt - b.attempt);
   const result: JobResult = {

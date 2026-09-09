@@ -2,6 +2,7 @@ name: eve Benchmarks
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "packages/eve-bench/**"
       - research/eve-bench-runner.md
@@ -90,8 +91,9 @@ jobs:
             }
           '
 
+  # AI_GATEWAY_API_KEY is available to pull requests from branches in this repository, not forks.
   eve-smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'bench:eve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -125,19 +127,19 @@ jobs:
 
       - name: Run eve smoke benchmark
         env:
-          MODEL: ${{ inputs.model }}
-          COHORT: ${{ inputs.cohort }}
+          MODEL: ${{ inputs.model || 'zai/glm-5.2' }}
+          COHORT: ${{ inputs.cohort || 'smoke' }}
         run: pnpm bench run --harness eve --model "$MODEL" --cohort "$COHORT" --attempts 1 --concurrency 5 --job eve-smoke
 
       - name: Download base job artifact
-        if: ${{ inputs.base_job_artifact != '' }}
+        if: ${{ inputs.base_job_artifact }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ inputs.base_job_artifact }}
           path: packages/eve-bench/.generated/base-job
 
       - name: Compare with base job
-        if: ${{ inputs.base_job_artifact != '' }}
+        if: ${{ inputs.base_job_artifact }}
         run: |
           pnpm bench diff .generated/base-job .generated/jobs/eve-smoke | tee diff.txt
           {

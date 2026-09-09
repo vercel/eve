@@ -22,8 +22,9 @@ const USAGE = `eve-bench: zero-dependency Terminal-Bench runner for eve
 
   eve-bench tasks sync [--dataset <name>]        fetch pinned datasets into .generated/datasets
   eve-bench tasks list [--cohort <name>]         print task names
-  eve-bench run --model <id> [--cohort <name>] [--task <name>...] [--attempts N] [--concurrency N]
-                [--harness eve|oracle] [--eve local|<version>] [--job <name>] [--format console|json|junit]
+  eve-bench run --model <id> [--cohort <name>] [--task <name>...] [--task-dir <path>...] [--attempts N]
+                [--concurrency N] [--harness eve|oracle] [--eve local|<version>] [--job <name>]
+                [--format console|json|junit]
   eve-bench report <job> [--format console|json|junit]
   eve-bench diff <base-job> <candidate-job> [--json]
 
@@ -90,6 +91,7 @@ async function run(args: string[]): Promise<void> {
       cohort: { type: "string" },
       dataset: { type: "string" },
       task: { type: "string", multiple: true },
+      "task-dir": { type: "string", multiple: true },
       attempts: { type: "string", default: "1" },
       concurrency: { type: "string", default: "4" },
       eve: { type: "string", default: "local" },
@@ -102,10 +104,15 @@ async function run(args: string[]): Promise<void> {
   const harness = selectHarness(values.harness, values.eve);
   const model = values.model ?? (harness.name === "oracle" ? "none" : undefined);
   if (!model) throw new Error("--model is required");
-  const selection = await selectTasks(values);
-  const datasetDir = await syncDataset(join(paths.generatedRoot, "datasets"), selection.lock);
+  const selection = await selectTasks({ ...values, taskDir: values["task-dir"] });
+  const datasetTaskDirs = selection.tasks.length
+    ? await taskDirs(
+        await syncDataset(join(paths.generatedRoot, "datasets"), selection.lock),
+        selection.tasks,
+      )
+    : [];
   const loaded = await Promise.all(
-    (await taskDirs(datasetDir, selection.tasks)).map((dir) => loadTask(dir)),
+    [...datasetTaskDirs, ...selection.taskDirs].map((dir) => loadTask(dir)),
   );
   const name = values.job ?? defaultJobName(`${harness.name}-${model}`);
   const controller = new AbortController();
@@ -128,6 +135,7 @@ async function run(args: string[]): Promise<void> {
     concurrency: Number(values.concurrency),
     forwardEnv: forwardedEnv(),
     signal: controller.signal,
+    onLog: (message) => process.stderr.write(`${message}\n`),
     onTrial: (trial, resumed) => {
       if (format !== "console") return;
       const reward = trial.reward === null ? "-" : trial.reward.toFixed(2);

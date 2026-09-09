@@ -1,0 +1,13 @@
+[task]
+name = "stress-bad-image"
+
+[agent]
+timeout_sec = 30
+
+[verifier]
+timeout_sec = 30
+
+[environment]
+build_timeout_sec = 60
+allow_internet = false
+docker_image = "eve-bench/does-not-exist:1"

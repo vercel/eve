@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
 
-import { buildImage, Container, containerArch, pullImage, type ProcessResult } from "./docker.ts";
+import {
+  buildImage,
+  Container,
+  containerArch,
+  createBoundedLog,
+  pullImage,
+  type ProcessResult,
+} from "./docker.ts";
 import type { Harness, HarnessBundle } from "./harness.ts";
 import type { StepResult, TrialResult, Usage } from "./result.ts";
 import type { Task } from "./task.ts";
@@ -17,6 +24,7 @@ export interface TrialInput {
   readonly model: string;
   /** Host env forwarded to the harness exec only (provider credentials). */
   readonly forwardEnv: Readonly<Record<string, string>>;
+  readonly job: string;
   readonly dir: string;
   readonly signal: AbortSignal;
 }
@@ -29,7 +37,7 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
   const { task, signal } = input;
   const startedAt = new Date().toISOString();
   await mkdir(input.dir, { recursive: true });
-  const containerLog = createWriteStream(join(input.dir, "container.log"), { flags: "a" });
+  const containerLog = createBoundedLog(join(input.dir, "container.log"));
   let container: Container | undefined;
   let agent: StepResult = skipped();
   let verifier: StepResult = skipped();
@@ -42,6 +50,8 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
       {
         image,
         name: `eve-bench-${task.name}-${input.attempt}-${Date.now().toString(36)}`,
+        job: input.job,
+        task: task.name,
         cpus: task.environment.cpus,
         memoryMb: task.environment.memoryMb,
         network: task.environment.allowInternet,
@@ -74,23 +84,27 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
       logsDir: `${LOGS_DIR}/agent`,
     };
     agent = await step(() =>
-      container!.exec(input.harness.command(runContext), {
-        cwd: workdir,
-        env: { ...input.forwardEnv, ...input.harness.env(runContext) },
-        timeoutMs: task.agentTimeoutMs,
-        signal,
-        log: createWriteStream(join(input.dir, "agent.log")),
-      }),
+      withBoundedLog(join(input.dir, "agent.log"), (log) =>
+        container!.exec(input.harness.command(runContext), {
+          cwd: workdir,
+          env: { ...input.forwardEnv, ...input.harness.env(runContext) },
+          timeoutMs: task.agentTimeoutMs,
+          signal,
+          log,
+        }),
+      ),
     );
 
     await container.upload(`${join(task.dir, "tests")}/.`, TESTS_DIR, signal);
     verifier = await step(() =>
-      container!.exec(`bash ${TESTS_DIR}/test.sh`, {
-        cwd: workdir,
-        timeoutMs: task.verifierTimeoutMs,
-        signal,
-        log: createWriteStream(join(input.dir, "verifier.log")),
-      }),
+      withBoundedLog(join(input.dir, "verifier.log"), (log) =>
+        container!.exec(`bash ${TESTS_DIR}/test.sh`, {
+          cwd: workdir,
+          timeoutMs: task.verifierTimeoutMs,
+          signal,
+          log,
+        }),
+      ),
     );
 
     for (const logs of ["agent", "verifier"]) {
@@ -105,6 +119,7 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
   } finally {
     if (container) await container.remove();
     containerLog.end();
+    await finished(containerLog);
   }
   const result: TrialResult = {
     task: task.name,
@@ -121,6 +136,16 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
   };
   await writeFile(join(input.dir, "trial.json"), `${JSON.stringify(result, null, 2)}\n`);
   return result;
+}
+
+async function withBoundedLog<T>(path: string, run: (log: Writable) => Promise<T>): Promise<T> {
+  const log = createBoundedLog(path);
+  try {
+    return await run(log);
+  } finally {
+    log.end();
+    await finished(log);
+  }
 }
 
 async function resolveImage(task: Task, log: Writable, signal: AbortSignal): Promise<string> {

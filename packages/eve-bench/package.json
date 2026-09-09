@@ -10,6 +10,7 @@
   "scripts": {
     "bench": "node src/cli.ts",
     "test": "pnpm run typecheck && node --test src/core/*.test.ts",
+    "test:stress": "node --test test/stress/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
