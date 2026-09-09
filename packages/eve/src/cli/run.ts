@@ -324,13 +324,18 @@ export function createCliProgram(
     startHost: runtime.startHost,
   });
 
-  agentCommand(program.command("dev"), applicationContext, (command) => {
-    const options = command.opts<DevelopmentCliOptions>();
-    return (
-      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
-      undefined
-    );
-  })
+  agentCommand(
+    program.command("dev"),
+    applicationContext,
+    (command) => {
+      const options = command.opts<DevelopmentCliOptions>();
+      return (
+        resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
+        undefined
+      );
+    },
+    { workspace: "preserve" },
+  )
     .description("Start the eve development server or connect to an existing URL.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
@@ -386,6 +391,31 @@ export function createCliProgram(
     )
     .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+      const projectContext =
+        remoteTarget === undefined ? await applicationContext.resolveAgent() : undefined;
+      if (projectContext?.kind === "workspace") {
+        if (
+          options.assistantResponseStats !== undefined ||
+          options.connectionAuth !== undefined ||
+          options.contextSize !== undefined ||
+          options.input !== undefined ||
+          options.logs !== undefined ||
+          options.name !== undefined ||
+          options.onboard === true ||
+          options.reasoning !== undefined ||
+          options.subagents !== undefined ||
+          options.tools !== undefined ||
+          options.ui === false
+        ) {
+          throw new InvalidArgumentError(
+            "This option requires an individual agent. Run `eve dev --agent <name>` instead.",
+          );
+        }
+        const { runWorkspaceDevelopment } = await import("#cli/dev/workspace-dev.js");
+        await runWorkspaceDevelopment({ options, workspace: projectContext.workspace });
+        return;
+      }
+
       const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });

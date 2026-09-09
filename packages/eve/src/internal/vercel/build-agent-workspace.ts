@@ -28,6 +28,9 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
       buildCommand: `node ${quoteVercelShellArgument(
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
       )} build`,
+      devCommand: `node ${quoteVercelShellArgument(
+        toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+      )} dev --no-ui`,
       name: member.name,
       publicRoutePrefix: `/${member.name}`,
       workspaceMember: true,

@@ -55,6 +55,19 @@ describe("agentCommand", () => {
     );
   });
 
+  it("leaves a workspace root intact when requested", async () => {
+    const context = workspaceContext();
+    const action = vi.fn(() => expect(context.root).toBe("/repo"));
+    const program = new Command().exitOverride();
+    agentCommand(program.command("dev"), context, () => true, { workspace: "preserve" }).action(
+      action,
+    );
+
+    await program.parseAsync(["dev", "--agent", "support"], { from: "user" });
+
+    expect(action).toHaveBeenCalledOnce();
+  });
+
   it("automatically selects the only workspace agent", async () => {
     const context = workspaceContext();
     context.resolveAgent = vi.fn(async () => ({
