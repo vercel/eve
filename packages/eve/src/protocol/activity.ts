@@ -1,4 +1,16 @@
+import type { JsonValue } from "#shared/json.js";
+import {
+  isPresentationStateKey,
+  isPresentationStateValue,
+  MAX_PRESENTATION_STATE_BYTES,
+  MAX_PRESENTATION_STATE_DEPTH,
+  MAX_PRESENTATION_STATE_ENTRIES,
+} from "#shared/presentation-state.js";
+
 export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
+export const MAX_ACTIVITY_STATE_BYTES = MAX_PRESENTATION_STATE_BYTES;
+export const MAX_ACTIVITY_STATE_DEPTH = MAX_PRESENTATION_STATE_DEPTH;
+export const MAX_ACTIVITY_STATE_ENTRIES = MAX_PRESENTATION_STATE_ENTRIES;
 
 export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
 export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
@@ -63,6 +75,17 @@ export interface ActivityBlockerStateV1 extends ActivityBlockerIdentityV1 {
   readonly startedAt: string;
 }
 
+export interface ActivityStructuredStateV1 {
+  readonly key: string;
+  readonly parentWorkId: string;
+  readonly replacedAt: string;
+  readonly rootTurnId: string;
+  readonly sourceActionId: string;
+  readonly sourceEventId: string;
+  readonly sourceToolName: string;
+  readonly value: JsonValue;
+}
+
 export type ActivityEventV1 =
   | {
       readonly eventId: string;
@@ -108,6 +131,11 @@ export type ActivityEventV1 =
       readonly kind: "blocker.settled";
       readonly outcome: Exclude<ActivityBlockerPhase, "blocked">;
       readonly settledAt: string;
+    }
+  | {
+      readonly eventId: string;
+      readonly kind: "state.replaced";
+      readonly state: ActivityStructuredStateV1;
     };
 
 export interface ActivityBatchV1 {
@@ -121,6 +149,7 @@ export interface ActivitySnapshotV1 {
   readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
   readonly revision: number;
   readonly seenEventIds: readonly string[];
+  readonly states: Readonly<Record<string, ActivityStructuredStateV1>>;
   readonly version: 1;
   readonly work: Readonly<Record<string, ActivityWorkStateV1>>;
 }
@@ -286,6 +315,12 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         settledAt: value.settledAt,
       };
     }
+    case "state.replaced": {
+      if (!hasOnlyKeys(value, ["eventId", "kind", "state"])) return undefined;
+      const state = parseStructuredState(value.state);
+      if (!isIdentity(value.eventId) || state === undefined) return undefined;
+      return { eventId: value.eventId, kind: "state.replaced", state };
+    }
     default:
       return null;
   }
@@ -340,6 +375,49 @@ function parseBlockerIdentity(value: unknown): ActivityBlockerIdentityV1 | undef
     parentWorkId: value.parentWorkId,
     rootTurnId: value.rootTurnId,
   };
+}
+
+function parseStructuredState(value: unknown): ActivityStructuredStateV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "key",
+      "parentWorkId",
+      "replacedAt",
+      "rootTurnId",
+      "sourceActionId",
+      "sourceEventId",
+      "sourceToolName",
+      "value",
+    ]) ||
+    !isPresentationStateKey(value.key) ||
+    !isIdentity(value.parentWorkId) ||
+    !isBoundedString(value.replacedAt) ||
+    !isIdentity(value.rootTurnId) ||
+    !isIdentity(value.sourceActionId) ||
+    !isIdentity(value.sourceEventId) ||
+    !isBoundedString(value.sourceToolName) ||
+    !isPresentationStateValue(value.value)
+  )
+    return undefined;
+  return {
+    key: value.key,
+    parentWorkId: value.parentWorkId,
+    replacedAt: value.replacedAt,
+    rootTurnId: value.rootTurnId,
+    sourceActionId: value.sourceActionId,
+    sourceEventId: value.sourceEventId,
+    sourceToolName: value.sourceToolName,
+    value: value.value,
+  };
+}
+
+export function isActivityStateKey(value: unknown): value is string {
+  return isPresentationStateKey(value);
+}
+
+export function isActivityStateValue(value: unknown): value is JsonValue {
+  return isPresentationStateValue(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

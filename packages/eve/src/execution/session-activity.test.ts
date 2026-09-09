@@ -68,10 +68,68 @@ describe("activity protocol and reducer", () => {
     );
   });
 
+  it("replaces structured state per work and converges out-of-order delivery", () => {
+    const replacement = (
+      eventId: string,
+      replacedAt: string,
+      value: string,
+      parentWorkId = work.id,
+    ): ActivityEventV1 => ({
+      eventId,
+      kind: "state.replaced",
+      state: {
+        key: "project-plan",
+        parentWorkId,
+        replacedAt,
+        rootTurnId: work.rootTurnId,
+        sourceActionId: `action:${eventId}`,
+        sourceEventId: eventId,
+        sourceToolName: "project_plan",
+        value: { current: value },
+      },
+    });
+    const root = replacement("result-2", "2026-01-01T00:00:02Z", "implement");
+    const child = replacement("child-result", "2026-01-01T00:00:03Z", "research", "work:child");
+    const snapshot = reduce([
+      root,
+      replacement("result-1", "2026-01-01T00:00:01Z", "design"),
+      child,
+    ]);
+
+    expect(snapshot.states).toEqual({
+      "root:session:turn:project-plan": expect.objectContaining({
+        value: { current: "implement" },
+      }),
+      "work:child:project-plan": expect.objectContaining({ value: { current: "research" } }),
+    });
+    expect(snapshot.revision).toBe(1);
+  });
+
   it("rejects malformed known events", () => {
     expect(
       parseActivityBatchV1({
         events: [{ eventId: "started", kind: "work.started", work }],
+        version: 1,
+      }),
+    ).toBeUndefined();
+    expect(
+      parseActivityBatchV1({
+        events: [
+          {
+            eventId: "state",
+            kind: "state.replaced",
+            state: {
+              key: "project plan",
+              parentWorkId: work.id,
+              replacedAt: "now",
+              rootTurnId: "turn",
+              sourceActionId: "action",
+              sourceEventId: "result",
+              sourceToolName: "project_plan",
+              value: "x".repeat(33 * 1024),
+            },
+          },
+        ],
         version: 1,
       }),
     ).toBeUndefined();

@@ -7,7 +7,7 @@ import type {
 import type { Approval } from "#approval/definition.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { InputOption } from "#shared/input.js";
@@ -40,13 +40,18 @@ interface ToolDefinitionBase {
   readonly execution?: ToolExecution;
 }
 
+export interface ToolLabelComplete {
+  readonly label?: string;
+  readonly renderingState?: JsonValue;
+}
+
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   /** Returns the presentation-safe label when one action invocation starts. */
   start(input: Readonly<TInput>): string;
   /** Projects one preliminary output snapshot into presentation-safe label text. */
   delta?(input: Readonly<TInput>, partial: Readonly<TOutput>): string;
-  /** Projects a successful final output into presentation-safe settlement text. */
-  complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
+  /** Projects successful settlement into text and optional renderer-consumable state. */
+  complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string | ToolLabelComplete;
 }
 
 /**
@@ -57,7 +62,7 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
  * carry `name`; identity comes from the file path.
  */
 export interface InternalToolLabelDefinition {
-  readonly complete?: (input: unknown, output: unknown) => string;
+  readonly complete?: (input: unknown, output: unknown) => string | ToolLabelComplete;
   readonly delta?: (input: unknown, partial: unknown) => string;
   readonly start?: (input: unknown) => string;
 }

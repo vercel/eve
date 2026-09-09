@@ -54,7 +54,42 @@ export default defineTool({
 
 The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `deploy`; if the callback throws or returns an empty label, activity falls back to the tool name.
 
-Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `todo`, `web_fetch`, `web_search`, and `write_file`.
+
+### Project structured activity state
+
+Return `renderingState` from `label.complete` when a successful tool result should replace structured state that a channel renderer can present. eve keys the state by the path-derived tool name and stores the projected JSON value without interpreting its schema:
+
+```ts title="agent/tools/project_plan.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+const taskSchema = z.object({
+  title: z.string(),
+  status: z.enum(["pending", "in_progress", "completed"]),
+});
+
+export default defineTool({
+  description: "Replace the current project plan.",
+  inputSchema: z.object({ tasks: z.array(taskSchema) }),
+  outputSchema: z.object({ tasks: z.array(taskSchema) }),
+  label: {
+    start: () => "Update project plan",
+    complete: (_input, output) => ({
+      renderingState: output.tasks,
+    }),
+  },
+  execute({ tasks }) {
+    return { tasks };
+  },
+});
+```
+
+The projection runs only for successful final results. A later result with the same key from the same work replaces its previous value. Root and delegated work keep separate publications, so renderers can select root state, group state under each work item, or flatten values that share a key. Each `snapshot.states` entry includes the key, projected value, source tool and action, owning work, and update time. A renderer that does not recognize the key can ignore it.
+
+State projections are explicit because tool results may contain sensitive or large data. eve accepts only bounded JSON values and isolates projection failures from tool execution. The projected state does not enter model history or add a new event to the public session stream; it is derived from the existing durable `action.result` event for activity presentation.
+
+The built-in `todo` tool publishes its item list under the `todo` state key. Other planning tools can publish a different schema and key, or adopt a shared key when their renderer expects the same contract.
 
 ### Stream preliminary tool results
 
@@ -97,8 +132,7 @@ action complete.
 eve normalizes and bounds projected text before rendering it. If either
 callback throws or returns an empty string, eve keeps the existing activity
 label. `label.complete` does not run for failed or rejected tool calls. The
-full values remain available in `action.partial` and `action.result`; renderers
-receive only the projected text.
+full values remain available in `action.partial` and `action.result`; renderers receive only the projected label and optional rendering state.
 
 ### Background execution
 
