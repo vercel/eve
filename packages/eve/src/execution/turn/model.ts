@@ -22,7 +22,6 @@ import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -111,7 +110,6 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
   }
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
-    ctx.delete(TurnTaskStateKey);
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
@@ -258,14 +256,14 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
     }
   }
 
-  if (ctx.get(TurnTaskDeliveryKey) === "none") {
+  const taskDeliveryPhase = ctx.get(TurnTaskDeliveryKey);
+  if (taskDeliveryPhase === "none" || taskDeliveryPhase === "initiating") {
     const taskContext = resolveInitiatingTaskContext({
       state: durableSession.state,
       turnId: activeTurnId(initialEmissionState),
     });
     if (taskContext !== undefined) {
       ctx.set(TurnTaskDeliveryKey, taskContext.phase);
-      ctx.set(TurnTaskStateKey, taskContext.context);
     }
   }
 

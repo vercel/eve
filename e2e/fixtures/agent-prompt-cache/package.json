@@ -1,5 +1,5 @@
 {
-  "name": "agent-task-reporting",
+  "name": "agent-prompt-cache",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,6 @@
     "@eve-e2e/config": "workspace:*",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
-    "just-bash": "3.1.0",
     "zod": "catalog:"
   },
   "devDependencies": {

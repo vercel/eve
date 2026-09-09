@@ -18,12 +18,9 @@ interface ReportingRun {
   session: EveEvalSession | EveEvalContext;
 }
 
-export async function startWarehouseLookups(
-  t: EveEvalContext,
-  control = "",
-): Promise<ReportingRun> {
+export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
   const started =
-    await t.send(`${control}Please find the inventory item at each of our three sample warehouses using the built-in agent tool. Start all three lookups in the background without waiting for their results. Delegate the lookups instead of calling probe yourself.
+    await t.send(`Please find the inventory item at each of our three sample warehouses using the built-in agent tool. Start all three lookups in the background without waiting for their results. Delegate the lookups instead of calling probe yourself.
 
 1. "Call probe with check=first and report its result value."
 2. "Call probe with check=second and report its result value."
@@ -115,16 +112,6 @@ export async function waitForReport(
   return run.wakes
     .filter((wake) => wake.completed > 0 && wake.settled && !receivedQuestion(wake.turn))
     .at(-1)?.turn.message;
-}
-
-export function intermediateWakes(run: ReportingRun): readonly EveEvalTurn[] {
-  return run.wakes
-    .filter((wake) => wake.completed > 0 && !wake.settled && !receivedQuestion(wake.turn))
-    .map((wake) => wake.turn);
-}
-
-export function silentWake() {
-  return satisfies((message) => message === undefined, "intermediate task wake is silent");
 }
 
 export function completeReport() {
