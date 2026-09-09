@@ -4,6 +4,10 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
+import {
+  SESSION_TASKS_STATE_KEY,
+  SESSION_TASKS_STATE_VERSION,
+} from "#tasks/session-task-cohorts.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -14,8 +18,7 @@ import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types
  * threads through step results, while callback routes and child
  * executors must update tasks without holding the current snapshot.
  */
-export const SESSION_TASKS_STATE_KEY = "eve.tasks";
-const SESSION_TASKS_STATE_VERSION = 2;
+export { SESSION_TASKS_STATE_KEY } from "#tasks/session-task-cohorts.js";
 
 /**
  * One task owned by this session. Immutable model-safe metadata keeps the

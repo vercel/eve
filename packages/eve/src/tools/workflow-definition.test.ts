@@ -18,8 +18,10 @@ describe("defineWorkflowTool", () => {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
         expectTypeOf(ctx.getSandbox).toEqualTypeOf<WorkflowToolContext["getSandbox"]>();
-        // @ts-expect-error Workflow bodies do not have turn-owned token access.
-        void ctx.getToken;
+        expectTypeOf(ctx.getToken).toEqualTypeOf<WorkflowToolContext["getToken"]>();
+        expectTypeOf(ctx.requireAuth).toEqualTypeOf<WorkflowToolContext["requireAuth"]>();
+        // @ts-expect-error Skills are unavailable to workflow tools.
+        void ctx.getSkill;
         return { deployed: input.service };
       },
       sandbox: true,

@@ -3,3 +3,4 @@ export const WORKSPACE_LOOKUP_MESSAGE = [
   "Make a fresh lookup: earlier answers in this session may belong to a different caller.",
   "Report the returned name, or explain if access is denied.",
 ].join(" ");
+export const WORKSPACE_FORWARDING_MARKER = "Shared workspace membership check.";

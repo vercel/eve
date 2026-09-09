@@ -659,11 +659,14 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("keeps the sleep tool schemas out of the workflow driver", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-sleep-tool-"));
+  it.each([
+    ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
+    ["session driver", "src/execution/workflow-entry.ts", "nextTurnDelivery"],
+  ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");
     const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
-    const sleepWorkflowPath = resolvePackageSourceFilePath("src/execution/tools/sleep-workflow.ts");
+    const workflowPath = resolvePackageSourceFilePath(sourcePath);
 
     try {
       await writeFile(compiledArtifactsBootstrapPath, "export {};\n");
@@ -677,7 +680,7 @@ describe("WorkflowBundleBuilder", () => {
           rootDir: resolvePackageRoot(),
           watch: false,
         },
-        [sleepWorkflowPath],
+        [workflowPath],
       );
 
       await builder.build();
@@ -691,7 +694,7 @@ describe("WorkflowBundleBuilder", () => {
       const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
       const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
 
-      expect(decodedWorkflowCode).toContain("executeSleepTool");
+      expect(decodedWorkflowCode).toContain(marker);
       expect(decodedWorkflowCode).not.toContain("compiled/zod");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });

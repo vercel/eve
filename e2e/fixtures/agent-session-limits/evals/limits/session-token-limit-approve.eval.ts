@@ -45,8 +45,8 @@ export default defineEval({
     if (activeState === undefined) {
       throw new Error("The active eval session did not expose client state.");
     }
-    // Both messages were queued behind the active turn, so eve delivers them
-    // coalesced into one follow-up turn while the limit prompt stays pending.
+    // These requests have the same local-dev auth, so they can batch while
+    // the session-limit prompt remains pending.
     const queuedSession = t.target.watchTurn(active.sessionId, {
       startIndex: activeState.streamIndex,
     });

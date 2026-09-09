@@ -6,6 +6,19 @@ import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
+vi.mock("#setup/flows/model.js", () => ({
+  modelChangeRefusalForUneditableModel: vi.fn(),
+}));
+vi.mock("#compiler/model-catalog.js", () => ({
+  createCompiledRuntimeModelCatalogLoader: vi.fn(),
+}));
+vi.mock("#discover/discover-agent.js", () => ({
+  discoverAgent: vi.fn(),
+}));
+vi.mock("#source-change/static-source-change.js", () => ({
+  createStaticSourceChange: vi.fn(),
+}));
+
 const APP_ROOT = "/tmp/weather-agent";
 const LOCAL_TARGET = {
   kind: "local",

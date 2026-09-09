@@ -27,14 +27,18 @@ describe("createCurrentMessages", () => {
     expect(current.systemMessages).toEqual([{ role: "system", content: "system" }]);
   });
 
-  it("keeps first-turn context in instructions and routes later context as user messages", () => {
+  it("persists framework context as user messages from the first turn", () => {
     const current = createCurrentMessages([]);
 
-    current.add(0, "first");
-    current.add(1, "later");
+    current.add("first");
+    current.add("later");
 
-    expect(current.systemMessages).toEqual([{ role: "system", content: "first" }]);
-    expect(current.nonSystemMessages).toEqual([{ role: "user", content: "later" }]);
+    expect(current.systemMessages).toEqual([]);
+    expect(current.nonSystemMessages).toEqual([
+      { role: "user", content: "first" },
+      { role: "user", content: "later" },
+    ]);
+    expect(current.history).toEqual(current.nonSystemMessages);
   });
 
   it("inserts later context before the current turn input", () => {
@@ -47,8 +51,8 @@ describe("createCurrentMessages", () => {
       { currentTurnMessages },
     );
 
-    current.add(1, "task state");
-    current.add(1, "delivery guidance");
+    current.add("task state");
+    current.add("delivery guidance");
 
     expect(current.nonSystemMessages).toEqual([
       { role: "user", content: "history" },
@@ -56,6 +60,82 @@ describe("createCurrentMessages", () => {
       { role: "user", content: "delivery guidance" },
       { role: "user", content: "channel context" },
       { role: "user", content: "current request" },
+    ]);
+  });
+
+  it("appends messages without interpreting their text", () => {
+    const current = createCurrentMessages([
+      { role: "user", content: "[Task state]\nuser-authored text" },
+    ]);
+
+    current.add("[Task state]\nworking");
+    current.add("[Task state]\nworking");
+
+    expect(current.history.map((message) => message.content)).toEqual([
+      "[Task state]\nuser-authored text",
+      "[Task state]\nworking",
+      "[Task state]\nworking",
+    ]);
+  });
+
+  it("prepares tracked announcements without advancing the recorded baseline", () => {
+    const recorded = { taskState: "working" };
+    const current = createCurrentMessages([{ role: "user", content: "working" }], {
+      historyState: recorded,
+    });
+
+    current.addAnnouncements({ taskState: "working" });
+    current.addAnnouncements({ taskState: "completed" });
+    current.addAnnouncements({ taskState: "completed", availableSkills: "completed" });
+
+    expect(recorded).toEqual({ taskState: "working" });
+    expect(current.historyState).toEqual({ taskState: "completed", availableSkills: "completed" });
+    expect(current.history.map((message) => message.content)).toEqual([
+      "working",
+      "completed",
+      "completed",
+    ]);
+  });
+
+  it("keeps announcement order stable and ignores empty or absent values", () => {
+    const current = createCurrentMessages([]);
+    current.addAnnouncements({
+      deliveryInstruction: "report",
+      taskState: "working",
+      availableSkills: "skills",
+    });
+    current.addAnnouncements({ availableSkills: "", taskState: undefined });
+
+    expect(current.history.map((message) => message.content)).toEqual([
+      "skills",
+      "working",
+      "report",
+    ]);
+    expect(current.historyState).toEqual({
+      availableSkills: "skills",
+      taskState: "working",
+      deliveryInstruction: "report",
+    });
+  });
+
+  it("persists additions without storing client context or replacing projected history", () => {
+    const hidden = { role: "user" as const, content: "hidden by projection" };
+    const input = { role: "user" as const, content: "request" };
+    const current = createCurrentMessages([hidden, input], {
+      currentTurnMessages: [input],
+      projectedMessages: [{ role: "user", content: "ephemeral client context" }, input],
+    });
+    current.add("[Task state]\nworking");
+    current.addSystem({ role: "system", content: "turn-scoped instructions" });
+    expect(current.history).toEqual([
+      hidden,
+      { role: "user", content: "[Task state]\nworking" },
+      input,
+    ]);
+    expect(current.nonSystemMessages).toEqual([
+      { role: "user", content: "ephemeral client context" },
+      { role: "user", content: "[Task state]\nworking" },
+      input,
     ]);
   });
 
@@ -82,16 +162,17 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.add(1, "task state");
+    current.addAnnouncements({ taskState: "task state" });
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
+    expect(current.historyState).toEqual({});
   });
 
   it("keeps hierarchy-sensitive context in instructions when requested", () => {
     const current = createCurrentMessages([]);
 
-    current.add(1, "authoritative", { cacheFriendly: false });
+    current.add("authoritative", { cacheFriendly: false });
 
     expect(current.systemMessages).toEqual([{ role: "system", content: "authoritative" }]);
     expect(current.nonSystemMessages).toEqual([]);

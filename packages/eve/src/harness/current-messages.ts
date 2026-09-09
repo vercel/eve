@@ -1,29 +1,37 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
+import type { HistoryState } from "#context/keys.js";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
 }
 
 interface CurrentMessagesOptions {
+  readonly historyState?: HistoryState;
   readonly currentTurnMessages?: readonly ModelMessage[];
+  readonly projectedMessages?: readonly ModelMessage[];
 }
 
-/** Model-call messages with cache-friendly placement for turn-local context. */
+/** Builds the model view and durable history for one step. */
 export function createCurrentMessages(
   history: readonly ModelMessage[],
   options: CurrentMessagesOptions = {},
 ): {
+  readonly history: readonly ModelMessage[];
+  readonly historyState: HistoryState;
   readonly nonSystemMessages: readonly ModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
-  add(turnSequence: number, message: string, options?: AddCurrentMessageOptions): void;
+  add(message: string, options?: AddCurrentMessageOptions): void;
+  addAnnouncements(announcements: HistoryState): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
+  const durableMessages = [...history];
+  const historyState = { ...options.historyState };
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: ModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
   let currentTurnInsertionIndex: number | undefined;
 
-  for (const message of history) {
+  for (const message of options.projectedMessages ?? history) {
     if (currentTurnInsertionIndex === undefined && currentTurnMessages.has(message)) {
       currentTurnInsertionIndex = nonSystemMessages.length;
     }
@@ -34,19 +42,35 @@ export function createCurrentMessages(
     }
   }
   let userInsertionIndex = currentTurnInsertionIndex ?? nonSystemMessages.length;
+  const currentInputIndex = history.findIndex((message) => currentTurnMessages.has(message));
+  let historyInsertionIndex = currentInputIndex === -1 ? history.length : currentInputIndex;
   // The AI SDK collects approval responses only from the tail tool message.
   // Appending user-role context there would skip the approved tool's
   // execution and send the provider a tool call with no result.
   const canAppendUserMessages =
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
+  function add(message: string, { cacheFriendly = true }: AddCurrentMessageOptions = {}): boolean {
+    if (cacheFriendly && canAppendUserMessages) {
+      const entry = { role: "user" as const, content: message };
+      nonSystemMessages.splice(userInsertionIndex, 0, entry);
+      durableMessages.splice(historyInsertionIndex, 0, entry);
+      userInsertionIndex += 1;
+      historyInsertionIndex += 1;
+      return true;
+    }
+    systemMessages.push({ role: "system", content: message });
+    return false;
+  }
+
   return {
-    add(turnSequence, message, { cacheFriendly = true } = {}) {
-      if (turnSequence > 0 && cacheFriendly === true && canAppendUserMessages) {
-        nonSystemMessages.splice(userInsertionIndex, 0, { role: "user", content: message });
-        userInsertionIndex += 1;
-      } else {
-        systemMessages.push({ role: "system", content: message });
+    add,
+    addAnnouncements(announcements) {
+      for (const key of ["availableSkills", "taskState", "deliveryInstruction"] as const) {
+        const message = announcements[key];
+        if (message === undefined || message.length === 0 || historyState[key] === message)
+          continue;
+        if (add(message)) historyState[key] = message;
       }
     },
     addSystem(messages) {
@@ -54,6 +78,12 @@ export function createCurrentMessages(
     },
     get nonSystemMessages() {
       return [...nonSystemMessages];
+    },
+    get history() {
+      return [...durableMessages];
+    },
+    get historyState() {
+      return { ...historyState };
     },
     get systemMessages() {
       return [...systemMessages];

@@ -7,6 +7,7 @@ import {
 } from "#execution/tools/subagent/invoke-step.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
+import { startSubagent } from "#execution/tools/subagent/start.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 
 vi.mock("#execution/tools/subagent/invoke-preparation.js", () => ({
@@ -16,6 +17,7 @@ vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
   dispatchToClaimedAgentAddress: vi.fn(),
 }));
+vi.mock("#execution/tools/subagent/start.js", () => ({ startSubagent: vi.fn() }));
 
 const address = {
   continuationToken: "child-token",
@@ -71,6 +73,90 @@ describe("blocking workflow agent continuation", () => {
       session: input.currentSession,
       toolName: "research",
     }));
+  });
+
+  it("forwards inherited activity when starting a background subagent", async () => {
+    const activityObserver = {
+      sink: { url: "https://parent.example/activity", version: 1 as const },
+      workIdentity: {
+        id: "work:task",
+        kind: "task" as const,
+        name: "slack",
+        parentId: "work:root",
+        rootSessionId: "root-session",
+        rootTurnId: "root-turn",
+      },
+    };
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      activityObserver,
+      auth: null,
+      batch: { event: { sequence: 1, stepIndex: 0, turnId: "turn-1" } },
+      bundle: {},
+      capabilities: undefined,
+      channelMetadata: undefined,
+      fanoutSize: 1,
+      initiatorAuth: null,
+      localDevRequest: undefined,
+      parentTraceContext: undefined,
+      plan: [
+        {
+          kind: "start",
+          target: {
+            action: {
+              callId: "call-1",
+              description: "Research",
+              input: { message: "Search Slack", target: "slack" },
+              kind: "subagent-call",
+              name: "slack",
+              nodeId: "subagents/slack",
+              subagentName: "slack",
+            },
+            kind: "local",
+            source: { description: "Search Slack", type: "local" },
+          },
+        },
+      ],
+      sandboxSessionId: "parent",
+      serializedContext: {},
+      session: {
+        agent: { dynamicModel: true as const, system: "", tools: [] },
+        compaction: { recentWindowSize: 5, threshold: 10_000 },
+        continuationToken: "parent-token",
+        history: [],
+        sessionId: "parent",
+      },
+    } as never);
+    vi.mocked(startSubagent).mockResolvedValue({
+      address: { continuationToken: "child-token", kind: "agent/local", sessionId: "child" },
+      callId: "call-1",
+      kind: "called",
+      name: "slack",
+      session: {} as never,
+      toolName: "slack",
+    });
+
+    await dispatchAgentInvocation({
+      callbackBaseUrl: "https://parent.example",
+      ownerId: "workflow-run-1",
+      replyTo: "reply-1",
+      request: {
+        input: { message: "Search Slack", target: "slack" },
+        invocationId: "call-1",
+        kind: "agent-invoke",
+      },
+      serializedContext: {},
+      sessionState: createDurableSessionState({
+        session: {
+          agent: { dynamicModel: true as const, system: "", tools: [] },
+          compaction: { recentWindowSize: 5, threshold: 10_000 },
+          continuationToken: "parent-token",
+          history: [],
+          sessionId: "parent",
+        },
+      }),
+    });
+
+    expect(startSubagent).toHaveBeenCalledWith(expect.objectContaining({ activityObserver }));
   });
 
   it("reuses one handle for two calls from the same workflow run", async () => {

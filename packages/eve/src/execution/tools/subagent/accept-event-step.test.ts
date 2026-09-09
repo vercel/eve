@@ -90,6 +90,28 @@ describe("acceptTaskAuthorizationEventStep", () => {
     expect(readLatestTaskView).toHaveBeenCalledWith({ taskRunId: "task-run" });
   });
 
+  it("accepts the owning workflow tool's event without an agent handle", async () => {
+    mockSession([]);
+    const event = {
+      ...hookPayload,
+      childSessionId: "task-run",
+      subagentName: "export",
+      event: { ...hookPayload.event, data: { ...hookPayload.event.data, turnId: "turn-1" } },
+    };
+    await expect(
+      acceptTaskAuthorizationEventStep({
+        delivery: { hookPayload: event, taskId: "task-1" },
+        sessionState,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      acceptTaskAuthorizationEventStep({
+        delivery: { hookPayload: { ...event, childSessionId: "different-run" }, taskId: "task-1" },
+        sessionState,
+      }),
+    ).resolves.toBe(false);
+  });
+
   it("accepts the first authorization event while the task child start is still reserved", async () => {
     mockSession([
       {

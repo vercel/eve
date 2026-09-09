@@ -36,8 +36,16 @@ describe("setup integrations", () => {
       label: "File memory",
     });
   });
-  it("registers Shopify", () => {
+  it("registers Shopify and self-modification setup variants", () => {
     expect(setupIntegration("shopify")).toMatchObject({ kind: "shopify", label: "Shopify" });
+    expect(setupIntegration("self-modification")).toMatchObject({
+      kind: "self-modification",
+      label: "Self-modification",
+    });
+    expect(setupIntegration("self-modification-production")).toMatchObject({
+      kind: "self-modification-production",
+      label: "Self-modification production",
+    });
   });
   it("rejects unknown integrations", () => {
     expect(() => setupIntegration("unknown")).toThrow(

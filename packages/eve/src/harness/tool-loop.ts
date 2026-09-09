@@ -22,11 +22,11 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
   AuthKey,
+  HistoryStateKey,
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -194,6 +194,7 @@ import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellati
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
+import { resolveInitiatingTaskContext } from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
@@ -582,14 +583,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.clearOnly === true) {
       session = {
         ...session,
-        compaction: {
-          recentWindowSize: session.compaction.recentWindowSize,
-          threshold: session.compaction.threshold,
-          thresholdPercent: session.compaction.thresholdPercent,
-        },
-        history: [],
         state: clearMemorySessionState(session.state),
       };
+      session = replaceSessionHistory(session, []);
       await emit?.(
         createContextClearedEvent({
           sequence: emissionState.sequence,
@@ -627,15 +623,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             telemetry: stepInstrumentation?.telemetry(),
           });
 
-          session = {
-            ...compacted.session,
-            compaction: {
-              recentWindowSize: compacted.session.compaction.recentWindowSize,
-              threshold: compacted.session.compaction.threshold,
-              thresholdPercent: compacted.session.compaction.thresholdPercent,
-            },
-            history: compacted.messages,
-          };
+          session = compacted.session;
         } catch (error) {
           logError(log, "manual session compaction failed", error, {
             sessionId: session.sessionId,
@@ -1095,16 +1083,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    // Keep the insertion point stable when a later durable step reconstructs
-    // the model-only prompt, preserving the full prompt prefix within the turn.
+    // Keep ephemeral client context at the same position across durable steps.
     let turnClientContext = storedClientContext;
-    if (
-      clientContext !== undefined ||
-      (storedClientContext === undefined && preparedTurnInput.length > 0)
-    ) {
+    if (clientContext !== undefined) {
       turnClientContext = {
         insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
-        messages: clientContext ?? storedClientContext?.messages ?? [],
+        messages: clientContext,
         turnId,
       };
     }
@@ -1241,36 +1225,32 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
-    // AI SDK rejects role:"system" in `messages`; currentMessages also keeps
-    // later turn-local context out of the stable system prompt cache prefix.
-    // Insert that context before the current delivery so the triggering user
-    // message remains the model's latest request.
-    const currentMessages = createCurrentMessages(projectedMessages, {
-      currentTurnMessages:
-        turnClientContext === undefined
-          ? preparedTurnInput
-          : messages.slice(turnClientContext.insertionIndex),
+    // Persist framework announcements before the new input, or after earlier
+    // tool results on a continuation, so later requests retain the full prefix.
+    const currentMessages = createCurrentMessages(messages, {
+      historyState: ctx?.get(HistoryStateKey),
+      currentTurnMessages: preparedTurnInput,
+      projectedMessages,
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
-      const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(emissionState.sequence, skillAnnouncement);
-      }
-      const taskState = ctx.get(TurnTaskStateKey);
-      if (taskState !== undefined) {
-        currentMessages.add(emissionState.sequence, taskState);
-      }
     }
-    if (deliveryPolicy.instruction !== undefined) {
-      currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
-    }
+    const taskContext =
+      ctx?.get(TurnTaskDeliveryKey) === "initiating"
+        ? resolveInitiatingTaskContext({ state: session.state, turnId })
+        : undefined;
+    currentMessages.addAnnouncements({
+      availableSkills: ctx?.get(PendingSkillAnnouncementKey),
+      taskState: taskContext?.context,
+      deliveryInstruction: deliveryPolicy.instruction,
+    });
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
-      currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
+      currentMessages.add(pendingApprovals, { cacheFriendly: false });
     }
+    const promptMessages = currentMessages.history;
 
     // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
     // only. Session history remains ref-only across future step boundaries.
@@ -1855,20 +1835,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Handle result ------------------------------------------------------
 
-    return handleStepResult({
+    const stepResult = await handleStepResult({
       config,
       emit,
       emissionState,
       durableModelPromptMessageCount:
         turnClientContext === undefined || turnClientContext.messages.length === 0
-          ? projectedMessages.length
+          ? modelMessages.length
           : undefined,
-      promptMessages: messages,
+      promptMessages,
       result,
       runStep,
       session,
       coordinationTools: modelCallCoordinationTools,
     });
+    // The returned session now owns these messages; persist their baseline with it.
+    ctx?.set(HistoryStateKey, currentMessages.historyState);
+    return stepResult;
   }
 
   return runStep;
@@ -3135,6 +3118,19 @@ function createNextCompactionConfig(
   return next;
 }
 
+function replaceSessionHistory(session: HarnessSession, history: ModelMessage[]): HarnessSession {
+  contextStorage.getStore()?.delete(HistoryStateKey);
+  return {
+    ...session,
+    history,
+    compaction: {
+      recentWindowSize: session.compaction.recentWindowSize,
+      threshold: session.compaction.threshold,
+      thresholdPercent: session.compaction.thresholdPercent,
+    },
+  };
+}
+
 /**
  * Runs the compaction pipeline once if the session's input-token estimate
  * is over the configured threshold. Mutates neither input; returns the new
@@ -3257,7 +3253,7 @@ async function maybeCompact(input: {
     }
   }
 
-  return { compacted: true, messages, session };
+  return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
 }
 
 /**

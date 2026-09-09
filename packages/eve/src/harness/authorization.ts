@@ -187,18 +187,19 @@ export function consumeAuthorizationResult(
  * Builds a callback URL for external systems. `name` and `attemptId` identify
  * the exact challenge in the URL path.
  *
- * The URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * By default the URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * A runtime with its own continuation supplies that hook through AuthorizationHookKey.
  * It is independent of the continuation token, so channel re-keying mid-turn
  * does not invalidate the callback URL.
  *
- * Returns `undefined` if the session context isn't available.
+ * Returns `undefined` if no callback address is available.
  */
 export function getHookUrl(name: string, attemptId: string): string | undefined {
   const ctx = loadContext();
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
-  if (!sessionId || !baseUrl) return undefined;
-  const token = authHookToken(sessionId);
+  const token = ctx.get(AuthorizationHookKey) ?? (sessionId ? authHookToken(sessionId) : undefined);
+  if (!token || !baseUrl) return undefined;
   return createWorkflowCallbackUrl(
     baseUrl,
     createEveConnectionCallbackRoutePath(name, attemptId, token),
@@ -294,6 +295,9 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
  * metadata.
  */
 export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
+
+/** Hook token of a runtime that owns its callback instead of using the session hook. */
+export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHook");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

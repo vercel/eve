@@ -19,7 +19,13 @@ import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { getSessionTaskIndex, recordSessionTask } from "#tasks/session-index.js";
+import { getHookByToken } from "#internal/workflow/runtime.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
+  getHookByToken: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: vi.fn() }));
 vi.mock("#execution/tools/subagent/task-cancel.js", () => ({ cancelBackgroundAgentTask: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
@@ -119,7 +125,30 @@ describe("background subagent steering", () => {
     vi.mocked(cancelOwnedTask).mockResolvedValue(cancelledView);
     vi.mocked(startTaskRun).mockResolvedValue(undefined as never);
     vi.mocked(waitForTaskCommandOwner).mockResolvedValue({ runId: "steering-task-run" } as never);
+    vi.mocked(getHookByToken).mockResolvedValue({
+      metadata: { workflowTaskAuthorization: true },
+    } as never);
   });
+
+  it.each([
+    { metadata: undefined, supported: false },
+    { metadata: { sessionInboxWireVersion: 6 }, supported: false },
+    { metadata: { workflowTaskAuthorization: "true" }, supported: false },
+    { metadata: { workflowTaskAuthorization: true }, supported: true },
+  ])(
+    "passes the receiving driver's auth support to the task ($supported)",
+    async ({ metadata, supported }) => {
+      vi.mocked(getHookByToken).mockResolvedValue({ metadata } as never);
+      const scope = await createScope();
+      await expect(scope.execute()).resolves.toMatchObject({ status: "working" });
+      expect(getHookByToken).toHaveBeenCalledWith(sessionCommandHookToken("parent"));
+      expect(startTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow: expect.objectContaining({ authorizationSupported: supported }),
+        }),
+      );
+    },
+  );
 
   it("cancels the old task before starting a new task in the same child", async () => {
     const scope = await createScope();

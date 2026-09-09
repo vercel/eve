@@ -294,6 +294,8 @@ export default slackChannel({
 });
 ```
 
+With `"queue"`, adjacent messages with matching full auth contexts can combine into one turn, keeping their attachments and context in order. Messages from different users, or from the same user with different authorization attributes, stay separate. Anonymous deliveries also stay separate. Batching follows session-inbox order, and turns still share the thread's session history.
+
 Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) also receive thread-bound session operations directly on `ctx`. `ctx.cancel({ turnId? })` remains useful for a Stop button: it cancels without sending replacement input. `"accepted"` means the live thread session durably queued that request; a parked session consumes it as a no-op, and `"no_active_turn"` means the thread has no active session owner.
 
 Message and interaction hooks expose every current-owner operation directly on `ctx`:

@@ -15,6 +15,9 @@ import {
 } from "../constants";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
+// Scripted usage supplies pressure without starving the real summarizer's transcript.
+const TEST_COMPACTION_THRESHOLD_TOKENS = 2_048;
+const COMPACTION_PRESSURE_USAGE = { inputTokens: 4_096 };
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase =
@@ -170,12 +173,10 @@ const taskModel = mockModel({
     // These are fixture markers, not compaction protocol fields. `marker` records the
     // regression work tool; `SECOND_CHECKPOINT_MARKER` records the test-only tool
     // whose output makes the harness cross the compaction threshold a second time.
-    // Completion evidence is detected in any assistant message: compaction may
-    // leave it as a summarization checkpoint or as an eviction trail line, and
-    // the model must not repeat work in either case. User messages are
-    // excluded because the eval instructions themselves quote the markers.
-    if (assistantEvidenceContains(request.messages, marker)) {
-      if (assistantEvidenceContains(request.messages, SECOND_CHECKPOINT_MARKER)) {
+    // Kept tool results, checkpoints, and eviction trails all prove completed work.
+    // User messages are excluded because the eval instructions quote the markers.
+    if (completionEvidenceContains(request.messages, marker)) {
+      if (completionEvidenceContains(request.messages, SECOND_CHECKPOINT_MARKER)) {
         return `Done: ${marker}; ${SECOND_CHECKPOINT_MARKER}`;
       }
 
@@ -186,6 +187,7 @@ const taskModel = mockModel({
 
       checkpointAdvanceCallCounts.set(regressionCase, advanceCalls + 1);
       return {
+        usage: COMPACTION_PRESSURE_USAGE,
         toolCalls: [
           {
             id: `advance-checkpoint-${advanceCalls + 1}`,
@@ -206,6 +208,7 @@ const taskModel = mockModel({
 
     return regressionCase === "redundant-tool-calls"
       ? {
+          usage: COMPACTION_PRESSURE_USAGE,
           toolCalls: [
             {
               id: `inspect-repository-${attempt}`,
@@ -215,6 +218,7 @@ const taskModel = mockModel({
           ],
         }
       : {
+          usage: COMPACTION_PRESSURE_USAGE,
           toolCalls: [
             {
               id: `perform-source-analysis-${attempt}`,
@@ -235,7 +239,7 @@ export default defineAgent({
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent: 0.02,
+    thresholdPercent: TEST_COMPACTION_THRESHOLD_TOKENS / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     maxInputTokensPerSession: 100_000,
@@ -267,9 +271,12 @@ function completionMarker(
     : "SOURCE_ANALYSIS_COMPLETE";
 }
 
-function assistantEvidenceContains(
+function completionEvidenceContains(
   messages: MockModelRequest["messages"],
   marker: string,
 ): boolean {
-  return messages.some((message) => message.role === "assistant" && message.text.includes(marker));
+  return messages.some(
+    (message) =>
+      (message.role === "assistant" || message.role === "tool") && message.text.includes(marker),
+  );
 }

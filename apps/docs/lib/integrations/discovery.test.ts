@@ -73,6 +73,80 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders related resources after Configure and omits the section when empty", () => {
+    const kernel = getIntegration("kernel");
+    expect(kernel).toBeDefined();
+
+    const markdown = integrationMarkdown(kernel!);
+    expect(markdown).toContain("## Related resources");
+    expect(markdown.indexOf("## Related resources")).toBeGreaterThan(
+      markdown.indexOf("## Configure"),
+    );
+    expect(markdown).toContain(
+      "- [How to build a browser agent that works behind a login](https://vercel.com/kb/guide/build-a-browser-agent)",
+    );
+    expect(markdown).toContain(
+      "- [Give your software factory a browser](https://vercel.com/kb/guide/software-factory-browser)",
+    );
+
+    const agentBrowser = getIntegration("agent-browser");
+    expect(agentBrowser).toBeDefined();
+    expect(integrationMarkdown(agentBrowser!)).toContain(
+      "- [Give your eve agent a browser](https://vercel.com/changelog/give-your-eve-agent-a-browser)",
+    );
+
+    for (const slug of ["github", "linear-agent", "github-tools", "linear", "vercel"]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Build a software factory with eve](https://vercel.com/kb/guide/eve-software-factory)",
+      );
+    }
+
+    const vercel = getIntegration("vercel");
+    expect(integrationMarkdown(vercel!)).toContain(
+      "- [Manage Vercel projects with a software factory](https://vercel.com/kb/guide/software-factory-vercel-mcp)",
+    );
+
+    for (const slug of [
+      "slack",
+      "github",
+      "github-tools",
+      "datadog",
+      "datadog-instrumentation",
+      "vercel",
+    ]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Build an incident response SRE agent with eve](https://vercel.com/kb/guide/eve-incident-sre-agent)",
+      );
+    }
+
+    const vercelMarkdown = integrationMarkdown(vercel!);
+    expect(vercelMarkdown.indexOf("eve-incident-sre-agent")).toBeLessThan(
+      vercelMarkdown.indexOf("eve-software-factory"),
+    );
+
+    for (const slug of ["slack", "notion"]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Run a marketing team from Slack with eve](https://vercel.com/kb/guide/marketing-team-eve)",
+      );
+    }
+
+    const resend = getIntegration("chat-sdk-resend");
+    expect(resend).toBeDefined();
+    expect(integrationMarkdown(resend!)).toContain(
+      "- [Give your eve agent an email inbox with Resend](https://vercel.com/kb/guide/eve-agent-with-resend)",
+    );
+
+    const browserbase = getIntegration("browserbase");
+    expect(browserbase).toBeDefined();
+    expect(integrationMarkdown(browserbase!)).not.toContain("## Related resources");
+  });
+
   it("renders the BlitzReels extension setup", () => {
     const blitzreels = getIntegration("blitzreels");
     expect(blitzreels).toBeDefined();

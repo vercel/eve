@@ -113,6 +113,41 @@ describe("Slack activity activity", () => {
     expect(selectSlackActivityStatus(completed)).toBe("Found Slack docs");
   });
 
+  it("renders inherited child tool activity beneath an existing task row", () => {
+    const task = {
+      id: "work:task",
+      kind: "task" as const,
+      name: "slack",
+      parentId: root.id,
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    const activity = reduceActivityBatch(createActivitySnapshot(), {
+      events: [
+        { eventId: "root", kind: "work.started", startedAt: "1", work: root },
+        { eventId: "task", kind: "work.started", startedAt: "2", work: task },
+        {
+          action: {
+            id: "action:work:task:search",
+            kind: "tool",
+            name: "search_slack",
+            parentWorkId: task.id,
+            rootTurnId: "turn",
+            stepIndex: 0,
+          },
+          eventId: "search",
+          kind: "action.started",
+          startedAt: "3",
+        },
+      ],
+      version: 1,
+    });
+
+    expect(activityMessages(activity).get("turn")).toBe(
+      "```\n• Working\n└── • slack\n    └── • search_slack\n```",
+    );
+  });
+
   it("renders a background task instead of its duplicate initiating tool action", () => {
     const task = {
       callId: "call-background",
@@ -201,7 +236,7 @@ describe("Slack activity activity", () => {
     });
 
     expect(activityMessages(settled).get("turn")).toContain("✓ tester &amp; reviewer");
-    expect(activityMessages(settled).get("turn")).toContain("– search &lt;web&gt;");
+    expect(activityMessages(settled).get("turn")).toContain("⊘ search &lt;web&gt;");
     expect(requests.map((request) => request.operation)).toEqual([
       "conversations.replies",
       "chat.postMessage",

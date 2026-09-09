@@ -22,6 +22,8 @@ import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
+  /** Advertised by the parent driver; absent on runs started before this capability. */
+  readonly authorizationSupported?: boolean;
   readonly callId: string;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
@@ -122,12 +124,15 @@ class WorkflowToolRuntimeContext implements ToolContext, WorkflowToolContext {
   getToken(): never {
     return this.unavailable(
       "getToken()",
-      'read credentials from the environment inside a "use step" helper',
+      'pass ctx directly to a "use step" helper to resolve credentials',
     );
   }
 
   requireAuth(): never {
-    return this.unavailable("requireAuth()", "a workflow body cannot park on authorization");
+    return this.unavailable(
+      "requireAuth()",
+      'pass ctx directly to a "use step" helper to request authorization',
+    );
   }
 
   private unavailable(member: string, hint: string): never {
@@ -149,7 +154,11 @@ export async function executeWorkflowBody(
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
-  attachWorkflowToolRunContext(ctx, { from, owner: input.owner });
+  attachWorkflowToolRunContext(ctx, {
+    from,
+    owner: input.owner,
+    authorizationSupported: input.execution === "blocking" || input.authorizationSupported === true,
+  });
   let reportCount = 0;
 
   try {

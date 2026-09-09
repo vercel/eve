@@ -11,6 +11,7 @@ import {
 } from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+  WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
   isSessionInboxAddress,
   isSessionInboxWireVersion,
   SessionInboxWireError,
@@ -66,6 +67,16 @@ function isStableInboxFastPathCompatible(
 }
 
 type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;
+
+/** Whether the session's pinned driver displays authorization events raised by workflow tasks. */
+export async function sessionDriverSupportsWorkflowTaskAuthorization(
+  sessionId: string,
+): Promise<boolean> {
+  const driver = await getHookByToken(sessionCommandHookToken(sessionId));
+  return (
+    isObject(driver.metadata) && driver.metadata[WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY] === true
+  );
+}
 
 /** Selects the encoder understood by a persisted hook's consumer deployment. */
 export async function resolveSessionInboxWireTarget(

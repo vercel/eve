@@ -14,10 +14,16 @@ vi.mock("node:module", () => ({ findPackageJSON }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
 import { readTerminalHeadlessEvent, runEveAdd } from "./extension/eve-add.js";
-import { addRegistryItem, handoffMessage, unsetEnvVars } from "./extension/tools/registry_add.js";
+import {
+  addLocalRegistryItem,
+  handoffMessage,
+  resolveRegistryAddTool,
+  unsetEnvVars,
+} from "./extension/tools/registry_add.js";
 import { clearRegistryIndexCache } from "./extension/tools/search_registry.js";
 
 const APP_ROOT = "/workspace/agent";
+const originalEveDev = process.env.EVE_DEV;
 
 const INDEX = {
   items: [
@@ -110,20 +116,84 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (originalEveDev === undefined) delete process.env.EVE_DEV;
+  else process.env.EVE_DEV = originalEveDev;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-describe("addRegistryItem", () => {
+describe("resolveRegistryAddTool", () => {
+  it("resolves the local lifecycle with only local arguments and outcomes", () => {
+    process.env.EVE_DEV = "1";
+
+    const tool = resolveRegistryAddTool({ localEnabled: true });
+
+    expect(tool).toMatchObject({
+      description: expect.stringContaining("configured eve registry"),
+      inputSchema: {
+        properties: { address: expect.any(Object) },
+        required: ["address"],
+      },
+      outputSchema: {
+        properties: { status: { enum: ["installed", "needs-terminal", "failed"] } },
+      },
+    });
+    if (tool === null) throw new Error("Expected the local registry tool.");
+    expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toEqual([
+      "address",
+    ]);
+  });
+
+  it("resolves the deployed lifecycle with continuation arguments and outcomes", () => {
+    delete process.env.EVE_DEV;
+
+    const tool = resolveRegistryAddTool({
+      localEnabled: true,
+      deployed: {
+        credentials: { kind: "pat" },
+        directory: ".",
+        repository: { owner: "acme", repo: "agent" },
+        targetBranch: "main",
+      },
+    });
+
+    expect(tool).toMatchObject({
+      description: expect.stringContaining("production change proposal"),
+      inputSchema: {
+        properties: {
+          address: expect.any(Object),
+          answers: expect.any(Object),
+          installed: expect.any(Object),
+        },
+        required: ["address"],
+      },
+      outputSchema: {
+        properties: {
+          status: {
+            enum: [
+              "completed",
+              "input-required",
+              "external-action-required",
+              "failed",
+              "cancelled",
+            ],
+          },
+        },
+      },
+    });
+  });
+});
+
+describe("addLocalRegistryItem", () => {
   it("refuses to run without the development capability", async () => {
     await expect(
-      addRegistryItem("extension/browserbase", { getCapability: () => undefined }),
+      addLocalRegistryItem("extension/browserbase", { getCapability: () => undefined }),
     ).rejects.toThrow(/only be installed while `eve dev` is running/u);
   });
 
   it("hands a setup-bearing item over without installing anything", async () => {
     const { calls, spawn } = fakeSpawn({ code: 0, output: COMPLETED });
-    const result = await addRegistryItem("channel/slack", {
+    const result = await addLocalRegistryItem("channel/slack", {
       getCapability: () => capability(),
       spawn,
     });
@@ -136,7 +206,10 @@ describe("addRegistryItem", () => {
 
   it("hands a bundle over without installing anything", async () => {
     const { calls, spawn } = fakeSpawn({ code: 0, output: COMPLETED });
-    const result = await addRegistryItem("linear", { getCapability: () => capability(), spawn });
+    const result = await addLocalRegistryItem("linear", {
+      getCapability: () => capability(),
+      spawn,
+    });
 
     expect(result.status).toBe("needs-terminal");
     expect(result.reason).toContain("channel/linear-agent");
@@ -144,7 +217,7 @@ describe("addRegistryItem", () => {
   });
 
   it("leaves the automatically queued setup to an interactive client", async () => {
-    const result = await addRegistryItem("channel/slack", {
+    const result = await addLocalRegistryItem("channel/slack", {
       getCapability: () => capability({ interactiveClient: true }),
     });
 
@@ -159,7 +232,7 @@ describe("addRegistryItem", () => {
       code: 0,
       output: JSON.stringify({ version: 1, type: "completed", item: address }),
     });
-    const result = await addRegistryItem(address, {
+    const result = await addLocalRegistryItem(address, {
       getCapability: () => capability(),
       spawn,
     });
@@ -170,7 +243,7 @@ describe("addRegistryItem", () => {
 
   it("rejects an address the registry does not publish", async () => {
     await expect(
-      addRegistryItem("channel/nonexistent", { getCapability: () => capability() }),
+      addLocalRegistryItem("channel/nonexistent", { getCapability: () => capability() }),
     ).rejects.toThrow(/No item in the configured eve registry is published/u);
   });
 
@@ -180,7 +253,7 @@ describe("addRegistryItem", () => {
       output: `Something from shadcn\n${COMPLETED}\n`,
     });
     const suspended: string[] = [];
-    const result = await addRegistryItem("extension/browserbase", {
+    const result = await addLocalRegistryItem("extension/browserbase", {
       getCapability: () =>
         capability({
           withSuspendedSource: async (task) => {
@@ -212,7 +285,7 @@ describe("addRegistryItem", () => {
 
   it("does not relay child output when the child does not report completion", async () => {
     const { spawn } = fakeSpawn({ code: 1, output: "secret-child-output\n" });
-    const install = addRegistryItem("extension/browserbase", {
+    const install = addLocalRegistryItem("extension/browserbase", {
       getCapability: () => capability(),
       spawn,
     });
@@ -244,7 +317,10 @@ describe("addRegistryItem", () => {
     });
 
     await expect(
-      addRegistryItem("extension/browserbase", { getCapability: () => capability(), spawn }),
+      addLocalRegistryItem("extension/browserbase", {
+        getCapability: () => capability(),
+        spawn,
+      }),
     ).resolves.toMatchObject({
       status: "failed",
       changed: ["package.json"],
@@ -288,7 +364,7 @@ describe("addRegistryItem", () => {
         message: "Setup needs an answer.",
       }),
     });
-    const result = await addRegistryItem("extension/browserbase", {
+    const result = await addLocalRegistryItem("extension/browserbase", {
       getCapability: () => capability(),
       spawn,
     });
@@ -363,6 +439,19 @@ describe("readTerminalHeadlessEvent", () => {
         ].join("\n"),
       ),
     ).toMatchObject({ type: "completed" });
+  });
+
+  it("reads an external-action continuation", () => {
+    expect(
+      readTerminalHeadlessEvent(
+        JSON.stringify({
+          version: 1,
+          type: "external_action",
+          message: "Authorize GitHub.",
+          url: "https://github.com/login/device",
+        }),
+      ),
+    ).toMatchObject({ type: "external_action", url: "https://github.com/login/device" });
   });
 
   it("ignores lines that are not JSON", () => {

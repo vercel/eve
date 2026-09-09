@@ -10,7 +10,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return { toolCalls: [{ input: { marker: fanInMarker ?? "RELEASE" }, name: "release" }] };
   }
   if (fanInMarker !== undefined) return `FANOUT-COMPLETE:${fanInMarker}`;
-  return `FANOUT-COMPLETE:${request.lastUserMessage ?? ""}`;
+  const message = request.lastUserMessage ?? "";
+  const marker = /FANOUT-WORKER-\d+/u.exec(message)?.[0] ?? message;
+  return `FANOUT-COMPLETE:${marker}`;
 }
 
 export default defineAgent({

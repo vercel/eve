@@ -199,9 +199,6 @@ export function validateDurableDynamicToolCallbacks(
     );
   }
 
-  const hasLabelComplete = entry.label?.complete !== undefined;
-  const hasLabelDelta = entry.label?.delta !== undefined;
-  const hasLabelStart = entry.label?.start !== undefined;
   const hasApproval = entry.approval !== undefined;
   const hasApprovalResponse =
     entry.approval !== undefined &&
@@ -219,21 +216,21 @@ export function validateDurableDynamicToolCallbacks(
     owner,
     phase: "labelComplete",
     stamped: raw.label?.complete,
-    required: hasLabelComplete,
+    required: false,
   });
   const labelDelta = validateReference({
     name,
     owner,
     phase: "labelDelta",
     stamped: raw.label?.delta,
-    required: hasLabelDelta,
+    required: false,
   });
   const labelStart = validateReference({
     name,
     owner,
     phase: "labelStart",
     stamped: raw.label?.start,
-    required: hasLabelStart,
+    required: false,
   });
   const approvalKey = validateReference({
     name,

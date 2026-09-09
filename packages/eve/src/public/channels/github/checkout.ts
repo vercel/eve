@@ -8,7 +8,8 @@ import {
   resolveGitHubInstallationToken,
   type GitHubChannelCredentials,
 } from "#public/channels/github/auth.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
+import { shellQuote } from "#shared/shell-quote.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const DEFAULT_CHECKOUT_PATH = "/workspace";
@@ -71,7 +72,7 @@ export async function checkoutGitHubRepository(
   const checkoutPath = sandbox.resolvePath(input.path ?? DEFAULT_CHECKOUT_PATH);
   const checkoutRef = resolveCheckoutRef(input.ref, descriptor);
 
-  if (isFullSha(checkoutRef)) {
+  if (isFullGitSha(checkoutRef)) {
     const currentHead = await readCheckoutHead(sandbox, checkoutPath);
     if (currentHead === checkoutRef) {
       return {
@@ -91,14 +92,14 @@ export async function checkoutGitHubRepository(
     credentials: input.credentials,
     installationId: descriptor.installationId,
   });
-  const remote = publicRemoteUrl({ owner: descriptor.owner, repo: descriptor.repo });
-  const fetchedRef = isFullSha(checkoutRef) ? checkoutRef : "FETCH_HEAD";
+  const remote = gitHubRemoteUrl({ owner: descriptor.owner, repo: descriptor.repo });
+  const fetchedRef = isFullGitSha(checkoutRef) ? checkoutRef : "FETCH_HEAD";
 
   // Broker the installation token at the sandbox firewall: git fetches a clean
   // (token-free) URL and the platform injects `Authorization` on egress to
   // GitHub, so the token never enters the sandbox process. The `"*"` rule keeps
   // the agent's other egress open.
-  await sandbox.setNetworkPolicy(buildBrokerNetworkPolicy(token));
+  await sandbox.setNetworkPolicy(gitHubGitBrokerNetworkPolicy(token));
 
   await runCheckoutCommand({
     command: `mkdir -p ${shellQuote(checkoutPath)}`,
@@ -272,7 +273,7 @@ async function readCheckoutHead(
   });
   if (result.exitCode !== 0) return null;
   const head = String(result.stdout ?? "").trim();
-  return isFullSha(head) ? head : null;
+  return isFullGitSha(head) ? head : null;
 }
 
 async function runCheckoutCommand(input: {
@@ -304,37 +305,6 @@ function normalizeCheckoutDepth(value: number | undefined): number {
   return Math.floor(value);
 }
 
-function publicRemoteUrl(input: { readonly owner: string; readonly repo: string }): string {
-  return `https://github.com/${input.owner}/${input.repo}.git`;
-}
-
-/**
- * Builds the firewall policy that brokers the installation token onto git's
- * HTTPS egress. The header is injected at the fetch boundary (git uses Basic
- * auth with `x-access-token` as the username), so the clean remote URL carries
- * no secret. `codeload.github.com` is included because shallow fetches can
- * redirect there; `"*"` leaves all other egress untouched.
- */
-function buildBrokerNetworkPolicy(token: string): SandboxNetworkPolicy {
-  const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-  const rule = [{ transform: [{ headers: { Authorization: authorization } }] }];
-  return {
-    allow: {
-      "github.com": rule,
-      "codeload.github.com": rule,
-      "*": [],
-    },
-  };
-}
-
 function readNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function isFullSha(value: string): boolean {
-  return /^[a-f0-9]{40}$/iu.test(value);
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/gu, "'\\''")}'`;
 }

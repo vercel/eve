@@ -141,6 +141,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
   const capped = withResumptionGuard(
     [...checkpointHead, ...capToolResults(input.older), ...input.recent],
     input.conversation,
+    input.config.threshold,
   );
 
   // Evaluate on the same ruler shouldCompact uses (envelope included):
@@ -260,7 +261,11 @@ export async function compactMessages(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
+    const verbatim = withResumptionGuard(
+      [...summaryHead, ...recent],
+      conversation,
+      config.threshold,
+    );
     if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
@@ -268,6 +273,7 @@ export async function compactMessages(
     const stripped = withResumptionGuard(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
       conversation,
+      config.threshold,
     );
     if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
       return stripped;
@@ -338,16 +344,27 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
 function withResumptionGuard(
   messages: ModelMessage[],
   conversation: readonly ModelMessage[],
+  threshold: number,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  if (lastRole !== undefined && lastRole !== "assistant") {
-    return messages;
-  }
-
   const replay = findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
+
+  if (lastRole !== undefined && lastRole !== "assistant") {
+    // A retained tool tail must not displace a task that can fit in the budget.
+    // Including it here lets tail selection make room before accepting a candidate.
+    if (
+      lastRole === "tool" &&
+      replay !== undefined &&
+      !alreadyKept &&
+      estimateTokens([replay]) <= threshold
+    ) {
+      return [...messages, replay];
+    }
+    return messages;
+  }
 
   return [
     ...messages,

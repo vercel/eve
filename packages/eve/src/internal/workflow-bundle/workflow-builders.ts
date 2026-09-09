@@ -88,6 +88,7 @@ export async function applyWorkflowTransform(
     // package directory) and the server bundle (built from the app) agree.
     return transformWorkflowDirectives({
       authored: true,
+      authorizeSteps: true,
       filename: authoredRelativePath(absolutePath, resolvedProjectRoot),
       mode: prepared?.hasDirectives === true ? mode : false,
       moduleSpecifier: authoredModuleIdBase(absolutePath, resolvedProjectRoot),
@@ -98,6 +99,8 @@ export async function applyWorkflowTransform(
   }
 
   return transformWorkflowDirectives({
+    // The test harness authors workflow tools inside eve's own package.
+    authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
     filename,
     mode,
     moduleSpecifier,
@@ -105,6 +108,10 @@ export async function applyWorkflowTransform(
     stableModuleSpecifier,
     stableWorkflowNames,
   });
+}
+
+function isPackageTestFixtureModule(absolutePath: string): boolean {
+  return absolutePath.replace(/\\/g, "/").includes("/src/internal/testing/");
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {

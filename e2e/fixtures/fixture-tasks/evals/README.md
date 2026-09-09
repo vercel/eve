@@ -1,5 +1,40 @@
 # Task eval transitions
 
+## Completion batching measurement
+
+`task.parent.wake.emitted-ready.batching.eval.ts` launches ten children behind
+approval gates. The burst case releases nine together; the staggered case releases
+each child only after the parent has finished responding to the previous one.
+The last child stays blocked while the eval verifies silence and sends a user
+question, then completes to produce a report containing all ten distinct results.
+
+Each case logs a JSON `task-batching` record with completion-driven parent turns,
+model steps, silent and visible messages, and completions per turn. Setup wakes
+and the user question are excluded. The scripted model always obeys the silence
+policy, so this measures the runtime cost of perfect compliance; the real-model
+prompt ablation lives in `agent-task-reporting`.
+
+Batching is automatic. Both schedules run against the same runtime.
+The first completion's mock model call takes ten seconds, allowing later burst
+completions to enter the active parent's buffer. This delay belongs to the test
+model; the runtime adds no timer. The cases allow three minutes because the
+Vercel staggered run exceeded the previous two-minute timeout.
+
+At `76a18ee1`, the same burst workload with the previous option off/on took
+10/4 parent model steps in the local world. The staggered control took 10/10.
+Those measurements are retained in PR #3144; future runs exercise the default
+behavior and log their actual counts.
+
+Callback timing still varies across workflow worlds. Compare the observed batch
+sizes and model-step counts, not an assumed ten-to-one gain. The unit test at the
+delivery boundary separately proves that 100 buffered sibling completions become
+one parent turn with every payload and its metadata preserved.
+Counts are measurements, not fixed assertions that would prohibit improvements.
+The staggered case is a control for active-parent coalescing: it intentionally
+leaves no opportunity to merge adjacent completions. A policy that withholds all
+intermediate deliveries until cohort settlement needs a different driver because
+this case waits for each delivery before releasing the next child.
+
 ## Remote callback routing regression
 
 `task.input.answer.accepted-complete.remote.eval.ts` reuses the existing remote
