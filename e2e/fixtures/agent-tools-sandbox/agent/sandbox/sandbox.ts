@@ -141,6 +141,7 @@ const backend =
 
 export default defineSandbox({
   backend,
+  startup: "eager",
   // Bump when the bootstrap output changes so the reusable template snapshot
   // is rebuilt rather than served stale.
   revalidationKey: () => "agent-tools-sandbox-bootstrap-v3",

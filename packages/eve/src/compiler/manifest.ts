@@ -753,6 +753,7 @@ const compiledSandboxDefinitionSchema = z
     sourceHash: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    startup: z.enum(["eager", "lazy"]).optional(),
   })
   .strict();
 

@@ -141,6 +141,7 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
   readonly bootstrap?: (input: SandboxBootstrapContext) => Promise<void> | void;
   readonly revalidationKey?: string;
   readonly sourceHash?: string;
+  readonly startup?: "eager" | "lazy";
   /**
    * Resolved backend value. The authored `SandboxDefinition.backend`
    * accepts either a `SandboxBackend` or a `() => SandboxBackend`; by

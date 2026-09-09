@@ -95,6 +95,15 @@ interface SandboxDefinitionBase<BO = Record<string, never>, SO = Record<string, 
   /** Human-readable description of this sandbox, surfaced in tooling. */
   readonly description?: string;
   /**
+   * Controls when eve opens the live sandbox. The default, `"lazy"`, waits
+   * until authored code first accesses it. `"eager"` starts opening it when
+   * the turn context is created so startup can overlap model work.
+   *
+   * Eager startup may create billable compute on turns that never access the
+   * sandbox.
+   */
+  readonly startup?: "eager" | "lazy";
+  /**
    * Runs once per live session before authored steps use the sandbox.
    * Call `input.use(options?)` to open the session and apply per-session
    * backend options (typed by `SO`).

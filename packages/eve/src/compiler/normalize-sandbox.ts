@@ -47,6 +47,7 @@ export async function compileSandboxDefinition(
     sourceHash: await resolveSandboxSourceHash(options.binding),
     sourceId: source.sourceId,
     sourceKind: "module",
+    startup: normalized.startup,
   };
 }
 

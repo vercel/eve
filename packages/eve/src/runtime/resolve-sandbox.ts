@@ -56,6 +56,7 @@ export async function resolveSandboxDefinition(
       sourceHash: definition.sourceHash,
       sourceId: definition.sourceId,
       sourceKind: "module",
+      startup: definition.startup,
     };
   } catch (error) {
     if (error instanceof ResolveAgentError) {

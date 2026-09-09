@@ -12,7 +12,8 @@ describe("sandbox compilation", () => {
   it("preserves zero-argument sandbox definition factories", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/sandbox.ts": "export default () => ({ description: 'factory sandbox' });\n",
+        "agent/sandbox.ts":
+          "export default () => ({ description: 'factory sandbox', startup: 'eager' });\n",
       },
       name: "sandbox-definition-factory",
     });
@@ -26,6 +27,7 @@ describe("sandbox compilation", () => {
     expect(manifest.sandbox).toMatchObject({
       description: "factory sandbox",
       inheritsParent: undefined,
+      startup: "eager",
     });
   });
 

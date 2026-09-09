@@ -128,6 +128,22 @@ export default defineSandbox({
 
 `defineSandbox` and `defaultBackend` live on `eve/sandbox`. Omit `backend` and the runtime falls back to `defaultBackend()` (see [Backends](#backends)).
 
+### Start the sandbox before first use
+
+By default, eve opens a live sandbox only when authored code or a built-in tool first accesses it. Set `startup: "eager"` when the agent is expected to use its sandbox on most turns:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({
+  startup: "eager",
+});
+```
+
+Eager startup begins when eve creates the turn context. It does not block model execution, so sandbox startup can overlap the model call before the first sandbox-backed tool runs. `bootstrap` remains build-time and `onSession` still runs once before the live session is first used.
+
+Use eager startup only when most turns need the sandbox. It can start billable compute on a turn that never invokes a sandbox-backed tool. Omit `startup`, or set it to `"lazy"`, to preserve the default first-use behavior.
+
 ### Sharing a parent's sandbox
 
 Sandbox definitions use two distinct forms. Pass an object to give an agent or subagent an independent sandbox. Passing a callback to `defineSandbox` opts a declared subagent into sharing: return `parent.sandbox` to select the dispatching agent's exact live sandbox. A raw function export remains a zero-argument definition factory.

@@ -30,22 +30,29 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const sharesSandbox = inheritsParent || sharedSandboxSessionId !== undefined;
     const sandboxSessionId = sharesSandbox ? (sharedSandboxSessionId ?? sessionId) : sessionId;
 
-    return {
-      value: await ensureSandboxAccess({
-        compiledArtifactsSource: bundle.compiledArtifactsSource,
-        nodeId: node.nodeId,
-        ownsSandbox: !sharesSandbox,
-        registry,
-        runOnSession: async (callback) => await contextStorage.run(ctx, callback),
-        sessionId: sandboxSessionId,
-        state: session.sandboxState ?? (sharesSandbox ? parentSandboxState : undefined) ?? null,
-        tags: {
-          agent: resolveTagAgentName({ bundle, node }),
-          channel: resolveTagChannelKind(channel),
-          sessionId,
-        },
-      }),
-    };
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: node.nodeId,
+      ownsSandbox: !sharesSandbox,
+      registry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+      sessionId: sandboxSessionId,
+      state: session.sandboxState ?? (sharesSandbox ? parentSandboxState : undefined) ?? null,
+      tags: {
+        agent: resolveTagAgentName({ bundle, node }),
+        channel: resolveTagChannelKind(channel),
+        sessionId,
+      },
+    });
+
+    if (
+      (registry.sandbox?.inheritance?.definition ?? registry.sandbox?.definition)?.startup ===
+      "eager"
+    ) {
+      void access.get().catch(() => {});
+    }
+
+    return { value: access };
   },
 
   async commit(access, session) {

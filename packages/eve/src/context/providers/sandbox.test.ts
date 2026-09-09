@@ -87,6 +87,31 @@ describe("sandboxProvider", () => {
     );
   });
 
+  it("opens an eager sandbox without blocking context creation", async () => {
+    const ctx = new ContextContainer();
+    const stub = createStubSandboxRegistry();
+    const registry: RuntimeSandboxRegistry = {
+      sandbox: {
+        ...stub.sandbox!,
+        definition: { ...stub.sandbox!.definition, startup: "eager" },
+      },
+    };
+    const get = vi.fn(() => new Promise<null>(() => {}));
+    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce({
+      captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
+      get,
+      stop: vi.fn().mockResolvedValue(undefined),
+    });
+
+    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(ChannelKey, { kind: "slack" });
+    ctx.set(SessionIdKey, "session_1");
+
+    await sandboxProvider.create(ctx, createHarnessSession());
+
+    expect(get).toHaveBeenCalledOnce();
+  });
+
   it("tags sandbox backend resources with agent, channel, and session id", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();

@@ -28,7 +28,7 @@ export function normalizeSandboxDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["backend", "bootstrap", "description", "onSession", "revalidationKey"],
+    ["backend", "bootstrap", "description", "onSession", "revalidationKey", "startup"],
     message,
   );
   const definition: {
@@ -37,6 +37,7 @@ export function normalizeSandboxDefinition(
     bootstrap?: NormalizedSandboxDefinition["bootstrap"];
     onSession?: NormalizedSandboxDefinition["onSession"];
     revalidationKey?: NormalizedSandboxDefinition["revalidationKey"];
+    startup?: NormalizedSandboxDefinition["startup"];
   } = {};
 
   if (record.backend !== undefined) {
@@ -48,6 +49,13 @@ export function normalizeSandboxDefinition(
       throw new Error(`${message} The "description" field must be a string when set.`);
     }
     definition.description = record.description;
+  }
+
+  if (record.startup !== undefined) {
+    if (record.startup !== "eager" && record.startup !== "lazy") {
+      throw new Error(`${message} The "startup" field must be "eager" or "lazy" when set.`);
+    }
+    definition.startup = record.startup;
   }
 
   if (record.bootstrap !== undefined) {
