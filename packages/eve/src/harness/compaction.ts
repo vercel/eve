@@ -10,6 +10,7 @@ import {
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
+import { createCompactionSummaryError } from "#harness/compaction-summary-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -182,8 +183,8 @@ function evaluateThreshold(
 /**
  * Compacts messages by escalation: try each {@link CompactionHeuristic} in
  * order, then fall back to summarizing the older region with the compaction
- * model — keeping the recent tail verbatim when it fits, degrading it to
- * text-only, then shrinking the window.
+ * model, keeping the recent tail verbatim when it fits and expanding the
+ * summarized region before evicting more history.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -202,7 +203,7 @@ export async function compactMessages(
   if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
+      return recent;
     }
 
     // Capping preserves most of the measured prompt. Retain any known
@@ -227,6 +228,7 @@ export async function compactMessages(
     }
   }
 
+  let summaryAttempt = 0;
   while (true) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
 
@@ -236,6 +238,7 @@ export async function compactMessages(
       transcriptBudgetTokens: config.threshold,
     });
 
+    summaryAttempt += 1;
     const result = await generateText({
       abortSignal,
       headers,
@@ -247,10 +250,17 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    if (result.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
-      );
+    const empty = result.text.trim().length === 0;
+    if (empty || result.finishReason === "content-filter") {
+      throw createCompactionSummaryError({
+        empty,
+        finishReason: result.finishReason,
+        rawFinishReason: result.rawFinishReason,
+        providerMetadata: result.providerMetadata,
+        summaryAttempt,
+        olderMessageCount: older.length,
+        recentMessageCount: recent.length,
+      });
     }
 
     const summaryHead: ModelMessage[] = [
@@ -258,28 +268,21 @@ export async function compactMessages(
       { content: result.text, role: "assistant" },
     ];
 
-    // Prefer keeping the recent tail verbatim — surviving tool results are the
-    // model's evidence that work already ran. Degrade to text-only, then to a
-    // smaller window, only under threshold pressure.
     const verbatim = withResumptionGuard(
       [...summaryHead, ...recent],
       conversation,
       config.threshold,
     );
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+    if (
+      evaluateThreshold(verbatim, config, "estimate").type === "within-limit" ||
+      recent.length === 0
+    ) {
       return verbatim;
     }
 
-    const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent)],
-      conversation,
-      config.threshold,
-    );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
-      return stripped;
-    }
-
-    keep -= 1;
+    // Only `older` was summarized. Move more history into the next transcript
+    // before evicting it; use the snapped tail size to avoid repeating a split.
+    keep = recent.length - 1;
   }
 }
 
@@ -416,36 +419,6 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
     conversation: messages.slice(2),
     previousCheckpoint: assistantMessageText(checkpoint),
   };
-}
-
-/**
- * Returns the kept tail for a compacted history: recent messages with tool
- * activity removed. Tool-result messages are dropped, and assistant messages are
- * reduced to their text content (tool-call and reasoning parts stripped) so the
- * rebuilt history never carries a tool_use without its matching result.
- * Assistant messages with no remaining text are dropped; user messages are kept
- * verbatim.
- */
-function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
-  const kept: ModelMessage[] = [];
-
-  for (const message of messages) {
-    if (message.role === "tool") {
-      continue;
-    }
-
-    if (message.role === "assistant") {
-      const text = assistantMessageText(message);
-      if (text.length > 0) {
-        kept.push({ content: text, role: "assistant" });
-      }
-      continue;
-    }
-
-    kept.push(message);
-  }
-
-  return kept;
 }
 
 /**

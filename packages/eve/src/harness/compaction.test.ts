@@ -708,6 +708,50 @@ describe("compactMessages: forced summary", () => {
     expect(generateText).toHaveBeenCalledOnce();
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
+
+  it("rejects nonempty filtered text without replacing history or retrying", async () => {
+    const { generateText } = await import("ai");
+    const response: Pick<
+      Awaited<ReturnType<typeof generateText>>,
+      "finishReason" | "rawFinishReason" | "providerMetadata" | "text"
+    > = {
+      finishReason: "content-filter",
+      rawFinishReason: "refusal",
+      providerMetadata: { anthropic: { stopDetails: { type: "refusal", category: "test" } } },
+      text: "Unable to produce a summary.",
+    };
+    vi.mocked(generateText).mockResolvedValue(response as Awaited<ReturnType<typeof generateText>>);
+    const messages = [user("Keep the task."), assistant("Work in progress.")];
+    const original = structuredClone(messages);
+
+    let failure: unknown;
+    try {
+      await compactMessages(
+        messages,
+        {} as Parameters<typeof compactMessages>[1],
+        { recentWindowSize: 1, threshold: ROOMY },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).cause).toMatchObject({
+      finishReason: "content-filter",
+      rawFinishReason: "refusal",
+      providerStopType: "refusal",
+      providerStopCategory: "test",
+      summaryAttempt: 1,
+      olderMessageCount: 1,
+      recentMessageCount: 1,
+    });
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(messages).toEqual(original);
+  });
 });
 
 describe("compactMessages: summarization fallback", () => {
@@ -797,42 +841,77 @@ describe("compactMessages: summarization fallback", () => {
     expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
   });
 
-  it("strips tool activity from the tail when verbatim does not fit but text does", async () => {
-    const oldProse = user("investigation notes ".repeat(2_000));
-    const [recentCall, recentResult] = toolExchange({
-      callId: "call-1",
-      payloadChars: 1_400,
-      prose: "Running the tool.",
-    });
+  it("summarizes recent tool evidence before evicting a tail that no longer fits", async () => {
+    const { generateText } = await import("ai");
+    const oldProse = user("The earlier source review is complete.");
+    const toolInput = { recordId: "order-42", revision: 7 };
+    const toolOutput = {
+      type: "json" as const,
+      value: { saved: true, revision: 8, audit: "x".repeat(1_400) },
+    };
+    const recentCall: ModelMessage = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Recording the handoff." },
+        { type: "tool-call", toolName: "save_record", toolCallId: "save-1", input: toolInput },
+      ],
+    };
+    const recentResult: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolName: "save_record",
+          toolCallId: "save-1",
+          output: toolOutput,
+        },
+      ],
+    };
     const tail = [user("do the thing"), recentCall, recentResult];
     const messages = [oldProse, ...tail];
-
-    // Derive a threshold between the stripped and verbatim tail sizes so the
-    // regime is explicit rather than encoded in magic numbers. The summary is
-    // sized to exceed the window-selection reserve, which is what makes the
-    // verbatim tail overshoot after the summary head is added.
     const summary = "s".repeat(2_400);
     const summaryHead = [user(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
     const strippedSize = estimateTokens([
       ...summaryHead,
       user("do the thing"),
-      assistant("Running the tool."),
+      assistant("Recording the handoff."),
     ]);
     const threshold = Math.floor((verbatimSize + strippedSize) / 2);
     expect(strippedSize).toBeLessThan(threshold);
     expect(verbatimSize).toBeGreaterThan(threshold);
 
-    const { result, summarizer } = await compact(messages, {
-      recentWindowSize: 3,
-      summary,
-      threshold,
+    const expectedCall = `Called save_record with ${JSON.stringify(toolInput)}`;
+    const expectedResult = `Tool save_record returned ${JSON.stringify(toolOutput)}`;
+    const requests: string[] = [];
+    vi.mocked(generateText).mockImplementation(async (options) => {
+      const prompt = String(options.prompt);
+      requests.push(prompt);
+      const covered = prompt.includes(expectedCall) && prompt.includes(expectedResult);
+      return {
+        text: covered ? "The record was saved at revision 8." : summary,
+        finishReason: "stop",
+      } as Awaited<ReturnType<typeof generateText>>;
     });
 
-    expect(summarizer).toHaveBeenCalledTimes(1);
+    const result = await compactMessages(messages, {} as Parameters<typeof compactMessages>[1], {
+      recentWindowSize: 3,
+      threshold,
+      lastKnownInputTokens: 4_096,
+      lastKnownPromptMessageCount: 1,
+    });
+
+    expect(requests[0]).not.toContain(expectedCall);
+    expect(requests[0]).not.toContain(expectedResult);
+    expect(requests.at(-1)).toContain(expectedCall);
+    expect(requests.at(-1)).toContain(expectedResult);
+    expect(requests.at(-1)).toContain("Recording the handoff.");
+    expect(requests.length).toBeGreaterThan(1);
+    expect(requests.length).toBeLessThanOrEqual(tail.length + 1);
     expect(result).toContainEqual(user("do the thing"));
-    expect(result).toContainEqual(assistant("Running the tool."));
+    expect(result).toContainEqual(assistant("The record was saved at revision 8."));
     expect(result.some((m) => m.role === "tool")).toBe(false);
+    expectWellFormedCompaction(result, threshold);
   });
 
   it("folds everything into the summary when even the stripped tail cannot fit", async () => {
@@ -852,6 +931,87 @@ describe("compactMessages: summarization fallback", () => {
       assistant("Summary of the large SQL result"),
       user("Find the relevant rows."),
     ]);
+  });
+
+  it("keeps original history when expanded summarization refuses and reports its attempt", async () => {
+    const { generateText } = await import("ai");
+    const messages = [
+      user("Review the records."),
+      ...toolExchange({ callId: "first", payloadChars: 100 }),
+      user("Record the handoff."),
+      ...toolExchange({ callId: "second", payloadChars: 100 }),
+    ];
+    const original = structuredClone(messages);
+    vi.mocked(generateText)
+      .mockResolvedValueOnce({
+        finishReason: "stop",
+        text: "s".repeat(8_000),
+      } as Awaited<ReturnType<typeof generateText>>)
+      .mockResolvedValueOnce({
+        finishReason: "content-filter",
+        rawFinishReason: "refusal",
+        text: "",
+      } as Awaited<ReturnType<typeof generateText>>);
+    const config: CompactionConfig = {
+      recentWindowSize: 3,
+      threshold: 1_000,
+      lastKnownInputTokens: 4_096,
+      lastKnownPromptMessageCount: 4,
+    };
+
+    let failure: unknown;
+    try {
+      await compactMessages(messages, {} as Parameters<typeof compactMessages>[1], config);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).cause).toMatchObject({
+      summaryAttempt: 2,
+      olderMessageCount: 4,
+      recentMessageCount: 2,
+    });
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(messages).toEqual(original);
+  });
+
+  it("propagates an abort from expanded summarization without replacing history", async () => {
+    const { generateText } = await import("ai");
+    const messages = [
+      user("Review the records."),
+      ...toolExchange({ callId: "first", payloadChars: 100 }),
+      user("Record the handoff."),
+      ...toolExchange({ callId: "second", payloadChars: 100 }),
+    ];
+    const original = structuredClone(messages);
+    const controller = new AbortController();
+    const aborted = new DOMException("Aborted", "AbortError");
+    vi.mocked(generateText)
+      .mockResolvedValueOnce({
+        finishReason: "stop",
+        text: "s".repeat(8_000),
+      } as Awaited<ReturnType<typeof generateText>>)
+      .mockRejectedValueOnce(aborted);
+
+    await expect(
+      compactMessages(
+        messages,
+        {} as Parameters<typeof compactMessages>[1],
+        {
+          recentWindowSize: 3,
+          threshold: 1_000,
+          lastKnownInputTokens: 4_096,
+          lastKnownPromptMessageCount: 4,
+        },
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBe(aborted);
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(generateText).mock.calls[1]?.[0]?.abortSignal).toBe(controller.signal);
+    expect(messages).toEqual(original);
   });
 
   it("replays the folded-away user prompt when the tail would trail on assistant content", async () => {
