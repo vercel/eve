@@ -8,15 +8,33 @@ const SCHEDULED = "BACKGROUND-EXPORT-SCHEDULED";
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
+  const message =
+    [...request.userMessages]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.includes("BACKGROUND-EXPORT-") || /^(?:Background task|Export) task_/u.test(entry),
+      ) ??
+    request.userMessages.at(-1) ??
+    "";
+
+  const examplePrefix = "Alice is documenting conditional delivery. Return exactly this example:\n";
+  if (message.startsWith(examplePrefix)) {
+    return message.slice(examplePrefix.length);
+  }
+  if (message === "Repeat your previous assistant response verbatim.") {
+    return (
+      [...request.messages].reverse().find((entry) => entry.role === "assistant")?.text ??
+      "No previous assistant response."
+    );
+  }
 
   if (request.userMessages.some((entry) => entry.includes(SCHEDULED))) {
     return respondScheduled(request);
   }
 
   if (message.includes("BACKGROUND-EXPORT-START")) {
-    const roles = request.messages.map((entry) => entry.role);
-    if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
+    if (!request.toolResults.some((result) => result.name === "export")) {
       return {
         toolCalls: [
           {
@@ -29,7 +47,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return "BACKGROUND-EXPORT-STARTED";
   }
 
-  if (message.includes(`update: ${PROGRESS}`)) {
+  if (message.includes(PROGRESS)) {
     return "BACKGROUND-EXPORT-UPDATE-RECEIVED";
   }
 
@@ -50,12 +68,11 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 function respondScheduled(request: MockModelRequest): MockModelResponse | string {
   const taskNotification = [...request.userMessages]
     .reverse()
-    .find((entry) => /^Background task task_[a-z0-9]+/iu.test(entry));
+    .find((entry) => /^(?:Background task|Export) task_[a-z0-9]+/iu.test(entry));
   if (taskNotification?.includes("is completed") && taskNotification.includes(RESULT)) {
     return "SCHEDULED-EXPORT-DONE";
   }
-  const roles = request.messages.map((entry) => entry.role);
-  const launched = roles.lastIndexOf("tool") > roles.lastIndexOf("user");
+  const launched = request.toolResults.some((result) => result.name === "export");
   if (!launched && taskNotification === undefined) {
     return {
       toolCalls: [
@@ -66,8 +83,8 @@ function respondScheduled(request: MockModelRequest): MockModelResponse | string
       ],
     };
   }
-  const instructedToAcknowledge = request.messages.some(
-    (entry) => entry.role === "system" && entry.text.includes("launch acknowledgement"),
+  const instructedToAcknowledge = request.messages.some((entry) =>
+    entry.text.includes("launch acknowledgement"),
   );
   return instructedToAcknowledge ? "SCHEDULED-EXPORT-LAUNCH-ACK" : EMPTY_DELIVERY_SENTINEL;
 }

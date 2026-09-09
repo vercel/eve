@@ -11,21 +11,40 @@ import {
 } from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+  WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
+  isSessionInboxAddress,
   isSessionInboxWireVersion,
   SessionInboxWireError,
+  type SessionInboxAddress,
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
 
 /** Resolves the consumer contract, encodes for it, and resumes that exact hook. */
 export async function resumeSessionInbox(
-  token: string,
+  address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
+  if (typeof address !== "string") {
+    if (!isSessionInboxAddress(address)) {
+      throw new SessionInboxWireError("Session inbox target has an invalid address.");
+    }
+    if (!isSessionInboxWireVersion(address.version)) {
+      throw new SessionInboxWireError(
+        `Session inbox target declares unsupported wire version ${JSON.stringify(address.version)}.`,
+      );
+    }
+    return await resumeHook(
+      sessionCommandHookToken(address.sessionId),
+      sessionInboxWire.encode(command, { version: address.version }),
+    );
+  }
+
+  const token = address;
   if (isStableInboxFastPathCompatible(token, command)) {
     return await resumeHook(
       token,
@@ -49,6 +68,16 @@ function isStableInboxFastPathCompatible(
 
 type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;
 
+/** Whether the session's pinned driver displays authorization events raised by workflow tasks. */
+export async function sessionDriverSupportsWorkflowTaskAuthorization(
+  sessionId: string,
+): Promise<boolean> {
+  const driver = await getHookByToken(sessionCommandHookToken(sessionId));
+  return (
+    isObject(driver.metadata) && driver.metadata[WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY] === true
+  );
+}
+
 /** Selects the encoder understood by a persisted hook's consumer deployment. */
 export async function resolveSessionInboxWireTarget(
   hook: SessionInboxHook,
@@ -66,7 +95,7 @@ export async function resolveSessionInboxWireTarget(
   if (hook.token === stableToken) return { variant: "send", version: 0 };
 
   try {
-    const stableHook = await getHookByToken(stableToken);
+    const stableHook = await getRawHookByToken(stableToken);
     if (stableHook.runId !== hook.runId) {
       throw new SessionInboxWireError(
         `Stable session inbox ${JSON.stringify(stableToken)} belongs to run ${JSON.stringify(stableHook.runId)}, expected ${JSON.stringify(hook.runId)}.`,

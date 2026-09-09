@@ -1,3 +1,4 @@
+import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -11,21 +12,29 @@ import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-m
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
+  HistoryStateKey,
   SessionKey,
+  SessionIdKey,
+  SessionDynamicToolMetadataKey,
+  TurnDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
-  TurnTaskStateKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch, getApprovedTools } from "#harness/input-requests.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { recordSessionTask } from "#tasks/session-index.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import {
+  registerDurableDynamicCallback,
+  stampDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
 
 const usage = {
   inputTokens: {
@@ -206,6 +215,7 @@ function createApprovalContext(): ContextContainer {
   };
   const ctx = new ContextContainer();
   ctx.set(AuthKey, responder);
+  ctx.set(SessionIdKey, "generate-approval-resume-session");
   ctx.set(SessionKey, {
     auth: { current: responder, initiator: null },
     sessionId: "generate-approval-resume-session",
@@ -275,6 +285,65 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
+  it.each(
+    [
+      { scope: "step", metadataKey: StepDynamicToolMetadataKey },
+      { scope: "turn", metadataKey: TurnDynamicToolMetadataKey },
+      { scope: "session", metadataKey: SessionDynamicToolMetadataKey },
+    ].flatMap((scope) => ["structured", "text"].map((response) => ({ ...scope, response }))),
+  )(
+    "records the scoped key for a $response approval of a $scope dynamic tool",
+    async ({ metadataKey, response, scope }) => {
+      const ctx = createApprovalContext();
+      const execute = vi.fn(async () => "/workspace");
+      const owner = {
+        sessionId: ctx.require(SessionIdKey),
+        scope: scope as "session" | "turn" | "step",
+        resolverSlug: "dynamic-shell",
+        entryKey: "bash",
+        name: "bash",
+      };
+      registerDurableDynamicCallback({ owner, phase: "execute", callback: execute });
+      registerDurableDynamicCallback({
+        owner,
+        phase: "approvalKey",
+        callback: (_closure, input: { command: string }) => `bash:${input.command}`,
+      });
+      ctx.set(metadataKey, [
+        {
+          name: "bash",
+          description: "Run a shell command.",
+          inputSchema: { type: "object" },
+          resolverSlug: "dynamic-shell",
+          entryKey: "bash",
+          callbacks: { execute: { closure: {} }, approvalKey: { closure: {} } },
+        },
+      ]);
+      const staticExecute = vi.fn(async () => "static");
+      const resolveStepDynamicTools = vi.fn(async () => {});
+      const runStep = createToolLoopHarness({
+        ...createConfig(createModel(), staticExecute),
+        resolveStepDynamicTools,
+      });
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(
+          createPendingApprovalSession(),
+          response === "text"
+            ? { message: "approve" }
+            : {
+                inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+              },
+        ),
+      );
+      expect(resolveStepDynamicTools).toHaveBeenCalledOnce();
+
+      expect(getApprovedTools(result.session)).toEqual(new Set(["bash:pwd"]));
+      expect(execute).toHaveBeenCalledOnce();
+      expect(staticExecute).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { label: "direct", responseAuthorization: false },
     { label: "response-authorized", responseAuthorization: true },
@@ -332,6 +401,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       principalType: "user" as const,
     };
     ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: null },
       sessionId: "generate-approval-resume-session",
@@ -459,6 +529,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: null },
       sessionId: "generate-approval-resume-session",
@@ -765,71 +836,116 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
   // appended as a user message after the approval response. The AI SDK reads
   // approvals only from the tail tool message, so the approved tool never ran
   // and the provider rejected the prompt with a tool call that had no output.
-  it.each([
-    { key: PendingSkillAnnouncementKey, label: "dynamic skill announcement" },
-    { key: TurnTaskStateKey, label: "task state" },
-  ])("executes the approved tool when $label is injected on the resume step", async ({ key }) => {
-    const siblingCall = {
-      input: { command: "whoami" },
-      toolCallId: "call-sibling",
-      toolName: "bash",
-      type: "tool-call" as const,
-    };
-    const siblingResult = {
-      output: { type: "text" as const, value: "eve" },
-      toolCallId: siblingCall.toolCallId,
-      toolName: "bash",
-      type: "tool-result" as const,
-    };
-    const session = appendPendingInputBatch({
-      requests: [pendingApprovalInputRequest],
-      // The parked shape when a gated call shares a step with an ungated one.
-      responseMessages: [
-        { content: [toolCall, approvalRequest, siblingCall], role: "assistant" },
-        { content: [siblingResult], role: "tool" },
-      ],
-      session: createBaseSession(),
-    });
-    const ctx = new ContextContainer();
-    ctx.set(key, "[Runtime context]\nInjected on the resume step.");
-    const execute = vi.fn(async () => "/workspace");
-    const model = createModel();
-
-    const result = await contextStorage.run(ctx, () =>
-      createToolLoopHarness(createConfig(model, execute))(
-        setHarnessEmissionState(session, {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 1,
-          turnId: "turn-1",
-        }),
-        { inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }] },
-      ),
-    );
-
-    expect(execute).toHaveBeenCalledExactlyOnceWith(
-      toolCall.input,
-      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
-    );
-
-    const providerPrompt = model.doGenerateCalls[0]?.prompt ?? [];
-    const answered = new Set<string>();
-    const called: string[] = [];
-    for (const message of providerPrompt) {
-      if (!Array.isArray(message.content)) continue;
-      for (const part of message.content) {
-        if (part.type === "tool-call") called.push(part.toolCallId);
-        if (part.type === "tool-result") answered.add(part.toolCallId);
+  it.each(
+    [
+      {
+        label: "dynamic skill announcement",
+        historyKey: "availableSkills" as const,
+      },
+      { label: "task state", historyKey: "taskState" as const },
+    ].flatMap((context) => [false, true].map((restoredAnchor) => ({ ...context, restoredAnchor }))),
+  )(
+    "executes the approved tool when $label is injected on the resume step (restored anchor: $restoredAnchor)",
+    async ({ historyKey, restoredAnchor }) => {
+      const siblingCall = {
+        input: { command: "whoami" },
+        toolCallId: "call-sibling",
+        toolName: "bash",
+        type: "tool-call" as const,
+      };
+      const siblingResult = {
+        output: { type: "text" as const, value: "eve" },
+        toolCallId: siblingCall.toolCallId,
+        toolName: "bash",
+        type: "tool-result" as const,
+      };
+      let session = appendPendingInputBatch({
+        requests: [pendingApprovalInputRequest],
+        // The parked shape when a gated call shares a step with an ungated one.
+        responseMessages: [
+          { content: [toolCall, approvalRequest, siblingCall], role: "assistant" },
+          { content: [siblingResult], role: "tool" },
+        ],
+        session: createBaseSession(),
+      });
+      const ctx = new ContextContainer();
+      const runtimeContextAnnouncement =
+        historyKey === "taskState"
+          ? '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}'
+          : "Available skills\n- policy: Tenant policy";
+      if (historyKey === "taskState") {
+        ctx.set(TurnTaskDeliveryKey, "initiating");
+        session = recordSessionTask(session, {
+          createdByTurnId: "turn-1",
+          executor: { data: {}, kind: "workflow-tool" },
+          metadata: { kind: "report-probe", name: "analysis" },
+          taskId: "analysis",
+          taskInboxToken: "task-token",
+          taskRunId: "task-run",
+        });
+      } else {
+        ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);
       }
-    }
-    expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
-    expect(called.filter((id) => !answered.has(id))).toEqual([]);
-    expect(providerPrompt.at(-1)?.role).toBe("tool");
-    expect(result.session.history.at(-1)).toMatchObject({
-      content: [{ text: "The command returned /workspace.", type: "text" }],
-      role: "assistant",
-    });
-  });
+      const execute = vi.fn(async () => "/workspace");
+      const model = createModel();
+      const runStep = createToolLoopHarness(createConfig(model, execute));
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(
+          setHarnessEmissionState(
+            restoredAnchor
+              ? setTurnClientContextState(session, {
+                  insertionIndex: 0,
+                  messages: [],
+                  turnId: "turn-1",
+                })
+              : session,
+            {
+              sequence: 1,
+              sessionStarted: true,
+              stepIndex: 1,
+              turnId: "turn-1",
+            },
+          ),
+          { inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }] },
+        ),
+      );
+
+      expect(execute).toHaveBeenCalledExactlyOnceWith(
+        toolCall.input,
+        expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+      );
+
+      const providerPrompt = model.doGenerateCalls[0]?.prompt ?? [];
+      const answered = new Set<string>();
+      const called: string[] = [];
+      for (const message of providerPrompt) {
+        if (!Array.isArray(message.content)) continue;
+        for (const part of message.content) {
+          if (part.type === "tool-call") called.push(part.toolCallId);
+          if (part.type === "tool-result") answered.add(part.toolCallId);
+        }
+      }
+      expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
+      expect(called.filter((id) => !answered.has(id))).toEqual([]);
+      expect(providerPrompt.at(-1)?.role).toBe("tool");
+      expect(ctx.get(HistoryStateKey)).toEqual({});
+      expect(result.session.history.at(-1)).toMatchObject({
+        content: [{ text: "The command returned /workspace.", type: "text" }],
+        role: "assistant",
+      });
+
+      const continued = await contextStorage.run(ctx, () =>
+        runStep(result.session, { message: "Continue." }),
+      );
+      expect(
+        continued.session.history.filter(
+          (message) => message.content === runtimeContextAnnouncement,
+        ),
+      ).toHaveLength(1);
+      expect(ctx.get(HistoryStateKey)).toMatchObject({ [historyKey]: runtimeContextAnnouncement });
+    },
+  );
 
   // Acceptance gate for the HITL non-blocking plan (research/hitl-request-lifecycle.md):
   // once messages run as normal turns while an approval is open, the approval batch is

@@ -188,6 +188,7 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
+    defaultTools?: boolean;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
@@ -197,6 +198,10 @@ function createResolvedAgentConfig(
   } = {
     name: manifest.config.name,
   };
+
+  if (manifest.config.defaultTools !== undefined) {
+    config.defaultTools = manifest.config.defaultTools;
+  }
 
   if (manifest.config.compaction !== undefined) {
     const compaction: {

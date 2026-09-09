@@ -167,6 +167,14 @@ describe("compatibilityRedirects", () => {
       permanent: true,
     });
   });
+
+  it("redirects the Upstash AgentKit extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/upstash-agentkit.json",
+      destination: "/r/memory/upstash-agentkit.json",
+      permanent: true,
+    });
+  });
 });
 
 describe("defaultLanguageRedirects", () => {

@@ -5,6 +5,7 @@ import {
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
+  sliceUtf16Safe,
   stubContentOutputFileParts,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
@@ -101,6 +102,7 @@ interface CompactionHeuristicInput {
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
+  readonly tokenEstimateAdjustment: number;
 }
 
 /**
@@ -139,13 +141,19 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
   const capped = withResumptionGuard(
     [...checkpointHead, ...capToolResults(input.older), ...input.recent],
     input.conversation,
+    input.config.threshold,
   );
 
   // Evaluate on the same ruler shouldCompact uses (envelope included):
   // capping can be a near no-op when the older region holds few large
   // results, and accepting one on a looser ruler would let shouldCompact
   // re-fire every step without compaction ever making progress.
-  const evaluation = evaluateThreshold(capped, input.config, "should-compact");
+  const evaluation = evaluateThreshold(
+    capped,
+    input.config,
+    "should-compact",
+    input.tokenEstimateAdjustment,
+  );
   return evaluation.type === "within-limit"
     ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
@@ -161,9 +169,10 @@ function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
   ruler: "estimate" | "should-compact",
+  tokenEstimateAdjustment = 0,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
   const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead;
+  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
@@ -196,8 +205,22 @@ export async function compactMessages(
       return keepNonToolResultMessages(recent);
     }
 
+    // Capping preserves most of the measured prompt. Retain any known
+    // underestimate while crediting only the estimated tokens it removes.
+    // A new summary replaces that prompt, so it uses its own estimate below.
+    const tokenEstimateAdjustment = Math.max(
+      0,
+      getInputTokenCount(messages, config) - estimateTokens(messages),
+    );
     for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
+      const outcome = heuristic({
+        config,
+        conversation,
+        older,
+        previousCheckpoint,
+        recent,
+        tokenEstimateAdjustment,
+      });
       if (outcome.type === "within-limit") {
         return outcome.messages;
       }
@@ -224,6 +247,12 @@ export async function compactMessages(
       temperature: 0,
     });
 
+    if (result.text.trim().length === 0) {
+      throw new Error(
+        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
+      );
+    }
+
     const summaryHead: ModelMessage[] = [
       { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
@@ -232,7 +261,11 @@ export async function compactMessages(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
+    const verbatim = withResumptionGuard(
+      [...summaryHead, ...recent],
+      conversation,
+      config.threshold,
+    );
     if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
@@ -240,6 +273,7 @@ export async function compactMessages(
     const stripped = withResumptionGuard(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
       conversation,
+      config.threshold,
     );
     if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
       return stripped;
@@ -289,7 +323,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
         ...part,
         output: {
           type: "text" as const,
-          value: `${CAPPED_RESULT_ANNOTATION}\n\n${serialized.slice(0, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+          value: `${CAPPED_RESULT_ANNOTATION}\n\n${sliceUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT)}`,
         },
       };
     });
@@ -310,16 +344,27 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
 function withResumptionGuard(
   messages: ModelMessage[],
   conversation: readonly ModelMessage[],
+  threshold: number,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  if (lastRole !== undefined && lastRole !== "assistant") {
-    return messages;
-  }
-
   const replay = findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
+
+  if (lastRole !== undefined && lastRole !== "assistant") {
+    // A retained tool tail must not displace a task that can fit in the budget.
+    // Including it here lets tail selection make room before accepting a candidate.
+    if (
+      lastRole === "tool" &&
+      replay !== undefined &&
+      !alreadyKept &&
+      estimateTokens([replay]) <= threshold
+    ) {
+      return [...messages, replay];
+    }
+    return messages;
+  }
 
   return [
     ...messages,

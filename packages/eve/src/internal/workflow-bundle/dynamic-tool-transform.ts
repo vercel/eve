@@ -2,7 +2,7 @@
  * Stamps callbacks passed to authored `defineTool()` calls with durable replay
  * descriptors. Each callback body is hoisted into a module-suffix function and
  * the live callback is stamped with that function plus the lexical values its
- * body references; identity `(toolName, phase)` is assigned at resolve time.
+ * body references; the session, scope, and resolver bind its identity at resolve time.
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
@@ -13,8 +13,26 @@ import {
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
-type CallbackPhase = "approvalRequest" | "approvalResponse" | "execute" | "toModelOutput";
-type CallbackPropertyName = "approval" | "execute" | "request" | "response" | "toModelOutput";
+type CallbackPhase =
+  | "labelComplete"
+  | "labelDelta"
+  | "labelStart"
+  | "approvalKey"
+  | "approvalRequest"
+  | "approvalResponse"
+  | "execute"
+  | "toModelOutput";
+type CallbackPropertyName =
+  | "approvalKey"
+  | "label"
+  | "approval"
+  | "execute"
+  | "start"
+  | "request"
+  | "response"
+  | "complete"
+  | "delta"
+  | "toModelOutput";
 
 interface CallbackInfo {
   readonly body: string;
@@ -45,7 +63,7 @@ export async function transformDynamicToolExecute(
   source: string,
   workflowFunctions: ReadonlySet<string> = NO_WORKFLOW_FUNCTIONS,
 ): Promise<{ code: string } | null> {
-  if (!source.includes("defineTool")) return null;
+  if (!source.includes("defineTool") && !source.includes("defineWorkflowTool")) return null;
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
   const defineToolAliases = findDefineToolAliases(ast);
@@ -80,9 +98,14 @@ function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
       return false;
     }
     for (const specifier of node.specifiers ?? []) {
+      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
+        aliases.add(`${specifier.local.name}.defineWorkflowTool`);
+      }
       if (
         specifier.type === "ImportSpecifier" &&
-        (specifier.imported?.name ?? specifier.imported?.value) === "defineTool" &&
+        ["defineTool", "defineWorkflowTool"].includes(
+          String(specifier.imported?.name ?? specifier.imported?.value),
+        ) &&
         specifier.local?.name
       ) {
         aliases.add(specifier.local.name);
@@ -91,6 +114,13 @@ function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
     return false;
   });
   return aliases;
+}
+
+function readDefinerName(callee: AstNode | undefined): string | undefined {
+  if (callee?.type === "Identifier") return callee.name;
+  if (callee?.type !== "MemberExpression" || callee.object?.type !== "Identifier") return undefined;
+  const property = callee.computed ? callee.property?.value : callee.property?.name;
+  return typeof property === "string" ? `${callee.object.name}.${property}` : undefined;
 }
 
 function walkForCallbacks(
@@ -118,9 +148,7 @@ function walkForCallbacks(
 
   if (
     node.type === "CallExpression" &&
-    node.callee?.type === "Identifier" &&
-    node.callee.name !== undefined &&
-    context.defineToolAliases.has(node.callee.name) &&
+    context.defineToolAliases.has(readDefinerName(node.callee) ?? "") &&
     node.arguments?.length === 1 &&
     node.arguments[0]?.type === "ObjectExpression"
   ) {
@@ -160,6 +188,42 @@ function collectToolCallbacks(
   const execute = findProperty(tool, "execute");
   if (!isWorkflowExecute(execute, context)) {
     collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
+  }
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "approvalKey"),
+    "approvalKey",
+    "approvalKey",
+    results,
+    nestedScopes,
+  );
+  const label = findProperty(tool, "label");
+  const labelValue = label?.value as AstNode | undefined;
+  if (labelValue?.type === "ObjectExpression") {
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "start"),
+      "labelStart",
+      "start",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "complete"),
+      "labelComplete",
+      "complete",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "delta"),
+      "labelDelta",
+      "delta",
+      results,
+      nestedScopes,
+    );
   }
   collectCallbackProperty(
     source,

@@ -1,9 +1,9 @@
 import { relative } from "node:path";
 
+import { shellQuote } from "#shared/shell-quote.js";
+
 /** Quote one argument for Vercel's POSIX build-command shell. */
-export function quoteVercelShellArgument(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
+export const quoteVercelShellArgument = shellQuote;
 
 /** Return a portable relative path for a generated Vercel configuration. */
 export function toVercelRelativePath(from: string, to: string): string {

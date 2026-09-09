@@ -26,6 +26,7 @@ describe("createLlmsIndex", () => {
     expect(output).toContain("https://eve.dev/sitemap.md");
     expect(output).toContain("https://eve.dev/agents.md");
     expect(output).toContain("https://eve.dev/llms-full.txt");
+    expect(output).toContain("https://eve.dev/changelog.md");
   });
 
   it("uses unique absolute links and stays concise", () => {

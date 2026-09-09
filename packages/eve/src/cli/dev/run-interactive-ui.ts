@@ -7,6 +7,8 @@ import {
   suspendDevelopmentRuntimeArtifacts,
 } from "#services/dev-client/runtime-artifacts.js";
 
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
+
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { resolveTuiDisplayOptions } from "./ui-options.js";
 import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "./tui/tui.js";
@@ -22,6 +24,8 @@ export async function runInteractiveDevelopmentUi(input: {
   readonly remoteTarget?: DevelopmentUrlTarget;
   readonly report?: DevBootProgressReporter;
   readonly runDevelopmentTui?: (input: RunDevelopmentTuiInput) => Promise<void>;
+  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
+  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   readonly server: { readonly appRoot?: string; readonly serverUrl: string };
   readonly startup?: DevelopmentTuiStartup;
 }): Promise<void> {
@@ -48,6 +52,8 @@ export async function runInteractiveDevelopmentUi(input: {
     initialInput: input.options.input,
     onboard: input.options.onboard,
     onBootProgress: input.report,
+    onOnboardingStep: input.onOnboardingStep,
+    onOnboardingTerminal: input.onOnboardingTerminal,
     lifecycle: input.lifecycle,
     ...display,
   };

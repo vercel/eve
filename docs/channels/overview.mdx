@@ -28,6 +28,8 @@ export default defineChannel({
 });
 ```
 
+Adjacent queued messages can combine into one turn only when their full auth contexts match, including identity, issuer, authenticator, and authorization attributes. Their attachments and context stay in payload order. A different auth context ends the batch; eve does not regroup messages across intervening senders. Anonymous deliveries stay separate. Turns still share the session's conversation history.
+
 `from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
 
 Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.

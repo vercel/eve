@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,8 +11,41 @@ import {
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
+import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 
 describe("applyWorkflowTransform", () => {
+  it("preserves native arguments and receivers for Workflow built-in steps", async () => {
+    const filename = "src/internal/workflow/builtins.ts";
+    const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
+    const transformed = await applyWorkflowTransform(filename, source, "step");
+    const executable = stripTypeScriptTypes(
+      transformed.code.replace(/^import[^;]+;\n/gm, "").replace(/^export /gm, ""),
+    );
+    const registered = new Map<string, Function>();
+    new Function("registerStepFunction", "withWorkflowStepAuthorization", executable)(
+      (id: string, execute: Function) => registered.set(id, execute),
+      withWorkflowStepAuthorization,
+    );
+
+    await expect(
+      registered.get("__builtin_response_json")!.call(Response.json({ ok: true })),
+    ).resolves.toEqual({ ok: true });
+    await expect(registered.get("__builtin_response_text")!.call(new Response("ok"))).resolves.toBe(
+      "ok",
+    );
+    const bytes = await registered.get("__builtin_response_array_buffer")!.call(new Response("ok"));
+    expect(new TextDecoder().decode(bytes)).toBe("ok");
+    expect(Reflect.get(registered.get("__builtin_set_attributes")!, "maxRetries")).toBe(2);
+
+    const workflow = await applyWorkflowTransform(filename, source, "workflow");
+    expect(workflow.code).not.toContain("workflowToolStep");
+    for (const name of registered.keys()) {
+      expect(workflow.code).toContain(
+        `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(name)})`,
+      );
+    }
+  });
+
   it("keeps eve workflow references stable when eve is the project root", async () => {
     const filename = "src/execution/turn-workflow.ts";
     const transformed = await applyWorkflowTransform(
@@ -105,7 +139,50 @@ describe("applyWorkflowTransform", () => {
       'import { registerStepFunction } from "workflow/internal/private";',
     );
     expect(transformed.code).toContain('registerStepFunction("step//./steps/ping//ping", ping);');
+    expect(transformed.code).not.toContain("eve-authorization");
     expect(transformed.code).not.toContain('"use step"');
+  });
+
+  it("registers authorization twins only for package test fixtures", async () => {
+    const source = [
+      "export async function ping(input: { value: string }): Promise<string> {",
+      '  "use step";',
+      "  return input.value;",
+      "}",
+      "",
+    ].join("\n");
+    const fixturePath = resolvePackageSourceFilePath("src/internal/testing/ping.ts");
+    const transformed = await applyWorkflowTransform(
+      "src/internal/testing/ping.ts",
+      source,
+      "step",
+      fixturePath,
+    );
+    expect(transformed.workflowManifest.steps?.["src/internal/testing/ping.ts"]).toEqual({
+      ping: { stepId: "step//./src/internal/testing/ping//ping" },
+      "ping:eve-authorization": {
+        stepId: "step//./src/internal/testing/ping//ping:eve-authorization",
+      },
+    });
+    expect(transformed.code).toContain(
+      'import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./src/internal/testing/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
+    );
+
+    const workflow = await applyWorkflowTransform(
+      "src/internal/testing/ping.ts",
+      source,
+      "workflow",
+      fixturePath,
+    );
+    expect(workflow.code).toContain(
+      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+    );
+    expect(workflow.code).toContain(
+      'export var ping = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping:eve-authorization"));',
+    );
   });
 
   it("replaces step functions with workflow proxies in workflow mode", async () => {
@@ -130,6 +207,7 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.code).toContain(
       'export var localStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/task//localStep");',
     );
+    expect(transformed.code).not.toContain("workflowToolStep");
     expect(transformed.code).toContain('export const TASK_KIND = "task";');
     expect(transformed.code).toContain("export const RETRY_OFFSET = -1;");
     expect(transformed.code).not.toContain("node:crypto");
@@ -268,20 +346,19 @@ describe("applyWorkflowTransform for authored application modules", () => {
   const toolPath = "/app/agent/tools/deploy.ts";
   const toolSource = [
     'import { readFile } from "node:fs/promises";',
-    'import { defineTool } from "eve/tools";',
-    'import { ask } from "eve/workflow";',
+    'import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";',
     'import { sleep } from "workflow";',
     'import { z } from "zod";',
     "",
     'const APPROVE = [{ id: "approve", label: "Deploy" }];',
     "",
-    "export default defineTool({",
+    "export default defineWorkflowTool({",
     '  description: "Deploy",',
     "  inputSchema: z.object({ service: z.string() }),",
-    "  async execute({ service }: { service: string }, ctx: ToolContext) {",
+    "  async execute({ service }: { service: string }, ctx: WorkflowToolContext) {",
     '    "use workflow";',
     "    const plan = await planDeploy(service);",
-    "    const answer = await (await ask(ctx, { prompt: plan, options: APPROVE }));",
+    "    const answer = await ctx.ask({ prompt: plan, options: APPROVE });",
     '    await sleep("1s");',
     '    return { deployed: answer.optionId === "approve" };',
     "  },",
@@ -307,6 +384,9 @@ describe("applyWorkflowTransform for authored application modules", () => {
       steps: {
         "agent/tools/deploy.ts": {
           planDeploy: { stepId: "step//./agent/tools/deploy//planDeploy" },
+          "planDeploy:eve-authorization": {
+            stepId: "step//./agent/tools/deploy//planDeploy:eve-authorization",
+          },
         },
       },
       workflows: {
@@ -315,8 +395,12 @@ describe("applyWorkflowTransform for authored application modules", () => {
         },
       },
     });
+    // The driver bundle resolves eve source aliases even when the app has no eve dependency.
     expect(transformed.code).toContain(
-      'var planDeploy = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy");',
+      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+    );
+    expect(transformed.code).toContain(
+      'var planDeploy = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy:eve-authorization"));',
     );
     expect(transformed.code).toContain(
       'globalThis.__private_workflows.set("workflow//./agent/tools/deploy//execute", execute);',
@@ -325,10 +409,28 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).toContain("const APPROVE = ");
     expect(transformed.code).toContain('import { sleep } from "workflow";');
     expect(transformed.code).not.toContain("export default");
-    expect(transformed.code).not.toContain("defineTool");
+    expect(transformed.code).not.toContain("defineWorkflowTool");
     expect(transformed.code).not.toContain("zod");
     expect(transformed.code).not.toContain("node:fs/promises");
     expect(transformed.code).not.toContain('"use workflow"');
+  });
+
+  it("removes a namespace-imported workflow definition from the driver", async () => {
+    const source = toolSource
+      .replace("import { defineWorkflowTool, type WorkflowToolContext }", "import * as tools")
+      .replace("defineWorkflowTool({", "tools.defineWorkflowTool({");
+    const transformed = await applyWorkflowTransform(
+      "agent/tools/deploy.ts",
+      source,
+      "workflow",
+      toolPath,
+      appRoot,
+    );
+    expect(transformed.code).not.toContain("export default");
+    expect(transformed.code).not.toContain("eve/tools");
+    expect(transformed.workflowManifest.workflows?.["agent/tools/deploy.ts"]?.execute).toEqual({
+      workflowId: "workflow//./agent/tools/deploy//execute",
+    });
   });
 
   it("registers steps and stubs the workflow body in step mode", async () => {
@@ -340,8 +442,12 @@ describe("applyWorkflowTransform for authored application modules", () => {
       appRoot,
     );
 
+    // Step registrations are bundled by the app, which resolves eve's package export.
     expect(transformed.code).toContain(
-      'registerStepFunction("step//./agent/tools/deploy//planDeploy", planDeploy);',
+      'import { withWorkflowStepAuthorization } from "eve/internal/workflow-step-execution";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./agent/tools/deploy//planDeploy:eve-authorization", withWorkflowStepAuthorization(planDeploy));',
     );
     expect(transformed.code).toContain(
       'execute.workflowId = "workflow//./agent/tools/deploy//execute";',
@@ -349,7 +455,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).toContain(
       "You attempted to execute workflow execute function directly",
     );
-    expect(transformed.code).toContain("export default defineTool({");
+    expect(transformed.code).toContain("export default defineWorkflowTool({");
     expect(transformed.code).toContain("  execute,\n");
     expect(transformed.code).toContain('import { z } from "zod";');
   });
@@ -408,7 +514,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
     expect(transformed.code).toContain("export function formatPlan(plan: string): string {");
     expect(transformed.code).toContain(
-      'export var hashPlan = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/lib/steps//hashPlan");',
+      'export var hashPlan = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/lib/steps//hashPlan"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/lib/steps//hashPlan:eve-authorization"));',
     );
     expect(transformed.code).not.toContain("node:crypto");
   });

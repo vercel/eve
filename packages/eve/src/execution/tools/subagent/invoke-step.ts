@@ -220,6 +220,7 @@ export async function dispatchAgentInvocation(input: {
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
+      activityObserver: prepared.activityObserver,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       serializedContext: prepared.serializedContext,

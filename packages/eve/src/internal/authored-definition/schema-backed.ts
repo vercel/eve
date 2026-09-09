@@ -1,3 +1,5 @@
+import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
@@ -101,15 +103,29 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   const record = expectObjectRecord(value, message);
+  const workflowId = readWorkflowFunctionId(record.execute);
+  if (isWorkflowToolDefinition(value)) {
+    if (workflowId === undefined) {
+      throw new Error(
+        `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
+      );
+    }
+  } else if (workflowId !== undefined) {
+    throw new Error(
+      `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
+    );
+  }
   expectOnlyKnownKeys(
     record,
     [
+      "label",
       "auth",
       "description",
       "execute",
       "execution",
       "inputSchema",
       "approval",
+      "approvalKey",
       "outputSchema",
       "toModelOutput",
     ],
@@ -162,8 +178,20 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
+  if (record.label !== undefined) {
+    const label = expectObjectRecord(record.label, message);
+    expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
+    expectFunction(label.start, message);
+    if (label.complete !== undefined) expectFunction(label.complete, message);
+    if (label.delta !== undefined) expectFunction(label.delta, message);
+  }
+
   if (record.approval !== undefined) {
     normalizeApproval(record.approval, message);
+  }
+
+  if (record.approvalKey !== undefined) {
+    expectFunction(record.approvalKey, message);
   }
 
   if (record.toModelOutput !== undefined) {

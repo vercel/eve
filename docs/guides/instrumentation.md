@@ -46,7 +46,7 @@ Export the result of `defineInstrumentation` as the default export.
 
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
 
-Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification.
+Any OTel-compatible backend works (Braintrust, PostHog, Sentry, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification. The [Sentry integration](/integrations/sentry-instrumentation) provides a ready-to-install OTLP exporter that sends traces to Sentry without a Sentry SDK.
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
@@ -69,8 +69,9 @@ Instrumentation providers receive `channel.delivery.started` followed by
 `channel.delivery.failed` for every inbound channel operation. The lifecycle
 covers durable processing through the terminal state of the resulting turn, not
 messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
-Several deliveries can coalesce into one turn while retaining separate lifecycle
-pairs, and an adapter can consume a delivery without starting a turn.
+Adjacent queued messages with matching authenticated identities and authorization
+attributes can share a turn while retaining separate lifecycle pairs. An adapter
+can also consume a delivery without starting a turn.
 
 Each operation has a framework-owned `deliveryId` distinct from its optional
 platform request ID. Metadata-only providers receive identity, channel, session,
@@ -83,6 +84,58 @@ The built-in OpenTelemetry provider maps each pair to an
 `traceChannelRequests: true` creates an inbound HTTP server span, the delivery
 span links to it with `eve.link.type=channel.request` rather than using the
 short-lived request span as its parent.
+
+## Callback delivery errors
+
+Failed outbound session and task callback attempts emit an error-level
+`[eve:execution.session-callback] callback delivery failed` runtime log without
+requiring an instrumentation provider. Filter by `statusCode` for HTTP failures
+or `failure` (`http`, `transport`, or `timeout`). The log includes the callback
+origin, token-redacted route, payload kind, and available call, task, and child
+session identifiers. Payload content, credentials, and callback tokens are
+excluded. Each retry can emit a separate error; logging does not change Workflow
+retry behavior. Best-effort activity delivery keeps its single
+`[eve:execution.activity-submit] activity sink request failed` warning and does
+not mark the active span as failed.
+
+## Exported span names and outcomes
+
+The built-in OpenTelemetry provider preserves each span's OTel name and adds
+`operation.name` and `resource.name` for Datadog's operation/resource mapping:
+
+| OTel span name                                                                                                     | `operation.name`  | `resource.name`        |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------- | ---------------------- |
+| `invoke_agent weather`                                                                                             | `invoke_agent`    | `invoke_agent weather` |
+| `execute_tool search`                                                                                              | `execute_tool`    | `execute_tool search`  |
+| `chat <model>`                                                                                                     | `chat`            | `chat <model>`         |
+| `agent.session`, `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
+
+These attributes apply to eve-owned spans in local tracing and the
+[instrumentation provider layout](./instrumentation-providers). They do not
+rename Workflow, AI SDK, or other third-party spans, or change trace IDs,
+parenting, sampling, or session grouping. Legacy `instrumentation.ts` setup
+still owns its exporter configuration and [authored trace
+hierarchy](#authored-trace-hierarchy).
+
+In Datadog APM, `operation_name:invoke_agent resource_name:"invoke_agent weather"`
+selects named agent invocations. Operation-based dashboards and monitors may
+need to replace inferred names such as `otel.span` with these explicit names.
+Keep session IDs, turn IDs, and message content in attributes, not operation or
+resource names.
+
+If an eve-owned span still appears as `otel.span`, inspect its exported OTel
+name, `operation.name`, and `resource.name` before and after any drain or
+Collector transforms. Datadog's [operation-name mapping
+guide](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/)
+describes the explicit override. Exported fields must survive the ingestion
+path; a local export does not prove that a hosted backend retained them.
+
+Agent invocation spans carry `agent.turn.outcome=completed|failed|cancelled`
+when the turn has a terminal outcome. A failed invocation also has OTel error
+status; cancellation is not an error. The scalar outcome survives backends
+that discard span events, including Sentry's [direct OTLP
+intake](https://docs.sentry.io/concepts/otlp/direct/traces/). These attributes
+remain available when model and tool content is redacted.
 
 ## Runtime context
 
@@ -130,16 +183,20 @@ When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
-  +-- ai.streamText                           step 1
-  |     +-- ai.streamText.doStream            model call
-  |     +-- ai.toolCall  {toolName: search}   tool exec
-  +-- ai.streamText                           step 2
-  |     +-- ai.streamText.doStream
-  |     +-- ai.toolCall  {toolName: read}
-  +-- ai.streamText                           step 3 (final text)
+  +-- invoke_agent <model>                    gen_ai.operation.name=invoke_agent
+        +-- step 1                            gen_ai.operation.name=agent_step
+        |     +-- chat <model>                gen_ai.operation.name=chat
+        |     +-- execute_tool search         gen_ai.operation.name=execute_tool
+        +-- step 2
+        |     +-- chat <model>
+        |     +-- execute_tool read
+        +-- step 3 (final text)
+              +-- chat <model>
 ```
 
-eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. The AI SDK's OpenTelemetry integration names these spans after the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so backends that understand `gen_ai.operation.name` can classify them without extra configuration. The `invoke_agent` span is named after the model; the agent name is on its `gen_ai.agent.name` attribute.
+
+This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names its invocation span `invoke_agent <agent>` and its model-attempt spans `agent.step`. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
 Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
 
@@ -177,7 +234,7 @@ Per-turn usage tags are written on each step of a turn, accumulating cumulative 
 
 Tag writes are best-effort: a failure is logged once per process and then swallowed, so a broken tag emit never breaks the agent.
 
-These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Datadog, or another third-party backend.
+These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Sentry, Datadog, or another third-party backend.
 
 ## Local traces
 

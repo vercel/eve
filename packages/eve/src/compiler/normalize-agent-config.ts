@@ -82,6 +82,7 @@ export async function compileAgentConfig(
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
     };
+    defaultTools?: boolean;
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
     name: string;
@@ -94,6 +95,10 @@ export async function compileAgentConfig(
     name: manifest.agentId,
     source: { ...configModule },
   };
+
+  if (definition.defaultTools !== undefined) {
+    compiledConfig.defaultTools = definition.defaultTools;
+  }
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;

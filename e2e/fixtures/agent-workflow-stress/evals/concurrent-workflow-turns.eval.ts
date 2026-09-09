@@ -26,9 +26,6 @@ export default defineEval({
       }),
     );
     const firstBatchDurationMs = performance.now() - firstBatchStartedAt;
-    firstTurns.forEach((turn, index) => {
-      t.log(`workflow run id (${index + 1}/${SESSION_COUNT}): ${turn.result.sessionId}`);
-    });
     const secondBatchStartedAt = performance.now();
     const secondTurns = await Promise.all(
       sessions.map(async (session, index) => {

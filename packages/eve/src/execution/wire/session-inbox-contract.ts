@@ -11,6 +11,36 @@ export const SESSION_INBOX_WIRE_VERSION =
 export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";
 
 /**
+ * Hook metadata field advertising that the driver displays authorization
+ * events raised by a workflow task itself. Drivers pinned before this marker
+ * drop those events, so producers fail fast instead of waiting on a callback
+ * no channel will render.
+ */
+export const WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY = "workflowTaskAuthorization";
+
+export const SESSION_INBOX_CONTEXT_KEY = "eve.sessionInbox";
+
+/** Immutable inbox coordinates advertised by the receiving session's driver. */
+export interface SessionInboxAddress {
+  readonly sessionId: string;
+  readonly version: number;
+}
+
+export function isSessionInboxAddress(value: unknown): value is SessionInboxAddress {
+  if (value === null || typeof value !== "object") return false;
+  return (
+    "sessionId" in value &&
+    typeof value.sessionId === "string" &&
+    value.sessionId.length > 0 &&
+    !value.sessionId.includes(":") &&
+    "version" in value &&
+    typeof value.version === "number" &&
+    Number.isSafeInteger(value.version) &&
+    value.version > 0
+  );
+}
+
+/**
  * The consumer wire selected before a producer persists a payload.
  *
  * Version 0 had two incompatible unversioned shapes, so its historical

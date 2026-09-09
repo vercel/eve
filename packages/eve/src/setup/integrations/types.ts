@@ -44,6 +44,7 @@ interface SetupIntegrationDefinition<Plan> {
   readonly kind: string;
   readonly label: string;
   readonly hint?: string;
+  describeEnvironment?(environment: IntegrationSetupEnvironment): string;
   prepare(context: SetupPrepareContext): Promise<Plan>;
   apply(plan: Plan, context: SetupApplyContext): Promise<RegistrySetupCompletion>;
 }
@@ -52,6 +53,7 @@ export interface SetupIntegration {
   readonly kind: string;
   readonly label: string;
   hint?: string;
+  describeEnvironment?(environment: IntegrationSetupEnvironment): string;
   run(input: {
     prepare: SetupPrepareContext;
     apply: SetupApplyContext;
@@ -76,5 +78,7 @@ export function defineSetupIntegration<Plan>(
     },
   };
   if (definition.hint !== undefined) registered.hint = definition.hint;
+  if (definition.describeEnvironment !== undefined)
+    registered.describeEnvironment = definition.describeEnvironment;
   return registered;
 }

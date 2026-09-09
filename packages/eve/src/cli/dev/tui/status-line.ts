@@ -118,7 +118,7 @@ function renderEndpoint(
         return { text: c.dim("chatgpt-sub checking…"), standalone: true };
       case "signed-out":
       case "reauth-required":
-        return { text: c.yellow(`${g.warning} chatgpt-sub login · codex login`), standalone: true };
+        return { text: c.yellow(`${g.warning} chatgpt-sub login · /model`), standalone: true };
       case "unavailable":
         return { text: c.yellow(`${g.warning} chatgpt-sub unavailable`), standalone: true };
     }

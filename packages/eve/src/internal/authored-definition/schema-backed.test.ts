@@ -36,11 +36,9 @@ describe("normalizeToolDefinition", () => {
       description: "Starts an export.",
       execution: "background",
       inputSchema: z.object({ exportId: z.string() }),
-      execute(input, _ctx, task) {
-        return task.delegated({
-          executor: { data: { exportId: input.exportId }, kind: "export" },
-          receipt: { exportId: input.exportId },
-        });
+      async *execute(input) {
+        yield { exportId: input.exportId };
+        return { exportId: input.exportId };
       },
     });
 
@@ -134,6 +132,50 @@ describe("normalizeToolDefinition", () => {
       FAILURE_MESSAGE,
     );
     expect(() => normalizeToolDefinition(null, FAILURE_MESSAGE)).toThrow(FAILURE_MESSAGE);
+  });
+
+  it("accepts and types authored tool labels", () => {
+    const tool = defineTool({
+      label: {
+        start(input) {
+          const city: string = input.city;
+          // @ts-expect-error label start callback input is schema-typed.
+          const missing = input.missing;
+          void missing;
+          return `Fetch ${city}`;
+        },
+      },
+      description: "Fetch weather.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: ({ city }) => city,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects malformed label definitions", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { start: "Fetch weather" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { label: () => "Fetch weather", result: "Done" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("accepts authored tools that declare a `toModelOutput` function", () => {

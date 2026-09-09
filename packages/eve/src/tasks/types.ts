@@ -3,6 +3,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
 } from "#channel/types.js";
 import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
@@ -139,6 +140,15 @@ export interface TaskCommandHookPayload {
   readonly command: TaskCommand;
 }
 
+/** One authored message delivered to the parent as a new turn. */
+export interface TaskInboundMessage {
+  readonly callId: string;
+  readonly kind: "task-message";
+  readonly message: string;
+  readonly messageIndex: number;
+  readonly messageEpoch: string;
+}
+
 /** Intermediate progress reported by an executor. */
 export interface TaskInboundUpdate {
   readonly callId: string;
@@ -162,6 +172,7 @@ export interface TaskInboundInputRequest {
 export interface TaskInboundAnswerInput {
   readonly auth?: unknown;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly inputResponses: readonly {
     readonly optionId?: string;
@@ -175,6 +186,7 @@ export interface TaskInboundAnswerInput {
 export type TaskRunInboundPayload =
   | TaskCommandHookPayload
   | TaskInboundAnswerInput
+  | TaskInboundMessage
   | TaskInboundUpdate;
 
 /** Generic task-owned request sent through the parent session payload. */
@@ -221,6 +233,15 @@ export interface TaskAgentRequestDelivery {
   readonly taskId: string;
 }
 
+export interface TaskProgress {
+  readonly callId: string;
+  readonly kind: "task-progress";
+  readonly taskId: string;
+  readonly update: JsonValue;
+  readonly updateIndex: number;
+}
+
+export const TASK_PROGRESS_STREAM_NAMESPACE = "eve.task.progress";
 export const TASK_VIEW_STREAM_NAMESPACE = "eve.task";
 
 export function isTerminalTaskStatus(status: TaskStatus): boolean {

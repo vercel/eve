@@ -95,6 +95,8 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 `message.completed` can fire more than once in a turn: the agent often emits interim assistant text before a tool call. To tell tool-call narration from a terminal reply, check `message.completed.data.finishReason`. `step.completed.data.finishReason` mirrors the step outcome, and usage lives on `step.completed`.
 
+When a task explicitly requires conditional delivery and there is nothing new to report, the agent can finish with exactly `<eve-empty-delivery/>`. eve emits `message.completed` with `message: null` for that intentional silence. The marker must be the entire response, apart from surrounding whitespace; the HTML-escaped form `&lt;eve-empty-delivery/&gt;` is also accepted. A response that quotes the marker in prose or code is delivered normally.
+
 A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId`, which a client uses to attach. `subagent.completed` carries a working task receipt after admission; later updates and outcomes arrive as task-triggered `message.received` notifications.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
@@ -119,6 +121,10 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 - **`meta.id`** uniquely identifies the event. It is an `evt_`-prefixed [ULID](https://github.com/ulid/spec): a millisecond timestamp followed by random bits, so ids are broadly time-ordered.
 - **`meta.at`** is the ISO-8601 time the event was emitted.
+- **`meta.deliveryIds`**, when present, identifies the accepted messages that own
+  the turn. `POST /eve/v1/session/:sessionId` returns its `deliveryId`, allowing
+  clients to skip earlier turns when resuming from an old cursor. Coalesced
+  messages share the same turn events.
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 

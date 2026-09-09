@@ -20,6 +20,7 @@ import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mc
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
+  McpToolOperationError,
   type McpCallToolResult,
   type McpServerTool,
 } from "#internal/mcp/streamable-http-server.js";
@@ -366,6 +367,7 @@ async function handleMcpRequest(
   });
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
+    instructions: MCP_SERVER_INSTRUCTIONS,
     name: agentInfo.agent.name,
     tools: createInvocationTools(
       execution,
@@ -376,6 +378,22 @@ async function handleMcpRequest(
   })(request);
 }
 
+/**
+ * Hosted MCP clients receive this once per connection (legacy `initialize`)
+ * or per discovery (`server/discover`). Keep it short: clients truncate or
+ * drop long instructions, and the details live in each tool description.
+ */
+const MCP_SERVER_INSTRUCTIONS = [
+  "Each invocation is one durable agent task.",
+  "Call agent_start once per task and keep the returned invocationId.",
+  "Poll agent_get, waiting at least pollAfterMs between calls, until status is completed, failed, or cancelled.",
+  "If status is input_required, answer every entry in inputRequests in one agent_update call; repeating accepted answers is safe.",
+  "If status is authorization_required, show the user the authorization url or instructions and keep polling.",
+  "isError on a tool result means your call was rejected; a failed status means the task failed.",
+  "agent_start is not idempotent and a lost response leaves no invocationId, so ask the user before starting again.",
+  "Work continues after your connection drops; agent_cancel stops it, then poll until any terminal status.",
+].join(" ");
+
 function createInvocationTools(
   execution: WorkflowAgentInvocationExecution,
   agentDescription: string | undefined,
@@ -384,7 +402,10 @@ function createInvocationTools(
   const publicHandleDescription = publicAccess
     ? " On this public channel, the invocation ID is a bearer capability until workflow retention expires."
     : "";
-  const startDescription = `Starts durable work and returns an invocation handle immediately.${publicHandleDescription}`;
+  const startDescription =
+    "Starts durable work and returns an invocation handle immediately. " +
+    "Call once per task; keep invocationId and poll agent_get. Not idempotent: if the response is lost, " +
+    `ask the user before starting again rather than retrying.${publicHandleDescription}`;
   const tools: McpServerTool[] = [
     defineMcpTool({
       definition: {
@@ -399,7 +420,7 @@ function createInvocationTools(
             ? startDescription
             : `${agentDescription} ${startDescription}`,
         inputSchema: z.strictObject({
-          message: z.string().min(1),
+          message: utf8Bounded(MAX_MESSAGE_BYTES).min(1),
           outputSchema: z.looseObject({}).optional(),
         }),
         name: "agent_start",
@@ -422,8 +443,11 @@ function createInvocationTools(
           openWorldHint: false,
           readOnlyHint: true,
         },
-        description: `Reads complete durable invocation state.${publicHandleDescription}`,
-        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
+        description:
+          "Reads complete durable invocation state. Wait at least pollAfterMs between calls. " +
+          "Terminal statuses are completed, failed, and cancelled. input_required needs agent_update; " +
+          `authorization_required needs the user to follow the returned authorization.${publicHandleDescription}`,
+        inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
         name: "agent_get",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -446,10 +470,13 @@ function createInvocationTools(
           openWorldHint: true,
           readOnlyHint: false,
         },
-        description: "Answers a pending input request on a durable invocation.",
+        description:
+          "Answers the pending input batch on an input_required invocation. Include one response per " +
+          "entry in inputRequests, each keyed by its requestId, in a single call; partial batches are rejected. " +
+          "Returns the current invocation state; repeating the same accepted answers is safe.",
         inputSchema: z.strictObject({
-          invocationId: z.string().min(1),
-          responses: z.array(inputResponseSchema).min(1),
+          invocationId: z.string().min(1).max(MAX_ID_CHARS),
+          responses: z.array(MCP_INPUT_RESPONSE_SCHEMA).min(1).max(MAX_RESPONSES_PER_UPDATE),
         }),
         name: "agent_update",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
@@ -475,8 +502,10 @@ function createInvocationTools(
           readOnlyHint: false,
         },
         description:
-          "Requests cancellation of a durable invocation. Read it again to observe acknowledgement.",
-        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
+          "Requests cooperative cancellation of a non-terminal invocation. Cancellation is asynchronous and " +
+          "can race with completion: poll agent_get until status is terminal (cancelled, completed, or failed). " +
+          "Safe to call repeatedly.",
+        inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
         name: "agent_cancel",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -495,8 +524,15 @@ function createInvocationTools(
   return tools;
 }
 
+// Unknown, expired, and foreign-principal invocations all read as not found
+// so the response never confirms that another caller's invocation exists.
+const INVOCATION_NOT_FOUND =
+  "Invocation not found. It may have expired or belong to another caller.";
+
 function requiredInvocation(invocation: AgentInvocation | undefined): AgentInvocation {
-  if (invocation === undefined) throw new Error("Invocation not found.");
+  if (invocation === undefined) {
+    throw new McpToolOperationError("not_found", INVOCATION_NOT_FOUND);
+  }
   return invocation;
 }
 
@@ -505,9 +541,12 @@ function requiredMutation(result: AgentInvocationMutationResult): AgentInvocatio
     case "success":
       return result.invocation;
     case "conflict":
-      throw new Error(result.message);
+      throw new McpToolOperationError(
+        "conflict",
+        `${result.message} Call agent_get to read the current state before answering again.`,
+      );
     case "not_found":
-      throw new Error("Invocation not found.");
+      throw new McpToolOperationError("not_found", INVOCATION_NOT_FOUND);
   }
 }
 
@@ -521,9 +560,16 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
 
 function asJsonObject(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined;
-  const schema = parseJsonObject(value);
-  validateOutputSchemaComplexity(schema);
-  return schema;
+  try {
+    const schema = parseJsonObject(value);
+    validateOutputSchemaComplexity(schema);
+    return schema;
+  } catch (error) {
+    throw new McpToolOperationError(
+      "invalid_input",
+      error instanceof Error ? error.message : "outputSchema must be a JSON object.",
+    );
+  }
 }
 
 const AUTHORIZATION_CHALLENGE_SCHEMA = z.strictObject({
@@ -539,6 +585,28 @@ const AUTHORIZATION_REQUEST_SCHEMA = z.strictObject({
   description: z.string(),
   name: z.string(),
   webhookUrl: z.url().optional(),
+});
+
+// Bounds on caller-supplied text. The transport already caps the whole body
+// at MCP_REQUEST_BODY_MAX_BYTES; these keep individual durable fields sane.
+// Text bounds are UTF-8 bytes, matching the transport cap and the docs;
+// string.length undercounts multibyte input by up to 3x.
+const MAX_MESSAGE_BYTES = 64 * 1_024;
+const MAX_RESPONSE_TEXT_BYTES = 16 * 1_024;
+const MAX_ID_CHARS = 256;
+const MAX_RESPONSES_PER_UPDATE = 64;
+
+function utf8Bounded(maxBytes: number) {
+  const encoder = new TextEncoder();
+  return z.string().refine((value) => encoder.encode(value).byteLength <= maxBytes, {
+    message: `must be at most ${String(maxBytes)} bytes when UTF-8 encoded`,
+  });
+}
+
+const MCP_INPUT_RESPONSE_SCHEMA = inputResponseSchema.safeExtend({
+  optionId: z.string().max(MAX_ID_CHARS).optional(),
+  requestId: z.string().min(1).max(MAX_ID_CHARS),
+  text: utf8Bounded(MAX_RESPONSE_TEXT_BYTES).optional(),
 });
 
 const MCP_INPUT_REQUEST_SCHEMA = inputRequestSchema.safeExtend({

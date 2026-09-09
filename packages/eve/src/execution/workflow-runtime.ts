@@ -32,7 +32,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   cancelRun,
-  getHookByToken,
+  getRawHookByToken,
   getRun,
   getWorld,
   start,
@@ -305,7 +305,7 @@ export function createWorkflowRuntime(config: {
       continuationToken: string,
     ): Promise<{ sessionId: string } | undefined> {
       try {
-        const hook = await getHookByToken(continuationToken);
+        const hook = await getRawHookByToken(continuationToken);
         return { sessionId: hook.runId };
       } catch (error) {
         if (HookNotFoundError.is(error)) {
@@ -369,8 +369,8 @@ function activeCommandResult<TCommand extends SessionCommand>(
   const result =
     command.kind === "reset"
       ? { previousSessionId: sessionId, status: "reset" as const }
-      : command.kind === "cancel"
-        ? { sessionId, status: "accepted" as const }
+      : command.kind === "send" && command.delivery !== undefined
+        ? { sessionId, status: "accepted" as const, deliveryId: command.delivery.deliveryId }
         : { sessionId, status: "accepted" as const };
   return result as SessionCommandResult<TCommand>;
 }
@@ -423,7 +423,7 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      return normalizeWorkflowHook(await getHookByToken(token));
+      return normalizeWorkflowHook(await getRawHookByToken(token));
     } catch (error) {
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
@@ -435,7 +435,7 @@ async function waitForCommandHookRelease(token: string, sessionId: string): Prom
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      const owner = normalizeWorkflowHook(await getHookByToken(token));
+      const owner = normalizeWorkflowHook(await getRawHookByToken(token));
       if (owner.runId !== sessionId) return;
     } catch (error) {
       if (HookNotFoundError.is(error)) return;

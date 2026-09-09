@@ -1,5 +1,5 @@
 import type { ModelMessage } from "ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
   DeliverPayload,
@@ -22,8 +22,9 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
   SessionTraceSeedKey,
+  TurnDeliveryIdsKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
+  HistoryStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
@@ -34,7 +35,7 @@ import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
-import { createInputRequestedEvent } from "#protocol/message.js";
+import { createActionsRequestedEvent, createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -214,6 +215,22 @@ const threadContextAdapter: ChannelAdapter = {
     const thread = adapterCtx.ctx.ensure(ThreadKey, () => "unset");
     const message = payload.message ?? "";
 
+    // `attach:` delivers structured UserContent carrying a FilePart, the
+    // shape real channels produce for an uploaded image or document.
+    if (typeof message === "string" && message.startsWith("attach:")) {
+      return {
+        message: [
+          { text: `thread=${thread}; user=${message.slice("attach:".length)}`, type: "text" },
+          {
+            data: new URL("https://files.example/diagram.png"),
+            filename: "diagram.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ],
+      };
+    }
+
     return { message: `thread=${thread}; user=${message}` };
   },
 };
@@ -234,7 +251,16 @@ function createSerializedContext(
 ): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
-  ctx.set(BundleKey, {
+  ctx.set(BundleKey, createStubBundle());
+  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ContinuationTokenKey, "http:thread-context");
+  ctx.set(ModeKey, mode);
+  ctx.set(SessionIdKey, "session-1");
+  return serializeContext(ctx);
+}
+
+function createStubBundle(): Awaited<ReturnType<typeof getCompiledRuntimeAgentBundle>> {
+  return {
     adapterRegistry: {
       adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
     },
@@ -251,13 +277,12 @@ function createSerializedContext(
     subagentRegistry: {},
     toolRegistry: {},
     turnAgent: TestTurnAgent,
-  } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
-  ctx.set(ContinuationTokenKey, "http:thread-context");
-  ctx.set(ModeKey, mode);
-  ctx.set(SessionIdKey, "session-1");
-  return serializeContext(ctx);
+  } as never;
 }
+
+beforeEach(() => {
+  vi.mocked(getCompiledRuntimeAgentBundle).mockReset().mockResolvedValue(createStubBundle());
+});
 
 afterEach(() => {
   getRunMock.mockReset();
@@ -275,6 +300,46 @@ afterEach(() => {
 });
 
 describe("routeProxiedDeliverStep", () => {
+  it("replies to the saved child inbox after its continuation alias changes", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "request-1",
+          {
+            childContinuationToken: "stale-alias",
+            childSessionInbox: { sessionId: "original-child", version: 1 },
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "stale-alias",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { inputResponses: [{ requestId: "request-1", text: "yes" }] },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "eve:session:original-child:inbox",
+      expect.objectContaining({
+        kind: "deliver",
+        version: 1,
+        payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
+      }),
+    );
+  });
+
   it("forwards descendant input responses as session send commands", async () => {
     const auth = {
       attributes: {},
@@ -912,6 +977,7 @@ describe("dispatchCoordinationStep", () => {
 
     const result = await dispatchCoordinationStep({
       action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -974,7 +1040,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1038,7 +1104,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1115,7 +1181,7 @@ describe("dispatchCoordinationStep", () => {
     await expect(
       dispatchCoordinationStep({
         action: "park",
-        parentContinuationToken: "turn-inbox",
+        workflowToolRunOwner: { inbox: "generated-owner-token" },
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -1259,6 +1325,93 @@ describe("turnStep", () => {
       backgroundTasks: [{ taskId: "task-1" }],
     });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => async (stepSession) => {
+      await input.handleEvent?.({
+        type: "session.waiting",
+        data: { continuationToken: "continuation_test", wait: "next-user-message" },
+      });
+      return { next: null, session: stepSession };
+    });
+    const delivery = (ids: string[]): Parameters<typeof turnStep>[0]["input"] => ({
+      kind: "deliver",
+      payloads: ids.map((message) => ({ message })),
+      deliveryMetadata: ids.map((deliveryId, payloadIndex) => ({
+        channelKind: "eve",
+        channelName: "eve",
+        deliveryId,
+        payloadIndex,
+      })),
+    });
+
+    const first = await turnStep({
+      input: delivery(["delivery-a", "delivery-b"]),
+      parentWritable: createTestWritable("first"),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(first.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-a", "delivery-b"]);
+    const resumed = await turnStep({
+      input: undefined,
+      parentWritable: createTestWritable("resumed"),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+    expect(resumed.serializedContext[TurnDeliveryIdsKey.name]).toEqual([
+      "delivery-a",
+      "delivery-b",
+    ]);
+    const next = await turnStep({
+      input: delivery(["delivery-c"]),
+      parentWritable: createTestWritable("next"),
+      serializedContext: resumed.serializedContext,
+      sessionState: resumed.sessionState,
+    });
+    expect(next.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-c"]);
+    for (const [namespace, deliveryIds] of [
+      ["first", ["delivery-a", "delivery-b"]],
+      ["resumed", ["delivery-a", "delivery-b"]],
+      ["next", ["delivery-c"]],
+    ] as const) {
+      const events = (workflowWritesByNamespace.get(namespace) ?? []).map((chunk) =>
+        JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+      );
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "session.waiting",
+          meta: expect.objectContaining({ deliveryIds }),
+        }),
+      ]);
+    }
   });
 
   it("defers before mutation when an inline step reaches another deployment", async () => {
@@ -1524,7 +1677,7 @@ describe("turnStep", () => {
     expect(observed).toEqual(expected);
   });
 
-  it("routes remote task HITL only to the parent callback", async () => {
+  it("projects inherited task tool activity while routing HITL only to the parent callback", async () => {
     const inputRequested = vi.fn();
     const remoteTaskAdapter: ChannelAdapter = {
       kind: "remote-task-test",
@@ -1556,6 +1709,21 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
       return async (stepSession): Promise<StepResult> => {
+        await input.handleEvent?.(
+          createActionsRequestedEvent({
+            actions: [
+              {
+                callId: "tool-call-1",
+                input: { query: "activity" },
+                kind: "tool-call",
+                toolName: "search_slack",
+              },
+            ],
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          }),
+        );
         await input.handleEvent?.(
           createInputRequestedEvent({
             requests: [
@@ -1634,7 +1802,15 @@ describe("turnStep", () => {
       }),
     );
     expect(inputRequested).not.toHaveBeenCalled();
-    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      expect.objectContaining({
+        body: expect.stringContaining(
+          '"action":{"id":"action:work:child:tool-call-1","kind":"tool","name":"search_slack","parentWorkId":"work:child","rootTurnId":"turn-root"',
+        ),
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
       expect.objectContaining({ body: expect.stringContaining('"kind":"blocker.started"') }),
@@ -1642,7 +1818,10 @@ describe("turnStep", () => {
   });
 
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
-    const session = createStubSession();
+    const announcement = "Available skills\n- policy: Tenant policy";
+    const session = createStubSession({
+      history: [{ role: "user", content: announcement }],
+    });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
@@ -1671,6 +1850,7 @@ describe("turnStep", () => {
           contextWindowTokens: 1_000_000,
         });
         ctx.set(ThreadKey, "discard this turn-scoped mutation");
+        ctx.delete(HistoryStateKey);
         throw new TurnCancelledError();
       };
     });
@@ -1679,15 +1859,29 @@ describe("turnStep", () => {
       input: {
         kind: "deliver",
         payloads: [{ message: "cancel this turn" }],
+        deliveryMetadata: [
+          {
+            channelKind: "eve",
+            channelName: "eve",
+            deliveryId: "cancelled-delivery",
+            payloadIndex: 0,
+          },
+        ],
       },
       parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
+      serializedContext: {
+        ...createSerializedContext(),
+        [TurnDeliveryIdsKey.name]: ["previous-delivery"],
+        [HistoryStateKey.name]: { availableSkills: announcement },
+      },
       sessionState: createStubSessionState(),
     });
 
     expect(result).toMatchObject({
       action: "cancelled",
       serializedContext: {
+        [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
+        [HistoryStateKey.name]: { availableSkills: announcement },
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
@@ -1696,7 +1890,58 @@ describe("turnStep", () => {
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
     expect(result.sessionState.snapshot?.session.history).toEqual([
+      { role: "user", content: announcement },
       { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
+  });
+
+  it("preserves a cancelled turn message that carries an attachment", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "attach:look at this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({ action: "cancelled" });
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      {
+        content: [
+          { text: "thread=unset; user=look at this", type: "text" },
+          expect.objectContaining({ filename: "diagram.png", type: "file" }),
+        ],
+        role: "user",
+      },
     ]);
   });
 
@@ -2137,7 +2382,6 @@ describe("turnStep", () => {
 
   it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
     const observedTaskDeliveries: unknown[] = [];
-    const observedTaskStates: unknown[] = [];
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
@@ -2165,13 +2409,11 @@ describe("turnStep", () => {
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => {
         observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
-        observedTaskStates.push(contextStorage.getStore()?.get(TurnTaskStateKey));
         return { next: { done: true, output: "ok" }, session: stepSession };
       };
     });
 
     const initialSerializedContext = createSerializedContext();
-    initialSerializedContext[TurnTaskStateKey.name] = "stale task state";
 
     const first = await turnStep({
       input: {
@@ -2201,10 +2443,9 @@ describe("turnStep", () => {
     });
 
     expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
-    expect(observedTaskStates).toEqual([undefined, undefined, undefined]);
   });
 
-  it("supplies initiating task state after the active turn accepts delegated work", async () => {
+  it.each(["none", "initiating"] as const)("sets initiating task phase (%s)", async (phase) => {
     const tasksBundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -2256,17 +2497,15 @@ describe("turnStep", () => {
 
     let observedInput: unknown;
     let observedPhase: unknown;
-    let observedTaskState: unknown;
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession, stepInput): Promise<StepResult> => {
         observedInput = stepInput;
         observedPhase = contextStorage.getStore()?.get(TurnTaskDeliveryKey);
-        observedTaskState = contextStorage.getStore()?.get(TurnTaskStateKey);
         return { next: { done: true, output: "ok" }, session: stepSession };
       };
     });
     const serializedContext = createSerializedContext();
-    serializedContext[TurnTaskDeliveryKey.name] = "none";
+    serializedContext[TurnTaskDeliveryKey.name] = phase;
 
     await turnStep({
       input: undefined,
@@ -2283,9 +2522,6 @@ describe("turnStep", () => {
     });
 
     expect(observedPhase).toBe("initiating");
-    expect(observedTaskState).toBe(
-      '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
-    );
     expect(observedInput).toBeUndefined();
   });
 

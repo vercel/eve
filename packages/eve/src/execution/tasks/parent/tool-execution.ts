@@ -4,7 +4,7 @@ import { ActivityObserverKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { CallbackBaseUrlKey } from "#harness/authorization.js";
+import { serializeContext } from "#context/serialize.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
@@ -17,20 +17,12 @@ import {
   type BackgroundToolExecutor,
 } from "#harness/background-tools.js";
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
-import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import {
-  createTaskDelegated,
-  isTaskDelegated,
-  type TaskExec,
-  type TaskSendCommand,
-} from "#tools/task.js";
-import { recordSessionTask } from "#tasks/session-index.js";
-import type { TaskInboundUpdate } from "#tasks/types.js";
+import { createTaskMessage, isTaskMessage, type TaskExec } from "#tools/task.js";
+import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
-import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   beginBackgroundTask,
   prepareBackgroundTask,
@@ -45,6 +37,7 @@ import {
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionDriverSupportsWorkflowTaskAuthorization } from "#execution/wire/session-inbox-resume.js";
 import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
@@ -56,6 +49,8 @@ import {
   type AgentHandleStoreCommandResult,
 } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
+import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
+import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 
 const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
 
@@ -144,6 +139,7 @@ export function readRetainedBackgroundToolResult(
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
+  private readonly steeringAgents = new Set<string>();
   private agentHandleSession: HarnessSession;
   private agentHandlesChanged = false;
   private retained = false;
@@ -221,7 +217,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     if (incomplete.length > 0) {
       await this.compensate(incomplete, cause);
     }
-    if (settled.length === 0) return;
+    if (settled.length === 0) {
+      this.retained = this.agentHandlesChanged && isTurnCancellation(cause);
+      return;
+    }
     // Cancellation must not compensate settled records: their tasks are
     // already running. Retain them for readRetainedBackgroundToolResult.
     if (isTurnCancellation(cause)) {
@@ -251,7 +250,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const tasks = this.records.flatMap((record) =>
       record.settled && record.task !== undefined ? [record.task] : [],
     );
-    if (tasks.length === 0) return undefined;
+    if (tasks.length === 0 && !this.agentHandlesChanged) return undefined;
     return {
       backgroundTaskSession: this.apply(this.initialSession),
       backgroundTasks: tasks.map(({ taskInboxToken, taskId, taskRunId }) => ({
@@ -276,26 +275,15 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const task = started.task;
     record.task = task;
 
-    const callbackBaseUrl = ctx.get(CallbackBaseUrlKey);
-    const binding = {
-      taskId: task.taskId,
-      token: task.taskInboxToken,
-      ...(callbackBaseUrl === undefined
-        ? {}
-        : {
-            url: createWorkflowCallbackUrl(
-              callbackBaseUrl,
-              createEveCallbackRoutePath(task.taskInboxToken),
-            ),
-          }),
-    };
     const taskExec: TaskExec = {
-      batch: input.batch.calls,
-      binding,
-      delegated: ({ executor, receipt }) => createTaskDelegated({ binding, executor, receipt }),
-      send: createTaskSender(task, input.options.toolCallId),
+      binding: { taskId: task.taskId, token: task.taskInboxToken },
+      postMessage: createTaskMessage,
+      send() {
+        throw new Error("task.send() was replaced by yielded task descriptors.");
+      },
       session: this.initialSession,
       task,
+      taskId: task.taskId,
     };
     if (input.definition.workflowId !== undefined) {
       record.settled = true;
@@ -306,28 +294,18 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       };
     }
     const output = input.definition.execute(input.toolInput, input.options, taskExec);
-    if (isAsyncIterable(output)) {
-      throw new Error("Background tools cannot return AsyncIterable output.");
-    }
-    const settled = await output;
+    const settled = isAsyncIterable(output)
+      ? await executeBackgroundIterable({
+          callId: input.options.toolCallId,
+          output,
+          task,
+        })
+      : await output;
     if (isAuthorizationSignal(settled)) return settled;
-    if (isTaskDelegated(settled)) {
-      if (settled.executor !== undefined) {
-        await deliverTaskCommand(task, {
-          executor: settled.executor,
-          kind: "bind",
-        });
-        record.task = { ...task, executor: settled.executor };
-      }
-      record.settled = true;
-      return started.receipt === undefined
-        ? settled.receipt
-        : { ...settled.receipt, ...started.receipt };
-    }
 
     await deliverTaskCommand(task, { data: parseJsonValue(settled), kind: "complete" });
     record.settled = true;
-    return settled;
+    return { status: "working", taskId: task.taskId };
   }
 
   private async startTask(input: {
@@ -455,15 +433,18 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         parentSessionId: taskInput.parentSessionId,
         parentTurnId,
       });
-      const claim = this.applyAgentHandleCommand({
-        agentId: subagentProjection.metadata.agentId,
-        callId: taskInput.callId,
-        expectedTarget: subagentProjection.metadata.mode,
-        invokedName: subagentProjection.metadata.name,
-        kind: "claim",
-        operationId,
-        ownerId: task.taskId,
-      });
+      const claim = await this.claimAgentForSteering(
+        {
+          agentId: subagentProjection.metadata.agentId,
+          callId: taskInput.callId,
+          expectedTarget: subagentProjection.metadata.mode,
+          invokedName: subagentProjection.metadata.name,
+          kind: "claim",
+          operationId,
+          ownerId: task.taskId,
+        },
+        input.ctx,
+      );
       if (!readClaimedHandle(claim)) {
         throwAgentClaimError(subagentProjection.metadata.agentId, claim);
       } else {
@@ -479,6 +460,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
       workflow: {
+        authorizationSupported: await sessionDriverSupportsWorkflowTaskAuthorization(
+          this.initialSession.sessionId,
+        ),
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,
@@ -486,6 +470,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         session: buildCallbackContext().session,
         stepIndex: input.emission.stepIndex,
         toolName: input.input.definition.name,
+        taskId: task.taskId,
         workflowId: workflow.workflowId,
       },
     });
@@ -507,6 +492,42 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       return { receipt: subagentProjection.receipt, task: backgroundTask };
     }
     return { receipt: subagentProjection.receipt, task: backgroundTask };
+  }
+
+  private async claimAgentForSteering(
+    command: Extract<AgentHandleStoreCommand, { kind: "claim" }>,
+    ctx: ReturnType<typeof loadContext>,
+  ): Promise<AgentHandleStoreCommandResult> {
+    const claim = this.applyAgentHandleCommand(command);
+    if (claim.kind !== "busy" || claim.handle.phase !== "claimed") return claim;
+
+    const handle = claim.handle;
+    if (this.steeringAgents.has(handle.identity.id)) return claim;
+
+    const entry = findSessionTaskEntry(this.agentHandleSession.state, handle.ownerId);
+    if (
+      entry?.metadata.kind !== "subagent" ||
+      entry.metadata.agentId !== handle.identity.id ||
+      entry.metadata.name !== handle.identity.name
+    ) {
+      return claim;
+    }
+
+    this.steeringAgents.add(handle.identity.id);
+    try {
+      await cancelOwnedTask({
+        cancelOwnedWork: cancelBackgroundAgentTask,
+        entry,
+        serializedContext: serializeContext(ctx),
+        session: this.agentHandleSession,
+      });
+      // Other calls in this batch may have changed the store while cancellation
+      // was pending. Release only the old owner, then claim the current handle.
+      this.applyAgentHandleCommand({ kind: "release-owner", ownerId: handle.ownerId });
+      return this.applyAgentHandleCommand(command);
+    } finally {
+      this.steeringAgents.delete(handle.identity.id);
+    }
   }
 
   private applyAgentHandleCommand(command: AgentHandleStoreCommand): AgentHandleStoreCommandResult {
@@ -558,6 +579,42 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 }
 
+async function executeBackgroundIterable(input: {
+  readonly callId: string;
+  readonly output: AsyncIterable<unknown>;
+  readonly task: BackgroundTask;
+}): Promise<unknown> {
+  const iterator = input.output[Symbol.asyncIterator]();
+  let updateIndex = 0;
+  let next = await iterator.next();
+  while (!next.done) {
+    const payload = isTaskMessage(next.value)
+      ? {
+          callId: input.callId,
+          kind: "task-message" as const,
+          message: next.value.message,
+          messageEpoch: input.task.taskId,
+          messageIndex: updateIndex++,
+        }
+      : {
+          callId: input.callId,
+          kind: "task-update" as const,
+          message: typeof next.value === "string" ? next.value : JSON.stringify(next.value),
+          updateEpoch: input.task.taskId,
+          updateIndex: updateIndex++,
+        };
+    const outcome = await sendTaskInboundPayload({
+      payload,
+      taskInboxToken: input.task.taskInboxToken,
+    });
+    if (outcome !== "delivered") {
+      throw new Error(`Task run "${input.task.taskId}" did not accept "${payload.kind}".`);
+    }
+    next = await iterator.next();
+  }
+  return next.value ?? null;
+}
+
 function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
   return (
     getAgentHandleStore(session.state)?.handles.some((handle) => handle.identity.id === agentId) ===
@@ -580,34 +637,6 @@ async function deliverTaskCommand(
   if (outcome !== "delivered") {
     throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
   }
-}
-
-function createTaskSender(
-  task: BackgroundTask,
-  callId: string,
-): (command: TaskSendCommand) => Promise<void> {
-  let nextUpdateIndex = 0;
-  return async (command) => {
-    if (command.kind !== "update") {
-      await deliverTaskCommand(task, command);
-      return;
-    }
-
-    const payload: TaskInboundUpdate = {
-      callId,
-      kind: "task-update",
-      message: command.message,
-      updateEpoch: task.taskId,
-      updateIndex: nextUpdateIndex++,
-    };
-    const outcome = await sendTaskInboundPayload({
-      payload,
-      taskInboxToken: task.taskInboxToken,
-    });
-    if (outcome !== "delivered") {
-      throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
-    }
-  };
 }
 
 function readClaimedHandle(result: AgentHandleStoreCommandResult): boolean {

@@ -41,6 +41,11 @@ import {
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
 import {
+  errorMessage,
+  ensureVercelSandboxTags,
+  resolveVercelSandboxTags,
+} from "#execution/sandbox/bindings/vercel-options.js";
+import {
   isVercelSandboxMissingError,
   isVercelSnapshotUnavailableError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
@@ -534,7 +539,8 @@ function createVercelInternalSandboxSession(
     },
     async writeFile(options: SandboxWriteFileOptions) {
       const bytes = await streamToBuffer(options.content);
-      await sandbox.writeFiles([{ content: bytes, path: options.path }]);
+      const path = await resolveVercelWritePath(sandbox, options.path, options.abortSignal);
+      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.abortSignal });
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
@@ -575,6 +581,23 @@ function resolveVercelSandboxPath(path: string): string {
   return `${WORKSPACE_ROOT}/${path}`;
 }
 
+async function resolveVercelWritePath(
+  sandbox: VercelSandbox,
+  path: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await sandbox.runCommand({
+    args: ["-m", "--", path],
+    cmd: "realpath",
+    signal,
+  });
+  const resolved = (await result.stdout()).trim();
+  if (result.exitCode !== 0 || !resolved.startsWith("/") || resolved.includes("\n")) {
+    throw new Error(`Failed to resolve Vercel Sandbox write path: ${path}`);
+  }
+  return resolved;
+}
+
 function isUnprovisionedTerminalTemplateSandbox(
   sandbox: VercelSandbox,
   authorSnapshotId: string | undefined,
@@ -612,87 +635,8 @@ function getVercelSandboxName(metadata: Record<string, unknown> | undefined): st
   return typeof sandboxName === "string" ? sandboxName : undefined;
 }
 
-function resolveVercelSandboxTags(
-  userTags: VercelCreateOptions["tags"],
-  eveTags: SandboxBackendTags | undefined,
-): Record<string, string> | undefined {
-  const tags: Record<string, string> = {};
-
-  if (userTags !== undefined) {
-    for (const [key, value] of Object.entries(userTags as Record<string, string>)) {
-      tags[key] = value;
-    }
-  }
-
-  if (eveTags !== undefined) {
-    for (const [key, value] of Object.entries(eveTags)) {
-      tags[key] = value;
-    }
-  }
-
-  const count = Object.keys(tags).length;
-  if (count === 0) {
-    return undefined;
-  }
-
-  if (count > VERCEL_SANDBOX_TAG_LIMIT) {
-    throw new Error(
-      `Vercel Sandbox supports at most ${VERCEL_SANDBOX_TAG_LIMIT} tags. ` +
-        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
-    );
-  }
-
-  return tags;
-}
-
-async function ensureVercelSandboxTags(
-  sandbox: VercelSandbox,
-  tags: Record<string, string> | undefined,
-): Promise<void> {
-  if (tags === undefined || areVercelSandboxTagsEqual(sandbox.tags, tags)) {
-    return;
-  }
-
-  await sandbox.update({ tags });
-}
-
-function areVercelSandboxTagsEqual(
-  current: Record<string, string> | undefined,
-  next: Record<string, string>,
-): boolean {
-  const currentTags = current ?? {};
-  const currentEntries = Object.entries(currentTags);
-  const nextEntries = Object.entries(next);
-
-  if (currentEntries.length !== nextEntries.length) {
-    return false;
-  }
-
-  return nextEntries.every(([key, value]) => currentTags[key] === value);
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const responseJson = (error as { readonly json?: unknown }).json;
-    const responseText = (error as { readonly text?: unknown }).text;
-    const responseBody =
-      typeof responseText === "string" && responseText.length > 0
-        ? responseText
-        : responseJson !== undefined
-          ? JSON.stringify(responseJson)
-          : undefined;
-    if (responseBody !== undefined) {
-      return `${error.message}: ${responseBody}`;
-    }
-    return error.message;
-  }
-  return String(error);
-}
-
 /**
  * 30 minutes. The `@vercel/sandbox` SDK defaults to 5 minutes which is
  * too short for multi-step workflows — the VM expires between steps.
  */
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
-
-const VERCEL_SANDBOX_TAG_LIMIT = 5;

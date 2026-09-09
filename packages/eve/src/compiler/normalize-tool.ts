@@ -107,13 +107,19 @@ export async function compileToolEntry(
   }
 
   const workflowId = readWorkflowFunctionId(entry.definition.execute);
+  const shape = {
+    lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
+    suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
+  };
   return {
     kind: "tool",
     definition: {
       behavior:
         workflowId === undefined
-          ? entry.definition.behavior
-          : { availability: [], handling: { kind: "workflow-tool", workflowId } },
+          ? entry.definition.behavior === undefined
+            ? { availability: [], shape }
+            : { ...entry.definition.behavior, shape }
+          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,

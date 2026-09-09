@@ -1,0 +1,13 @@
+diff --git a/dist/fs.js b/dist/fs.js
+index f5b40f81f2c8581d333c653a26fb64b4730e959c..93cd6d177a22426afdad49947140f07e73ab283b 100644
+--- a/dist/fs.js
++++ b/dist/fs.js
+@@ -360,7 +360,7 @@ export async function write(filePath, data, opts) {
+ }
+ export async function readJSON(filePath, decoder) {
+     try {
+-        const content = await fs.readFile(filePath, 'utf-8');
++        const content = await withWindowsRetry(() => fs.readFile(filePath, 'utf-8'));
+         return decoder.parse(JSON.parse(content, jsonReviver));
+     }
+     catch (error) {

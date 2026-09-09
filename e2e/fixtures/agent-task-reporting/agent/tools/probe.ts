@@ -2,13 +2,13 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 const PROBES = {
-  first: { delayMs: 10_000, result: "WAKE-MECHANISM" },
-  second: { delayMs: 40_000, result: "CHANNEL-DELIVERY" },
-  third: { delayMs: 70_000, result: "REPORTING-POLICY" },
+  first: { delayMs: 10_000, result: "oranges" },
+  second: { delayMs: 40_000, result: "pears" },
+  third: { delayMs: 70_000, result: "apples" },
 } as const;
 
 export default defineTool({
-  description: "Complete one requested reporting probe after its configured delay.",
+  description: "Look up the inventory item at one sample warehouse after its configured delay.",
   inputSchema: z.strictObject({
     check: z.enum(["first", "second", "third"]),
   }),

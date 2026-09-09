@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { createCliProgram, resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { cliTelemetryCommandPaths, internalCliCommandPaths } from "#cli/telemetry/index.js";
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
@@ -66,6 +67,28 @@ async function runInteractiveDev(
 }
 
 describe("CLI command registration", () => {
+  it("keeps telemetry's command allowlist aligned with registered commands", () => {
+    const program = createCliProgram(
+      { error: () => {}, log: () => {} },
+      {},
+      {
+        resolve: async () => {},
+        resolveAgent: async () => undefined as never,
+        root: process.cwd(),
+      },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
+    );
+    const paths: string[] = [];
+    const visit = (command: (typeof program.commands)[number], parentPath = ""): void => {
+      const path = [parentPath, command.name()].filter(Boolean).join(":");
+      paths.push(path);
+      for (const child of command.commands) visit(child, path);
+    };
+    for (const command of program.commands) visit(command);
+
+    expect([...cliTelemetryCommandPaths, ...internalCliCommandPaths].sort()).toEqual(paths.sort());
+  });
+
   it("lists the current project creation and Vercel commands", async () => {
     const output: string[] = [];
 
@@ -80,6 +103,7 @@ describe("CLI command registration", () => {
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
+    expect(help).toContain("telemetry");
     expect(help).not.toContain("setup [options] <item>");
   });
 
@@ -287,11 +311,20 @@ describe("bare eve command", () => {
     await runCli([], logger, { findApplicationRoot });
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
-      channelWebNextjs: undefined,
-      model: undefined,
-      reasoning: undefined,
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      undefined,
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: undefined,
+        reasoning: undefined,
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("runs dev from the enclosing eve application", async () => {
@@ -360,11 +393,20 @@ describe("eve init compatibility flags", () => {
       logger,
     );
 
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
-      channelWebNextjs: undefined,
-      model: "openai/gpt-5.6-sol",
-      reasoning: "high",
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: "openai/gpt-5.6-sol",
+        reasoning: "high",
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("rejects unsupported reasoning before running the init command", async () => {

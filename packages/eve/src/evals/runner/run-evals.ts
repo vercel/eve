@@ -33,7 +33,7 @@ export interface RunEvalsOptions {
   readonly maxConcurrency?: number;
   /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /** Receives `t.log` lines as evals run (used by `--verbose`). */
+  /** Receives verbose activity lines as evals run. */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
 
@@ -139,6 +139,12 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
           timeoutMs: options.timeoutMs,
         });
         results.push(result);
+
+        for (const session of result.result.sessions ?? []) {
+          if (session.sessionId === undefined) continue;
+          const role = session.primary ? "primary session" : "secondary session";
+          options.onEvalLog?.(evaluation.id, `workflow run id (${role}): ${session.sessionId}`);
+        }
 
         enqueueReporterCallback(evaluation, async (reporter) => {
           await reporter.onEvalComplete(result, {

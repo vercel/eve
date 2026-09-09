@@ -114,12 +114,13 @@ export interface SendTurnOptions<TOutput = unknown> {
   readonly turnPolicy?: TurnPolicy;
 
   /**
-   * Ephemeral client/page context for the next model call only.
+   * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are
    * JSON-serialized into one user-role model context message. Client context
    * rides along with a message or HITL response; it does not dispatch a turn by
-   * itself and is never persisted to durable session history.
+   * itself, remains available to every model call in the turn, and is never
+   * persisted to durable session history or exposed to later turns.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
 

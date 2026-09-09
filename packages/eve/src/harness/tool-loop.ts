@@ -1,3 +1,4 @@
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import {
   isStepCount,
   type LanguageModelCallEndEvent,
@@ -21,11 +22,11 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
   AuthKey,
+  HistoryStateKey,
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
   TurnTaskDeliveryKey,
-  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -132,6 +133,11 @@ import {
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
+  clearTurnClientContextState,
+  getTurnClientContextState,
+  setTurnClientContextState,
+} from "#harness/turn-client-context.js";
+import {
   getApprovalAuditState,
   markApprovalCandidateHistoryEventEmitted,
   markApprovalCandidatePendingEventEmitted,
@@ -139,7 +145,6 @@ import {
 } from "#harness/approval-candidates.js";
 import {
   coordinateApprovalDelivery,
-  shouldPrepareApprovalPolicyTools,
   shouldPrepareApprovalReplayTools,
 } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
@@ -185,10 +190,11 @@ import {
   extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
-import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
+import { resolveInitiatingTaskContext } from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
@@ -452,7 +458,6 @@ function buildHarnessToolsWithDynamicSubagents(
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
-  const resolveApprovalKey = resolveApprovalKeyFromTools(config.tools);
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
@@ -534,6 +539,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
       };
     };
+    const failBoundaryEvent = async (
+      error: unknown,
+      failureState: ReturnType<typeof getHarnessEmissionState>,
+    ): Promise<StepResult> => {
+      throwIfTurnAborted(config.abortSignal);
+      if (isTurnCancellation(error)) throw error;
+      if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
+      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
+        throw error;
+      }
+
+      stepInstrumentation?.recordError(error);
+      const errorId = createErrorId();
+      const message = toErrorMessage(error);
+      log.error("turn boundary handler failed — parking session", {
+        error,
+        errorId,
+        sessionId: session.sessionId,
+        turnId: failureState.turnId,
+      });
+      emissionState = await emitRecoverableFailedTurn(emit, failureState, {
+        code: "EVENT_HANDLER_FAILED",
+        continuationToken: session.continuationToken,
+        details: { errorId },
+        message,
+      });
+      return {
+        next: null,
+        session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
+        settledTurn: { isError: true, output: message },
+      };
+    };
     const preparePreambleTrace = async (): Promise<RuntimeTraceContext | undefined> => {
       return await stepInstrumentation?.preparePreamble({
         sequence: emissionState.sequence,
@@ -546,14 +583,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.clearOnly === true) {
       session = {
         ...session,
-        compaction: {
-          recentWindowSize: session.compaction.recentWindowSize,
-          threshold: session.compaction.threshold,
-          thresholdPercent: session.compaction.thresholdPercent,
-        },
-        history: [],
         state: clearMemorySessionState(session.state),
       };
+      session = replaceSessionHistory(session, []);
       await emit?.(
         createContextClearedEvent({
           sequence: emissionState.sequence,
@@ -591,15 +623,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             telemetry: stepInstrumentation?.telemetry(),
           });
 
-          session = {
-            ...compacted.session,
-            compaction: {
-              recentWindowSize: compacted.session.compaction.recentWindowSize,
-              threshold: compacted.session.compaction.threshold,
-              thresholdPercent: compacted.session.compaction.thresholdPercent,
-            },
-            history: compacted.messages,
-          };
+          session = compacted.session;
         } catch (error) {
           logError(log, "manual session compaction failed", error, {
             sessionId: session.sessionId,
@@ -669,7 +693,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedCoordination.messages, session.state),
       });
     }
-    const responseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+    const responseAuthorizationTools = shouldPrepareApprovalReplayTools({
       session,
       stepInput: effectiveStepInput,
     })
@@ -808,7 +832,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const pending = resolvePendingInput({
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
-      resolveApprovalKey,
+      resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
       session,
       stepInput: coordinated.stepInput,
     });
@@ -853,8 +877,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             history: [...parkedSession.history, ...instructionMessages],
           };
           session = parkedSession;
-          if (!isDynamicModelSelectionError(error)) throw error;
-          return failModelSelection(error, {
+          return failBoundaryEvent(error, {
             sessionStarted: true,
             sequence: emissionState.sequence,
             stepIndex: 0,
@@ -933,11 +956,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
-    const clientContext = readClientContext(effectiveStepInput);
+    const turnId = activeTurnId(emissionState);
+    const storedClientContext = getTurnClientContextState(pending.session.state, turnId);
+    const clientContext =
+      pending.deferredContext === true ? undefined : readClientContext(effectiveStepInput);
+    const activeClientContext = clientContext ?? storedClientContext?.messages;
     const ephemeralContextMessages: ModelMessage[] =
-      clientContext === undefined || pending.deferredContext === true
-        ? []
-        : clientContext.map((content) => ({ content, role: "user" }));
+      activeClientContext?.map((content) => ({ content, role: "user" })) ?? [];
     const preparedTurnInput: ModelMessage[] = [];
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
@@ -984,8 +1009,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           history: [...(memoryCommit?.history ?? pending.session.history), ...instructionMessages],
           state: memoryCommit?.state ?? pending.session.state,
         };
-        if (!isDynamicModelSelectionError(error)) throw error;
-        return failModelSelection(error, {
+        return failBoundaryEvent(error, {
           sessionStarted: true,
           sequence: emissionState.sequence,
           stepIndex: 0,
@@ -1059,15 +1083,33 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
+    // Keep ephemeral client context at the same position across durable steps.
+    let turnClientContext = storedClientContext;
+    if (clientContext !== undefined) {
+      turnClientContext = {
+        insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
+        messages: clientContext,
+        turnId,
+      };
+    }
+    if (turnClientContext !== undefined) {
+      session = setTurnClientContextState(session, turnClientContext);
+    }
+
     messages = [...messages, ...preparedTurnInput];
 
     const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
-      if (ephemeralContextMessages.length === 0) return [...durableMessages];
+      if (turnClientContext === undefined || turnClientContext.messages.length === 0) {
+        return [...durableMessages];
+      }
 
-      const insertionIndex = Math.max(0, durableMessages.length - preparedTurnInput.length);
+      const insertionIndex = Math.min(
+        Math.max(0, turnClientContext.insertionIndex),
+        durableMessages.length,
+      );
       return [
         ...durableMessages.slice(0, insertionIndex),
-        ...ephemeralContextMessages,
+        ...turnClientContext.messages.map((content) => ({ content, role: "user" as const })),
         ...durableMessages.slice(insertionIndex),
       ];
     };
@@ -1113,6 +1155,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
+    const clientContextTailLength =
+      turnClientContext === undefined
+        ? undefined
+        : Math.max(0, messages.length - turnClientContext.insertionIndex);
     const compaction = await maybeCompact({
       abortSignal: config.abortSignal,
       auth: ctx?.get(AuthKey) ?? null,
@@ -1131,20 +1177,36 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = compaction.session;
     if (compaction.compacted) {
       messages = compaction.messages;
+      if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
+        turnClientContext = {
+          ...turnClientContext,
+          insertionIndex: Math.max(0, messages.length - clientContextTailLength),
+        };
+        session = setTurnClientContextState(session, turnClientContext);
+      }
     }
     projectedMessages = normalizeModelMessages(
       projectHistory(createModelMessages(messages), session.state),
     );
 
     if (emit) {
-      await emitStepStarted(
-        emit,
-        emissionState,
-        requireSessionModelReference(session).id,
-        projectedMessages,
-      );
+      try {
+        await emitStepStarted(
+          emit,
+          emissionState,
+          requireSessionModelReference(session).id,
+          projectedMessages,
+        );
+      } catch (error) {
+        return failBoundaryEvent(error, emissionState);
+      }
     }
-    const approvedTools = getApprovedTools(session, resolveApprovalKey);
+    const approvedTools = getApprovedTools(
+      session,
+      resolveApprovalKeyFromTools(
+        buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx }),
+      ),
+    );
 
     const isFirstTurn = emissionState.sequence === 0;
     const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;
@@ -1163,33 +1225,32 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
-    // AI SDK rejects role:"system" in `messages`; currentMessages also keeps
-    // later turn-local context out of the stable system prompt cache prefix.
-    // Insert that context before the current delivery so the triggering user
-    // message remains the model's latest request.
-    const currentMessages = createCurrentMessages(projectedMessages, {
+    // Persist framework announcements before the new input, or after earlier
+    // tool results on a continuation, so later requests retain the full prefix.
+    const currentMessages = createCurrentMessages(messages, {
+      historyState: ctx?.get(HistoryStateKey),
       currentTurnMessages: preparedTurnInput,
+      projectedMessages,
     });
     if (ctx !== undefined) {
       currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
-      const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        currentMessages.add(emissionState.sequence, skillAnnouncement);
-      }
-      const taskState = ctx.get(TurnTaskStateKey);
-      if (taskState !== undefined) {
-        currentMessages.add(emissionState.sequence, taskState);
-      }
     }
-    if (deliveryPolicy.instruction !== undefined) {
-      currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
-    }
+    const taskContext =
+      ctx?.get(TurnTaskDeliveryKey) === "initiating"
+        ? resolveInitiatingTaskContext({ state: session.state, turnId })
+        : undefined;
+    currentMessages.addAnnouncements({
+      availableSkills: ctx?.get(PendingSkillAnnouncementKey),
+      taskState: taskContext?.context,
+      deliveryInstruction: deliveryPolicy.instruction,
+    });
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
-      currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
+      currentMessages.add(pendingApprovals, { cacheFriendly: false });
     }
+    const promptMessages = currentMessages.history;
 
     // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
     // only. Session history remains ref-only across future step boundaries.
@@ -1774,18 +1835,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Handle result ------------------------------------------------------
 
-    return handleStepResult({
+    const stepResult = await handleStepResult({
       config,
       emit,
       emissionState,
       durableModelPromptMessageCount:
-        ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
-      promptMessages: messages,
+        turnClientContext === undefined || turnClientContext.messages.length === 0
+          ? modelMessages.length
+          : undefined,
+      promptMessages,
       result,
       runStep,
       session,
       coordinationTools: modelCallCoordinationTools,
     });
+    // The returned session now owns these messages; persist their baseline with it.
+    ctx?.set(HistoryStateKey, currentMessages.historyState);
+    return stepResult;
   }
 
   return runStep;
@@ -2764,6 +2830,7 @@ async function finishTaskTurn(input: {
 }): Promise<StepResult> {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
+  session = clearTurnClientContextState(session);
 
   if (schema === undefined) {
     if (emit) {
@@ -2813,6 +2880,7 @@ async function finishConversationTurn(input: {
 }): Promise<StepResult> {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
+  session = clearTurnClientContextState(session);
 
   if (schema === undefined) {
     if (emit) {
@@ -3050,6 +3118,19 @@ function createNextCompactionConfig(
   return next;
 }
 
+function replaceSessionHistory(session: HarnessSession, history: ModelMessage[]): HarnessSession {
+  contextStorage.getStore()?.delete(HistoryStateKey);
+  return {
+    ...session,
+    history,
+    compaction: {
+      recentWindowSize: session.compaction.recentWindowSize,
+      threshold: session.compaction.threshold,
+      thresholdPercent: session.compaction.thresholdPercent,
+    },
+  };
+}
+
 /**
  * Runs the compaction pipeline once if the session's input-token estimate
  * is over the configured threshold. Mutates neither input; returns the new
@@ -3172,7 +3253,7 @@ async function maybeCompact(input: {
     }
   }
 
-  return { compacted: true, messages, session };
+  return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
 }
 
 /**

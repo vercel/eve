@@ -52,7 +52,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     setupPrompt:
       "Set up the eve chat template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
-      "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
+      "A persisted Next.js chat template for eve, with per-user long-term memory, Better Auth, Drizzle, Neon, and Upstash Redis.",
     sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-chat-template",
     category: "Chat",
     model: "anthropic/claude-sonnet-5",
@@ -69,6 +69,7 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/channels/eve.ts",
       "agent/channels/slack.ts",
       "agent/instructions.md",
+      "agent/memory/profile.ts",
       "agent/skills/plan_a_trip.md",
       "agent/tools/get_weather.ts",
     ],

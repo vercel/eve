@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { act, create } from "react-test-renderer";
+import { act, create as createRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
@@ -131,8 +131,22 @@ function completedTurnData(input: {
   };
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
+const renderers: ReturnType<typeof createRenderer>[] = [];
+
+function create(...args: Parameters<typeof createRenderer>) {
+  const renderer = createRenderer(...args);
+  renderers.push(renderer);
+  return renderer;
+}
+
+afterEach(async () => {
+  try {
+    await act(async () => {
+      for (const renderer of renderers.splice(0)) renderer.unmount();
+    });
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 describe("useEveAgent", () => {
@@ -689,7 +703,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
-      .mockResolvedValueOnce(createEagerStreamResponse([]));
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
     const statuses: string[] = [];
 
@@ -705,6 +719,8 @@ describe("useEveAgent", () => {
 
     await act(async () => {
       create(createElement(TestComponent));
+    });
+    await act(async () => {
       await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
 
