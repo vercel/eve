@@ -39,7 +39,8 @@ export interface DefaultSandboxProbes {
 // module participates in an import cycle through the runtime resolver,
 // so the probe imports may still be uninitialized live bindings when
 // this object literal evaluates. Accessing them at call time is safe.
-const PRODUCTION_PROBES: DefaultSandboxProbes = {
+/** Runtime probes shared by availability-aware built-in backend selectors. @internal */
+export const SANDBOX_BACKEND_PROBES: DefaultSandboxProbes = {
   isDeployedOnVercel: () => Boolean(process.env.VERCEL),
   isDockerAvailable: () => isLinuxDockerDaemonAvailableSync(),
   isMicrosandboxSupported: () => isMicrosandboxPlatformSupported(),
@@ -64,7 +65,7 @@ const PRODUCTION_PROBES: DefaultSandboxProbes = {
  * `vercel()`).
  */
 export function defaultSandbox(opts?: DefaultSandboxOptions): SandboxBackend {
-  return lazyBackend(() => selectDefaultSandbox(opts, PRODUCTION_PROBES));
+  return lazyBackend(() => selectDefaultSandbox(opts, SANDBOX_BACKEND_PROBES));
 }
 
 /**

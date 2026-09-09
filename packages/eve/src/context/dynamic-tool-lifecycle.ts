@@ -199,7 +199,6 @@ export function validateDurableDynamicToolCallbacks(
     );
   }
 
-  const hasLabelStart = entry.label?.start !== undefined;
   const hasApproval = entry.approval !== undefined;
   const hasApprovalResponse =
     entry.approval !== undefined &&
@@ -212,12 +211,26 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
+  const labelComplete = validateReference({
+    name,
+    owner,
+    phase: "labelComplete",
+    stamped: raw.label?.complete,
+    required: false,
+  });
+  const labelDelta = validateReference({
+    name,
+    owner,
+    phase: "labelDelta",
+    stamped: raw.label?.delta,
+    required: false,
+  });
   const labelStart = validateReference({
     name,
     owner,
     phase: "labelStart",
     stamped: raw.label?.start,
-    required: hasLabelStart,
+    required: false,
   });
   const approvalKey = validateReference({
     name,
@@ -250,13 +263,23 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
-    label?: { start?: DurableDynamicCallbackReference };
+    label?: {
+      complete?: DurableDynamicCallbackReference;
+      delta?: DurableDynamicCallbackReference;
+      start?: DurableDynamicCallbackReference;
+    };
     approvalKey?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
-  if (labelStart !== undefined) callbacks.label = { start: labelStart };
+  if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+    callbacks.label = {
+      complete: labelComplete,
+      delta: labelDelta,
+      start: labelStart,
+    };
+  }
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;

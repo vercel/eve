@@ -170,6 +170,44 @@ describe("durable callback capture validation", () => {
       'Dynamic tool "captured" callback "execute" has a non-serializable capture',
     );
   });
+
+  it("falls back to the tool name when presentation callbacks are not durable", () => {
+    const entry = defineTool({
+      description: "labeled tool",
+      inputSchema: { type: "object" },
+      label: {
+        complete: () => "Completed label",
+        delta: () => "Delta label",
+        start: () => "Starting label",
+      },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: {} },
+    });
+
+    expect(validateDurableDynamicToolCallbacks("labeled", entry, callbackOwner("labeled"))).toEqual(
+      { execute: { closure: {} } },
+    );
+  });
+
+  it("still requires durable behavioral callbacks", () => {
+    const entry = defineTool({
+      approval: () => "user-approval",
+      description: "guarded tool",
+      inputSchema: { type: "object" },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: {} },
+    });
+
+    expect(() =>
+      validateDurableDynamicToolCallbacks("guarded", entry, callbackOwner("guarded")),
+    ).toThrow(
+      'Dynamic tool "guarded" callback "approvalRequest" does not have a durable descriptor',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1536,7 +1574,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays a label start callback", () => {
+  it("replays label callbacks", () => {
     const ctx = createCtx();
     const owner = {
       sessionId: ctx.require(SessionIdKey),
@@ -1551,10 +1589,26 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
       owner,
     );
+    registerTestCallback(
+      "deploy",
+      "labelComplete",
+      (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+      owner,
+    );
+    registerTestCallback(
+      "deploy",
+      "labelDelta",
+      (_closure, _input, partial) => String((partial as { phase: unknown }).phase),
+      owner,
+    );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          label: { start: { closure: {} } },
+          label: {
+            complete: { closure: {} },
+            delta: { closure: {} },
+            start: { closure: {} },
+          },
           execute: { closure: {} },
         },
         description: "Deploy.",
@@ -1565,8 +1619,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       },
     ]);
 
-    expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
-      "Deploy to preview",
+    const tool = buildDynamicTools(ctx)[0];
+    expect(tool?.label?.start?.({ environment: "preview" })).toBe("Deploy to preview");
+    expect(
+      tool?.label?.complete?.({ environment: "preview" }, { url: "preview.example.com" }),
+    ).toBe("Deployed to preview.example.com");
+    expect(tool?.label?.delta?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
+      "Uploading",
     );
     clearDurableDynamicCallbacks(owner.sessionId);
   });

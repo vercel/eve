@@ -6,6 +6,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 export function projectActivityEvents(input: {
   readonly at: string;
   readonly event: UnstampedMessageStreamEvent;
+  readonly eventId?: string;
   readonly lineage: ActivityWorkIdentityV1;
 }): readonly ActivityEventV1[] {
   const { event, lineage } = input;
@@ -44,6 +45,20 @@ export function projectActivityEvents(input: {
       ];
     });
   }
+  if (event.type === "action.partial") {
+    const id = actionId(lineage.id, event.data.result.callId);
+    const label = activityLabel(event.data.presentation?.[event.data.result.callId]?.label);
+    return label === undefined
+      ? []
+      : [
+          {
+            actionId: id,
+            eventId: `${id}:update:${input.eventId ?? input.at}`,
+            kind: "action.label.updated",
+            label,
+          },
+        ];
+  }
   if (event.type === "action.result") {
     const result = event.data.result;
     if (result.kind === "subagent-result") {
@@ -72,7 +87,18 @@ export function projectActivityEvents(input: {
       ];
     }
     const id = actionId(lineage.id, result.callId);
+    const label = activityLabel(event.data.presentation?.[result.callId]?.label);
     return [
+      ...(label === undefined
+        ? []
+        : [
+            {
+              actionId: id,
+              eventId: `${id}:result:${input.eventId ?? input.at}`,
+              kind: "action.label.updated" as const,
+              label,
+            },
+          ]),
       {
         actionId: id,
         eventId: `${id}:settled:${event.data.status}`,

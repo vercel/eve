@@ -115,7 +115,79 @@ describe("projectActivityEvents", () => {
     expect(event.blocker.label).toHaveLength(MAX_ACTIVITY_TEXT_LENGTH);
   });
 
-  it("projects safe tool settlement", () => {
+  it("projects safe tool updates from partial events", () => {
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:01Z",
+        event: {
+          data: {
+            presentation: { "tool-1": { label: "Collecting sources" } },
+            result: {
+              callId: "tool-1",
+              kind: "tool-result",
+              output: { secret: "hidden" },
+              toolName: "search",
+            },
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn",
+          },
+          type: "action.partial",
+        },
+        eventId: "partial-1",
+        lineage,
+      }),
+    ).toEqual([
+      {
+        actionId: "action:work:root:turn:tool-1",
+        eventId: "action:work:root:turn:tool-1:update:partial-1",
+        kind: "action.label.updated",
+        label: "Collecting sources",
+      },
+    ]);
+  });
+
+  it("projects successful result text before tool settlement", () => {
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:02Z",
+        event: {
+          data: {
+            presentation: { "tool-1": { label: "Report ready" } },
+            result: {
+              callId: "tool-1",
+              kind: "tool-result",
+              output: { report: "hidden" },
+              toolName: "build_report",
+            },
+            sequence: 0,
+            status: "completed",
+            stepIndex: 0,
+            turnId: "turn",
+          },
+          type: "action.result",
+        },
+        eventId: "result-1",
+        lineage,
+      }),
+    ).toEqual([
+      {
+        actionId: "action:work:root:turn:tool-1",
+        eventId: "action:work:root:turn:tool-1:result:result-1",
+        kind: "action.label.updated",
+        label: "Report ready",
+      },
+      {
+        actionId: "action:work:root:turn:tool-1",
+        eventId: "action:work:root:turn:tool-1:settled:completed",
+        kind: "action.settled",
+        outcome: "completed",
+        settledAt: "2026-01-01T00:00:02Z",
+      },
+    ]);
+  });
+
+  it("projects safe failed tool settlement", () => {
     expect(
       projectActivityEvents({
         at: "2026-01-01T00:00:01Z",

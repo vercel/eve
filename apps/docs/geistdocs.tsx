@@ -23,6 +23,10 @@ export const nav = [
     label: "Templates",
     href: "/templates",
   },
+  {
+    label: "Changelog",
+    href: "/changelog",
+  },
 ];
 
 export const suggestions = [
@@ -33,6 +37,13 @@ export const suggestions = [
 ];
 
 export const agent = {
+  links: [
+    {
+      label: "Changelog",
+      href: "/changelog.md",
+      description: "eve release notes as Markdown, with links to older releases.",
+    },
+  ],
   product: {
     name: "eve",
     description:
