@@ -1,0 +1,78 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { ContextContainer } from "#context/container.js";
+import { ResponseReleaseEventGate } from "#execution/response-release-event-gate.js";
+import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
+
+const { dispatchBeforeResponseReleaseHooks } = vi.hoisted(() => ({
+  dispatchBeforeResponseReleaseHooks: vi.fn(),
+}));
+
+vi.mock("#context/hook-lifecycle.js", () => ({ dispatchBeforeResponseReleaseHooks }));
+
+const terminal = {
+  data: {
+    finishReason: "stop" as const,
+    message: "candidate",
+    sequence: 0,
+    stepIndex: 0,
+    turnId: "turn_0",
+  },
+  type: "message.completed" as const,
+};
+
+const registry: RuntimeHookRegistry = {
+  beforeResponseRelease: [{ handler: vi.fn(), slug: "review" }],
+  streamEventsByType: new Map(),
+  streamEventsWildcard: [],
+};
+
+describe("ResponseReleaseEventGate", () => {
+  it("withholds then releases a terminal completion when history is retained", async () => {
+    const gate = new ResponseReleaseEventGate(new ContextContainer(), registry);
+    const release = vi.fn().mockResolvedValue(undefined);
+
+    expect(gate.intercept(terminal)).toBe(true);
+    await expect(
+      gate.beforeRelease(release)!({ history: [], output: "candidate", turnId: "turn_0" }),
+    ).resolves.toBeUndefined();
+    expect(release).toHaveBeenCalledWith(terminal);
+  });
+
+  it("does not intercept task-mode terminal completions", () => {
+    const gate = new ResponseReleaseEventGate(new ContextContainer(), registry, false);
+
+    expect(gate.intercept(terminal)).toBe(false);
+    expect(gate.beforeRelease(vi.fn())).toBeUndefined();
+  });
+
+  it("does not intercept a response that parks on tool calls", () => {
+    const gate = new ResponseReleaseEventGate(new ContextContainer(), registry);
+
+    expect(
+      gate.intercept({
+        ...terminal,
+        data: { ...terminal.data, finishReason: "tool-calls" },
+      }),
+    ).toBe(false);
+  });
+
+  it("drops a terminal completion when a hook skips release", async () => {
+    dispatchBeforeResponseReleaseHooks.mockResolvedValueOnce("skip");
+    const gate = new ResponseReleaseEventGate(new ContextContainer(), registry);
+    const release = vi.fn().mockResolvedValue(undefined);
+
+    expect(gate.intercept(terminal)).toBe(true);
+    await expect(
+      gate.beforeRelease(release)!({
+        history: [
+          { content: "keep", role: "user" },
+          { content: "remove", role: "assistant" },
+        ],
+        output: "candidate",
+        turnId: "turn_0",
+      }),
+    ).resolves.toBe("skip");
+    expect(release).not.toHaveBeenCalled();
+  });
+});

@@ -7,6 +7,7 @@
  */
 
 export {
+  type BeforeResponseReleaseHook,
   type HookContext,
   type HookDefinition,
   type HookEvent,
@@ -15,5 +16,6 @@ export {
   type HookEventType,
   type StreamEventHook,
   type StreamEventHooks,
+  type ResponseReleaseCandidate,
   defineHook,
 } from "#public/definitions/hook.js";

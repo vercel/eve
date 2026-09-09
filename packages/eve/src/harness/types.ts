@@ -305,6 +305,12 @@ export interface ToolLoopHarnessConfig {
    */
   readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
+  /** Optional suppression requested before terminal response release. */
+  readonly beforeResponseRelease?: (input: {
+    readonly history: readonly ModelMessage[];
+    readonly output: unknown;
+    readonly turnId: string;
+  }) => Promise<"skip" | undefined>;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */
