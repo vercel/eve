@@ -29,7 +29,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { background } from "#internal/workflow/background.js";
 
-/** One event path for live progress and committed terminal effects. */
+/** All writes target the step's local enqueue sink; lifecycle work retains its ordering. */
 export function bindTurnEvents(input: {
   readonly abortSignal?: AbortSignal;
   readonly ctx: ContextContainer;

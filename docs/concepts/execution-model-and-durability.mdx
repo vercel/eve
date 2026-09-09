@@ -15,6 +15,19 @@ Work nests in three levels:
 
 Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
 
+The first execution step reads the latest settled session snapshot once, after
+claiming the turn inbox. Intermediate state travels through Workflow step inputs
+and results. At turn end, eve finalizes lifecycle effects, appends one full session
+snapshot, and then releases the inbox. The shared snapshot stream is not read or
+written between execution steps. Live response events use a separate event stream.
+
+Event writes enqueue locally and drain eagerly in order while model preparation
+and execution continue. Opening storage and writing preamble events do not block
+the model request. The step registers its final drain with `waitUntil` and waits
+for persistence before completing, so later steps and stream closure cannot
+overtake earlier output. Lifecycle handlers that prepare context still run before
+the model call. A failed drain aborts active model work and fails the step.
+
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
 When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
@@ -57,6 +70,11 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 ## Resuming after a crash
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+
+Snapshot publication is a separate step after finalization. If its write is retried,
+it reuses the finalized state without rerunning lifecycle handlers. A retry can append
+an identical snapshot; the latest record remains the settled state. Intermediate
+execution uses normal Workflow retries rather than additional snapshot markers.
 
 There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
 

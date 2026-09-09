@@ -17,6 +17,11 @@ export default defineEval({
 
     await t.require(second.sessionId, equals(first.sessionId));
 
+    const third = await t.send(
+      "What word did I ask you to remember at the start? Reply with just the word.",
+    );
+    await t.require(third.sessionId, equals(first.sessionId));
+
     t.succeeded();
     t.messageIncludes(/marigold/i);
     t.check(t.transcript, includes("User:\nMy favorite word is marigold. Remember it."));

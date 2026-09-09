@@ -1,12 +1,40 @@
 ---
 issue: none
 status: in-progress
-last_updated: "2026-09-08"
+last_updated: "2026-09-09"
 ---
 
 # Stable session storage, a small holder, and independent turns
 
 ## Startup latency iteration
+
+### September 9 snapshot simplification
+
+Event output now uses one bounded step-local enqueue writer. Storage opens lazily
+on the first event and drains eagerly, keeping one Workflow chunk per event for
+cursor compatibility. Every local write completes without storage backpressure.
+The final drain is registered with host `waitUntil` and awaited at the step boundary
+to preserve ordering across processes. Storage failure signals abort to active
+model work. Pure `waitUntil`-only completion needs a durable cross-step ordering
+primitive; a process-local queue cannot provide that guarantee.
+
+This iteration supersedes the per-step immutable-record design below. A turn reads
+one full snapshot from the snapshot stream tail after claiming its inbox. Intra-turn
+state travels in ordinary Workflow step inputs/results. There are no `:entered`
+records, snapshot index, per-write streams, or effect-replay probes. An initialized
+stream contains a null sentinel until the first turn settles.
+
+Finalization returns settled state as a Workflow step result. A separate commit
+step appends that state once before inbox disposal; retrying the append can repeat
+the same record but cannot rerun finalization. Terminal cleanup follows commit.
+Task/tool acknowledgements run after the creating step result is recorded. First
+turn descriptor publication and timeout start overlap model execution, and complete
+before that step returns. Ordinary step failure follows Workflow retry semantics.
+
+The happy path has one snapshot tail read, zero intermediate snapshot I/O, and one
+snapshot append per executing turn. Snapshot payloads now occupy step history;
+recovery and throughput should be validated against this contract, not the older
+small-reference-only design.
 
 The September 8 implementation updates the original readiness contract below:
 fresh ID-only creation returns after holder start, while alias-bearing creation

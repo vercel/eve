@@ -19,10 +19,9 @@ function descriptorStream(holderRunId: string): string {
 export async function publishSessionDescriptor(
   holderRunId: string,
   resources: SessionResources,
-  options?: { readonly fresh?: boolean },
 ): Promise<void> {
   const stream = descriptorStream(holderRunId);
-  if (!options?.fresh && (await streamTailIndex(stream)) !== -1) {
+  if ((await streamTailIndex(stream)) !== -1) {
     if (!isDeepStrictEqual(await readStreamRecord<SessionResources>(stream), resources)) {
       throw new Error("An immutable session resource was published with different contents.");
     }
@@ -31,11 +30,9 @@ export async function publishSessionDescriptor(
   await appendStreamRecords(stream, [resources], true);
 }
 
-export async function initializeSessionResources(
-  resources: SessionResources,
-  options?: { readonly fresh?: boolean },
-): Promise<void> {
-  await sessionSnapshots.initialize(resources.snapshots, options);
+export async function initializeSessionResources(resources: SessionResources): Promise<void> {
+  // Bootstrap retries can repeat this sentinel before any turn has been dispatched.
+  await sessionSnapshots.initialize(resources.snapshots);
   // The existing run owns its empty default stream. The first event materializes
   // its contents; readers can wait on that stable address before any write.
 }

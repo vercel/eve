@@ -39,6 +39,11 @@ their background dispatch waits for initialization before starting a turn candid
 Create-once requests with an `operationId` resolve the canonical session before
 returning its ID.
 
+Each executing turn reads the latest settled snapshot once. Workflow step results
+preserve intermediate state until finalization; the turn appends its final snapshot
+before releasing execution ownership. A follow-up that arrives during that write
+waits for the current owner, so it cannot hydrate the previous turn's state early.
+
 ## Stream a session
 
 ```bash

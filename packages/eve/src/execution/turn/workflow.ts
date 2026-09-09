@@ -5,8 +5,13 @@ import type { InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
 import { awaitTurnStep, forwardSubmissionStep } from "#execution/turn/admission.js";
 import { awaitRunStep } from "#internal/workflow/await-run.js";
-import { executeTurnStep } from "#execution/turn/execute.js";
-import { failTurnStep, finalizeTurnStep } from "#execution/turn/finalize.js";
+import { executeTurnStep, acknowledgeTurnWorkStep } from "#execution/turn/execute.js";
+import {
+  failTurnStep,
+  finalizeTurnStep,
+  commitTurnStep,
+  closeSessionStep,
+} from "#execution/turn/finalize.js";
 import {
   interruptionKind,
   reduceTurnBoundary,
@@ -14,14 +19,19 @@ import {
 } from "#execution/turn/reduce.js";
 import type { TurnExecutionResult, TurnReceipt, TurnWorkflowInput } from "#execution/turn/types.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import type { SnapshotRecordRef } from "#execution/session/resources.js";
+import type { InitializedSessionCheckpoint } from "#execution/turn/types.js";
+import type { SessionCheckpoint } from "#execution/turn/types.js";
 import { deferTurnStep } from "#execution/session/dispatch.js";
+
+type ClaimedTurnResult =
+  | Exclude<TurnExecutionResult, { kind: "progress" }>
+  | { readonly kind: "settled"; readonly checkpoint: SessionCheckpoint };
 
 export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceipt> {
   "use workflow";
   const runId = getWorkflowMetadata().workflowRunId;
   const token = activeTurnToken(input.session.sessionId);
-  let checkpoint: SnapshotRecordRef | undefined;
+  let checkpoint: InitializedSessionCheckpoint | undefined;
   if (input.afterRunId !== undefined) await awaitTurnStep(input.afterRunId);
   while (true) {
     const inbox = createOwnerInbox({ token });
@@ -29,23 +39,33 @@ export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceip
       const claim = await inbox.claim();
       if (claim.kind === "owned") {
         const eventIds = new Set([input.submission.eventId]);
-        let result: Exclude<TurnExecutionResult, { kind: "progress" }>;
+        let result: ClaimedTurnResult;
         try {
-          result = await executeClaimedTurn(input, inbox, eventIds, (ref) => {
-            checkpoint = ref;
+          result = await executeClaimedTurn(input, inbox, eventIds, (state) => {
+            checkpoint = state;
           });
         } catch (error) {
-          return await failTurnStep({
+          const failed = await failTurnStep({
             session: input.session,
             submission: input.submission,
             eventIds: [...eventIds],
             checkpoint,
             error: error instanceof Error ? error.message : String(error),
           });
+          result = { kind: "settled", checkpoint: failed };
         }
         // A deferral failure belongs to this candidate, not to the settled session.
         if (result.kind === "wait")
           return await deferTurnStep({ ...input, afterRunId: result.runId });
+        if (result.kind === "settled") {
+          const receipt = await commitTurnStep({
+            session: input.session,
+            checkpoint: result.checkpoint,
+            eventIds: [...eventIds],
+          });
+          if (receipt.terminal) await closeSessionStep(input.session, result.checkpoint);
+          return receipt;
+        }
         return result.receipt;
       }
     } finally {
@@ -65,8 +85,8 @@ async function executeClaimedTurn(
   input: TurnWorkflowInput,
   inbox: OwnerInbox,
   eventIds: Set<string>,
-  observeCheckpoint: (ref: SnapshotRecordRef) => void,
-): Promise<Exclude<TurnExecutionResult, { kind: "progress" }>> {
+  observeCheckpoint: (checkpoint: InitializedSessionCheckpoint) => void,
+): Promise<ClaimedTurnResult> {
   const controller = new AbortController();
   let turnId = `turn_${inbox.address.ownerRunId}`;
   let taskId =
@@ -106,6 +126,7 @@ async function executeClaimedTurn(
   const slept = new Set<string>();
   const executors = new Map<string, Promise<void>>();
   const completedExecutors = new Set<string>();
+  const acknowledgedSteps = new Set<string>();
   const watchExecutors = (runIds: readonly string[]): void => {
     for (const runId of runIds) {
       if (executors.has(runId) || completedExecutors.has(runId)) continue;
@@ -155,12 +176,21 @@ async function executeClaimedTurn(
       work: { kind: "model" },
       abortSignal: controller.signal,
     });
-    throwIfOwnerFailed();
     while (result.kind === "progress") {
       const progress = result.progress;
       turnId = progress.turnId;
       taskId = progress.taskId;
       observeCheckpoint(progress.checkpoint);
+      throwIfOwnerFailed();
+      const tools = progress.checkpoint.pendingToolAcks ?? [];
+      const tasks = progress.checkpoint.pendingTaskAcks ?? [];
+      if (
+        (tools.length > 0 || tasks.length > 0) &&
+        !acknowledgedSteps.has(progress.checkpoint.writeId)
+      ) {
+        await acknowledgeTurnWorkStep({ tools, tasks });
+        acknowledgedSteps.add(progress.checkpoint.writeId);
+      }
       if (progress.claimedContinuationToken !== undefined)
         aliases.add(progress.claimedContinuationToken);
       await claimAlias(progress.continuationToken);
@@ -184,7 +214,7 @@ async function executeClaimedTurn(
       const decision = reduceTurnBoundary(progress, pending);
       if (decision.kind === "finalize") {
         const initialKind = interruptionKind(input.submission, turnId, taskId);
-        const receipt = await finalizeTurnStep({
+        let settled = await finalizeTurnStep({
           session: input.session,
           checkpoint: progress.checkpoint,
           eventIds: [...eventIds],
@@ -195,8 +225,15 @@ async function executeClaimedTurn(
               : decision.settlement,
           pending,
         });
-        if (!receipt.terminal) await claimAlias(receipt.continuationToken);
-        return { kind: "receipt", receipt };
+        const terminal = settled.phase === "terminal" || settled.phase === "initialization-failed";
+        if (!terminal && settled.phase !== "initialization-failed") {
+          await claimAlias(settled.state.continuationToken);
+          settled = {
+            ...settled,
+            claimedContinuationToken: settled.state.continuationToken || undefined,
+          };
+        }
+        return { kind: "settled", checkpoint: settled };
       }
       if (decision.kind === "wait") {
         await Promise.race([readNext(), ...executors.values()]);
@@ -217,9 +254,9 @@ async function executeClaimedTurn(
               : { kind: "dispatch" },
         abortSignal: controller.signal,
       });
-      throwIfOwnerFailed();
       if (decision.kind === "dispatch") pending.push(...envelopes);
     }
+    throwIfOwnerFailed();
     if (result.kind === "receipt" && !result.receipt.terminal)
       await claimAlias(result.receipt.continuationToken);
     return result;

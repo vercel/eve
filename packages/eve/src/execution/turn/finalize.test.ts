@@ -1,59 +1,43 @@
-import { accountPending } from "#execution/turn/submissions.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { failTurnStep, finalizeTurnStep } from "#execution/turn/finalize.js";
-import { createSessionResources, type SnapshotRecordRef } from "#execution/session/resources.js";
-import type { InitializedSessionCheckpoint, SessionCheckpoint } from "#execution/turn/types.js";
+import {
+  finalizeTurnStep,
+  failTurnStep,
+  commitTurnStep,
+  closeSessionStep,
+} from "#execution/turn/finalize.js";
+import { createSessionResources } from "#execution/session/resources.js";
+import type { InitializedSessionCheckpoint } from "#execution/turn/types.js";
 import { createDurableSessionState } from "#execution/session/state.js";
 import { createSessionWaitingEvent, stampMessageStreamEvent } from "#protocol/message.js";
 
 const mocks = vi.hoisted(() => ({
-  attempt: 2,
-  find: vi.fn(),
-  read: vi.fn(),
   append: vi.fn(),
   latest: vi.fn(),
-  closeSnapshots: vi.fn(),
-  appendEvents: vi.fn(),
+  close: vi.fn(),
+  events: vi.fn(),
   closeEvents: vi.fn(),
-  publish: vi.fn(),
   finalize: vi.fn(),
   cancel: vi.fn(),
   cancelDescendants: vi.fn(),
-  terminateChildren: vi.fn(),
-  cancelTimer: vi.fn(),
+  terminate: vi.fn(),
+  notify: vi.fn(),
   notifyCancel: vi.fn(),
-  notifyCaller: vi.fn(),
-  notifyParent: vi.fn(),
-  callback: vi.fn(),
   cancelRun: vi.fn(),
-  log: vi.fn(),
+  publish: vi.fn(),
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
-  getStepMetadata: () => ({ stepId: "commit", attempt: mocks.attempt }),
+  getStepMetadata: () => ({ stepId: "finalize" }),
   getWorkflowMetadata: () => ({ workflowRunId: "owner" }),
 }));
-vi.mock("#internal/logging.js", () => ({ createLogger: () => ({ error: mocks.log }) }));
-vi.mock("#execution/turn/initialization-failure.js", () => ({
-  notifyInitializationFailure: vi.fn(),
-}));
 vi.mock("#execution/session/snapshots.js", () => ({
-  sessionSnapshots: {
-    find: mocks.find,
-    read: mocks.read,
-    append: mocks.append,
-    latest: mocks.latest,
-    close: mocks.closeSnapshots,
-  },
+  sessionSnapshots: { append: mocks.append, latest: mocks.latest, close: mocks.close },
 }));
 vi.mock("#execution/session/events.js", () => ({
   sessionEvents: {
-    append: mocks.appendEvents,
+    append: mocks.events,
     close: mocks.closeEvents,
-    withWriter: async (
-      _ref: unknown,
-      callback: (writable: WritableStream<Uint8Array>) => Promise<unknown>,
-    ) => callback(new WritableStream()),
+    withWriter: async (_: unknown, run: (writer: WritableStream<Uint8Array>) => Promise<unknown>) =>
+      run(new WritableStream()),
   },
 }));
 vi.mock("#execution/session/directory.js", () => ({ publishSessionDescriptor: mocks.publish }));
@@ -69,49 +53,44 @@ vi.mock("#execution/turn/cancel-descendants.js", () => ({
   cancelDescendantTurns: mocks.cancelDescendants,
 }));
 vi.mock("#execution/turn/terminate-children.js", () => ({
-  terminateChildSessions: mocks.terminateChildren,
+  terminateChildSessions: mocks.terminate,
 }));
-vi.mock("#execution/session-timeout-steps.js", () => ({
-  cancelSessionTimeout: mocks.cancelTimer,
-}));
+vi.mock("#execution/session-timeout-steps.js", () => ({ cancelSessionTimeout: vi.fn() }));
 vi.mock("#subagents/parent-notification.js", () => ({
+  notifyTurnCaller: mocks.notify,
   notifyCancelledTaskCaller: mocks.notifyCancel,
-  notifyTurnCaller: mocks.notifyCaller,
-  notifyDelegatedParent: mocks.notifyParent,
+  notifyDelegatedParent: vi.fn(),
 }));
-vi.mock("#subagents/parent-result.js", () => ({
-  createDelegatedSubagentErrorResult: vi.fn(),
-  createDelegatedSubagentSuccessResult: vi.fn(),
+vi.mock("#subagents/callbacks.js", () => ({ fireSessionCallback: vi.fn() }));
+vi.mock("#execution/turn/initialization-failure.js", () => ({
+  notifyInitializationFailure: vi.fn(),
 }));
-vi.mock("#subagents/callbacks.js", () => ({ fireSessionCallback: mocks.callback }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: mocks.cancelRun,
   getWorld: async () => ({}),
 }));
-vi.mock("#execution/tasks/workflow-target.js", () => ({ isTaskWorkflowTargetGone: () => false }));
+vi.mock("#internal/logging.js", () => ({ createLogger: () => ({ error: vi.fn() }) }));
 
-const resources = createSessionResources("holder", "initial");
-const records = new Map<string, SessionCheckpoint>();
-let current: SessionCheckpoint | undefined;
-const recordRef = (id: string) => ({ id }) as SnapshotRecordRef;
-
-function checkpoint(): InitializedSessionCheckpoint {
+const session = createSessionResources("holder", "initial");
+let checkpoint: InitializedSessionCheckpoint;
+beforeEach(() => {
+  vi.resetAllMocks();
   const state = createDurableSessionState({
     session: {
-      sessionId: resources.sessionId,
+      sessionId: "holder",
       continuationToken: "alias",
       history: [],
       agent: { modelReference: { id: "model" }, system: "", tools: [] },
       compaction: { threshold: 1000, recentWindowSize: 10 },
     },
   });
-  return {
-    writeId: "proposal",
+  checkpoint = {
+    writeId: "model",
     writerRunId: "owner",
     phase: "running",
     state,
     serializedContext: { "eve.mode": "conversation" },
-    deliveries: { initial: "applied" },
+    deliveries: { initial: "applied", older: "applied" },
     queue: [],
     caller: {
       callId: "call",
@@ -130,180 +109,84 @@ function checkpoint(): InitializedSessionCheckpoint {
       },
     },
   };
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.attempt = 2;
-  records.clear();
-  current = checkpoint();
-  records.set(current.writeId, current);
-  mocks.find.mockImplementation(async (_ref, id: string) => {
-    const stored = records.get(id);
-    return stored === undefined ? undefined : { ref: recordRef(id), checkpoint: stored };
-  });
-  mocks.read.mockImplementation(async (ref: SnapshotRecordRef) => records.get(ref.id));
-  mocks.latest.mockImplementation(async () =>
-    current === undefined ? undefined : { ref: recordRef(current.writeId), checkpoint: current },
-  );
-  mocks.append.mockImplementation(async (_stream, value: SessionCheckpoint) => {
-    records.set(value.writeId, value);
-    current = value;
-    return recordRef(value.writeId);
-  });
-  mocks.finalize.mockImplementation(async (input) => ({
+  const settled = async (input: { sessionState: unknown; serializedContext: unknown }) => ({
     sessionState: input.sessionState,
     serializedContext: input.serializedContext,
-  }));
-  mocks.cancel.mockImplementation(async (input) => ({
-    sessionState: input.sessionState,
-    serializedContext: input.serializedContext,
-  }));
-  mocks.appendEvents.mockResolvedValue(undefined);
+  });
+  mocks.finalize.mockImplementation(settled);
+  mocks.cancel.mockImplementation(settled);
+  mocks.latest.mockResolvedValue(null);
 });
 
-describe("turn finalization", () => {
-  it("reads the proposal without retry probes on a first attempt", async () => {
-    mocks.attempt = 1;
-    await finalizeTurnStep({
-      session: resources,
-      eventIds: ["initial"],
-      checkpoint: recordRef("proposal"),
-      kind: "natural",
-      pending: [],
-    });
-    expect(mocks.find).not.toHaveBeenCalled();
-    expect(mocks.read).toHaveBeenCalledExactlyOnceWith(recordRef("proposal"));
-    expect(mocks.append).toHaveBeenCalledWith(resources.snapshots, expect.anything(), {
-      fresh: true,
-    });
+const finalize = (overrides: Partial<Parameters<typeof finalizeTurnStep>[0]> = {}) =>
+  finalizeTurnStep({
+    session,
+    checkpoint,
+    eventIds: ["initial"],
+    kind: "natural",
+    pending: [],
+    ...overrides,
   });
-  it("keeps a caller parked on HITL and preserves the accepting candidate of queued input", async () => {
-    const original = current as InitializedSessionCheckpoint;
-    records.set("proposal", {
-      ...original,
-      deliveries: { ...original.deliveries, "older-turn": "applied" },
+
+describe("turn settlement", () => {
+  it("finalizes supplied state with no snapshot I/O, then commits one full record", async () => {
+    const settled = await finalize();
+    expect(settled.phase).toBe("settled");
+    expect(mocks.latest).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
+    const receipt = await commitTurnStep({ session, checkpoint: settled, eventIds: ["initial"] });
+    expect(mocks.append).toHaveBeenCalledExactlyOnceWith(session.snapshots, settled);
+    expect(receipt).toEqual({
+      terminal: false,
+      deliveries: { initial: "applied" },
+      continuationToken: "alias",
     });
-    const pending = {
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+
+  it("preserves queued candidate identities and pending callers", async () => {
+    const item = {
+      candidateRunId: "waiting",
       submission: {
-        eventId: "followup",
-        acceptedDeploymentId: "new-deployment",
+        eventId: "next",
+        acceptedDeploymentId: "deployment",
         command: { kind: "send" as const, payload: { message: "Next" } },
       },
-      candidateRunId: "waiting-candidate",
     };
-    const result = await finalizeTurnStep({
-      session: resources,
-      eventIds: ["initial", "followup"],
-      checkpoint: recordRef("proposal"),
-      kind: "natural",
-      pending: [{ kind: "session.submit", eventId: "delivery", payload: pending }],
+    const settled = await finalize({
+      pending: [{ eventId: "next", kind: "session.submit", payload: item }],
     });
-    expect(result.terminal).toBe(false);
-    expect(result.deliveries).not.toHaveProperty("older-turn");
-    const committed = records.get("commit") as InitializedSessionCheckpoint;
-    expect(committed.caller).toEqual(original.caller);
-    expect(committed.queue).toEqual([pending]);
-    expect(committed.deliveries["older-turn"]).toBe("applied");
-    expect(committed.claimedContinuationToken).toBeUndefined();
-    expect(mocks.notifyCaller).not.toHaveBeenCalled();
-    expect(mocks.append.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.finalize.mock.invocationCallOrder[0]!,
-    );
+    expect(settled).toMatchObject({
+      queue: [item],
+      caller: checkpoint.caller,
+      deliveries: checkpoint.deliveries,
+    });
+    expect(mocks.notify).not.toHaveBeenCalled();
   });
 
-  it("returns the continuation token committed by terminal lifecycle hooks before ownership releases", async () => {
-    mocks.finalize.mockImplementationOnce(async (input) => ({
-      serializedContext: input.serializedContext,
-      sessionState: {
-        ...input.sessionState,
-        continuationToken: "new-alias",
-        snapshot: {
-          session: { ...input.sessionState.snapshot.session, continuationToken: "new-alias" },
-        },
-      },
-    }));
-    const result = await finalizeTurnStep({
-      session: resources,
-      eventIds: ["initial", "followup"],
-      claimedContinuationToken: "acknowledged-alias",
-      checkpoint: recordRef("proposal"),
-      kind: "natural",
-      pending: [],
+  it("retains lifecycle-induced state for the final commit", async () => {
+    mocks.finalize.mockResolvedValue({
+      sessionState: { ...checkpoint.state, continuationToken: "new-alias" },
+      serializedContext: { changed: true },
     });
-    expect(result).toMatchObject({ terminal: false, continuationToken: "new-alias" });
-    expect((records.get("commit") as InitializedSessionCheckpoint).claimedContinuationToken).toBe(
-      "acknowledged-alias",
-    );
+    expect(await finalize({ claimedContinuationToken: "old-alias" })).toMatchObject({
+      state: { continuationToken: "new-alias" },
+      serializedContext: { changed: true },
+      claimedContinuationToken: "old-alias",
+    });
   });
 
-  it("preserves a previously acknowledged alias when no new acknowledgment is supplied", async () => {
-    current = {
-      ...current,
-      claimedContinuationToken: "known-alias",
-    } as InitializedSessionCheckpoint;
-    records.set("proposal", current);
-    await finalizeTurnStep({
-      session: resources,
-      eventIds: ["initial", "followup"],
-      checkpoint: recordRef("proposal"),
-      kind: "natural",
-      pending: [],
-    });
-    expect((records.get("commit") as InitializedSessionCheckpoint).claimedContinuationToken).toBe(
-      "known-alias",
-    );
-  });
-
-  it("publishes a completed outcome once and skips authored effects on a committed retry", async () => {
-    const original = current as InitializedSessionCheckpoint;
-    current = {
-      ...original,
-      result: {
-        action: "done",
-        output: "Answer",
-        sessionState: original.state,
-        serializedContext: {},
-        settlement: original.result?.settlement,
-      },
+  it("uses cancellation carveouts when an interrupt overtakes model completion", async () => {
+    const cancellationState = { ...checkpoint.state, continuationToken: "retained" };
+    checkpoint = {
+      ...checkpoint,
+      result: { ...checkpoint.result!, cancellationState, cancellationContext: { retained: true } },
     };
-    records.set("proposal", current);
-    const input = {
-      session: resources,
-      eventIds: ["initial", "followup"],
-      checkpoint: recordRef("proposal"),
-      kind: "natural" as const,
-      pending: [],
-    };
-    const first = await finalizeTurnStep(input);
-    expect(first.terminal).toBe(true);
-    expect(mocks.notifyCaller).toHaveBeenCalledTimes(1);
-    expect(await finalizeTurnStep(input)).toEqual(first);
-    expect(mocks.finalize).toHaveBeenCalledTimes(1);
-    expect(mocks.notifyCaller).toHaveBeenCalledTimes(1);
-    expect((records.get("commit") as InitializedSessionCheckpoint).caller).toBeUndefined();
-  });
-
-  it("uses the cancellation carveouts when an interrupt overtakes a completed model call", async () => {
-    const original = current as InitializedSessionCheckpoint;
-    const cancellationState = { ...original.state, continuationToken: "retained" };
-    const cancellationContext = { retained: true };
-    current = {
-      ...original,
-      result: { ...original.result!, cancellationState, cancellationContext },
-    };
-    records.set("proposal", current);
-    await finalizeTurnStep({
-      session: resources,
-      eventIds: ["initial", "followup"],
-      checkpoint: recordRef("proposal"),
-      kind: "interrupt",
-      pending: [],
-    });
+    await finalize({ kind: "interrupt" });
     expect(mocks.cancel).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionState: cancellationState,
-        serializedContext: cancellationContext,
+        serializedContext: { retained: true },
         settlement: expect.objectContaining({ events: [{ type: "turn.interrupted" }] }),
       }),
     );
@@ -313,89 +196,62 @@ describe("turn finalization", () => {
     );
   });
 
-  it("does not repeat terminal effects after an uncommitted finalization attempt", async () => {
-    mocks.finalize.mockRejectedValueOnce(new Error("Lost completion"));
-    const input = {
-      session: resources,
-      eventIds: ["initial", "followup"],
-      checkpoint: recordRef("proposal"),
-      kind: "natural" as const,
-      pending: [],
-    };
-    await expect(finalizeTurnStep(input)).rejects.toThrow("Lost completion");
-    await expect(finalizeTurnStep(input)).rejects.toThrow("did not commit its effects");
-    expect(mocks.finalize).toHaveBeenCalledTimes(1);
+  it("retries a failed append without repeating completed lifecycle work", async () => {
+    const settled = await finalize();
+    mocks.append.mockRejectedValueOnce(new Error("Write failed"));
+    const input = { session, checkpoint: settled, eventIds: ["initial"] };
+    await expect(commitTurnStep(input)).rejects.toThrow("Write failed");
+    await commitTurnStep(input);
+    expect(mocks.finalize).toHaveBeenCalledOnce();
+    expect(mocks.append.mock.calls[0]).toEqual(mocks.append.mock.calls[1]);
   });
 
-  it("does not confuse unreadable state with an empty session", async () => {
-    mocks.latest.mockRejectedValueOnce(new Error("Storage failed"));
+  it("allows normal Workflow retries of interrupted lifecycle work", async () => {
+    mocks.finalize.mockRejectedValueOnce(new Error("Transient failure"));
+    await expect(finalize()).rejects.toThrow("Transient failure");
+    await finalize();
+    expect(mocks.finalize).toHaveBeenCalledTimes(2);
+    expect(mocks.append).not.toHaveBeenCalled();
+  });
+
+  it("commits terminal state before closing shared streams and the holder", async () => {
+    const settled = await finalize({ kind: "reset" });
+    expect(settled.phase).toBe("terminal");
+    expect(mocks.close).not.toHaveBeenCalled();
+    await commitTurnStep({ session, checkpoint: settled, eventIds: ["initial"] });
+    await closeSessionStep(session, settled);
+    expect(mocks.append.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.close.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.cancelRun).toHaveBeenCalled();
+  });
+
+  it("does not mistake unavailable storage for uninitialized state", async () => {
+    mocks.latest.mockRejectedValue(new Error("Storage unavailable"));
     await expect(
       failTurnStep({
-        session: resources,
-        eventIds: ["initial", "followup"],
+        session,
+        eventIds: ["initial"],
         submission: { eventId: "initial", command: { kind: "cancel" } },
-        error: "private failure",
+        error: "failed",
       }),
-    ).rejects.toThrow("Storage failed");
-    expect(mocks.appendEvents).not.toHaveBeenCalled();
-    expect(mocks.publish).not.toHaveBeenCalled();
+    ).rejects.toThrow("Storage unavailable");
+    expect(mocks.events).not.toHaveBeenCalled();
   });
 
-  it("records initialization failure without inventing a harness snapshot or exposing the error", async () => {
-    records.clear();
-    current = undefined;
-    const input = {
-      session: resources,
-      eventIds: ["initial", "followup"],
-      submission: { eventId: "initial", command: { kind: "cancel" as const } },
-      error: "private secret detail",
-    };
-    const result = await failTurnStep(input);
-    expect(result).toMatchObject({ terminal: true, deliveries: { initial: "retired" } });
-    const failed = records.get("commit");
-    expect(failed?.phase).toBe("initialization-failed");
+  it("returns initialization failure state without an intermediate snapshot write", async () => {
+    const failed = await failTurnStep({
+      session,
+      eventIds: ["initial"],
+      submission: { eventId: "initial", command: { kind: "cancel" } },
+      error: "private details",
+    });
+    expect(failed).toMatchObject({
+      phase: "initialization-failed",
+      deliveries: { initial: "retired" },
+    });
     expect(failed).not.toHaveProperty("state");
-    expect(JSON.stringify(mocks.appendEvents.mock.calls)).not.toContain("private secret detail");
-    expect(mocks.log).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ error: "private secret detail" }),
-    );
-    await failTurnStep(input);
-    expect(mocks.appendEvents).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not repeat an uncertain bootstrap failure notification", async () => {
-    mocks.latest.mockResolvedValue(undefined);
-    mocks.appendEvents.mockRejectedValueOnce(new Error("Write completion unknown"));
-    const input = {
-      session: resources,
-      eventIds: ["initial", "followup"],
-      submission: {
-        eventId: "initial",
-        command: { kind: "send" as const, payload: { message: "Hello" } },
-      },
-      error: "private",
-    };
-    await expect(failTurnStep(input)).rejects.toThrow("Write completion unknown");
-    await expect(failTurnStep(input)).rejects.toThrow("did not commit its effects");
-    expect(mocks.appendEvents).toHaveBeenCalledOnce();
-  });
-  it("accounts for a cancellation request while retaining undispatched input", () => {
-    const original = checkpoint();
-    const message = {
-      candidateRunId: "candidate",
-      submission: {
-        eventId: "steer",
-        command: { kind: "send" as const, payload: { message: "Keep me" } },
-      },
-    };
-    const cancel = {
-      candidateRunId: "cancel-candidate",
-      submission: { eventId: "cancel", command: { kind: "cancel" as const } },
-    };
-    const accounted = accountPending({ ...original, inputs: [message, cancel] }, [], "cancel");
-    expect(accounted.queue).toEqual([message]);
-    expect(accounted.deliveries.cancel).toBe("applied");
-    expect(accounted.inputs).toEqual([]);
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.events.mock.calls)).not.toContain("private details");
   });
 });

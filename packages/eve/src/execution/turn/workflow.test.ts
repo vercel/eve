@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 import { createSessionResources } from "#execution/session/resources.js";
-import type { SnapshotRecordRef } from "#execution/session/resources.js";
+import type { InitializedSessionCheckpoint } from "#execution/turn/types.js";
 import type {
   TurnExecutionResult,
   TurnProgress,
@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   awaitRunStep: vi.fn(),
   sendInboxStep: vi.fn(),
   sleep: vi.fn(),
+  commitTurnStep: vi.fn(),
+  closeSessionStep: vi.fn(),
+  acknowledgeTurnWorkStep: vi.fn(),
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "candidate" }),
@@ -27,10 +30,15 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 }));
 vi.mock("#execution/inbox/owner.js", () => ({ createOwnerInbox: mocks.createOwnerInbox }));
 vi.mock("#execution/inbox/send.js", () => ({ sendInboxStep: mocks.sendInboxStep }));
-vi.mock("#execution/turn/execute.js", () => ({ executeTurnStep: mocks.executeTurnStep }));
+vi.mock("#execution/turn/execute.js", () => ({
+  executeTurnStep: mocks.executeTurnStep,
+  acknowledgeTurnWorkStep: mocks.acknowledgeTurnWorkStep,
+}));
 vi.mock("#execution/turn/finalize.js", () => ({
   finalizeTurnStep: mocks.finalizeTurnStep,
   failTurnStep: mocks.failTurnStep,
+  commitTurnStep: mocks.commitTurnStep,
+  closeSessionStep: mocks.closeSessionStep,
 }));
 vi.mock("#execution/session/dispatch.js", () => ({ deferTurnStep: mocks.deferTurnStep }));
 vi.mock("#execution/turn/admission.js", () => ({
@@ -47,7 +55,10 @@ const input: TurnWorkflowInput = {
   submission: { eventId: "input", command: { kind: "send", payload: { message: "hello" } } },
 };
 const receipt: TurnReceipt = { deliveries: { input: "applied" }, terminal: false };
-const checkpoint = { id: "checkpoint" } as SnapshotRecordRef;
+const checkpoint = {
+  state: { continuationToken: "" },
+  phase: "settled",
+} as InitializedSessionCheckpoint;
 function progress(overrides: Partial<TurnProgress> = {}): TurnExecutionResult {
   return {
     kind: "progress",
@@ -132,8 +143,12 @@ function submit(
 describe("turn workflow ownership", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.finalizeTurnStep.mockResolvedValue(receipt);
-    mocks.failTurnStep.mockResolvedValue({ deliveries: {}, terminal: true });
+    mocks.finalizeTurnStep.mockResolvedValue(checkpoint);
+    mocks.failTurnStep.mockResolvedValue({ deliveries: {}, phase: "terminal" });
+    mocks.commitTurnStep.mockImplementation(async ({ checkpoint }) => ({
+      ...receipt,
+      terminal: checkpoint.phase === "terminal",
+    }));
     mocks.sendInboxStep.mockResolvedValue("delivered");
     mocks.sleep.mockResolvedValue(undefined);
     mocks.awaitRunStep.mockImplementation(() => new Promise(() => {}));
@@ -146,6 +161,51 @@ describe("turn workflow ownership", () => {
     await expect(turnWorkflow(input)).rejects.toThrow("claim failed");
     expect(inbox.dispose).toHaveBeenCalledOnce();
     expect(mocks.failTurnStep).not.toHaveBeenCalled();
+  });
+
+  it("passes step state directly and commits once before disposal", async () => {
+    const actor = testInbox();
+    const committed = deferred<TurnReceipt>();
+    mocks.createOwnerInbox.mockReturnValue(actor.inbox);
+    mocks.executeTurnStep
+      .mockResolvedValueOnce(progress({ action: "continue" }))
+      .mockResolvedValueOnce(progress());
+    mocks.commitTurnStep.mockReturnValue(committed.promise);
+    const run = turnWorkflow(input);
+    await vi.waitFor(() => expect(mocks.commitTurnStep).toHaveBeenCalledOnce());
+    expect(mocks.executeTurnStep.mock.calls[1]![0].checkpoint).toBe(checkpoint);
+    expect(mocks.finalizeTurnStep.mock.calls[0]![0].checkpoint).toBe(checkpoint);
+    expect(actor.inbox.dispose).not.toHaveBeenCalled();
+    committed.resolve(receipt);
+    await run;
+    expect(actor.inbox.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not rerun settlement as failure handling when the final snapshot write fails", async () => {
+    const actor = testInbox();
+    mocks.createOwnerInbox.mockReturnValue(actor.inbox);
+    mocks.executeTurnStep.mockResolvedValue(progress());
+    mocks.commitTurnStep.mockRejectedValue(new Error("Snapshot write failed"));
+    await expect(turnWorkflow(input)).rejects.toThrow("Snapshot write failed");
+    expect(mocks.finalizeTurnStep).toHaveBeenCalledOnce();
+    expect(mocks.failTurnStep).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges executors after the step result records their ownership", async () => {
+    const actor = testInbox();
+    const tool = { hookToken: "tool", runId: "tool-run" };
+    mocks.createOwnerInbox.mockReturnValue(actor.inbox);
+    const model = deferred<TurnExecutionResult>();
+    mocks.executeTurnStep.mockReturnValue(model.promise);
+    const run = turnWorkflow(input);
+    await flush();
+    expect(mocks.acknowledgeTurnWorkStep).not.toHaveBeenCalled();
+    model.resolve(progress({ checkpoint: { ...checkpoint, pendingToolAcks: [tool] } }));
+    await run;
+    expect(mocks.acknowledgeTurnWorkStep).toHaveBeenCalledExactlyOnceWith({
+      tools: [tool],
+      tasks: [],
+    });
   });
 
   it("stops its observer when the first execution fails", async () => {
@@ -331,7 +391,10 @@ describe("turn workflow ownership", () => {
     const actor = testInbox();
     mocks.createOwnerInbox.mockReturnValue(actor.inbox);
     mocks.executeTurnStep.mockResolvedValue(progress({ continuationToken: "model-token" }));
-    mocks.finalizeTurnStep.mockResolvedValue({ ...receipt, continuationToken: "settled-token" });
+    mocks.finalizeTurnStep.mockResolvedValue({
+      ...checkpoint,
+      state: { continuationToken: "settled-token" },
+    });
     await turnWorkflow(input);
     expect(mocks.sendInboxStep.mock.calls.map((call) => call[1].payload.token)).toEqual([
       "model-token",

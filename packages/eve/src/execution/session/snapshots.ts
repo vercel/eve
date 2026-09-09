@@ -1,105 +1,18 @@
-import { equalSnapshot } from "#execution/session/snapshot-equality.js";
+import type { SnapshotStreamRef } from "#execution/session/resources.js";
+import { appendStreamRecords, readStreamRecord } from "#execution/session/stream-storage.js";
 
-import type {
-  SnapshotRecordId,
-  SnapshotRecordRef,
-  SnapshotStreamRef,
-} from "#execution/session/resources.js";
-import { decodeStreamLocation, encodeStreamLocation } from "#execution/session/stream-location.js";
-import {
-  appendStreamRecords,
-  readStreamRecord,
-  streamTailIndex,
-} from "#execution/session/stream-storage.js";
-
-interface SnapshotWrite {
-  readonly writeId: string;
-}
-
-type SnapshotEntry =
-  | { readonly kind: "initialized" }
-  | { readonly kind: "record"; readonly ref: SnapshotRecordRef };
-
-export interface StoredSnapshot<Checkpoint> {
-  readonly ref: SnapshotRecordRef;
-  readonly checkpoint: Checkpoint;
-}
-
-function recordRef(ref: SnapshotStreamRef, writeId: string): SnapshotRecordRef {
-  if (writeId.length === 0) throw new Error("Snapshot writes require a stable write identity.");
-  const location = decodeStreamLocation(ref.id);
-  return {
-    id: encodeStreamLocation({
-      runId: location.runId,
-      namespace: `${location.namespace}.record.${encodeURIComponent(writeId)}`,
-    }) as SnapshotRecordId,
-  };
-}
-
-async function readHead(ref: SnapshotStreamRef): Promise<SnapshotEntry | undefined> {
-  const index = await streamTailIndex(ref.id);
-  return index === -1 ? undefined : readStreamRecord<SnapshotEntry>(ref.id, index);
-}
-
+/** Only settled turn state lives here; intermediate state lives in Workflow step results. */
 export const sessionSnapshots = {
-  async find<Checkpoint>(
-    stream: SnapshotStreamRef,
-    writeId: string,
-  ): Promise<StoredSnapshot<Checkpoint> | undefined> {
-    const ref = recordRef(stream, writeId);
-    if ((await streamTailIndex(ref.id)) === -1) return undefined;
-    return { ref, checkpoint: await sessionSnapshots.read<Checkpoint>(ref) };
-  },
-  async initialize(ref: SnapshotStreamRef, options?: { readonly fresh?: boolean }): Promise<void> {
-    if (options?.fresh || (await readHead(ref)) === undefined) {
-      await appendStreamRecords<SnapshotEntry>(ref.id, [{ kind: "initialized" }]);
-    }
+  async initialize(ref: SnapshotStreamRef): Promise<void> {
+    await appendStreamRecords(ref.id, [null]);
   },
 
-  async latest<Checkpoint>(
-    ref: SnapshotStreamRef,
-  ): Promise<StoredSnapshot<Checkpoint> | undefined> {
-    const head = await readHead(ref);
-    if (head === undefined) throw new Error("Session snapshot storage has not been initialized.");
-    if (head.kind === "initialized") return undefined;
-    return { ref: head.ref, checkpoint: await sessionSnapshots.read<Checkpoint>(head.ref) };
+  latest<Checkpoint>(ref: SnapshotStreamRef): Promise<Checkpoint | null> {
+    return readStreamRecord<Checkpoint | null>(ref.id, -1);
   },
 
-  read<Checkpoint>(ref: SnapshotRecordRef): Promise<Checkpoint> {
-    return readStreamRecord<Checkpoint>(ref.id);
-  },
-
-  async append<Checkpoint extends SnapshotWrite>(
-    stream: SnapshotStreamRef,
-    checkpoint: Checkpoint,
-    /** Only for a new step-owned write on its first authoritative execution attempt. */
-    options?: { readonly fresh?: boolean },
-  ): Promise<SnapshotRecordRef> {
-    const ref = recordRef(stream, checkpoint.writeId);
-    if (options?.fresh === true) {
-      await appendStreamRecords<SnapshotEntry>(stream.id, [{ kind: "record", ref }]);
-      await appendStreamRecords(ref.id, [checkpoint], true);
-      return ref;
-    }
-    if ((await streamTailIndex(ref.id)) !== -1) {
-      const stored = await sessionSnapshots.read<Checkpoint>(ref);
-      if (!(await equalSnapshot(stored, checkpoint))) {
-        throw new Error(
-          `Snapshot write identity "${checkpoint.writeId}" was reused with different state.`,
-        );
-      }
-      return ref;
-    }
-
-    // Publish the address first: a crash can leave an unfinished record, but can
-    // never make a retry publish an older completed checkpoint as the new head.
-    const head = await readHead(stream);
-    if (head === undefined) throw new Error("Session snapshot storage has not been initialized.");
-    if (head.kind !== "record" || head.ref.id !== ref.id) {
-      await appendStreamRecords<SnapshotEntry>(stream.id, [{ kind: "record", ref }]);
-    }
-    await appendStreamRecords(ref.id, [checkpoint], true);
-    return ref;
+  append<Checkpoint>(ref: SnapshotStreamRef, checkpoint: Checkpoint): Promise<void> {
+    return appendStreamRecords(ref.id, [checkpoint]);
   },
 
   close(ref: SnapshotStreamRef): Promise<void> {

@@ -5,7 +5,7 @@ import {
   createDurableSessionState,
   replaceDurableSessionSnapshot,
 } from "#execution/session/state.js";
-import { createSessionResources, type SnapshotRecordRef } from "#execution/session/resources.js";
+import { createSessionResources } from "#execution/session/resources.js";
 import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type {
   AcceptedSubmission,
@@ -15,8 +15,6 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   attempt: 2,
-  find: vi.fn(),
-  read: vi.fn(),
   latest: vi.fn(),
   append: vi.fn(),
   publish: vi.fn(),
@@ -27,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   acknowledge: vi.fn(),
   acknowledgeTools: vi.fn(),
   create: vi.fn(),
+  timeout: vi.fn(),
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getStepMetadata: () => ({ stepId: "step", attempt: mocks.attempt }),
@@ -35,8 +34,6 @@ vi.mock("#internal/workflow/background.js", () => ({ background: vi.fn() }));
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 vi.mock("#execution/session/snapshots.js", () => ({
   sessionSnapshots: {
-    find: mocks.find,
-    read: mocks.read,
     latest: mocks.latest,
     append: mocks.append,
   },
@@ -44,8 +41,10 @@ vi.mock("#execution/session/snapshots.js", () => ({
 vi.mock("#execution/session/directory.js", () => ({ publishSessionDescriptor: mocks.publish }));
 vi.mock("#execution/session/events.js", () => ({
   sessionEvents: {
-    withWriter: async (_ref: unknown, run: (stream: WritableStream<Uint8Array>) => unknown) =>
-      run(new WritableStream()),
+    withWriter: async (
+      _ref: unknown,
+      run: (stream: WritableStream<Uint8Array>, signal: AbortSignal) => unknown,
+    ) => run(new WritableStream(), new AbortController().signal),
   },
 }));
 vi.mock("#execution/session/create-state.js", () => ({ createSessionState: mocks.create }));
@@ -63,10 +62,9 @@ vi.mock("#subagents/parent-notification.js", () => ({
   bindTurnCallerContext: async (input: { serializedContext: unknown }) => input.serializedContext,
   resolveInitialTurnCaller: async () => undefined,
 }));
-vi.mock("#execution/session-timeout-steps.js", () => ({ startSessionTimeout: vi.fn() }));
+vi.mock("#execution/session-timeout-steps.js", () => ({ startSessionTimeout: mocks.timeout }));
 
 const session = createSessionResources("holder", "first");
-const ref = { id: "checkpoint" } as SnapshotRecordRef;
 const owner = { token: "inbox", ownerRunId: "candidate" };
 const submission: AcceptedSubmission = {
   eventId: "next",
@@ -95,11 +93,9 @@ beforeEach(() => {
     deliveries: {},
     queue: [],
   };
-  mocks.find.mockResolvedValue(undefined);
-  mocks.read.mockImplementation(async () => checkpoint);
-  mocks.latest.mockImplementation(async () => ({ ref, checkpoint }));
-  mocks.append.mockResolvedValue(ref);
+  mocks.latest.mockImplementation(async () => checkpoint);
   mocks.create.mockResolvedValue({ state });
+  mocks.timeout.mockResolvedValue({ runId: "timer" });
   mocks.model.mockImplementation(async (input) => ({
     action: "continue",
     sessionState: input.sessionState,
@@ -130,17 +126,35 @@ const run = (changes: Partial<Parameters<typeof executeTurnStep>[0]> = {}) =>
   });
 
 describe("turn execution boundary", () => {
-  it("skips retry probes and append preflights on a first attempt", async () => {
-    mocks.attempt = 1;
-    await run();
-    expect(mocks.find).not.toHaveBeenCalled();
-    expect(mocks.latest).toHaveBeenCalledOnce();
-    expect(mocks.append).toHaveBeenCalledWith(session.snapshots, expect.anything(), {
-      fresh: true,
+  it("starts model work while bootstrap descriptor and timer operations are pending", async () => {
+    const descriptor = Promise.withResolvers<void>();
+    const timer = Promise.withResolvers<{ runId: string }>();
+    mocks.latest.mockResolvedValue(null);
+    mocks.publish.mockReturnValueOnce(descriptor.promise);
+    mocks.timeout.mockReturnValueOnce(timer.promise);
+    const running = run({
+      submission: {
+        ...submission,
+        eventId: "first",
+        initial: { serializedContext: { "eve.bundle": { source: {} } } },
+      },
     });
+    await vi.waitFor(() => expect(mocks.model).toHaveBeenCalledOnce());
+    descriptor.resolve();
+    timer.resolve({ runId: "timer" });
+    expect(await running).toMatchObject({
+      kind: "progress",
+      progress: { checkpoint: { timeoutRunId: "timer" } },
+    });
+    expect(mocks.append).not.toHaveBeenCalled();
   });
-  it("publishes bootstrap readiness after its first durable checkpoint and before model effects", async () => {
-    mocks.latest.mockResolvedValue(undefined);
+  it("hydrates once and performs no snapshot writes", async () => {
+    await run();
+    expect(mocks.latest).toHaveBeenCalledOnce();
+    expect(mocks.append).not.toHaveBeenCalled();
+  });
+  it("publishes bootstrap resources while the first owner holds admission", async () => {
+    mocks.latest.mockResolvedValue(null);
     const result = await run({
       submission: {
         ...submission,
@@ -148,33 +162,30 @@ describe("turn execution boundary", () => {
         initial: { serializedContext: { "eve.bundle": { source: {} } }, sessionTimeoutMs: false },
       },
     });
-    expect(mocks.append.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.publish.mock.invocationCallOrder[0]!,
-    );
     expect(mocks.publish.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.model.mock.invocationCallOrder[0]!,
     );
-    expect(result).toMatchObject({ kind: "progress", progress: { checkpoint: ref } });
-    expect(JSON.stringify(result)).not.toContain("serializedContext");
-    expect(JSON.stringify(result)).not.toContain("history");
-  });
-
-  it("does not replay model effects after a committed attempt, but retries its durable task acknowledgment", async () => {
-    const task = { taskId: "task", taskRunId: "run", taskInboxToken: "task-inbox" };
-    mocks.find.mockResolvedValueOnce({
-      ref,
-      checkpoint: { ...checkpoint, pendingTaskAcks: [task], result: { action: "continue" } },
+    expect(result).toMatchObject({
+      kind: "progress",
+      progress: { checkpoint: { state: expect.anything(), serializedContext: expect.anything() } },
     });
-    await run();
-    expect(mocks.model).not.toHaveBeenCalled();
-    expect(mocks.acknowledge).toHaveBeenCalledWith({ tasks: [task] });
     expect(mocks.append).not.toHaveBeenCalled();
   });
 
-  it("fails a previously entered attempt without repeating uncertain effects", async () => {
-    mocks.find.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ ref, checkpoint });
-    await expect(run()).rejects.toThrow("did not commit");
-    expect(mocks.model).not.toHaveBeenCalled();
+  it("uses the previous step result without any snapshot reads", async () => {
+    const first = await run();
+    if (first.kind !== "progress") throw new Error("Expected progress");
+    mocks.latest.mockClear();
+    await run({ checkpoint: first.progress.checkpoint });
+    expect(mocks.latest).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
+  });
+
+  it("retries interrupted work through normal Workflow step execution", async () => {
+    mocks.model.mockRejectedValueOnce(new Error("Transient model failure"));
+    await expect(run()).rejects.toThrow("Transient model failure");
+    await run();
+    expect(mocks.model).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a pending earlier candidate in front without touching session effects", async () => {
@@ -194,15 +205,17 @@ describe("turn execution boundary", () => {
   });
 
   it("retires a cancel that acquires idle ownership without inventing a model turn", async () => {
-    await run({ submission: { eventId: "cancel", command: { kind: "cancel", turnId: "old" } } });
+    const result = await run({
+      submission: { eventId: "cancel", command: { kind: "cancel", turnId: "old" } },
+    });
     expect(mocks.model).not.toHaveBeenCalled();
-    expect(mocks.append.mock.lastCall?.[1]).toMatchObject({
+    expect(result.kind === "progress" ? result.progress.checkpoint : undefined).toMatchObject({
       deliveries: { cancel: "retired" },
       result: { action: "park" },
     });
   });
 
-  it("commits executor ownership before acknowledging blocking tools", async () => {
+  it("returns executor ownership for acknowledgement after the step completes", async () => {
     checkpoint = {
       ...checkpoint,
       phase: "running",
@@ -224,17 +237,12 @@ describe("turn execution boundary", () => {
       sessionState: dispatchedState,
       results: [],
     });
-    await run({ checkpoint: ref, work: { kind: "dispatch" } });
-    expect(mocks.append.mock.lastCall?.[1]).toMatchObject({
+    const result = await run({ checkpoint, work: { kind: "dispatch" } });
+    expect(result.kind === "progress" ? result.progress.checkpoint : undefined).toMatchObject({
       pendingToolAcks: [tool],
     });
-    expect(mocks.acknowledgeTools).toHaveBeenCalledWith({ runs: [tool] });
-    expect(mocks.append.mock.invocationCallOrder[1]).toBeLessThan(
-      mocks.acknowledgeTools.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.append.mock.invocationCallOrder[1]).toBeLessThan(
-      mocks.acknowledge.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.acknowledgeTools).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
   });
 
   it("routes answers to a waiting child without running the model or losing queued messages", async () => {
@@ -267,8 +275,8 @@ describe("turn execution boundary", () => {
         payload: { message: "Later", inputResponses: [{ requestId: "question", text: "Yes" }] },
       },
     };
-    await run({
-      checkpoint: ref,
+    const result = await run({
+      checkpoint,
       work: {
         kind: "events",
         envelopes: [
@@ -282,7 +290,8 @@ describe("turn execution boundary", () => {
     });
     expect(mocks.model).not.toHaveBeenCalled();
     expect(mocks.route).toHaveBeenCalledOnce();
-    expect(mocks.append.mock.lastCall?.[1]).toMatchObject({
+    const updated = result.kind === "progress" ? result.progress.checkpoint : undefined;
+    expect(updated).toMatchObject({
       deliveries: { "next:response": "applied" },
       inputs: [],
       queue: [
@@ -293,7 +302,9 @@ describe("turn execution boundary", () => {
       ],
     });
     expect(
-      mocks.append.mock.lastCall?.[1].queue[0].submission.command.payload.inputResponses,
+      updated?.queue[0]?.submission.command.kind === "send"
+        ? updated.queue[0].submission.command.payload.inputResponses
+        : undefined,
     ).toBeUndefined();
   });
 });
@@ -333,7 +344,7 @@ describe("admission and progress", () => {
         serializedContext: {},
       },
     };
-    expect(projectProgress(ref, checkpoint).action).toBe("wait");
+    expect(projectProgress(checkpoint).action).toBe("wait");
     checkpoint = {
       ...checkpoint,
       inputs: [
@@ -343,17 +354,17 @@ describe("admission and progress", () => {
         }),
       ],
     };
-    expect(projectProgress(ref, checkpoint).action).toBe("continue");
+    expect(projectProgress(checkpoint).action).toBe("continue");
   });
   it("does not infer alias ownership from the session's current token", () => {
-    expect(projectProgress(ref, checkpoint)).toMatchObject({
+    expect(projectProgress(checkpoint)).toMatchObject({
       continuationToken: "alias",
       claimedContinuationToken: undefined,
     });
   });
   it("keeps the acknowledged alias separate from a new unclaimed continuation", () => {
     checkpoint = { ...checkpoint, claimedContinuationToken: "previous-alias" };
-    expect(projectProgress(ref, checkpoint)).toMatchObject({
+    expect(projectProgress(checkpoint)).toMatchObject({
       continuationToken: "alias",
       claimedContinuationToken: "previous-alias",
     });
@@ -371,7 +382,7 @@ describe("admission and progress", () => {
         serializedContext: {},
       },
     };
-    expect(projectProgress(ref, checkpoint).action).toBe(expected);
+    expect(projectProgress(checkpoint).action).toBe(expected);
   });
   it("does not resume a blocking batch after only one result", () => {
     checkpoint = {
@@ -387,6 +398,6 @@ describe("admission and progress", () => {
       },
       runtimeResults: [{ kind: "tool-result", callId: "one", toolName: "tool", output: "done" }],
     };
-    expect(projectProgress(ref, checkpoint).action).toBe("wait");
+    expect(projectProgress(checkpoint).action).toBe("wait");
   });
 });

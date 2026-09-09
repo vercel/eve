@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { InboxEnvelope } from "#execution/inbox/types.js";
-import type { SnapshotRecordRef } from "#execution/session/resources.js";
+import type { InitializedSessionCheckpoint } from "#execution/turn/types.js";
 import type { AcceptedSubmission, TurnProgress } from "#execution/turn/types.js";
 import { interruptionKind, reduceTurnBoundary } from "#execution/turn/reduce.js";
 
 const progress: TurnProgress = {
-  checkpoint: { id: "checkpoint" } as SnapshotRecordRef,
+  checkpoint: {} as InitializedSessionCheckpoint,
   turnId: "active-turn",
   action: "settle",
   terminal: false,

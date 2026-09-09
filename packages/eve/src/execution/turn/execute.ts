@@ -10,7 +10,7 @@ import type { InboxAddress } from "#execution/inbox/types.js";
 import { sessionEvents } from "#execution/session/events.js";
 import { sessionSnapshots } from "#execution/session/snapshots.js";
 import { publishSessionDescriptor } from "#execution/session/directory.js";
-import type { SessionResources, SnapshotRecordRef } from "#execution/session/resources.js";
+import type { SessionResources } from "#execution/session/resources.js";
 import { replaceDurableSessionSnapshot } from "#execution/session/state.js";
 import { createSessionState } from "#execution/session/create-state.js";
 import { dispatchCoordination } from "#execution/turn/dispatch-coordination.js";
@@ -45,38 +45,19 @@ export interface ExecuteTurnInput {
   readonly session: SessionResources;
   readonly owner: InboxAddress;
   readonly submission: AcceptedSubmission;
-  readonly checkpoint?: SnapshotRecordRef;
+  readonly checkpoint?: InitializedSessionCheckpoint;
   readonly work: TurnWork;
   readonly abortSignal: AbortSignal;
 }
 
-/** The only model boundary: hydrate, do work, commit, and return a small reference. */
+/** Hydrate once at turn admission, then carry state through ordinary Workflow step results. */
 export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExecutionResult> {
   "use step";
-  const { stepId: writeId, attempt } = getStepMetadata();
-  const completed =
-    attempt === 1
-      ? undefined
-      : await sessionSnapshots.find<InitializedSessionCheckpoint>(input.session.snapshots, writeId);
-  if (completed !== undefined) {
-    await acknowledgeCheckpoint(completed.checkpoint);
-    return { kind: "progress", progress: projectProgress(completed.ref, completed.checkpoint) };
-  }
-  const entered =
-    attempt === 1
-      ? undefined
-      : await sessionSnapshots.find<SessionCheckpoint>(
-          input.session.snapshots,
-          `${writeId}:entered`,
-        );
-  if (entered !== undefined) {
-    await publishSessionDescriptor(input.session.holderRunId, input.session);
-    throw new Error("The previous execution attempt did not commit its effects.");
-  }
+  const { stepId: writeId } = getStepMetadata();
   const loaded =
     input.checkpoint === undefined
-      ? (await sessionSnapshots.latest<SessionCheckpoint>(input.session.snapshots))?.checkpoint
-      : await sessionSnapshots.read<SessionCheckpoint>(input.checkpoint);
+      ? ((await sessionSnapshots.latest<SessionCheckpoint>(input.session.snapshots)) ?? undefined)
+      : input.checkpoint;
   if (
     loaded?.phase === "initialization-failed" ||
     loaded?.phase === "terminal" ||
@@ -85,16 +66,12 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     return {
       kind: "receipt",
       receipt: {
-        checkpoint: input.checkpoint,
         deliveries: selectDeliveries(loaded.deliveries, [input.submission.eventId]),
         terminal: loaded.phase === "terminal" || loaded.phase === "initialization-failed",
       },
     };
   }
   let checkpoint: InitializedSessionCheckpoint | undefined = loaded;
-  if (checkpoint?.phase === "running" && checkpoint.writerRunId !== input.owner.ownerRunId) {
-    throw new Error("The previous turn released ownership without settling its effects.");
-  }
   if (checkpoint === undefined) {
     if (
       input.submission.eventId !== input.session.initialEventId ||
@@ -140,6 +117,17 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
       }),
     };
   }
+  const seed = input.submission.initial;
+  const timeout =
+    loaded === undefined && seed !== undefined && seed.sessionTimeoutMs !== false
+      ? startSessionTimeout({
+          deadline: new Date(Date.now() + (seed.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS)),
+          token: sessionCommandToken(input.session.sessionId),
+        }).then(
+          (run) => ({ run }),
+          (error: unknown) => ({ error }),
+        )
+      : undefined;
   if (input.checkpoint === undefined)
     checkpoint = retireTaskSubmissions(checkpoint, input.submission);
   const emission = checkpoint.state.emissionState;
@@ -175,200 +163,220 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     ...checkpoint,
     writerRunId: input.owner.ownerRunId,
     phase: "running",
-    writeId: `${writeId}:entered`,
+    writeId,
+    pendingTaskAcks: [],
+    pendingToolAcks: [],
   };
-  await sessionSnapshots.append(input.session.snapshots, checkpoint, { fresh: attempt === 1 });
-  if (input.submission.eventId === input.session.initialEventId && input.checkpoint === undefined) {
-    await publishSessionDescriptor(input.session.holderRunId, input.session, {
-      fresh: attempt === 1,
-    });
-  }
+  const descriptor =
+    input.submission.eventId === input.session.initialEventId && input.checkpoint === undefined
+      ? publishSessionDescriptor(input.session.holderRunId, input.session).then(
+          () => ({}),
+          (error: unknown) => ({ error }),
+        )
+      : undefined;
 
   const admitted = checkpoint;
-  checkpoint = await sessionEvents.withWriter(input.session.events, async (events) => {
-    let state = admitted;
-    if (input.work.kind !== "dispatch") {
-      const envelopes = input.work.envelopes ?? [];
-      const submissions = envelopes.filter((envelope) => envelope.kind === "session.submit");
-      state = admitSubmissions(
-        state,
-        submissions.map((envelope) => envelope.payload as PendingSubmission),
-      );
-      const runtimeSubmissions = (state.inputs ?? []).filter(
-        (item) =>
-          item.submission.command.kind === "runtime" &&
-          isRuntimeEvent(item.submission.command.payload),
-      );
-      const runtimeIds = new Set(runtimeSubmissions.map((item) => item.submission.eventId));
-      const runtime = await applyRuntimeEvents({
-        events: [
-          ...envelopes.filter((envelope) => envelope.kind !== "session.submit"),
-          ...runtimeSubmissions.map((item) => ({
-            eventId: item.submission.eventId,
-            kind: "runtime.result",
-            payload:
-              item.submission.command.kind === "runtime"
-                ? item.submission.command.payload
-                : undefined,
-          })),
-        ],
-        eventsWriter: events,
-        owner: input.owner,
-        serializedContext: state.serializedContext,
-        state: state.state,
-      });
-      state = {
-        ...state,
-        state: runtime.state,
-        serializedContext: runtime.serializedContext,
-        runtimeResults: [
-          ...new Map(
-            [...(state.runtimeResults ?? []), ...runtime.results].map((result) => [
-              result.callId,
-              result,
-            ]),
-          ).values(),
-        ],
-        runtimeResultTimes: { ...state.runtimeResultTimes, ...runtime.acceptedAtMsByCallId },
-        deliveries: {
-          ...state.deliveries,
-          ...Object.fromEntries([...runtimeIds].map((id) => [id, "applied" as const])),
-        },
-        inputs: state.inputs?.filter((item) => !runtimeIds.has(item.submission.eventId)),
-      };
-      if (input.work.kind === "events") return await routePendingResponses(state, events);
-    }
-    if (input.work.kind === "dispatch") {
-      const result = state.result;
-      if (result?.action !== "park" && result?.action !== "dispatch-workflow-tasks")
-        throw new Error("Turn has no pending dispatch.");
-      const dispatch = await dispatchCoordination({
-        action: result.action,
-        parentContinuationToken: input.owner.token,
-        serializedContext: state.serializedContext,
-        sessionState: state.state,
-      });
-      state = {
-        ...state,
-        state: dispatch.sessionState,
-        runtimeResults: dispatch.results,
-        runtimeResultTimes: Object.fromEntries(
-          dispatch.results.map((result) => [result.callId, Date.now()]),
-        ),
-        dispatched: true,
-        pendingTaskAcks: [],
-        pendingToolAcks: getWorkflowToolRuns(dispatch.sessionState.snapshot.session.state),
-      };
-      return state;
-    }
+  checkpoint = await sessionEvents.withWriter(
+    input.session.events,
+    async (events, failureSignal) => {
+      let state = admitted;
+      if (input.work.kind !== "dispatch") {
+        const envelopes = input.work.envelopes ?? [];
+        const submissions = envelopes.filter((envelope) => envelope.kind === "session.submit");
+        state = admitSubmissions(
+          state,
+          submissions.map((envelope) => envelope.payload as PendingSubmission),
+        );
+        const runtimeSubmissions = (state.inputs ?? []).filter(
+          (item) =>
+            item.submission.command.kind === "runtime" &&
+            isRuntimeEvent(item.submission.command.payload),
+        );
+        const runtimeIds = new Set(runtimeSubmissions.map((item) => item.submission.eventId));
+        const runtime = await applyRuntimeEvents({
+          events: [
+            ...envelopes.filter((envelope) => envelope.kind !== "session.submit"),
+            ...runtimeSubmissions.map((item) => ({
+              eventId: item.submission.eventId,
+              kind: "runtime.result",
+              payload:
+                item.submission.command.kind === "runtime"
+                  ? item.submission.command.payload
+                  : undefined,
+            })),
+          ],
+          eventsWriter: events,
+          owner: input.owner,
+          serializedContext: state.serializedContext,
+          state: state.state,
+        });
+        state = {
+          ...state,
+          state: runtime.state,
+          serializedContext: runtime.serializedContext,
+          runtimeResults: [
+            ...new Map(
+              [...(state.runtimeResults ?? []), ...runtime.results].map((result) => [
+                result.callId,
+                result,
+              ]),
+            ).values(),
+          ],
+          runtimeResultTimes: { ...state.runtimeResultTimes, ...runtime.acceptedAtMsByCallId },
+          deliveries: {
+            ...state.deliveries,
+            ...Object.fromEntries([...runtimeIds].map((id) => [id, "applied" as const])),
+          },
+          inputs: state.inputs?.filter((item) => !runtimeIds.has(item.submission.eventId)),
+        };
+        if (input.work.kind === "events") return await routePendingResponses(state, events);
+      }
+      if (input.work.kind === "dispatch") {
+        const result = state.result;
+        if (result?.action !== "park" && result?.action !== "dispatch-workflow-tasks")
+          throw new Error("Turn has no pending dispatch.");
+        const dispatch = await dispatchCoordination({
+          action: result.action,
+          parentContinuationToken: input.owner.token,
+          serializedContext: state.serializedContext,
+          sessionState: state.state,
+        });
+        state = {
+          ...state,
+          state: dispatch.sessionState,
+          runtimeResults: dispatch.results,
+          runtimeResultTimes: Object.fromEntries(
+            dispatch.results.map((result) => [result.callId, Date.now()]),
+          ),
+          dispatched: true,
+          pendingTaskAcks: [],
+          pendingToolAcks: getWorkflowToolRuns(dispatch.sessionState.snapshot.session.state),
+        };
+        return state;
+      }
 
-    let payload: ModelPayload | undefined;
-    const deliveries: DeliverHookPayload[] = [];
-    const applied = { ...state.deliveries };
-    const remaining = [...(state.inputs ?? [])];
-    const runtimeReady = (state.runtimeResults?.length ?? 0) > 0;
-    if (runtimeReady) {
-      payload = {
-        kind: "runtime-action-result",
-        results: state.runtimeResults!,
-        acceptedAtMsByCallId: state.runtimeResultTimes,
-      };
-    } else {
-      while (remaining.length > 0) {
-        const { submission } = remaining[0]!;
-        const command = submission.command;
-        if (command.kind === "send") {
-          if (payload !== undefined) break;
-          deliveries.push(commandDelivery(submission));
-        } else {
-          if (deliveries.length > 0 || payload !== undefined) break;
-          if (command.kind === "runtime") payload = command.payload;
-          else if (command.kind === "clear" || command.kind === "compact")
-            payload = { kind: command.kind };
-          else if (command.kind === "cancel") {
-            remaining.shift();
-            applied[submission.eventId] = "retired";
-            return {
-              ...state,
-              deliveries: applied,
-              inputs: remaining,
-              result: parkedResult(state),
-            };
+      let payload: ModelPayload | undefined;
+      const deliveries: DeliverHookPayload[] = [];
+      const applied = { ...state.deliveries };
+      const remaining = [...(state.inputs ?? [])];
+      const runtimeReady = (state.runtimeResults?.length ?? 0) > 0;
+      if (runtimeReady) {
+        payload = {
+          kind: "runtime-action-result",
+          results: state.runtimeResults!,
+          acceptedAtMsByCallId: state.runtimeResultTimes,
+        };
+      } else {
+        while (remaining.length > 0) {
+          const { submission } = remaining[0]!;
+          const command = submission.command;
+          if (command.kind === "send") {
+            if (payload !== undefined) break;
+            deliveries.push(commandDelivery(submission));
           } else {
-            return {
-              ...state,
-              result: cancelledResult(state),
-            };
+            if (deliveries.length > 0 || payload !== undefined) break;
+            if (command.kind === "runtime") payload = command.payload;
+            else if (command.kind === "clear" || command.kind === "compact")
+              payload = { kind: command.kind };
+            else if (command.kind === "cancel") {
+              remaining.shift();
+              applied[submission.eventId] = "retired";
+              return {
+                ...state,
+                deliveries: applied,
+                inputs: remaining,
+                result: parkedResult(state),
+              };
+            } else {
+              return {
+                ...state,
+                result: cancelledResult(state),
+              };
+            }
           }
+          remaining.shift();
+          applied[submission.eventId] = "applied";
+          if (command.kind !== "send") break;
         }
-        remaining.shift();
-        applied[submission.eventId] = "applied";
-        if (command.kind !== "send") break;
       }
-    }
-    if (deliveries.length > 0) {
-      const routed = await routeDeliverToChildren({
-        delivery: coalesceDeliveries(deliveries),
-        parentWritable: events,
+      if (deliveries.length > 0) {
+        const routed = await routeDeliverToChildren({
+          delivery: coalesceDeliveries(deliveries),
+          parentWritable: events,
+          serializedContext: state.serializedContext,
+          sessionState: state.state,
+        });
+        state = {
+          ...state,
+          serializedContext: routed.serializedContext ?? state.serializedContext,
+          state: routed.sessionState ?? state.state,
+        };
+        if (routed.kind === "cancel-turn")
+          return {
+            ...state,
+            result: cancelledResult(state),
+          };
+        payload = routed.remainder;
+        if (payload === undefined) {
+          return {
+            ...state,
+            deliveries: applied,
+            inputs: remaining,
+            result: state.result ?? parkedResult(state),
+          };
+        }
+      }
+      if (
+        payload === undefined &&
+        state.result === undefined &&
+        (state.inputs?.length ?? 0) === 0
+      ) {
+        return { ...state, result: parkedResult(state) };
+      }
+      const result = await runModel({
+        input: payload,
+        events,
+        abortSignal: AbortSignal.any([input.abortSignal, failureSignal]),
         serializedContext: state.serializedContext,
         sessionState: state.state,
       });
-      state = {
+      return {
         ...state,
-        serializedContext: routed.serializedContext ?? state.serializedContext,
-        state: routed.sessionState ?? state.state,
+        state: result.sessionState,
+        serializedContext: result.serializedContext,
+        result,
+        deliveries: applied,
+        inputs: remaining,
+        runtimeResults: [],
+        runtimeResultTimes: {},
+        dispatched: false,
+        modelWriteId: writeId,
+        pendingTaskAcks: result.backgroundTasks,
+        pendingToolAcks: [],
       };
-      if (routed.kind === "cancel-turn")
-        return {
-          ...state,
-          result: cancelledResult(state),
-        };
-      payload = routed.remainder;
-      if (payload === undefined) {
-        return {
-          ...state,
-          deliveries: applied,
-          inputs: remaining,
-          result: state.result ?? parkedResult(state),
-        };
-      }
-    }
-    if (payload === undefined && state.result === undefined && (state.inputs?.length ?? 0) === 0) {
-      return { ...state, result: parkedResult(state) };
-    }
-    const result = await runModel({
-      input: payload,
-      events,
-      abortSignal: input.abortSignal,
-      serializedContext: state.serializedContext,
-      sessionState: state.state,
-    });
-    return {
-      ...state,
-      state: result.sessionState,
-      serializedContext: result.serializedContext,
-      result,
-      deliveries: applied,
-      inputs: remaining,
-      runtimeResults: [],
-      runtimeResultTimes: {},
-      dispatched: false,
-      modelWriteId: writeId,
-      pendingTaskAcks: result.backgroundTasks,
-      pendingToolAcks: [],
-    };
-  });
-  const committed: InitializedSessionCheckpoint = { ...checkpoint, writeId };
-  const ref = await sessionSnapshots.append(input.session.snapshots, committed, {
-    fresh: attempt === 1,
-  });
-  await acknowledgeCheckpoint(committed);
-  return { kind: "progress", progress: projectProgress(ref, committed) };
+    },
+  );
+  if (descriptor !== undefined) {
+    const outcome = await descriptor;
+    if ("error" in outcome) throw outcome.error;
+  }
+  if (timeout !== undefined) {
+    const outcome = await timeout;
+    if ("error" in outcome) throw outcome.error;
+    checkpoint = { ...checkpoint, timeoutRunId: outcome.run.runId };
+  }
+  return { kind: "progress", progress: projectProgress(checkpoint) };
 }
 
-async function acknowledgeCheckpoint(checkpoint: InitializedSessionCheckpoint): Promise<void> {
-  await acknowledgeWorkflowTools({ runs: checkpoint.pendingToolAcks ?? [] });
-  await acknowledgeDelegatedTasks({ tasks: checkpoint.pendingTaskAcks ?? [] });
+export async function acknowledgeTurnWorkStep(input: {
+  readonly tools: NonNullable<InitializedSessionCheckpoint["pendingToolAcks"]>;
+  readonly tasks: NonNullable<InitializedSessionCheckpoint["pendingTaskAcks"]>;
+}): Promise<void> {
+  "use step";
+  await Promise.all([
+    acknowledgeWorkflowTools({ runs: input.tools }),
+    acknowledgeDelegatedTasks({ tasks: input.tasks }),
+  ]);
 }
 
 function isRuntimeEvent(payload: HookPayload): boolean {
@@ -448,10 +456,7 @@ async function routePendingResponses(
   return { ...current, deliveries, inputs };
 }
 
-export function projectProgress(
-  ref: SnapshotRecordRef,
-  checkpoint: InitializedSessionCheckpoint,
-): TurnProgress {
+export function projectProgress(checkpoint: InitializedSessionCheckpoint): TurnProgress {
   const result = checkpoint.result;
   const pendingCallIds =
     result?.action === "dispatch-workflow-tasks"
@@ -460,7 +465,7 @@ export function projectProgress(
         ? result.pendingCoordinationCallIds
         : undefined;
   return {
-    checkpoint: ref,
+    checkpoint,
     turnId: checkpoint.state.emissionState.turnId || `turn_${checkpoint.writerRunId}`,
     taskId: checkpoint.caller?.taskId,
     action: nextAction(checkpoint, pendingCallIds),
@@ -534,13 +539,6 @@ async function initializeCheckpoint(
     input.submission.command.kind === "send"
       ? (input.submission.command.caller ?? (await resolveInitialTurnCaller({ serializedContext })))
       : undefined;
-  const timeout =
-    seed.sessionTimeoutMs === false
-      ? undefined
-      : await startSessionTimeout({
-          deadline: new Date(Date.now() + (seed.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS)),
-          token: sessionCommandToken(input.session.sessionId),
-        });
   return {
     writeId: "initial",
     writerRunId: input.owner.ownerRunId,
@@ -551,7 +549,6 @@ async function initializeCheckpoint(
     deliveries: {},
     queue: [],
     inputs: [{ submission: input.submission, candidateRunId: input.owner.ownerRunId }],
-    timeoutRunId: timeout?.runId,
     activityCollectorRunId: seed.activityCollectorRunId,
   };
 }

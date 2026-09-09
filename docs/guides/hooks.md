@@ -3,7 +3,7 @@ title: "Hooks"
 description: "Subscribe to runtime stream events from agent/hooks/."
 ---
 
-Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
+Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is queued for persistence, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
 
 ## Define a hook
 
@@ -168,11 +168,14 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 When a stream event fires, three things happen in order:
 
-1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
+1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is queued for the durable stream.
 2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 3. Dynamic tool resolvers. Resolvers subscribed to the event type run and update the tool set.
 
-Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
+Hooks run after local enqueueing, while persistence drains concurrently. The step
+flushes queued events before completing, including when a hook throws. A hook is
+not confirmation that the stream write has persisted. The queued event and every
+hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 

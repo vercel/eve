@@ -7,7 +7,7 @@ import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** In-memory domain state. Persist it in a checkpoint, never in workflow history. */
+/** Domain state carried by Workflow steps and persisted between turns. */
 export interface DurableSessionState {
   readonly sessionId: string;
   readonly continuationToken: string;

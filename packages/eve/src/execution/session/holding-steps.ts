@@ -7,7 +7,6 @@ import {
 import type { SessionResources } from "#execution/session/resources.js";
 import { dispatchTurn } from "#execution/session/dispatch.js";
 import type { AcceptedSubmission } from "#execution/turn/types.js";
-import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 
 export async function initializeHolderStep(
   runId: string,
@@ -15,7 +14,7 @@ export async function initializeHolderStep(
 ): Promise<SessionResources> {
   "use step";
   const resources = createSessionResources(runId, eventId);
-  await initializeSessionResources(resources, { fresh: getStepMetadata().attempt === 1 });
+  await initializeSessionResources(resources);
   return resources;
 }
 

@@ -82,8 +82,8 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
-Cold-start sends wait until the winning session owns the address and its streams
-and initial state are ready. If simultaneous sends race, eve forwards the losing
+Cold-start sends wait until the winning session owns the address and publishes its
+resource descriptor while holding first-turn ownership. If simultaneous sends race, eve forwards the losing
 candidate's message to the winner and returns that canonical session handle.
 
 ```ts

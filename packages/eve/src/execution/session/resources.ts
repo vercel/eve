@@ -4,7 +4,6 @@ export type SessionId = Id<"session">;
 export type WorkflowRunId = Id<"workflow-run">;
 export type EventStreamId = Id<"event-stream">;
 export type SnapshotStreamId = Id<"snapshot-stream">;
-export type SnapshotRecordId = Id<"snapshot-record">;
 
 export interface EventStreamRef {
   readonly id: EventStreamId;
@@ -12,10 +11,6 @@ export interface EventStreamRef {
 
 export interface SnapshotStreamRef {
   readonly id: SnapshotStreamId;
-}
-
-export interface SnapshotRecordRef {
-  readonly id: SnapshotRecordId;
 }
 
 export interface SessionResources {

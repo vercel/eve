@@ -811,9 +811,11 @@ describe("turn cancellation integration", () => {
         });
         expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
 
-        const stored = await sessionSnapshots.latest<SessionCheckpoint>(run.resources.snapshots);
-        if (stored === undefined) throw new Error("Expected a settled checkpoint.");
-        await waitForTurnReceipt(stored.checkpoint.writerRunId);
+        const checkpoint = await sessionSnapshots.latest<SessionCheckpoint>(
+          run.resources.snapshots,
+        );
+        if (checkpoint === null) throw new Error("Expected a settled checkpoint.");
+        await waitForTurnReceipt(checkpoint.writerRunId);
         expect(await getHookByToken(activeTurnToken(run.sessionId)).catch(() => null)).toBeNull();
         const world = await getWorld();
         const runs = await world.runs.list({ pagination: { limit: 100 } });

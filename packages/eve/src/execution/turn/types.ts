@@ -1,6 +1,6 @@
 import type { HookPayload, RunInput, SessionCommand, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/session/state.js";
-import type { SessionResources, SnapshotRecordRef } from "#execution/session/resources.js";
+import type { SessionResources } from "#execution/session/resources.js";
 import type { ModelResult } from "#execution/turn/model-types.js";
 import type { InboxEnvelope } from "#execution/inbox/types.js";
 
@@ -38,7 +38,7 @@ export interface PendingSubmission {
   readonly candidateRunId: string;
 }
 
-/** Program state stays in storage; workflows carry only its immutable reference. */
+/** Workflow step state during execution; persisted to the session stream only at settlement. */
 export interface InitializedSessionCheckpoint {
   readonly writeId: string;
   readonly writerRunId: string;
@@ -78,13 +78,12 @@ export type SessionCheckpoint = InitializedSessionCheckpoint | InitializationFai
 export interface TurnReceipt {
   readonly continuationToken?: string;
   readonly continuedTo?: string;
-  readonly checkpoint?: SnapshotRecordRef;
   readonly deliveries: Readonly<Record<string, DeliveryDisposition>>;
   readonly terminal: boolean;
 }
 
 export interface TurnProgress {
-  readonly checkpoint: SnapshotRecordRef;
+  readonly checkpoint: InitializedSessionCheckpoint;
   readonly claimedContinuationToken?: string;
   readonly turnId: string;
   readonly taskId?: string;
