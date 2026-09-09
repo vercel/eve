@@ -61,10 +61,12 @@ catalog:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
   - "@kybernesis/arcana"
   - "@upstash/*"
   - "@vercel/*"
   - "@workflow/*"
+  - ai
   - nitro
   # Required by nitro@3.0.260903-beta, published September 3.
   - db0@0.4.1
