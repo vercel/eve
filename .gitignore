@@ -13,12 +13,14 @@ coverage/
 .pnpm-store/
 .bun/
 .npm/
+__pycache__/
 
 # Test artifacts
 .vitest/
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
+packages/eve-bench/.generated/
 playwright-report/
 test-results/
 
@@ -31,6 +33,7 @@ packages/eve-buzz-acp-adapter/NOTICE
 
 # Logs
 *.log
+/jobs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

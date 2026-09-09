@@ -1,0 +1,157 @@
+name: eve Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - "packages/eve-bench/**"
+      - research/eve-bench-runner.md
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model to benchmark
+        required: false
+        default: zai/glm-5.2
+        type: string
+      cohort:
+        description: Task cohort to run
+        required: false
+        default: smoke
+        type: string
+      base_job_artifact:
+        description: Optional artifact containing a base job to compare
+        required: false
+        type: string
+
+concurrency:
+  group: eve-bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/eve-bench
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: ${{ github.workspace }}
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Sync benchmark tasks
+        run: pnpm bench tasks sync --json
+
+      - name: Run oracle smoke benchmark
+        run: pnpm bench run --harness oracle --cohort smoke --concurrency 5 --job oracle-smoke --format junit > junit.xml
+
+      - name: Print oracle smoke report
+        run: pnpm bench report oracle-smoke
+
+      - name: Upload oracle smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eve-bench-oracle-smoke
+          path: |
+            packages/eve-bench/.generated/jobs/oracle-smoke
+            packages/eve-bench/junit.xml
+          include-hidden-files: true
+          if-no-files-found: warn
+
+      - name: Require every oracle attempt to resolve
+        run: |
+          node -e '
+            const result = require("./.generated/jobs/oracle-smoke/result.json");
+            const { attempts, resolved } = result.summary;
+            if (resolved < attempts) {
+              console.error(`Oracle resolved ${resolved} of ${attempts} attempts`);
+              process.exit(1);
+            }
+          '
+
+  eve-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+    defaults:
+      run:
+        working-directory: packages/eve-bench
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: ${{ github.workspace }}
+
+      - name: Build eve package
+        run: pnpm --filter eve run build
+        working-directory: ${{ github.workspace }}
+
+      - name: Run eve smoke benchmark
+        env:
+          MODEL: ${{ inputs.model }}
+          COHORT: ${{ inputs.cohort }}
+        run: pnpm bench run --harness eve --model "$MODEL" --cohort "$COHORT" --attempts 1 --concurrency 5 --job eve-smoke
+
+      - name: Download base job artifact
+        if: ${{ inputs.base_job_artifact != '' }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ inputs.base_job_artifact }}
+          path: packages/eve-bench/.generated/base-job
+
+      - name: Compare with base job
+        if: ${{ inputs.base_job_artifact != '' }}
+        run: |
+          pnpm bench diff .generated/base-job .generated/jobs/eve-smoke | tee diff.txt
+          {
+            echo "## Benchmark diff"
+            echo '```text'
+            cat diff.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload eve smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eve-bench-eve-smoke
+          path: packages/eve-bench/.generated/jobs/eve-smoke
+          include-hidden-files: true
+          if-no-files-found: warn

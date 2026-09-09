@@ -1,0 +1,26 @@
+{
+  "name": "@eve/bench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Terminal-Bench harness benchmarks for eve.",
+  "bin": {
+    "eve-bench": "./src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "bench": "node src/cli.ts",
+    "test": "pnpm run typecheck && node --test src/core/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

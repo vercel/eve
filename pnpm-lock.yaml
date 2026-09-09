@@ -1260,6 +1260,22 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(zod@4.4.3)
 
+  packages/eve-bench:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/eve-buzz-acp-adapter:
     dependencies:
       eve:
