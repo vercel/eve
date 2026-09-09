@@ -2,6 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/subagent/invoke-agent.js";
+import { copyWorkflowHistory } from "#execution/tools/workflow/history.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
@@ -18,6 +19,11 @@ import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
+  /**
+   * Immutable completed parent prefix captured before this tool call. Older
+   * in-flight workflow runs omit it and intentionally receive an empty view.
+   */
+  readonly history?: import("#execution/tools/workflow/history.js").WorkflowHistory;
   /** Advertised by the parent driver; absent on runs started before this capability. */
   readonly authorizationSupported?: boolean;
   readonly callId: string;
@@ -149,6 +155,7 @@ function createWorkflowBodyContext(
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
+    history: copyWorkflowHistory(input.history ?? []),
     requireAuth: () =>
       unavailable(
         "requireAuth()",

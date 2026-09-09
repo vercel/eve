@@ -14,6 +14,7 @@ import {
 } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
+import type { WorkflowHistory } from "#shared/history-message.js";
 
 export interface AgentInput {
   readonly agentId?: string;
@@ -31,6 +32,12 @@ export type WorkflowToolContext = Pick<
   ToolContext,
   "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
+  /**
+   * Immutable completed conversation prefix captured before this workflow tool
+   * call. It excludes the calling tool exchange and never exposes live session
+   * state.
+   */
+  readonly history: WorkflowHistory;
   /** Invoke a visible subagent. The key must be unique within this workflow run. */
   agent(input: AgentInput): Promise<JsonValue>;
   /** Ask the human on the session's channel; awaiting the answer suspends the run. */

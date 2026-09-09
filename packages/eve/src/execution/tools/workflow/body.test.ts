@@ -19,8 +19,13 @@ it("binds workflow-only methods to the run context", async () => {
   const signal = new AbortController().signal;
   const input = {
     callId: "call",
+    history: [{ content: "Earlier request", role: "user" }],
     input: {},
-    session: { id: "session", turn: { id: "turn", sequence: 1 } },
+    session: {
+      auth: { current: null, initiator: null },
+      id: "session",
+      turn: { id: "turn", sequence: 1 },
+    },
     stepIndex: 0,
     toolName: "deploy",
     workflowId: "workflow//test//execute",
@@ -35,6 +40,8 @@ it("binds workflow-only methods to the run context", async () => {
   mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
     expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
     expect(ctx.abortSignal).toBe(signal);
+    expect(ctx.history).toEqual([{ content: "Earlier request", role: "user" }]);
+    expect(Object.isFrozen(ctx.history)).toBe(true);
     const answer = await ctx.ask(question);
     const result = await ctx.agent(invocation);
     expect(mocks.ask).toHaveBeenCalledWith(ctx, question);
@@ -64,6 +71,7 @@ it.each([
         {
           authorizationSupported,
           callId: "call",
+          history: [],
           input: {},
           session: {
             id: "session",

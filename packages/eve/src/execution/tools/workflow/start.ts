@@ -1,6 +1,7 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { copyWorkflowHistory } from "#execution/tools/workflow/history.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import type {
@@ -50,6 +51,7 @@ export async function startWorkflowTask(input: {
     const started = await startWorkflowToolRun({
       callId: task.callId,
       executeInput: task.executeInput,
+      history: copyWorkflowHistory(session.history),
       input: task.input,
       owner: input.owner,
       resultKind: task.resultKind,

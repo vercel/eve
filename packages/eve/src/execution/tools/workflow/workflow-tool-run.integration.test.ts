@@ -16,6 +16,7 @@ import {
   deployServiceWorkflow,
   failingDeployWorkflow,
   holdUntilAbortedWorkflow,
+  readHistoryWorkflow,
   reportingDeployWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
@@ -143,6 +144,37 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 }
 
 describe("workflow step authorization", () => {
+  it("receives the completed parent prefix before the workflow tool exchange", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-history-read",
+      execute: readHistoryWorkflow,
+      toolName: "research",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run research with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-history-read",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const settled = await stream.nextTurn();
+        const result = filterEventsByType(settled, "action.result").at(-1);
+        expect(result?.data.result.output).toMatchObject({
+          lastContent: 'Run research with service "api"',
+          length: 1,
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
   it.each(["blocking", "background"] as const)(
     "runs %s auth with no advertised driver support",
     async (execution) => {
