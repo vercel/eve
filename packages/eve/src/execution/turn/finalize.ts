@@ -115,8 +115,8 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<SessionCheckpoint
     let current = checkpoint;
     if (cancelling) {
       await cancelDescendantTurns({
-        sessionState: current.state,
-        serializedContext: current.serializedContext,
+        sessionState: original.state,
+        serializedContext: original.serializedContext,
       });
       const settled = await settleCancelledTurn({
         events,

@@ -207,6 +207,7 @@ export async function dispatchAgentInvocation(input: {
       }
     }
     outcome = await startSubagent({
+      activityObserver: prepared.activityObserver,
       auth: prepared.auth,
       batchEvent: prepared.batch.event,
       bundle: prepared.bundle,

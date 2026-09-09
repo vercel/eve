@@ -28,6 +28,7 @@ export interface CapturedTurnStream {
    * observed in that turn.
    */
   nextTurn(): Promise<MessageStreamEvent[]>;
+  until(type: MessageStreamEvent["type"]): Promise<MessageStreamEvent[]>;
   /** Releases the reader lock on the underlying `ReadableStream`. */
   dispose(): void;
 }
@@ -56,6 +57,10 @@ export function captureTurnEvents(
       }
 
       return await readUntilBoundary(reader, state, decoder);
+    },
+    async until(type) {
+      if (disposed) throw new Error("CapturedTurnStream: stream already disposed.");
+      return await readUntilBoundary(reader, state, decoder, type);
     },
     dispose() {
       if (disposed) {
@@ -133,6 +138,7 @@ async function readUntilBoundary(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState,
   decoder: InstanceType<typeof TextDecoder>,
+  until?: MessageStreamEvent["type"],
 ): Promise<MessageStreamEvent[]> {
   const events: MessageStreamEvent[] = [];
 
@@ -152,7 +158,7 @@ async function readUntilBoundary(
       const event = JSON.parse(line) as MessageStreamEvent;
       events.push(event);
 
-      if (isCurrentTurnBoundaryEvent(event)) {
+      if (until === undefined ? isCurrentTurnBoundaryEvent(event) : event.type === until) {
         return events;
       }
     }

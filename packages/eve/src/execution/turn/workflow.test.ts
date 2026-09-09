@@ -45,7 +45,7 @@ vi.mock("#execution/turn/admission.js", () => ({
   forwardSubmissionStep: mocks.forwardSubmissionStep,
   awaitTurnStep: mocks.awaitTurnStep,
 }));
-vi.mock("#internal/workflow/await-run.js", () => ({
+vi.mock("#execution/await-run.js", () => ({
   awaitRunStep: mocks.awaitRunStep,
 }));
 import { turnWorkflow } from "#execution/turn/workflow.js";
@@ -56,6 +56,7 @@ const input: TurnWorkflowInput = {
 };
 const receipt: TurnReceipt = { deliveries: { input: "applied" }, terminal: false };
 const checkpoint = {
+  deliveries: {},
   state: { continuationToken: "" },
   phase: "settled",
 } as InitializedSessionCheckpoint;
@@ -415,6 +416,16 @@ describe("turn workflow ownership", () => {
     expect(mocks.finalizeTurnStep).toHaveBeenCalledWith(
       expect.objectContaining({ claimedContinuationToken: "existing" }),
     );
+  });
+  it("does not run another model step for a forwarded submission already applied by the owner", async () => {
+    const actor = testInbox();
+    mocks.createOwnerInbox.mockReturnValue(actor.inbox);
+    actor.push(submit({ kind: "send", payload: { message: "duplicate" } }, "input"));
+    mocks.executeTurnStep.mockResolvedValue(
+      progress({ checkpoint: { ...checkpoint, deliveries: { input: "applied" } } }),
+    );
+    await turnWorkflow(input);
+    expect(mocks.executeTurnStep).toHaveBeenCalledOnce();
   });
   it("awaits model quiescence when an executor fails during foreground work", async () => {
     const actor = testInbox();

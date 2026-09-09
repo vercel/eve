@@ -10,6 +10,14 @@ last_updated: "2026-09-09"
 
 ### September 9 snapshot simplification
 
+The September 9 CI recovery pass moves `awaitRunStep` into the scanned execution
+tree, registers the turn controller before awaiting the owner claim, and removes
+the successful-turn cleanup abort. This removes a serial hook-registration phase
+on the uncontested path and the post-success abort traffic. The downloaded
+`eve-turn-round-trips.html` captured at 16:24 UTC matches the preceding source
+snapshot, but its separate abort-hook barrier and success-abort rows no longer
+describe this version. Hosted time-to-model still needs direct measurement.
+
 Event output now uses one bounded step-local enqueue writer. Storage opens lazily
 on the first event and drains eagerly, keeping one Workflow chunk per event for
 cursor compatibility. Every local write completes without storage backpressure.

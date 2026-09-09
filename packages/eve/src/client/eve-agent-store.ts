@@ -16,6 +16,7 @@ import {
   summarizeUserContent,
   toTerminalStreamFailureError,
   updatePendingAuthorizations,
+  reduceProjectionEvents,
 } from "#client/eve-agent-store-helpers.js";
 import { toError } from "#shared/errors.js";
 import type {
@@ -180,7 +181,7 @@ export class EveAgentStore<TData> {
             streamIndex: init.initialSession.streamIndex,
           }));
 
-    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
+    this.#data = reduceProjectionEvents(this.#reducer, this.#projectionEvents);
     this.#snapshot = this.#createSnapshot();
   }
 
@@ -671,15 +672,7 @@ export class EveAgentStore<TData> {
     replacement: EveAgentReducerEvent,
   ): void {
     this.#projectionEvents = replaceProjectionEvent(this.#projectionEvents, predicate, replacement);
-    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
-  }
-
-  #reduceProjectionEvents(events: readonly EveAgentReducerEvent[]): TData {
-    let data = this.#reducer.initial();
-    for (const event of events) {
-      data = this.#reducer.reduce(data, event);
-    }
-    return data;
+    this.#data = reduceProjectionEvents(this.#reducer, this.#projectionEvents);
   }
 
   #createSnapshot(): EveAgentStoreSnapshot<TData> {

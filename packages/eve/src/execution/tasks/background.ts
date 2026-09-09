@@ -14,7 +14,6 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   BackgroundToolExecutorKey,
   type BackgroundExecutableTool,
@@ -44,9 +43,7 @@ import {
 import { parseWorkflowToolInput } from "#execution/workflow-tool/background.js";
 import { sendTaskCommand, sendTaskInboundPayload, startTaskRun } from "#execution/tasks/runtime.js";
 import { sessionCommandToken } from "#execution/session-command-token.js";
-import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
-import { parseJsonObject } from "#shared/json.js";
-import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import { projectSubagentTask } from "#execution/tasks/subagent-projection.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import { formatAgentBusyMessage } from "#subagents/agent-handle-errors.js";
@@ -58,20 +55,7 @@ import {
 } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 
-type SubagentReceiptIdentity = ReturnType<typeof createSubagentReceiptIdentity>;
-
 const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
-
-interface SubagentTaskProjection {
-  readonly identity?: SubagentReceiptIdentity;
-  readonly metadata: {
-    readonly agentId: string;
-    readonly kind: "subagent";
-    readonly mode: "local" | "remote";
-    readonly name: string;
-  };
-  readonly receipt: { readonly agentId: string };
-}
 
 interface BackgroundToolExecutionRecord {
   claim?: {
@@ -236,7 +220,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     if (incomplete.length > 0) {
       await this.compensate(incomplete, cause);
     }
-    if (settled.length === 0) return;
+    if (settled.length === 0) {
+      this.retained = this.agentHandlesChanged && isTurnCancellation(cause);
+      return;
+    }
     // Cancellation must not compensate settled records: their tasks are
     // already running. Retain them for readRetainedBackgroundToolResult.
     if (isTurnCancellation(cause)) {
@@ -266,7 +253,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const tasks = this.records.flatMap((record) =>
       record.settled && record.task !== undefined ? [record.task] : [],
     );
-    if (tasks.length === 0) return undefined;
+    if (tasks.length === 0 && !this.agentHandlesChanged) return undefined;
     return {
       backgroundTaskSession: this.apply(this.initialSession),
       backgroundTasks: tasks.map(({ taskInboxToken, taskId, taskRunId }) => ({
@@ -625,59 +612,6 @@ function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
     getAgentHandleStore(session.state)?.handles.some((handle) => handle.identity.id === agentId) ===
     true
   );
-}
-
-function projectSubagentTask(input: {
-  readonly ctx: ReturnType<typeof loadContext>;
-  readonly input: ReturnType<typeof parseJsonObject>;
-  readonly name: string;
-  readonly nodeId: string;
-  readonly taskInput: {
-    readonly callId: string;
-    readonly parentSessionId: string;
-    readonly parentTurnId: string;
-  };
-}): SubagentTaskProjection {
-  const continuation = input.input.agentId;
-  if (typeof continuation === "string" && continuation.trim() !== "") {
-    return {
-      metadata: {
-        agentId: continuation,
-        kind: "subagent",
-        mode: readSubagentTaskMode(input.ctx, input.nodeId),
-        name: input.name,
-      },
-      receipt: { agentId: continuation },
-    };
-  }
-  const identity = createSubagentReceiptIdentity({
-    callId: input.taskInput.callId,
-    nodeId: input.nodeId,
-    parentSessionId: input.taskInput.parentSessionId,
-    parentTurnId: input.taskInput.parentTurnId,
-    subagentName: input.name,
-  });
-  return {
-    identity,
-    metadata: {
-      agentId: identity.identity.id,
-      kind: "subagent",
-      mode: readSubagentTaskMode(input.ctx, input.nodeId),
-      name: input.name,
-    },
-    receipt: { agentId: identity.identity.id },
-  };
-}
-
-function readSubagentTaskMode(
-  ctx: ReturnType<typeof loadContext>,
-  nodeId: string,
-): "local" | "remote" {
-  const dynamic = getDynamicSubagentSelection(ctx, nodeId);
-  if (dynamic !== undefined) return dynamic.kind === "remote" ? "remote" : "local";
-
-  const registered = ctx.get(BundleKey)?.subagentRegistry.subagentsByNodeId.get(nodeId);
-  return registered?.definition.kind === "remote" ? "remote" : "local";
 }
 
 function requireExecutionScope(executor: BackgroundToolExecutor): BackgroundToolExecutionScope {

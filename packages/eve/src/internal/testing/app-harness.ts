@@ -170,12 +170,16 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
     modules: [
-      {
-        loadNamespace: async () => ({
-          default: defineSandbox({ backend: TEST_SANDBOX_BACKEND }),
-        }),
-        logicalPath: "sandbox.ts",
-      },
+      ...(descriptor.modules?.some((module) => module.logicalPath === "sandbox.ts")
+        ? []
+        : [
+            {
+              loadNamespace: async () => ({
+                default: defineSandbox({ backend: TEST_SANDBOX_BACKEND }),
+              }),
+              logicalPath: "sandbox.ts",
+            },
+          ]),
       ...(descriptor.modules ?? []),
     ],
     outputSchema: descriptor.agent?.outputSchema,

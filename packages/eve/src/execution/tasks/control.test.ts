@@ -64,7 +64,7 @@ describe("task cancellation", () => {
     { status: "completed", delivery: "delivered" },
     { status: "cancelled", delivery: "unreachable" },
   ] as const)(
-    "does not cancel child work for $status with $delivery delivery",
+    "finishes child cleanup only for $status with $delivery delivery",
     async ({ status, delivery }) => {
       vi.mocked(sendTaskCommand).mockResolvedValue(delivery);
       const common = { metadata: entry.metadata, taskId: entry.taskId };
@@ -75,7 +75,7 @@ describe("task cancellation", () => {
       );
       const cancelOwnedWork = vi.fn();
       await cancelOwnedTask({ entry, cancelOwnedWork });
-      expect(cancelOwnedWork).not.toHaveBeenCalled();
+      expect(cancelOwnedWork).toHaveBeenCalledTimes(status === "cancelled" ? 1 : 0);
       expect(awaitTerminalTaskView).not.toHaveBeenCalled();
     },
   );

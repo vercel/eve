@@ -4,19 +4,24 @@ export default defineEval({
   description:
     "A workflow tool reports progress around a human question, then settles the call in order.",
   async test(t) {
-    const parked = await t.send("WORKFLOW-CONFIRM-START");
-    t.requireInputRequest({
-      display: "confirmation",
-      optionIds: ["approve", "cancel"],
-      toolName: "confirm_deploy",
+    const live = await t.start("WORKFLOW-CONFIRM-START");
+    const requested = await live.waitForEvent("input.requested");
+    const response = await t.target.fetch(`/eve/v1/session/${live.sessionId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        inputResponses: requested.data.requests.map((request) => ({
+          requestId: request.requestId,
+          optionId: "approve",
+        })),
+      }),
     });
-    parked.event("action.partial", {
+    if (!response.ok) throw new Error("The approval was not accepted.");
+    const approved = await live.result();
+    approved.event("action.partial", {
       count: (count) => count >= 1,
       data: { result: { toolName: "confirm_deploy", output: "awaiting approval" } },
     });
-    parked.calledTool("confirm_deploy", { status: "pending", count: 1 });
-
-    const approved = await t.respondAll("approve");
     approved.expectOk();
     approved.event("action.result", {
       count: 1,

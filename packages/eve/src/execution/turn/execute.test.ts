@@ -96,6 +96,7 @@ beforeEach(() => {
   mocks.latest.mockImplementation(async () => checkpoint);
   mocks.create.mockResolvedValue({ state });
   mocks.timeout.mockResolvedValue({ runId: "timer" });
+  mocks.publish.mockResolvedValue(undefined);
   mocks.model.mockImplementation(async (input) => ({
     action: "continue",
     sessionState: input.sessionState,
@@ -126,6 +127,32 @@ const run = (changes: Partial<Parameters<typeof executeTurnStep>[0]> = {}) =>
   });
 
 describe("turn execution boundary", () => {
+  it("settles an idle task-control delivery without running a model", async () => {
+    mocks.route.mockImplementation(async (input) => ({
+      kind: "continue",
+      remainder: undefined,
+      sessionState: input.sessionState,
+      serializedContext: input.serializedContext,
+    }));
+    const result = await run({
+      submission: {
+        eventId: "task-request",
+        command: { kind: "send", payload: { task: { agentRequests: [] } } },
+      },
+    });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      kind: "progress",
+      progress: {
+        action: "settle",
+        checkpoint: {
+          result: {
+            settlement: { events: [expect.objectContaining({ type: "session.waiting" })] },
+          },
+        },
+      },
+    });
+  });
   it("starts model work while bootstrap descriptor and timer operations are pending", async () => {
     const descriptor = Promise.withResolvers<void>();
     const timer = Promise.withResolvers<{ runId: string }>();

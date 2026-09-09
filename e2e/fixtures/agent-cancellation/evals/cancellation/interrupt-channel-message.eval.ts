@@ -28,9 +28,9 @@ async function postMessage(
   return JSON.parse(text) as MessageResponse;
 }
 
-/** Replaces an active turn through the custom channel's default steering policy. */
+/** Replaces an active turn through the custom channel's explicit interrupt policy. */
 export default defineEval({
-  description: "An accepted channel message replaces the active turn by default.",
+  description: "An interrupting channel message replaces the active turn.",
   timeoutMs: 240_000,
 
   async test(t) {
@@ -57,7 +57,7 @@ export default defineEval({
       t.target,
       threadId,
       "Reply with exactly CHANNEL-STEERING-REPLACEMENT-OK.",
-      "steer",
+      "interrupt",
     );
     await t.require(
       replacement,
@@ -68,14 +68,16 @@ export default defineEval({
     );
 
     const cancelled = await activeTurn.result();
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
+    cancelled.event("turn.interrupted", { count: 1 });
+    cancelled.eventOrder([
+      { type: "turn.interrupted" },
+      { type: "turn.started" },
+      { type: "session.waiting" },
+    ]);
     cancelled.notEvent("turn.failed");
     cancelled.notEvent("session.failed");
 
-    const replacementTurn = await t.target
-      .watchTurn(sessionId, { startIndex: cancelled.events.length })
-      .result();
+    const replacementTurn = cancelled;
     replacementTurn.notEvent("turn.cancelled");
     replacementTurn.notEvent("turn.failed");
     replacementTurn.notEvent("session.failed");

@@ -1,4 +1,5 @@
 import { sendInboxStep } from "#execution/inbox/send.js";
+import { createTaskMessage } from "#tools/task.js";
 import type { InboxReplyTarget } from "#execution/inbox/types.js";
 
 import type {
@@ -143,7 +144,7 @@ export async function invokeAgent(
     if (reply.kind === "task-update") {
       await sendReport({
         from: run,
-        update: reply.message,
+        update: run.execution === "background" ? createTaskMessage(reply.message) : reply.message,
       });
       continue;
     }

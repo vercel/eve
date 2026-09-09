@@ -888,6 +888,7 @@ describe("eveChannel — onMessage", () => {
       sessionId: "test-session-id",
       status: "accepted",
       ok: true,
+      deliveryId: expect.any(String),
     });
   });
 });

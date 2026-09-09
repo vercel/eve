@@ -609,14 +609,21 @@ describe("EveTUIRunner active-owner input", () => {
     const firstStream = new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode(`${JSON.stringify(requested)}\n`));
+          controller.enqueue(
+            new TextEncoder().encode(
+              `${JSON.stringify({ ...requested, meta: { ...requested.meta, deliveryIds: ["approval-delivery"] } })}\n`,
+            ),
+          );
         },
         cancel: cancelReader,
       }),
       { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
     );
     const accepted = () =>
-      Response.json({ sessionId: "session_test", status: "accepted" }, { status: 202 });
+      Response.json(
+        { sessionId: "session_test", status: "accepted", deliveryId: "approval-delivery" },
+        { status: 202 },
+      );
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())

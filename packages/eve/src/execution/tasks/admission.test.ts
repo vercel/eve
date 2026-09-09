@@ -22,6 +22,8 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 vi.mock("#execution/inbox/readiness.js", () => ({ publishOwnerStep: vi.fn() }));
 vi.mock("#execution/tasks/steps.js", () => ({
   appendTaskViewStep: mocks.append,
+  appendTaskProgressStep: vi.fn(),
+  wakeTaskMessageParentStep: vi.fn(),
   deliverTaskInputResponsesStep: vi.fn(),
   wakeTaskAgentRequestParentStep: vi.fn(),
   wakeTaskAuthorizationParentStep: vi.fn(),

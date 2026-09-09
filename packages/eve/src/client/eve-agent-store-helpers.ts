@@ -1,5 +1,15 @@
 import type { SendTurnPayload } from "#client/types.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
+import type { EveAgentReducer } from "#client/reducer.js";
+
+export function reduceProjectionEvents<T>(
+  reducer: EveAgentReducer<T>,
+  events: readonly EveAgentReducerEvent[],
+): T {
+  let data = reducer.initial();
+  for (const event of events) data = reducer.reduce(data, event);
+  return data;
+}
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 

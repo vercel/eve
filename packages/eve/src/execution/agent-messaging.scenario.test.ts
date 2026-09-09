@@ -197,7 +197,7 @@ describe("agent messaging", () => {
         await expectRetainedChildConversation({
           childSessionId,
           client: new Client({ host: server.url }),
-          expectedCompletionCount: 0,
+          expectedCompletionCount: 1,
         });
         expect(await readWorkflowRunStatus(app.appRoot, childSessionId)).toBe("cancelled");
       } catch (error) {

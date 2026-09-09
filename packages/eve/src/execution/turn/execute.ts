@@ -40,6 +40,7 @@ import { startSessionTimeout } from "#execution/session-timeout-steps.js";
 import { sessionCommandToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { background } from "#internal/workflow/background.js";
+import { createSessionWaitingEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 
 export interface ExecuteTurnInput {
@@ -328,7 +329,15 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
             ...state,
             deliveries: applied,
             inputs: remaining,
-            result: state.result ?? parkedResult(state),
+            result: state.result ?? {
+              ...parkedResult(state),
+              settlement: state.state.emissionState.turnId
+                ? undefined
+                : {
+                    events: [stampMessageStreamEvent(createSessionWaitingEvent())],
+                    emissionAfter: state.state.emissionState,
+                  },
+            },
           };
         }
       }

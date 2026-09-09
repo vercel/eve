@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getWorld, getHookByToken } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
@@ -218,7 +218,9 @@ function createCancelRouteCaller(): (
         throw new Error("cancel route must not send to another channel");
       },
       params: { sessionId },
-      waitUntil: () => undefined,
+      waitUntil: (task) => {
+        void task.catch(() => {});
+      },
       requestIp: "127.0.0.1",
     } satisfies RouteHandlerArgs;
     return await handler(request, args);
@@ -240,7 +242,7 @@ async function expectCancelResponse(
 }
 
 describe("turn cancellation integration", () => {
-  it("buffers a default steering message before replacing the active turn", async () => {
+  it("interrupts an active turn before running the replacement", async () => {
     const fixture = await createWaitToolRuntime("turn-steer-message");
     const rawToken = "turn-steer-message";
     const continuationToken = `http:${rawToken}`;
@@ -270,17 +272,13 @@ describe("turn cancellation integration", () => {
         await fixture.toolStarted;
 
         await expect(
-          address.send("replacement after steer", { auth: null }),
+          address.send("replacement after steer", { auth: null, turnPolicy: "interrupt" }),
         ).resolves.toMatchObject({ id: run.sessionId });
 
-        const cancelledTurn = await stream.nextTurn();
-        expect(
-          containsEventSequence(cancelledTurn, [
-            "turn.started",
-            "turn.cancelled",
-            "session.waiting",
-          ]),
-        ).toBe(true);
+        const cancelledTurn = await stream.until("turn.interrupted");
+        expect(containsEventSequence(cancelledTurn, ["turn.started", "turn.interrupted"])).toBe(
+          true,
+        );
         expect(fixture.toolAborts()).toBe(1);
 
         const replacementTurn = await stream.nextTurn();
@@ -333,7 +331,11 @@ describe("turn cancellation integration", () => {
 
         // A duplicate cancel after the turn settled is consumed by the
         // next candidate and must not disturb the session.
-        await dispatchSessionCommandByToken(commandToken, { kind: "cancel" });
+        const duplicateCancel = await dispatchSessionCommandByToken(commandToken, {
+          kind: "cancel",
+          turnId: `turn_${cancelHook.runId}`,
+        });
+        await waitForTurnReceipt(duplicateCancel.run.runId);
 
         expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
         expect(
@@ -384,7 +386,8 @@ describe("turn cancellation integration", () => {
 
     await fixture.runtime.run(async () => {
       await expectCancelResponse(await cancelViaRoute("missing-session"), {
-        status: "no_active_turn",
+        status: "accepted",
+        sessionId: "missing-session",
       });
 
       const run = await startTestSession({
@@ -571,9 +574,11 @@ describe("turn cancellation integration", () => {
         const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
           .childSessionId;
         expect(childSessionId).toBeDefined();
-        expect(
-          await getHookByToken(activeTurnToken(childSessionId ?? "")).catch(() => null),
-        ).toBeNull();
+        await vi.waitFor(async () =>
+          expect(
+            await getHookByToken(activeTurnToken(childSessionId ?? "")).catch(() => null),
+          ).toBeNull(),
+        );
         expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
@@ -634,10 +639,7 @@ describe("turn cancellation integration", () => {
       try {
         // The child asks a question; the proxy epilogue emits this turn's
         // waiting boundary while the parent keeps waiting on the child.
-        const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
-          "session.waiting",
-        );
+        const hitlTurn = await stream.until("input.requested");
         const requested = filterEventsByType(hitlTurn, "input.requested");
         expect(requested).toHaveLength(1);
         const requestId = requested[0]?.data.requests[0]?.requestId;
@@ -653,6 +655,8 @@ describe("turn cancellation integration", () => {
         // Barrier: the answer must not race the cancel — a delivery that
         // beats the cancel is legitimately routed to the still-live child.
         await waitForTurnReceipt(cancelHook.runId);
+        const cancelled = await stream.nextTurn();
+        expect(filterEventsByType(cancelled, "turn.cancelled")).toHaveLength(1);
 
         // The boundary is already on the stream: settling must not emit a
         // fabricated turn.cancelled or a second session.waiting.
@@ -684,9 +688,11 @@ describe("turn cancellation integration", () => {
         ).toBe(true);
 
         // The answer cannot re-open the cancelled child.
-        expect(
-          await world.hooks.getByToken(activeTurnToken(childSessionId ?? "")).catch(() => null),
-        ).toBeNull();
+        await vi.waitFor(async () =>
+          expect(
+            await world.hooks.getByToken(activeTurnToken(childSessionId ?? "")).catch(() => null),
+          ).toBeNull(),
+        );
       } finally {
         stream.dispose();
         await run.cancel();
@@ -816,7 +822,9 @@ describe("turn cancellation integration", () => {
         );
         if (checkpoint === null) throw new Error("Expected a settled checkpoint.");
         await waitForTurnReceipt(checkpoint.writerRunId);
-        expect(await getHookByToken(activeTurnToken(run.sessionId)).catch(() => null)).toBeNull();
+        await vi.waitFor(async () =>
+          expect(await getHookByToken(activeTurnToken(run.sessionId)).catch(() => null)).toBeNull(),
+        );
         const world = await getWorld();
         const runs = await world.runs.list({ pagination: { limit: 100 } });
         expect(

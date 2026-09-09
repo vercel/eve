@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
@@ -57,7 +57,10 @@ describe("session reset integration", () => {
             continuationToken,
           }),
         ).resolves.toEqual({ previousSessionId: first.sessionId, status: "reset" });
-        await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+        await firstEvents.nextTurn();
+        await vi.waitFor(async () =>
+          expect(await runtime.resolveContinuation(continuationToken)).toBeUndefined(),
+        );
 
         const second = await startTestSession(seed);
         const secondEvents = captureTurnEvents(second);

@@ -1,4 +1,4 @@
-import { safeWaitUntil } from "#compiled/@workflow/core/runtime/wait-until.js";
+import { safeWaitUntil } from "#internal/workflow/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.background");

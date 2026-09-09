@@ -17,6 +17,14 @@ const runsGet = vi.fn();
 const cancel = vi.fn();
 const returnValue = vi.fn();
 const getReadable = vi.fn();
+const dispatch = vi.fn();
+const settle = vi.fn();
+vi.mock("#execution/session/ingress.js", () => ({
+  dispatchSessionCommand: (...args: unknown[]) => dispatch(...args),
+}));
+vi.mock("#execution/turn/admission.js", () => ({
+  waitForTurnReceipt: (...args: unknown[]) => settle(...args),
+}));
 
 vi.mock("#internal/workflow/runtime.js", () => ({
   getWorld: async () => ({ runs: { get: runsGet } }),
@@ -488,15 +496,20 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ result: "Done.", status: "working" });
   });
 
-  it("uses workflow return value as terminal result", async () => {
-    runsGet.mockResolvedValue(run({ status: "completed" }));
-    getReadable.mockReturnValue(eventStream([{ type: "session.completed" }]));
+  it("uses terminal session events rather than holder run status", async () => {
+    runsGet.mockResolvedValue(run({ status: "cancelled" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        { type: "result.completed", data: { result: { answer: 42 } } },
+        { type: "session.completed" },
+      ]),
+    );
     returnValue.mockResolvedValue({ output: { answer: 42 } });
 
     await expect(
       execution().read({ auth, invocationId: "wrun_invocation" }),
     ).resolves.toMatchObject({ result: { answer: 42 }, status: "completed" });
-    expect(getReadable).not.toHaveBeenCalled();
+    expect(returnValue).not.toHaveBeenCalled();
   });
 
   it("projects the workflow run reference without private error data", async () => {
@@ -632,11 +645,15 @@ describe("WorkflowAgentInvocationExecution", () => {
       .mockResolvedValueOnce(run({ status: "running" }))
       .mockResolvedValueOnce(run({ status: "cancelled" }));
     cancel.mockResolvedValue(undefined);
+    dispatch.mockResolvedValue({ run: { runId: "reset-candidate" } });
+    settle.mockResolvedValue({ terminal: true });
 
     await expect(
       execution().cancel({ auth, invocationId: "wrun_invocation" }),
     ).resolves.toMatchObject({ status: "cancelled" });
-    expect(cancel).toHaveBeenCalledWith();
+    expect(dispatch).toHaveBeenCalledWith("wrun_invocation", { kind: "reset" });
+    expect(settle).toHaveBeenCalledWith("reset-candidate");
+    expect(cancel).not.toHaveBeenCalled();
   });
 });
 

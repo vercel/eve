@@ -275,7 +275,7 @@ describe("terminateChildSessions", () => {
         "parent-ended:parent-session:session-local",
       );
       expect(errorSpy).toHaveBeenCalledWith(
-        "[eve:execution.cancel-indexed-session-tasks] failed to cancel indexed task",
+        "[eve:execution.terminate-child-sessions] failed to cancel task during parent finalization",
         expect.objectContaining({
           parentSessionId: "parent-session",
           taskId: "task-1",

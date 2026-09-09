@@ -129,7 +129,6 @@ describe("dynamic tool cold replay", () => {
     async () => {
       const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-cold-replay",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
@@ -137,7 +136,11 @@ describe("dynamic tool cold replay", () => {
       try {
         const client = new Client({ host: server.url });
         const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.response.result()).resolves.toMatchObject({
+        await expect(
+          created.response.result().catch((error) => {
+            throw new Error(`${String(error)}\n${server.stderr()}`, { cause: error });
+          }),
+        ).resolves.toMatchObject({
           inputRequests: [],
           status: "waiting",
         });

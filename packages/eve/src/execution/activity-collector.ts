@@ -68,7 +68,7 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   } finally {
     batches.dispose();
     if (ownsHook) {
-      await iterator.return?.().catch(() => {});
+      void iterator.return?.().catch(() => {});
       await disposeSessionActivityStep({
         rendererStates,
         serializedContext: input.serializedContext,

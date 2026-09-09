@@ -4,7 +4,7 @@ import { createOwnerInbox } from "#execution/inbox/owner.js";
 import type { InboxEnvelope, OwnerInbox } from "#execution/inbox/types.js";
 import { sendInboxStep } from "#execution/inbox/send.js";
 import { awaitTurnStep, forwardSubmissionStep } from "#execution/turn/admission.js";
-import { awaitRunStep } from "#internal/workflow/await-run.js";
+import { awaitRunStep } from "#execution/await-run.js";
 import { executeTurnStep, acknowledgeTurnWorkStep } from "#execution/turn/execute.js";
 import {
   failTurnStep,
@@ -33,15 +33,18 @@ export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceip
   const token = activeTurnToken(input.session.sessionId);
   let checkpoint: InitializedSessionCheckpoint | undefined;
   if (input.afterRunId !== undefined) await awaitTurnStep(input.afterRunId);
+  let controller: AbortController | undefined;
   while (true) {
     const inbox = createOwnerInbox({ token });
+    // Queue both hook registrations before the ownership suspension.
+    controller ??= new AbortController();
     try {
       const claim = await inbox.claim();
       if (claim.kind === "owned") {
         const eventIds = new Set([input.submission.eventId]);
         let result: ClaimedTurnResult;
         try {
-          result = await executeClaimedTurn(input, inbox, eventIds, (state) => {
+          result = await executeClaimedTurn(input, inbox, controller, eventIds, (state) => {
             checkpoint = state;
           });
         } catch (error) {
@@ -84,10 +87,10 @@ export async function turnWorkflow(input: TurnWorkflowInput): Promise<TurnReceip
 async function executeClaimedTurn(
   input: TurnWorkflowInput,
   inbox: OwnerInbox,
+  controller: AbortController,
   eventIds: Set<string>,
   observeCheckpoint: (checkpoint: InitializedSessionCheckpoint) => void,
 ): Promise<ClaimedTurnResult> {
-  const controller = new AbortController();
   let turnId = `turn_${inbox.address.ownerRunId}`;
   let taskId =
     input.submission.command.kind === "send"
@@ -211,6 +214,13 @@ async function executeClaimedTurn(
       }
       throwIfOwnerFailed();
       pending.push(...inbox.drain());
+      pending = pending.filter((envelope) => {
+        const submission = submissionFromEnvelope(envelope);
+        return (
+          submission === undefined ||
+          progress.checkpoint.deliveries[submission.eventId] === undefined
+        );
+      });
       const decision = reduceTurnBoundary(progress, pending);
       if (decision.kind === "finalize") {
         const initialKind = interruptionKind(input.submission, turnId, taskId);
@@ -262,6 +272,5 @@ async function executeClaimedTurn(
     return result;
   } finally {
     stopObserving();
-    controller.abort(new TurnCancelledError());
   }
 }

@@ -346,7 +346,12 @@ describe("compiled vendor assets", () => {
     expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
-    expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
+    expect(workflowDts).toContain("replayWorkflow");
+    const workflowBodyDts = await readFile(
+      join(COMPILED_VENDOR_ROOT, "@workflow/core-body/index.d.ts"),
+      "utf8",
+    );
+    expect(workflowBodyDts).toBe('export * from "../core/workflow/index.js";\n');
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
   });

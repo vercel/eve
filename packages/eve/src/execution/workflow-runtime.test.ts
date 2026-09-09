@@ -168,7 +168,7 @@ describe("session ingress", () => {
     };
     await expect(
       runtime().dispatchContinuation({ continuationToken: "slack:thread", command }),
-    ).resolves.toEqual({ status: "accepted", sessionId: "session-1" });
+    ).resolves.toEqual({ status: "accepted", sessionId: "session-1", deliveryId: "delivery-1" });
     expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
     expect(resolveHolderMock).toHaveBeenCalledWith("holder-1");
     expect(startMock).toHaveBeenCalledWith(
