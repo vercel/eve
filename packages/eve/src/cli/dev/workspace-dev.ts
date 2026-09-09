@@ -53,7 +53,7 @@ async function writeGeneratedWorkspaceConfig(workspace: AgentWorkspace): Promise
   const services = Object.fromEntries(
     Object.entries(assembled.services).map(([name, service]) => {
       const { routePrefix: _routePrefix, ...config } = service;
-      return [name, { ...config, installCommand: "true" }];
+      return [name, config];
     }),
   );
   await writeFile(path, `${JSON.stringify({ routes: assembled.routes, services }, null, 2)}\n`);
