@@ -2,10 +2,35 @@ name: E2E Tests (Local)
 
 on:
   workflow_dispatch:
+    inputs:
+      fixture:
+        description: "One fixture name (empty runs the full matrix)"
+        type: string
+        default: ""
+      model:
+        description: "One matrix model name (empty runs all configured models)"
+        type: string
+        default: ""
+      evals:
+        description: "Space-separated exact eval IDs for repeated validation"
+        type: string
+        default: ""
+      repetitions:
+        description: "Fresh-process repetitions per shard (1-500)"
+        type: number
+        default: 1
+      shards:
+        description: "Independent repetition shards (1-10, at most 500 total trials)"
+        type: number
+        default: 1
+      revision:
+        description: "Source revision to test (empty uses this workflow revision)"
+        type: string
+        default: ""
   pull_request:
 
 concurrency:
-  group: e2e-local-${{ github.ref }}
+  group: e2e-local-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -55,6 +80,11 @@ jobs:
 
       - name: Discover eval fixtures
         id: discover
+        env:
+          EVE_E2E_FIXTURE: ${{ inputs.fixture }}
+          EVE_E2E_MODEL_NAME: ${{ inputs.model }}
+          EVE_E2E_REPETITIONS: ${{ inputs.repetitions }}
+          EVE_E2E_SHARDS: ${{ inputs.shards }}
         run: node .github/scripts/discover-e2e-fixtures.mjs
 
   # The model suite: every fixture runs here against the local world with
@@ -63,8 +93,9 @@ jobs:
   # on the default model. The world suites (e2e-vercel, e2e-postgres) cover
   # the other workflow worlds with deterministic mock models.
   e2e:
-    name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})
+    name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})${{ matrix.job_suffix }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repetitions > 1 && 120 || 360 }}
     needs: [changes, discover-fixtures]
     # No job-level `if`: the stable aggregate check below requires a successful
     # matrix result. Guarding each step lets an irrelevant diff satisfy it in
@@ -86,6 +117,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.revision || github.sha }}
+
+      - name: Checkout repetition harness
+        if: github.event_name == 'workflow_dispatch' && inputs.repetitions > 1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .eve-repetition-harness
+          sparse-checkout: scripts
 
       - name: Setup pnpm
         if: needs.changes.outputs.relevant == 'true'
@@ -129,18 +170,45 @@ jobs:
           mv e2e/fixtures/js-only-extension/extension "$RUNNER_TEMP/js-only-extension-source"
 
       - name: Run fixture evals
-        if: needs.changes.outputs.relevant == 'true'
+        if: needs.changes.outputs.relevant == 'true' && (github.event_name != 'workflow_dispatch' || inputs.repetitions <= 1)
         run: |
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
           cd "${{ matrix.dir }}"
           pnpm exec eve eval --strict --verbose \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-${{ matrix.model_name }}.xml"
 
+      - name: Repeat selected fixture evals
+        if: needs.changes.outputs.relevant == 'true' && github.event_name == 'workflow_dispatch' && inputs.repetitions > 1
+        working-directory: ${{ matrix.dir }}
+        env:
+          EVE_E2E_REPETITIONS: ${{ inputs.repetitions }}
+          EVE_E2E_EVAL_IDS: ${{ inputs.evals }}
+          EVE_E2E_EXPECTED_EVAL_IDS: ${{ inputs.evals }}
+          EVE_E2E_REPO_ROOT: ${{ github.workspace }}
+          EVE_E2E_REF: ${{ inputs.revision || github.sha }}
+          EVE_E2E_REPETITION_SHARD: ${{ matrix.repetition_shard || 1 }}
+        run: |
+          node --test "$GITHUB_WORKSPACE/.eve-repetition-harness/scripts/flake-validation-results.test.mjs"
+          node "$GITHUB_WORKSPACE/.eve-repetition-harness/scripts/repeat-evals.mjs"
+
+      - name: Upload repetition evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.repetitions > 1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: repeat-evals-${{ matrix.name }}-${{ matrix.model_name }}-${{ matrix.repetition_shard || 1 }}
+          path: |
+            .junit/repetitions
+            ${{ matrix.dir }}/.eve/evals
+            ${{ matrix.dir }}/.eve/traces
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: eval-artifacts-${{ matrix.name }}-${{ matrix.model_name }}
+          name: eval-artifacts-${{ matrix.name }}-${{ matrix.model_name }}${{ matrix.job_suffix }}
           path: |
             .junit
             e2e/fixtures/*/.eve/evals
