@@ -14,6 +14,7 @@ const executeTool =
     ) => ReturnType<typeof import("#execution/code-mode/program-step.js").executeCodeModeToolStep>
   >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
+const ask = vi.fn<(...args: any[]) => Promise<unknown>>();
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
   CODE_MODE_CALL_INTERRUPT_KIND: "eve.code-mode-call",
@@ -24,6 +25,7 @@ vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({
   invokeAgent: (...args: unknown[]) => invokeAgent(...args),
 }));
 vi.mock("#execution/tools/workflow/ask.js", () => ({
+  ask: (_ctx: unknown, ...args: unknown[]) => ask(...args),
   readWorkflowToolRunRef: () => ({ sequence: 1, stepIndex: 2, turnId: "turn" }),
   readCodeModeRunContext: () => ({
     serializedContext: { ctx: true },
@@ -67,6 +69,7 @@ beforeEach(() => {
   runProgram.mockReset();
   executeTool.mockReset();
   invokeAgent.mockReset();
+  ask.mockReset();
 });
 
 describe("codeModeWorkflow", () => {
@@ -243,6 +246,53 @@ describe("codeModeWorkflow", () => {
     });
     expect(executeTool).not.toHaveBeenCalled();
   });
+
+  it("answers ask_question through the workflow-tool ask protocol", async () => {
+    const options = [
+      { id: "ship", label: "Ship" },
+      { id: "hold", label: "Hold" },
+    ];
+    runProgram
+      .mockResolvedValueOnce(
+        parked(call("tool", "ask_question", { prompt: "Ship it?", options, allowFreeform: true })),
+      )
+      .mockResolvedValueOnce(completed("shipped"));
+    ask.mockResolvedValueOnce({ optionId: "ship", text: undefined });
+
+    await expect(codeModeWorkflow(program, context())).resolves.toBe("shipped");
+    expect(ask).toHaveBeenCalledWith({ prompt: "Ship it?", options, allowFreeform: true });
+    expect(runProgram.mock.calls[1]?.[0]).toEqual({
+      callId: "outer",
+      program,
+      sessionState: { sessionId: "s1" },
+      resume: [
+        {
+          interrupt: { marker: "ask_question" },
+          resolution: { status: "completed", output: { status: "answered", optionId: "ship" } },
+        },
+      ],
+    });
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { options: [] }, { prompt: "" }])(
+    "fails an ask_question call without a prompt instead of asking (%j)",
+    async (toolInput) => {
+      runProgram
+        .mockResolvedValueOnce(parked(call("tool", "ask_question", toolInput)))
+        .mockResolvedValueOnce(completed("recovered"));
+
+      await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+      expect(ask).not.toHaveBeenCalled();
+      expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+        resume: [
+          {
+            resolution: { status: "failed", error: expect.stringContaining("ask_question") },
+          },
+        ],
+      });
+    },
+  );
 
   it("settles calls parked together concurrently and resumes once with every result", async () => {
     runProgram

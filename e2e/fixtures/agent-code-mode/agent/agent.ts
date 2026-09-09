@@ -164,6 +164,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       'if (discovered.inputSchema.type !== "object") throw new Error("Discovered tool schema is missing.");',
       'return { discovered: discovered.name, requiresDirectCall: discovered.requiresDirectCall, echo: await tools.echo({ value: "catalog-ready" }) };',
     ].join("\n");
+  } else if (message.includes("CODEMODE-ASK-START")) {
+    directive = "CODEMODE-ASK";
+    js = [
+      'const answer = await tools.ask_question({ prompt: "Ship the CODEMODE-ASK build?", options: [{ id: "ship", label: "Ship" }, { id: "hold", label: "Hold" }] });',
+      'const echo = await tools.echo({ value: "after-ask:" + answer.optionId });',
+      "return { answer, echo };",
+    ].join("\n");
   } else if (message.includes("CODEMODE-AUTH-START")) {
     directive = "CODEMODE-AUTH";
     js =

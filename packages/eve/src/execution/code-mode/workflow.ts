@@ -1,6 +1,12 @@
-import type { ToolContext } from "#tools/definition.js";
+import type { InputOption } from "#shared/input.js";
+import type { ToolContext, ToolInputRequest } from "#tools/definition.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
-import { readCodeModeRunContext, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
+import {
+  ask,
+  readCodeModeRunContext,
+  readWorkflowToolRunRef,
+} from "#execution/tools/workflow/ask.js";
 import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 import {
@@ -106,6 +112,15 @@ async function settleNestedCall(
       );
       return { interrupt, resolution: { status: "completed", output } };
     }
+    if (call.toolName === ASK_QUESTION_TOOL_NAME) {
+      // Answered through the workflow-tool `ask` protocol: the owner renders the
+      // question on the session channel and the program waits for the answer.
+      const answer = await ask(ctx, readAskInput(call.toolInput));
+      const output: Record<string, string> = { status: "answered" };
+      if (answer.optionId !== undefined) output.optionId = answer.optionId;
+      if (answer.text !== undefined) output.text = answer.text;
+      return { interrupt, resolution: { status: "completed", output } };
+    }
     // Passing `ctx` opts this step into the workflow-tool authorization twin,
     // which parks on sign-in and retries the step; the body only sees results.
     const settled = await executeCodeModeToolStep(ctx, {
@@ -150,4 +165,20 @@ function readAgentInput(value: unknown): CodeModeAgentInput {
     input.outputSchema = record.outputSchema as JsonObject;
   }
   return input;
+}
+
+function readAskInput(value: unknown): ToolInputRequest {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("ask_question calls from code_mode require an object input.");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.prompt !== "string" || record.prompt.length === 0) {
+    throw new TypeError('ask_question calls from code_mode require a non-empty "prompt" string.');
+  }
+  const request: { -readonly [K in keyof ToolInputRequest]: ToolInputRequest[K] } = {
+    prompt: record.prompt,
+  };
+  if (Array.isArray(record.options)) request.options = record.options as InputOption[];
+  if (typeof record.allowFreeform === "boolean") request.allowFreeform = record.allowFreeform;
+  return request;
 }

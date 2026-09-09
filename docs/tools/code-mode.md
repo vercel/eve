@@ -57,12 +57,17 @@ programs for work that chains, loops over, or reduces several calls.
 A program can call a tool when all of the following hold:
 
 - The tool has an executor and is not a framework control such as
-  `connection_search`, `ask_question`, or a task-control action.
+  `connection_search` or a task-control action.
 - The tool has no approval policy, or its policy is `never()`.
 - The tool is not an authored workflow tool.
 - The tool is not an ordinary `execution: "background"` tool. Subagent tools are
   the exception: inside a program they run to completion and return the child's
   final result instead of a task receipt.
+
+The framework `ask_question` tool is the exception to the executor rule. A
+nested `tools.ask_question({ prompt, options })` parks the program until the
+person answers on the session channel, then returns
+`{ status, optionId?, text? }` like the direct tool does.
 
 Everything else remains callable only directly. Discovery marks those tools with
 `requiresDirectCall: true`.
@@ -76,7 +81,8 @@ Everything else remains callable only directly. Discovery marks those tools with
 | Any tool with an approval policy other than `never` | yes         | no                  |
 | Authored workflow tools (`defineWorkflowTool`)      | yes         | no                  |
 | Ordinary background tools                           | yes         | no                  |
-| `connection_search`, `ask_question`, task controls  | yes         | no                  |
+| `ask_question`                                      | yes         | yes, awaited answer |
+| `connection_search`, task controls                  | yes         | no                  |
 
 When names overlap, step-scoped dynamic definitions override turn-scoped,
 session-scoped, and static definitions, in that order.

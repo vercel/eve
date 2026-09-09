@@ -80,6 +80,27 @@ describe("claimsForCodeMode", () => {
     const claimed = [...tools.keys()].filter((name) => claimsForCodeMode(name, tools));
     expect(claimed).toEqual(["add", "researcher", "agent"]);
   });
+
+  it("claims the framework question tool while other handled tools stay direct", () => {
+    const question = (
+      handling: NonNullable<HarnessToolDefinition["behavior"]>["handling"],
+    ): HarnessToolDefinition =>
+      tool("ask_question", {
+        behavior: { availability: ["requires-request-input"], handling },
+        execute: undefined,
+      });
+    const dispatch = { kind: "dispatch", target: { kind: "task-cancel" } } as const;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      ["ask_question", question({ kind: "request-input", request: "question" })],
+      ["task_cancel", tool("task_cancel", { behavior: { availability: [], handling: dispatch } })],
+    ]);
+
+    expect(claimsForCodeMode("ask_question", tools)).toBe(true);
+    expect(claimsForCodeMode("task_cancel", tools)).toBe(false);
+    expect(claimsForCodeMode("ask_question", new Map([["ask_question", question(dispatch)]]))).toBe(
+      false,
+    );
+  });
 });
 
 describe("applyCodeModeTool", () => {

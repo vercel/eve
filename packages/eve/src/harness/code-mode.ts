@@ -3,6 +3,7 @@ import { asSchema, type ToolSet } from "ai";
 import { z } from "#compiled/zod/index.js";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { isNeverApproval } from "#tools/approval/policies.js";
 import { AGENT_TASK_RECEIPT_DESCRIPTION } from "#tools/framework/agent-contract.js";
@@ -133,6 +134,11 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   const definition = tools.get(name);
   if (definition === undefined) return false;
   if (isCodeModeAgentTool(definition)) return true;
+  // The framework question tool has no executor; the body answers it through
+  // the workflow-tool `ask` protocol.
+  if (name === ASK_QUESTION_TOOL_NAME) {
+    return definition.behavior?.handling?.kind === "request-input";
+  }
   if (definition.execution === "background") return false;
   if (definition.execute === undefined) return false;
   if (definition.behavior?.presentation === "load-skill") return false;
