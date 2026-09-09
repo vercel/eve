@@ -10,7 +10,7 @@ export default defineTool({
   description:
     "Compaction regression tool. Complete source analysis exactly once when the user requests the stale-todo-work case.",
   inputSchema: z.object({
-    approach: z.string().min(1),
+    approach: z.literal("initial"),
   }),
   async execute(input, ctx) {
     const attempt = invocationCount.get() + 1;

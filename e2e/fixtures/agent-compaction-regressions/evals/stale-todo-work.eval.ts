@@ -19,6 +19,7 @@ export default defineEval({
     turn.expectOk();
     t.succeeded();
     t.calledTool("perform-source-analysis", {
+      input: { approach: "initial" },
       output: { completed: true, workUnit: "source-analysis" },
     });
     t.calledTool("advance-checkpoint", {

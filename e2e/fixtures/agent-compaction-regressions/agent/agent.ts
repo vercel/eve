@@ -222,7 +222,7 @@ const taskModel = mockModel({
           toolCalls: [
             {
               id: `perform-source-analysis-${attempt}`,
-              input: { approach: `attempt-${attempt}` },
+              input: { approach: "initial" },
               name: "perform-source-analysis",
             },
           ],
