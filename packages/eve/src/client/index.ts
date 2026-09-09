@@ -13,6 +13,7 @@ export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
+export { ClientSessionActivity } from "#client/session-activity.js";
 export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ export type {
 } from "#client/eve-agent-store.js";
 
 export type {
+  ActivitySessionSnapshot,
   AgentInfoEntry,
   AgentInfoChannelEntry,
   AgentInfoChannels,
@@ -66,6 +68,23 @@ export type {
   StreamReconnectRetryPolicy,
   TokenValue,
 } from "#client/types.js";
+
+export type {
+  ActivityActionIdentityV1,
+  ActivityActionKind,
+  ActivityActionPhase,
+  ActivityActionStateV1,
+  ActivityBlockerIdentityV1,
+  ActivityBlockerKind,
+  ActivityBlockerPhase,
+  ActivityBlockerStateV1,
+  ActivitySnapshotV1,
+  ActivityWorkIdentityV1,
+  PendingActivitySettlementV1,
+  ActivityWorkKind,
+  ActivityWorkPhase,
+  ActivityWorkStateV1,
+} from "#protocol/activity.js";
 
 export type {
   EveAgentReducer,

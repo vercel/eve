@@ -42,6 +42,7 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { ActivitySnapshotV1 } from "#protocol/activity.js";
 import {
   normalizePersistedMessageStreamEvent,
   type MessageStreamEventForVersion,
@@ -55,7 +56,11 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
-import type { ActivityCollectorInput } from "#execution/activity-collector.js";
+import {
+  ACTIVITY_COLLECTOR_RUN_ATTRIBUTE,
+  ACTIVITY_SNAPSHOT_STREAM_NAMESPACE,
+  type ActivityCollectorInput,
+} from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
   createWorkflowCallbackUrl,
@@ -233,6 +238,9 @@ export function createWorkflowRuntime(config: {
             });
       const attributes = {
         ...sessionAttributes,
+        ...(collectorRunId === undefined
+          ? {}
+          : { [ACTIVITY_COLLECTOR_RUN_ATTRIBUTE]: collectorRunId }),
         ...(input.externalInvocation === undefined
           ? {}
           : buildInvocationAttributes(input.externalInvocation)),
@@ -318,6 +326,36 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+export async function getWorkflowActivityStream(
+  sessionId: string,
+  options?: GetEventStreamOptions,
+): Promise<ReadableStream<ActivitySnapshotV1>> {
+  const collectorRunId = await resolveActivityCollectorRunId(sessionId);
+  return getRun(collectorRunId).getReadable({
+    namespace: ACTIVITY_SNAPSHOT_STREAM_NAMESPACE,
+    startIndex: options?.startIndex,
+  });
+}
+
+export async function getWorkflowActivityStreamTailIndex(sessionId: string): Promise<number> {
+  const collectorRunId = await resolveActivityCollectorRunId(sessionId);
+  const readable = getRun(collectorRunId).getReadable({
+    namespace: ACTIVITY_SNAPSHOT_STREAM_NAMESPACE,
+  });
+  try {
+    return await readable.getTailIndex();
+  } finally {
+    await readable.cancel().catch(() => {});
+  }
+}
+
+async function resolveActivityCollectorRunId(sessionId: string): Promise<string> {
+  const run = await (await getWorld()).runs.get(sessionId);
+  const collectorRunId = run.attributes[ACTIVITY_COLLECTOR_RUN_ATTRIBUTE];
+  if (collectorRunId === undefined) throw new Error("Session activity not found.");
+  return collectorRunId;
 }
 
 function normalizePersistedEvent(value: unknown): MessageStreamEvent {

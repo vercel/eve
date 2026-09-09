@@ -26,6 +26,7 @@
  * - `$eve.schedule`     — authored schedule that created the session
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
+ * - `$eve.activity_collector` — collector run ID for root sessions with channel activity enabled
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
  * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
  * - `$eve.trace_id` — trace id of the `agent.session` span, read from the pre-allocated

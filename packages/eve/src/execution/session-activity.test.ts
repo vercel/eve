@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
-import { parseActivityBatchV1, type ActivityEventV1 } from "#protocol/activity.js";
+import {
+  MAX_ACTIVITY_ENTITIES,
+  parseActivityBatchV1,
+  parseActivitySnapshotV1,
+  type ActivityEventV1,
+  type ActivitySnapshotV1,
+} from "#protocol/activity.js";
 
 const work = {
   id: "root:session:turn",
@@ -13,6 +19,103 @@ const work = {
 function reduce(events: readonly ActivityEventV1[]) {
   return reduceActivityBatch(createActivitySnapshot(), { events, version: 1 });
 }
+
+describe("activity snapshot protocol", () => {
+  const populatedSnapshot: ActivitySnapshotV1 = {
+    actions: {
+      action: {
+        id: "action",
+        kind: "tool",
+        label: "Search issues",
+        name: "search",
+        parentWorkId: work.id,
+        phase: "completed",
+        rootTurnId: "turn",
+        settledAt: "3",
+        startedAt: "2",
+        stepIndex: 0,
+      },
+    },
+    blockers: {
+      input: {
+        id: "input",
+        kind: "input",
+        parentActionId: "action",
+        parentWorkId: work.id,
+        phase: "blocked",
+        rootTurnId: "turn",
+        startedAt: "3",
+      },
+    },
+    pendingSettlements: {
+      "work:future": {
+        entityKind: "work",
+        eventId: "future:settled",
+        outcome: "failed",
+        settledAt: "4",
+      },
+    },
+    revision: 3,
+    seenEventIds: ["root", "action"],
+    version: 1,
+    work: {
+      [work.id]: { ...work, phase: "running", startedAt: "1" },
+    },
+  };
+
+  it("fully parses a populated snapshot", () => {
+    expect(parseActivitySnapshotV1(populatedSnapshot)).toMatchObject(populatedSnapshot);
+  });
+
+  it.each([
+    ["unknown top-level field", { ...populatedSnapshot, extra: true }],
+    [
+      "mismatched action key",
+      { ...populatedSnapshot, actions: { wrong: populatedSnapshot.actions.action } },
+    ],
+    [
+      "invalid nested phase",
+      {
+        ...populatedSnapshot,
+        blockers: { input: { ...populatedSnapshot.blockers.input, phase: "running" } },
+      },
+    ],
+    [
+      "active work with a settlement timestamp",
+      {
+        ...populatedSnapshot,
+        work: { [work.id]: { ...populatedSnapshot.work[work.id]!, settledAt: "4" } },
+      },
+    ],
+    [
+      "outcome inconsistent with pending entity kind",
+      {
+        ...populatedSnapshot,
+        pendingSettlements: {
+          "work:future": {
+            ...populatedSnapshot.pendingSettlements["work:future"],
+            outcome: "rejected",
+          },
+        },
+      },
+    ],
+    ["malformed seen event id", { ...populatedSnapshot, seenEventIds: [""] }],
+    [
+      "oversized entity collection",
+      {
+        ...populatedSnapshot,
+        actions: Object.fromEntries(
+          Array.from({ length: MAX_ACTIVITY_ENTITIES + 1 }, (_, index) => {
+            const id = `action-${index}`;
+            return [id, { ...populatedSnapshot.actions.action, id }];
+          }),
+        ),
+      },
+    ],
+  ])("rejects %s", (_name, candidate) => {
+    expect(parseActivitySnapshotV1(candidate)).toBeUndefined();
+  });
+});
 
 describe("activity protocol and reducer", () => {
   it("retains known siblings while ignoring additive unknown events", () => {

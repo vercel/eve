@@ -16,7 +16,12 @@ import {
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
+  attachSessionActivityReader,
 } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  getWorkflowActivityStream,
+  getWorkflowActivityStreamTailIndex,
+} from "#execution/workflow-runtime.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
@@ -257,39 +262,45 @@ function buildRouteArgs(
   });
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
-  const args = attachRouteSessionCreator(
-    attachHomeRouteMetadata(
-      attachRouteChannelName(
-        attachAgentInfoRouteResponse(
-          {
-            attachSession,
-            ...channelOperations,
-            params,
-            requestIp,
-            to,
-            waitUntil,
-          },
-          async () => {
-            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-            return await handleAgentInfoRequest(config);
-          },
+  const args = attachSessionActivityReader(
+    attachRouteSessionCreator(
+      attachHomeRouteMetadata(
+        attachRouteChannelName(
+          attachAgentInfoRouteResponse(
+            {
+              attachSession,
+              ...channelOperations,
+              params,
+              requestIp,
+              to,
+              waitUntil,
+            },
+            async () => {
+              const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+              return await handleAgentInfoRequest(config);
+            },
+          ),
+          channelName,
         ),
-        channelName,
+        { agentName: bundle.agentName },
       ),
-      { agentName: bundle.agentName },
+      async (input) =>
+        await bundle.runtime.createSession({
+          ...input,
+          adapter,
+          channelName,
+          continuationToken:
+            input.continuationToken === undefined
+              ? undefined
+              : `${channelName}:${input.continuationToken}`,
+          delivery: createChannelDeliveryMetadata(deliverySource),
+          requestId,
+        }),
     ),
-    async (input) =>
-      await bundle.runtime.createSession({
-        ...input,
-        adapter,
-        channelName,
-        continuationToken:
-          input.continuationToken === undefined
-            ? undefined
-            : `${channelName}:${input.continuationToken}`,
-        delivery: createChannelDeliveryMetadata(deliverySource),
-        requestId,
-      }),
+    {
+      getStream: getWorkflowActivityStream,
+      getTailIndex: getWorkflowActivityStreamTailIndex,
+    },
   );
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
