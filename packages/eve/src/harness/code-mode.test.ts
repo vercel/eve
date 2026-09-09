@@ -365,14 +365,25 @@ describe("createDiscoveryTools", () => {
       "simple_note__listNotes",
       "simple_note__login",
     ]);
-    expect(await names("LOGIN missing")).toEqual(["simple_note__login", "venmo__login"]);
+    expect(await names("LOGIN missing")).toEqual(["venmo__login", "simple_note__login"]);
     expect(await names("missing")).toEqual([]);
     expect(await names("   ")).toEqual([
-      "simple_note__listNotes",
-      "simple_note__login",
-      "unrelated",
       "venmo__login",
+      "simple_note__login",
+      "simple_note__listNotes",
+      "unrelated",
     ]);
+  });
+
+  it("weights name matches above description matches using connection search ranking", async () => {
+    const search = createDiscoveryTools([
+      { ...entry, name: "description_match", description: "Login authenticate." },
+      { ...entry, name: "login", description: "Access your account." },
+    ])[SEARCH_TOOLS_NAME];
+    expect(
+      (await search.execute({ query: "login authenticate" })).map((tool) => tool.name),
+    ).toEqual(["login", "description_match"]);
+    expect(await search.execute({ query: "a" })).toEqual([]);
   });
 
   it("does not mistake a missing connection tool for a loaded one", async () => {

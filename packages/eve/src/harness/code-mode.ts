@@ -1,3 +1,4 @@
+import { scoreToolSearch, tokenizeToolSearch } from "#shared/tool-search.js";
 import { asSchema, type ToolSet } from "ai";
 import { z } from "#compiled/zod/index.js";
 
@@ -167,20 +168,16 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
     [SEARCH_TOOLS_NAME]: {
       description:
         "Search this program's tool catalog by case-insensitive keywords in names and descriptions. " +
-        "Matches any keyword; tools matching more keywords rank first. Omit query to list the catalog. " +
+        "Matches any keyword; partial name matches score 3 and description matches score 1, as in connection_search. Omit query to list the catalog. " +
         "Undiscovered connection tools are excluded: call connection_search directly to find them, then start a new program.",
       inputSchema: z.object({ query: z.string().optional() }),
       outputSchema: z.array(toolSummarySchema),
       execute: async ({ query }: { readonly query?: string }) => {
-        const keywords = [...new Set(searchWords(query ?? ""))];
+        const keywords = tokenizeToolSearch(query ?? "");
         return descriptions
-          .map((entry) => {
-            const text = searchWords(`${entry.name} ${entry.description}`).join(" ");
-            const score = keywords.filter((keyword) => text.includes(keyword)).length;
-            return { entry, score };
-          })
-          .filter(({ score }) => keywords.length === 0 || score > 0)
-          .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+          .map((entry) => ({ entry, score: scoreToolSearch(keywords, entry) }))
+          .filter(({ score }) => !query?.trim() || score > 0)
+          .sort((a, b) => b.score - a.score)
           .map(({ entry: { description, name, requiresDirectCall } }) => ({
             description,
             name,
@@ -205,14 +202,6 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
         }),
     },
   } satisfies ToolSet;
-}
-
-function searchWords(text: string): string[] {
-  return text
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
 }
 
 function readProgram(toolInput: unknown): string {

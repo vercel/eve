@@ -338,8 +338,10 @@ require direct calls.
 
 `tools.search_tools({ query })` returns an array of matching tools; `query` is a
 case-insensitive keyword search over names and descriptions. A tool can match
-any keyword; more matching keywords rank first, with ties sorted by tool name.
-Whitespace, punctuation, and camel-case boundaries separate words. Omit `query`
+any keyword. It uses the same ranking as `connection_search`: each partial
+match scores 3 in a tool name and 1 in its description; higher totals rank first.
+Ties retain catalog order. Both searches split on whitespace, underscores,
+hyphens, periods, and slashes, and ignore single-character tokens. Omit `query`
 to list the program's catalog. `tools.describe_tools({ names })` returns an array of descriptions and
 input schemas for the requested tool names.
 
