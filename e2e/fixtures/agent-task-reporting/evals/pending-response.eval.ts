@@ -1,39 +1,30 @@
-import { defineEval, type Assertion, type EveEvalTurn } from "eve/evals";
+import { defineEval, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { reportingControl, type PendingInstruction } from "../agent/lib/reporting-model.js";
 import {
   completeReport,
-  intermediateWakes,
   QUESTION,
   sendQuestion,
-  silentWake,
   startWarehouseLookups,
   TASK_COUNT,
   waitForPartialCompletion,
   waitForReport,
 } from "./reporting.js";
 
-function pendingResponseEval(pendingInstruction: PendingInstruction, silence: Assertion) {
+function pendingResponseEval() {
   return defineEval({
-    description: `After the same guided intermediate wake, the parent answers a user before settlement, then reports all results (retained pending instruction ${pendingInstruction}).`,
+    description:
+      "After a partial completion, the parent answers a user while sibling tasks are running, then reports all results.",
     tags: ["real-model", "pending-response"],
-    metadata: { pendingInstruction },
     async test(t) {
       const run = await startWarehouseLookups(t);
       await waitForPartialCompletion(t, run);
 
-      const question = await sendQuestion(t, run, reportingControl(pendingInstruction));
+      const question = await sendQuestion(t, run);
       question.messageIncludes(/\b56\b/u);
       question.usedNoTools();
-      t.log(
-        `pending instruction ${pendingInstruction}: user reply=${JSON.stringify(question.message)}`,
-      );
 
       const report = await waitForReport(t, run);
-      for (const wake of intermediateWakes(run)) {
-        t.check(wake.message, silence);
-      }
       t.check(report, completeReport());
       t.notEvent("compaction.requested");
 
@@ -68,17 +59,14 @@ function pendingResponseEval(pendingInstruction: PendingInstruction, silence: As
         satisfies(Boolean, "the user received an answer before cohort settlement"),
       );
       t.log(
-        `pending instruction ${pendingInstruction}: asked=${askedAt} answered=${answeredAt} settled=${settledAt}`,
+        `user reply=${JSON.stringify(question.message)} asked=${askedAt} answered=${answeredAt} settled=${settledAt}`,
       );
       t.noFailedActions();
     },
   });
 }
 
-export default Array.from({ length: 20 }, () => [
-  pendingResponseEval("on", silentWake()),
-  pendingResponseEval("off", silentWake().soft(0)),
-]).flat();
+export default Array.from({ length: 20 }, pendingResponseEval);
 
 function completedAt(turn: EveEvalTurn): number {
   const event = turn.events.find((entry) => entry.type === "turn.completed");

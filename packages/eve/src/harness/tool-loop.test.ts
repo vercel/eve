@@ -99,7 +99,6 @@ import {
 } from "#shared/empty-delivery.js";
 import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
@@ -12775,35 +12774,59 @@ describe("createToolLoopHarness", () => {
       expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
     });
 
-    it.each([
-      ["pending", TASK_DELIVERY_PENDING_INSTRUCTION],
-      ["settled", TASK_DELIVERY_SETTLED_INSTRUCTION],
-    ] as const)(
-      "adds %s task-delivery guidance to a top-level framework wake",
-      async (phase, instruction) => {
-        setupMockAgent(defaultModelResult());
-        const runStep = createToolLoopHarness(createTestConfig("conversation"));
-        const ctx = new ContextContainer();
-        ctx.set(TurnTaskDeliveryKey, phase);
-        const session = setHarnessEmissionState(createTestSession(), {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 0,
-          turnId: "",
-        });
+    it("does not inject or retain silence guidance after a pending task wake", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "pending");
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
 
-        await contextStorage.run(ctx, () =>
-          runStep(session, { message: "Background task task_1 is completed." }),
-        );
+      const first = await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Background task task_1 is completed." }),
+      );
+      expect(getLastAgentSettings().messages).toEqual([
+        { role: "user", content: "Background task task_1 is completed." },
+      ]);
+      expect(ctx.get(HistoryStateKey)?.deliveryInstruction).toBeUndefined();
 
-        const { instructions, messages } = getLastAgentSettings();
-        expect(instructions).toBe("You are a test assistant.");
-        expect(messages.slice(-2)).toEqual([
-          { role: "user", content: instruction },
-          { role: "user", content: "Background task task_1 is completed." },
-        ]);
-      },
-    );
+      ctx.set(TurnTaskDeliveryKey, "none");
+      await contextStorage.run(ctx, () =>
+        runStep(first.session, { message: "What is 7 times 8?" }),
+      );
+      expect(getLastAgentSettings().messages).toEqual([
+        ...first.session.history,
+        { role: "user", content: "What is 7 times 8?" },
+      ]);
+    });
+
+    it("adds settled task-delivery guidance to a top-level framework wake", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "settled");
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Background task task_1 is completed." }),
+      );
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages.slice(-2)).toEqual([
+        { role: "user", content: TASK_DELIVERY_SETTLED_INSTRUCTION },
+        { role: "user", content: "Background task task_1 is completed." },
+      ]);
+    });
 
     it("does not add conditional-delivery guidance to a task-owned conversation child", async () => {
       setupMockAgent(defaultModelResult());

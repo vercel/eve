@@ -3,9 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 import {
   completeReport,
-  intermediateWakes,
   requireStreamIndex,
-  silentWake,
   startWarehouseLookups,
   waitForPartialCompletion,
   waitForReport,
@@ -14,7 +12,7 @@ import {
 function reportingEval() {
   return defineEval({
     description:
-      "A stock eve agent acknowledges accepted background work, keeps partial wakes silent, and reports all results after settlement.",
+      "A stock eve agent acknowledges accepted background work and reports all results after compaction and task settlement.",
     tags: ["real-model"],
     async test(t) {
       const run = await startWarehouseLookups(t);
@@ -46,9 +44,6 @@ function reportingEval() {
       run.session = compaction.session;
 
       const report = await waitForReport(t, run);
-      for (const wake of intermediateWakes(run)) {
-        await t.require(wake.message, silentWake());
-      }
       await t.require(report, completeReport());
       t.noFailedActions();
     },

@@ -9,15 +9,6 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_PENDING_INSTRUCTION = `Background task reporting: waiting for remaining results
-The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn. At least one of those tasks is still pending, so the combined report is not ready.
-
-Keep the completed results for the combined report once all tasks have settled. This notification does not need a user-facing progress update or acknowledgement.
-
-You may call tools only if the newly delivered task result requires immediate action. Otherwise, no tool calls are needed.
-
-After any necessary tool calls, your entire final text response must be exactly ${EMPTY_DELIVERY_SENTINEL} and no other text. eve treats this marker as an empty delivery and does not show it to the user.`;
-
 export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
 
 /** Returns model context and cohort phase for tasks started by the same parent turn as this delivery. */

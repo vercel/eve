@@ -88,12 +88,8 @@ export async function waitForPartialCompletion(
   );
 }
 
-export async function sendQuestion(
-  t: EveEvalContext,
-  run: ReportingRun,
-  control = "",
-): Promise<EveEvalTurn> {
-  let live = await run.session.start(`${control}${QUESTION}`);
+export async function sendQuestion(t: EveEvalContext, run: ReportingRun): Promise<EveEvalTurn> {
+  let live = await run.session.start(QUESTION);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const turn = await readTurn(t, run, live);
     if (receivedQuestion(turn)) return turn;
@@ -116,16 +112,6 @@ export async function waitForReport(
   return run.wakes
     .filter((wake) => wake.completed > 0 && wake.settled && !receivedQuestion(wake.turn))
     .at(-1)?.turn.message;
-}
-
-export function intermediateWakes(run: ReportingRun): readonly EveEvalTurn[] {
-  return run.wakes
-    .filter((wake) => wake.completed > 0 && !wake.settled && !receivedQuestion(wake.turn))
-    .map((wake) => wake.turn);
-}
-
-export function silentWake() {
-  return satisfies((message) => message === undefined, "intermediate task wake is silent");
 }
 
 export function completeReport() {

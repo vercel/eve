@@ -7,7 +7,6 @@ import {
   resolveTaskDeliveryContext,
   TASK_DELIVERY_CONTEXT_LABEL,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
@@ -30,26 +29,6 @@ describe("task delivery instructions", () => {
     );
     expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain("one brief user-facing acknowledgement");
     expect(TASK_DELIVERY_INITIATING_INSTRUCTION).not.toContain(EMPTY_DELIVERY_SENTINEL);
-  });
-
-  it("pending instruction unconditionally requires the sentinel", () => {
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(TASK_DELIVERY_CONTEXT_LABEL);
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("runtime-authored");
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("still pending");
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
-      "Keep the completed results for the combined report once all tasks have settled",
-    );
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
-      "may call tools only if the newly delivered task result requires immediate action",
-    );
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
-      "This notification does not need a user-facing progress update or acknowledgement",
-    );
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
-      `entire final text response must be exactly ${EMPTY_DELIVERY_SENTINEL} and no other text`,
-    );
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("does not show it to the user");
-    expect(TASK_DELIVERY_PENDING_INSTRUCTION).not.toContain("If any task");
   });
 
   it("settled instruction unconditionally forbids the sentinel and requires one combined response", () => {
