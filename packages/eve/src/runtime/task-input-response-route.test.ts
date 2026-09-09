@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 

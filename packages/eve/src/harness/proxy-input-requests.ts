@@ -5,7 +5,7 @@ import { isLoopbackHostname } from "#shared/network-address.js";
 import {
   isSessionInboxAddress,
   type SessionInboxAddress,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 

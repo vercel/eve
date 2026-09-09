@@ -15,7 +15,7 @@ import {
   sessionInboxWire,
   SessionInboxWireError,
   type DecodedSessionInbox,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/wire/session-inbox/session-inbox-wire.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;

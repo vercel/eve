@@ -21,6 +21,8 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox/session-inbox-encoder.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -206,7 +208,14 @@ function createEveCancelHandler(input: EveChannelInput) {
     .fn()
     .mockResolvedValue({ sessionId: "test-session-id", status: "accepted" });
   const session = createMockSession({
-    cancel: (options) => cancelTurn({ sessionId: "test-session-id", turnId: options?.turnId }),
+    cancel: (options) => {
+      const command: { sessionId: string; turnId?: string; tasks?: boolean } = {
+        sessionId: "test-session-id",
+        turnId: options?.turnId,
+      };
+      if (options?.tasks !== undefined) command.tasks = options.tasks;
+      return cancelTurn(command);
+    },
   });
 
   return {
@@ -1838,6 +1847,40 @@ describe("eveChannel — cancel turn", () => {
 
     expect(response.status).toBe(400);
     expect(handler.cancelTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 5] as const)(
+    "reports unsupported task cancellation to a v%i session as 409",
+    async (version) => {
+      const handler = createEveCancelHandler({ auth: none() });
+      handler.cancelTurn.mockImplementation(async ({ tasks }) => {
+        sessionInboxWire.encode(
+          { kind: "cancel", tasks },
+          version === 0 ? { version, variant: "send" } : { version },
+        );
+        return { sessionId: "test-session-id", status: "accepted" };
+      });
+
+      const response = await handler.fetch(cancelRequest({ tasks: true }));
+
+      expect(response.status).toBe(409);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      await expect(response.json()).resolves.toEqual({
+        code: "SESSION_INBOX_INCOMPATIBLE",
+        error:
+          "This session's deployment does not support cancelling all session-owned tasks. No cancellation was sent. Omit tasks: true to cancel only the current turn.",
+        ok: false,
+      });
+      expect(handler.cancelTurn).toHaveBeenCalledWith(expect.objectContaining({ tasks: true }));
+    },
+  );
+
+  it("does not classify a malformed wire payload as an unsupported operation", async () => {
+    const handler = createEveCancelHandler({ auth: none() });
+    handler.cancelTurn.mockRejectedValue(new SessionInboxWireError("Invalid cancellation payload"));
+    const response = await handler.fetch(cancelRequest({ tasks: true }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).not.toHaveProperty("code", "SESSION_INBOX_INCOMPATIBLE");
   });
 
   it("returns 500 when the cancellation request fails unexpectedly", async () => {

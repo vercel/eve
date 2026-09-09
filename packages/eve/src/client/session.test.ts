@@ -97,6 +97,44 @@ function createBoundedStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  it("exposes cancellation incompatibility and keeps the session available for a narrower request", async () => {
+    const message = "This session does not support cancelling all session-owned tasks.";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            code: "SESSION_INBOX_INCOMPATIBLE",
+            error: message,
+            ok: false,
+          },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "session_1",
+            status: "accepted",
+          },
+          { status: 202 },
+        ),
+      );
+    const session = createSession();
+
+    await expect(session.cancel({ tasks: true })).rejects.toMatchObject({
+      name: "ClientError",
+      code: "SESSION_INBOX_INCOMPATIBLE",
+      status: 409,
+      message,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(session.state.sessionId).toBe("session_1");
+    await expect(session.cancel()).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
     let headerResolution = 0;
     const requests: Array<{ headers: Headers; method: string; url: string }> = [];

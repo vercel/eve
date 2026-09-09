@@ -1,4 +1,4 @@
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxAddress } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -8,7 +8,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";

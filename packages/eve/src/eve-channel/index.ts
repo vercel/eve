@@ -1,5 +1,6 @@
 import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { SessionInboxIncompatibleError } from "#execution/wire/session-inbox/session-inbox-contract.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import {
   handleConnectionCallbackRequest,
@@ -389,6 +390,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             turnId: body.turnId,
           });
         } catch (error) {
+          if (error instanceof SessionInboxIncompatibleError) {
+            return Response.json(
+              {
+                code: error.code,
+                error:
+                  "This session's deployment does not support cancelling all session-owned tasks. No cancellation was sent. Omit tasks: true to cancel only the current turn.",
+                ok: false,
+              },
+              { headers: { "cache-control": "no-store" }, status: 409 },
+            );
+          }
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to cancel the turn.", errorId, ok: false },

@@ -15,7 +15,7 @@ import {
   sessionInboxWire,
   SessionInboxWireError,
   type DecodedSessionInbox,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/wire/session-inbox/session-inbox-wire.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";

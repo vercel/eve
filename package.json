@@ -16,7 +16,7 @@
     "fix:deps": "syncpack fix-mismatches && syncpack format",
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
-    "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "guard:invariants": "pnpm run test:migratew && node ./scripts/guard-invariants.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
@@ -28,7 +28,9 @@
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
     "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs",
-    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs"
+    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
+    "migratew": "pnpm --dir packages/eve run migratew",
+    "test:migratew": "pnpm --dir packages/eve run test:migratew"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.1",

@@ -100,10 +100,11 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 40 — Wire schemas and version-bound encoders are immutable protocol
- *             data. Pure `*.vN.migration.ts` transforms are immutable data too;
- *             version selection, chain assembly, and realm normalization remain
- *             editable policy. Every data module must carry a colocated test.
+ *   rule 40 — Wire schemas, frozen fixtures, snapshots, and adjacent migration
+ *             pairs are immutable protocol data. Encoders, version selection,
+ *             chain assembly, and realm normalization may change only in PRs
+ *             that do not add a wire version.
+ *             Every schema and migration pair must carry a colocated test.
  *             The session-inbox registry must be contiguous, name every schema
  *             module, and identify its highest version as current. Wire versions
  *             are append-only protocol history: change the contract by adding a
@@ -130,12 +131,15 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
+import { generateCatalog } from "../packages/eve/scripts/migratew.mjs";
+import { checkWireChanges } from "../packages/eve/scripts/guard-wire-changes.mjs";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
 const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
+const EVE_PACKAGE_ROOT = join(REPO_ROOT, "packages/eve");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
 
 const SKIP_DIRS = new Set([
@@ -609,33 +613,43 @@ function importSpecifier(node) {
 // ---------- Rule 40: wire versions carry colocated contract tests ----------
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
-const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
-const SESSION_INBOX_WIRE_DECODER = `${WIRE_FAMILY_DIR}/session-inbox-wire.ts`;
-const VERSIONED_WIRE_HISTORY_RE = new RegExp(
-  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+const SESSION_INBOX_DIR = `${WIRE_FAMILY_DIR}/session-inbox`;
+const SESSION_INBOX_MIGRATIONS_DIR = `${SESSION_INBOX_DIR}/migrations`;
+const SESSION_INBOX_MIGRATION_RE = new RegExp(
+  `^${SESSION_INBOX_MIGRATIONS_DIR}/v\\d+(?:-to-v\\d+(?:\\.test)?|\\.schema)\\.ts$`,
 );
-const RULE_40_ALLOWED_REWRITES = new Map([
-  [
-    `${WIRE_FAMILY_DIR}/session-inbox-wire.v1.ts`,
-    {
-      from: "5f110be5d7b488216c574a1aef9d2074d670efd2",
-      to: "7f5864f20e6bbb9f430c23918320ca6319c4cb14",
-    },
-  ],
-]);
+const SESSION_INBOX_HISTORY_SCOPE = [SESSION_INBOX_DIR];
+const SESSION_INBOX_WIRE_CONTRACT = `${SESSION_INBOX_DIR}/session-inbox-contract.ts`;
+const SESSION_INBOX_WIRE_DECODER = `${SESSION_INBOX_DIR}/session-inbox-wire.ts`;
+const VERSIONED_WIRE_HISTORY_RE = new RegExp(
+  `^${SESSION_INBOX_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+);
 const PURE_MIGRATION_IMPORTS = new Map([
+  [
+    "#execution/wire/session-inbox/migration.js",
+    new Map([
+      ["Migration", "type"],
+      ["Wire", "type"],
+    ]),
+  ],
+  [
+    "#execution/wire/session-inbox/session-inbox-contract.js",
+    new Map([
+      ["SessionInboxWireError", "value"],
+      ["SessionInboxIncompatibleError", "value"],
+    ]),
+  ],
   ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
   ["#shared/guards.js", new Map([["isObject", "value"]])],
 ]);
 const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
+  "#execution/wire/session-inbox/migrations.js",
+  "#execution/wire/session-inbox/generated/catalog.js",
+  "#execution/wire/session-inbox/generated/versions.js",
   "#execution/durable-session-migrations/chain.js",
-  "#execution/wire/session-inbox-contract.js",
-  "#execution/wire/session-inbox-wire.v0.js",
-  "#execution/wire/session-inbox-wire.v2-migration.js",
-  "#execution/wire/session-inbox-wire.v2.migration.js",
-  "#execution/wire/session-inbox-wire.v3.migration.js",
-  "#execution/wire/session-inbox-wire.v4.migration.js",
-  "#execution/wire/session-inbox-wire.v5.migration.js",
+  "#execution/wire/session-inbox/session-inbox-contract.js",
+  "#execution/wire/session-inbox/session-inbox-wire.v0.js",
+  "#execution/wire/session-inbox/session-inbox-normalize.js",
   "#shared/guards.js",
 ]);
 
@@ -651,18 +665,35 @@ function gitOutput(args) {
   }
 }
 
-function checkRule40ImmutableWireHistory() {
+async function checkRule40ImmutableWireHistory() {
   const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
   const comparisons = [
-    { args: ["diff", "--name-status", "--", WIRE_FAMILY_DIR], state: "worktree" },
     {
-      args: ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+      args: ["diff", "--no-renames", "--name-status", "--", ...SESSION_INBOX_HISTORY_SCOPE],
+      state: "worktree",
+    },
+    {
+      args: [
+        "diff",
+        "--no-renames",
+        "--cached",
+        "--name-status",
+        "--",
+        ...SESSION_INBOX_HISTORY_SCOPE,
+      ],
       state: "index",
     },
   ];
   if (hasBase)
     comparisons.push({
-      args: ["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR],
+      args: [
+        "diff",
+        "--no-renames",
+        "--name-status",
+        "origin/main...HEAD",
+        "--",
+        ...SESSION_INBOX_HISTORY_SCOPE,
+      ],
       state: "head",
     });
 
@@ -677,9 +708,16 @@ function checkRule40ImmutableWireHistory() {
   const violations = [];
   for (const change of changes) {
     const [state, status, ...paths] = change.split("\t");
-    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    const protectedPaths = paths.filter(
+      (path) => VERSIONED_WIRE_HISTORY_RE.test(path) || SESSION_INBOX_MIGRATION_RE.test(path),
+    );
     if (protectedPaths.length === 0 || status === "A") continue;
-    if (protectedPaths.every((path) => isAllowedRule40Rewrite(path, state))) continue;
+    if (
+      (
+        await Promise.all(protectedPaths.map((path) => hasUnchangedWireContract(path, state)))
+      ).every(Boolean)
+    )
+      continue;
     if (
       hasBase &&
       protectedPaths.every(
@@ -692,23 +730,79 @@ function checkRule40ImmutableWireHistory() {
       rule: 40,
       file: protectedPaths.at(-1),
       line: 1,
-      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
+      message: `shipped wire schemas, frozen fixtures, snapshots, and migration pairs are immutable (git status ${status}). Add the next wire version and migration instead of changing an existing contract.`,
     });
   }
   return violations;
 }
 
-function isAllowedRule40Rewrite(path, state) {
-  const rewrite = RULE_40_ALLOWED_REWRITES.get(path);
-  if (rewrite === undefined) return false;
-  const baseHash = gitOutput(["rev-parse", `origin/main:${path}`])?.trim();
-  const currentHash =
+// Freeze the protocol declarations, not the encoder implementation that uses them.
+// Follow local references so changing a helper schema is also a contract change.
+function wireContractDeclarations(path, source, root) {
+  if (source === undefined) return undefined;
+  const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const declarations = new Map();
+  for (const statement of ast.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) declarations.set(declaration.name.text, declaration);
+      }
+    } else if (ts.isImportDeclaration(statement)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const binding of bindings.elements) {
+          declarations.set(binding.name.text, {
+            import: statement.moduleSpecifier.text,
+            name: binding.propertyName?.text ?? binding.name.text,
+          });
+        }
+      }
+    } else if (statement.name !== undefined && ts.isIdentifier(statement.name)) {
+      declarations.set(statement.name.text, statement);
+    }
+  }
+  if (!declarations.has(root)) return undefined;
+  const printer = ts.createPrinter({ removeComments: true });
+  const result = new Map();
+  const collect = (name) => {
+    if (result.has(name)) return;
+    const declaration = declarations.get(name);
+    if (declaration === undefined) return;
+    if (declaration.import !== undefined) {
+      result.set(name, JSON.stringify(declaration));
+      return;
+    }
+    result.set(name, printer.printNode(ts.EmitHint.Unspecified, declaration, ast));
+    const visit = (node) => {
+      if (ts.isIdentifier(node)) collect(node.text);
+      ts.forEachChild(node, visit);
+    };
+    visit(declaration);
+  };
+  collect(root);
+  return JSON.stringify([...result].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+async function hasUnchangedWireContract(path, state) {
+  const retiredMigration = /\/session-inbox-wire\.v[2-5]\.migration(?:\.test)?\.ts$/.test(path);
+  const schema = path.match(/\/session-inbox-wire\.v([1-9]\d*)\.ts$/);
+  const fixture = /\/session-inbox-wire\.v\d+\.test\.ts$/.test(path);
+  if (schema === null && !fixture && !retiredMigration) return false;
+  const base = gitOutput(["show", `origin/main:${path}`]);
+  const current =
     state === "head"
-      ? gitOutput(["rev-parse", `HEAD:${path}`])?.trim()
+      ? gitOutput(["show", `HEAD:${path}`])
       : state === "index"
-        ? gitOutput(["rev-parse", `:${path}`])?.trim()
-        : gitOutput(["hash-object", path])?.trim();
-  return baseHash === rewrite.from && currentHash === rewrite.to;
+        ? gitOutput(["show", `:${path}`])
+        : await readFile(join(REPO_ROOT, path), "utf8").catch(() => undefined);
+  // Allow deleting the old transforms, which the adjacent migration pairs replace.
+  if (retiredMigration) return current === undefined;
+  const root = schema === null ? "FROZEN_FIXTURES" : `sessionInboxWireV${schema[1]}Schema`;
+  const before = wireContractDeclarations(path, base, root);
+  const after = wireContractDeclarations(path, current, root);
+  // Contract tests without explicit frozen fixtures may evolve; snapshots remain immutable.
+  if (fixture && before === undefined) return current !== undefined;
+  return before !== undefined && before === after;
 }
 
 function checkRule40MigrationPurity(path, source) {
@@ -730,7 +824,7 @@ function checkRule40MigrationPurity(path, source) {
           rule: 40,
           file: path,
           line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
-          message: `imports "${specifier.text}". Versioned wire migrations are immutable data transforms, so they may import only the VersionMigration type or dependency-free shared guards. Move normalization and version-selection policy to the wire facade.`,
+          message: `imports "${specifier.text}". Versioned wire migrations are immutable data transforms, so they may import only wire types, the wire compatibility error, or dependency-free shared guards. Move normalization and version-selection policy to the wire facade.`,
         });
       }
     }
@@ -740,9 +834,9 @@ function checkRule40MigrationPurity(path, source) {
   return violations;
 }
 
-function checkRule40WorkflowDecoderImports(source) {
+function checkRule40WorkflowDecoderImports(source, path = SESSION_INBOX_WIRE_DECODER) {
   const sourceFile = ts.createSourceFile(
-    SESSION_INBOX_WIRE_DECODER,
+    path,
     source,
     ts.ScriptTarget.Latest,
     true,
@@ -755,11 +849,12 @@ function checkRule40WorkflowDecoderImports(source) {
     if (
       specifier !== undefined &&
       isRuntimeImportReference(node) &&
-      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text)
+      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text) &&
+      !/^#execution\/wire\/session-inbox\/migrations\/v\d+-to-v\d+\.js$/.test(specifier.text)
     ) {
       violations.push({
         rule: 40,
-        file: SESSION_INBOX_WIRE_DECODER,
+        file: path,
         line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
         message: `imports "${specifier.text}" at runtime. The session-inbox decoder is embedded with inline sources in every workflow driver; keep schema and validation dependencies in the encoder and import only the inferred wire type here.`,
       });
@@ -791,82 +886,86 @@ function isRuntimeImportReference(node) {
 }
 
 async function checkRule40WireContracts() {
-  const violations = checkRule40ImmutableWireHistory();
-  let entries;
+  const violations = await checkRule40ImmutableWireHistory();
+  let rootEntries;
+  let sessionInboxEntries;
   try {
-    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+    [rootEntries, sessionInboxEntries] = await Promise.all([
+      readdir(join(REPO_ROOT, WIRE_FAMILY_DIR)),
+      readdir(join(REPO_ROOT, SESSION_INBOX_DIR)),
+    ]);
   } catch {
     return violations;
   }
 
-  for (const name of entries) {
-    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
-    if (match === null) continue;
-    const [, family, version, kind = ""] = match;
+  for (const [directory, entries] of [
+    [WIRE_FAMILY_DIR, rootEntries],
+    [SESSION_INBOX_DIR, sessionInboxEntries],
+  ]) {
+    for (const name of entries) {
+      const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
+      if (match === null) continue;
+      const [, family, version, kind = ""] = match;
 
-    const testName = `${family}-wire.v${version}${kind}.test.ts`;
-    if (!entries.includes(testName)) {
-      violations.push({
-        rule: 40,
-        file: `${WIRE_FAMILY_DIR}/${name}`,
-        line: 1,
-        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
-      });
-    }
-    if (kind === ".migration") {
-      const path = `${WIRE_FAMILY_DIR}/${name}`;
-      violations.push(
-        ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
-      );
+      const testName = `${family}-wire.v${version}${kind}.test.ts`;
+      if (!entries.includes(testName)) {
+        violations.push({
+          rule: 40,
+          file: `${directory}/${name}`,
+          line: 1,
+          message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
+        });
+      }
+      if (kind === ".migration") {
+        const path = `${directory}/${name}`;
+        violations.push(
+          ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+        );
+      }
     }
   }
 
-  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
-  const decoderSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8");
-  violations.push(...checkRule40WorkflowDecoderImports(decoderSource));
-  const registryMatch = contractSource.match(
-    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  const migrationFiles = await readdir(join(REPO_ROOT, SESSION_INBOX_MIGRATIONS_DIR));
+  for (const name of migrationFiles) {
+    if (!/^v\d+-to-v\d+\.ts$/.test(name)) continue;
+    const path = `${SESSION_INBOX_MIGRATIONS_DIR}/${name}`;
+    const source = await readFile(join(REPO_ROOT, path), "utf8");
+    violations.push(...checkRule40MigrationPurity(path, source));
+    if (!migrationFiles.includes(name.replace(/\.ts$/, ".test.ts"))) {
+      violations.push({
+        rule: 40,
+        file: path,
+        line: 1,
+        message: "Every session inbox migration needs a colocated contract test.",
+      });
+    }
+  }
+  for (const name of ["migrations.ts", "migration.ts"]) {
+    const path = `${SESSION_INBOX_DIR}/${name}`;
+    violations.push(
+      ...checkRule40WorkflowDecoderImports(await readFile(join(REPO_ROOT, path), "utf8"), path),
+    );
+  }
+  for (const name of ["catalog.ts", "versions.ts"]) {
+    const path = `${SESSION_INBOX_DIR}/generated/${name}`;
+    violations.push(
+      ...checkRule40WorkflowDecoderImports(await readFile(join(REPO_ROOT, path), "utf8"), path),
+    );
+  }
+  violations.push(
+    ...checkRule40WorkflowDecoderImports(
+      await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8"),
+    ),
   );
-  const tokens = registryMatch?.[1]
-    .split(",")
-    .map((token) => token.trim())
-    .filter(Boolean);
-  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+  try {
+    await generateCatalog(EVE_PACKAGE_ROOT, "session-inbox", true);
+    await checkWireChanges(REPO_ROOT);
+  } catch (error) {
     violations.push({
       rule: 40,
       file: SESSION_INBOX_WIRE_CONTRACT,
       line: 1,
-      message:
-        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
-    });
-    return violations;
-  }
-
-  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
-  const versions = tokens.map(Number);
-  const expectedVersions = versions.map((_, index) => index + 1);
-  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
-    });
-  }
-
-  const shippedVersions = entries
-    .flatMap((name) => {
-      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
-      return match === null ? [] : [Number(match[1])];
-    })
-    .sort((left, right) => left - right);
-  const registeredModules = [0, ...versions];
-  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+      message: error.message,
     });
   }
 

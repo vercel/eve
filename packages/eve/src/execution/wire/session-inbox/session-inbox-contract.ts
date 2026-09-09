@@ -1,0 +1,61 @@
+import { versions as SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox/generated/versions.js";
+export { SESSION_INBOX_WIRE_VERSIONS };
+export { currentVersion as SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox/generated/versions.js";
+export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[number];
+
+/** Hook metadata field advertising the consumer's inbox wire capability. */
+export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion";
+
+export const SESSION_INBOX_CONTEXT_KEY = "eve.sessionInbox";
+
+/** Immutable inbox coordinates advertised by the receiving session's driver. */
+export interface SessionInboxAddress {
+  readonly sessionId: string;
+  readonly version: number;
+}
+
+export function isSessionInboxAddress(value: unknown): value is SessionInboxAddress {
+  if (value === null || typeof value !== "object") return false;
+  return (
+    "sessionId" in value &&
+    typeof value.sessionId === "string" &&
+    value.sessionId.length > 0 &&
+    !value.sessionId.includes(":") &&
+    "version" in value &&
+    typeof value.version === "number" &&
+    Number.isSafeInteger(value.version) &&
+    value.version > 0
+  );
+}
+
+/**
+ * The consumer wire selected before a producer persists a payload.
+ *
+ * Version 0 had two incompatible unversioned shapes, so its historical
+ * variants remain explicit rather than pretending they were one protocol.
+ */
+export type SessionInboxWireTarget =
+  | { readonly variant: "deliver" | "send"; readonly version: 0 }
+  | { readonly version: SessionInboxWireVersion };
+
+export function isSessionInboxWireVersion(value: unknown): value is SessionInboxWireVersion {
+  return SESSION_INBOX_WIRE_VERSIONS.some((version) => version === value);
+}
+
+/** Raised when a session inbox value violates its versioned wire contract. */
+export class SessionInboxWireError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionInboxWireError";
+  }
+}
+
+/** A valid operation that the receiving session's protocol cannot represent. */
+export class SessionInboxIncompatibleError extends SessionInboxWireError {
+  readonly code = "SESSION_INBOX_INCOMPATIBLE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionInboxIncompatibleError";
+  }
+}
