@@ -155,6 +155,14 @@ describe("pending authorization state", () => {
       expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
     ]);
   });
+
+  it("clears by candidate ID", () => {
+    const state = setPendingAuthorization(undefined, {
+      challenges: [candidateChallenge("github", "candidate-1")],
+    });
+
+    expect(clearPendingAuthorization(state, ["candidate-1"])).toBeUndefined();
+  });
 });
 
 describe("pending authorization attempts", () => {

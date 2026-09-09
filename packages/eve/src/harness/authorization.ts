@@ -390,7 +390,7 @@ export function clearPendingAuthorization(
     if (pending !== undefined) {
       const completedAttemptIds = new Set(attemptIds);
       const challenges = pending.challenges.filter(
-        (challenge) => !completedAttemptIds.has(challenge.attemptId ?? challenge.name),
+        (challenge) => !completedAttemptIds.has(authorizationAttemptKey(challenge)),
       );
       if (challenges.length > 0) {
         return {
