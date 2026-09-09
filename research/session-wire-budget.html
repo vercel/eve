@@ -1110,7 +1110,7 @@
 
 <div class="path-head"><span class="letter">B</span><h3>Follow-up on an idle session over HTTP</h3></div>
   <div class="prose">
-    <p>This is the path the stress fixture measures. The handler mints an event id and starts a candidate with the session locator inside <code>waitUntil</code>; the 202 goes out before the start resolves, and nothing is read. The candidate registers two hooks in one suspension, claims, and reads the snapshot tail inside its execute step. Events are enqueued locally during the model call and drained to the event stream in the background; the drain is awaited before the step returns. The execute step returns the whole updated checkpoint as its result. The finalize step receives it as input, decides the settlement, writes <code>turn.completed</code> and <code>session.waiting</code>, and returns the checkpoint again. The commit step receives it a third time and appends it to the snapshot stream. Then the run completes.</p>
+    <p>This is the path the stress fixture measures. The handler mints an event id and starts a candidate with the session locator inside <code>waitUntil</code>; the 202 goes out before the start resolves. On a warm process nothing is read; a cold process first resolves the session descriptor (one stream GET plus one run metadata GET) because the turn input now carries the resources inline. The candidate registers two hooks in one suspension, claims, and reads the snapshot tail inside its execute step. Events are enqueued locally during the model call and drained to the event stream in the background; the drain is awaited before the step returns. The execute step returns the whole updated checkpoint as its result. The finalize step receives it as input, decides the settlement, writes <code>turn.completed</code> and <code>session.waiting</code>, and returns the checkpoint again. The commit step receives it a third time and appends it to the snapshot stream. Then the run completes.</p>
     <p>The client sees completion when finalize's event PUT lands. The commit step and run completion are off the client path, but they hold the function and delay the release of the turn hook.</p>
   </div>
   <figure class="wide"><div id="fig-b"></div>
@@ -2007,7 +2007,7 @@
     aria: "Follow-up on idle session at 5a95ccb4d: start inside waitUntil, one hop, two-hook claim with one log read, execute with tail read and background event drain, finalize writes session.waiting, commit appends the checkpoint.",
     lanes: [L.handler, L.vqs, L.turn, L.ws],
     events: [
-      { t: "self", lane: 0, label: "acceptSubmission: mint eventId, no reads · 202 returned", kind: "compute" },
+      { t: "self", lane: 0, label: "acceptSubmission: mint eventId · 202 returned · descriptor from cache (cold: 2 GETs)", kind: "compute" },
       { t: "msg", from: 0, to: 3, label: "run_created", kind: "ws", par: true, note: "Runs inside waitUntil after the 202 has been sent." },
       { t: "msg", from: 0, to: 1, label: "publish", kind: "vqs", par: true },
       { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
