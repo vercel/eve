@@ -10,6 +10,7 @@ if (process.env.EVE_E2E_MODEL === "mock") {
 
 const base = e2eAgentConfig();
 const { model, modelContextWindowTokens, ...agentConfig } = base;
+const defaultModel = typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
 const workspaceReader = mockModel({
   modelId: "principal-forwarding-workspace-reader",
   respond: ({ messages }) => {
@@ -83,7 +84,7 @@ export default defineAgent({
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
         }
-        return { model, modelContextWindowTokens };
+        return { model: defaultModel, modelContextWindowTokens };
       },
     },
   }),
