@@ -70,6 +70,10 @@ executions from the same batch. Approval, input, blocking coordination, and
 background-task boundaries still force a checkpoint before eve waits or
 acknowledges the work.
 
+Steering does not replay or discard the whole batch. eve aborts the active
+model-and-tool cycle, commits earlier completed cycles in the batch, and starts
+the replacement turn from that state in the next Workflow step.
+
 Durability itself needs no configuration. eve owns the workflow lifecycle, and
 sessions are durable by default; checkpoint batching is an explicit
 experimental opt-in.

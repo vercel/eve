@@ -1237,6 +1237,63 @@ describe("turnStep", () => {
     ]);
   });
 
+  it("checkpoints completed batched model calls when steering cancels the active call", async () => {
+    const bundle = createTurnStepTestBundle(100);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const controller = new AbortController();
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    let callCount = 0;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        callCount++;
+        if (callCount === 51) {
+          loadContext().set(ThreadKey, "discarded call 51");
+          controller.abort(new TurnCancelledError());
+          return {
+            next: continueStep,
+            session: {
+              ...session,
+              history: [
+                ...session.history,
+                { content: "discarded model call 51", role: "assistant" as const },
+              ],
+            },
+          };
+        }
+        loadContext().set(ThreadKey, `completed call ${String(callCount)}`);
+        return {
+          next: continueStep,
+          session: {
+            ...session,
+            history: [
+              ...session.history,
+              { content: `model call ${String(callCount)}`, role: "assistant" as const },
+            ],
+          },
+        };
+      };
+    });
+
+    const result = await turnStep({
+      abortSignal: controller.signal,
+      input: { kind: "deliver", payloads: [{ message: "run a long chain" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("cancelled");
+    expect(callCount).toBe(51);
+    expect(result.serializedContext).toMatchObject({ [ThreadKey.name]: "completed call 50" });
+    expect(result.sessionState.snapshot?.session.history).toHaveLength(50);
+    expect(result.sessionState.snapshot?.session.history.at(-1)).toEqual({
+      content: "model call 50",
+      role: "assistant",
+    });
+  });
+
   it("keeps one model call per Workflow step by default", async () => {
     const bundle = createTurnStepTestBundle();
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);

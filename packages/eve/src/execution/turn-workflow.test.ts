@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
-import { SessionDynamicModelReferenceKey } from "#context/keys.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -174,7 +173,7 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("keeps earlier inline state when cancellation wins over a completed step", async () => {
+  it("checkpoints completed inline state when cancellation wins", async () => {
     const initialState = createSessionState({ continuationToken: "http:initial" });
     const beforeStepState = createSessionState({ continuationToken: "http:inline-checkpoint" });
     const completedState = createSessionState({ continuationToken: "http:completed" });
@@ -202,8 +201,8 @@ describe("turnWorkflow", () => {
     });
 
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "inline-checkpoint" },
-      sessionState: beforeStepState,
+      serializedContext: { state: "done" },
+      sessionState: completedState,
     });
     expect(resumeHookMock).toHaveBeenCalledWith(
       "turn-token",
@@ -211,7 +210,7 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({
           cancelled: true,
           kind: "park",
-          sessionState: beforeStepState,
+          sessionState: completedState,
         }),
         kind: "turn-result",
       }),
@@ -457,23 +456,16 @@ describe("turnWorkflow", () => {
     });
   });
 
-  it("honors cancellation observed while a durable turn step returns", async () => {
+  it("checkpoints a durable turn step that finishes as cancellation arrives", async () => {
     const sessionState = createSessionState();
-    const sessionModel = {
-      id: "openai/gpt-5.6-sol",
-      contextWindowTokens: 1_000_000,
-    };
+    const completedState = createSessionState({ continuationToken: "completed-state" });
     installInbox([], { cancelPayloads: [{}] });
     vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
       await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
       return {
-        action: "done",
-        output: "must not complete",
-        serializedContext: {
-          state: "done",
-          [SessionDynamicModelReferenceKey.name]: sessionModel,
-        },
-        sessionState,
+        action: "continue",
+        serializedContext: { state: "completed" },
+        sessionState: completedState,
       };
     });
 
@@ -483,20 +475,16 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    const cancelledContext = {
-      state: "start",
-      [SessionDynamicModelReferenceKey.name]: sessionModel,
-    };
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: cancelledContext,
-      sessionState,
+      serializedContext: { state: "completed" },
+      sessionState: completedState,
     });
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       action: {
         cancelled: true,
         kind: "park",
-        serializedContext: cancelledContext,
-        sessionState,
+        serializedContext: { state: "completed" },
+        sessionState: completedState,
       },
       kind: "turn-result",
     });

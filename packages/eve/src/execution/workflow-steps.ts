@@ -9,7 +9,6 @@ import {
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   dispatchDynamicSubagentEvent,
@@ -41,9 +40,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
-import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
-import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -82,10 +79,7 @@ import {
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
-import {
-  readRetainedBackgroundToolResult,
-  runBackgroundStep,
-} from "#execution/tasks/parent/tool-execution.js";
+import { runBackgroundStep } from "#execution/tasks/parent/tool-execution.js";
 import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -95,9 +89,12 @@ import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
+import {
+  createCancelledModelCallBatchResult,
+  type CompletedModelCallCheckpoint,
+} from "#execution/cancelled-model-call-batch.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -487,6 +484,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     return step(modelSession, stepInput);
   };
 
+  let completedModelCall: CompletedModelCallCheckpoint | undefined;
   let stepResult: StepResult;
   try {
     // A signal already aborted at entry (cancellation during an in-line
@@ -497,8 +495,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       initialInput: resolved,
       initialSession,
       modelCallsPerStep,
-      runStep: ({ firstCall, session, stepInput }) =>
-        runBackgroundStep(ctx, session, async (enrichedSession) => {
+      runStep: async ({ firstCall, session, stepInput }) => {
+        const result = await runBackgroundStep(ctx, session, async (enrichedSession) => {
           ctx.setVirtualContext(HandleEventKey, handleEvent);
           let schemaSession = firstCall
             ? resolveEffectiveOutputSchema({
@@ -559,7 +557,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           }
 
           return runHarnessStep(schemaSession, stepInput);
-        }),
+        });
+        throwIfTurnAborted(input.abortSignal);
+        completedModelCall = { result, serializedContext: serializeContext(ctx) };
+        return result;
+      },
     });
   } catch (error) {
     if (!isTurnCancellation(error) && input.abortSignal?.aborted !== true) {
@@ -567,43 +569,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       throw error;
     }
     writer.releaseLock();
-    // Trace and instrumentation state are needed by the cancellation
-    // epilogue to close the operation the discarded step opened.
-    // The session model is also kept because `session.started` is not emitted
-    // again after this cancellation settles.
-    const interrupted = serializeContext(ctx);
-    const retained = readRetainedBackgroundToolResult(ctx);
-    // Runs inside the ALS scope: preserving the message stages its
-    // attachments, and `stageAttachmentsToSandbox` reads the sandbox off the
-    // active context. The harness step's own scope closed when it threw, so
-    // without this the cancellation epilogue fails with "No active eve
-    // context" whenever the discarded turn carried a file part.
-    const cancelledSession = await contextStorage.run(ctx, () =>
-      preserveCancelledTurnMessage(retained?.backgroundTaskSession ?? initialSession, resolved),
-    );
-    return {
-      action: "cancelled",
-      ...(retained === undefined
-        ? {}
-        : {
-            backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
-            backgroundTasks: retained.backgroundTasks,
-          }),
-      serializedContext: preserveSerializedInstrumentationState(
-        preserveSerializedAgentTraceState(
-          preserveSerializedSessionDynamicModelSelection(
-            {
-              ...input.serializedContext,
-              [TurnDeliveryIdsKey.name]: interrupted[TurnDeliveryIdsKey.name],
-            },
-            interrupted,
-          ),
-          interrupted,
-        ),
-        interrupted,
-      ),
-      sessionState: createDurableSessionState({ session: cancelledSession }),
-    };
+    return createCancelledModelCallBatchResult({
+      beforeBatchContext: input.serializedContext,
+      checkpoint: completedModelCall,
+      ctx,
+      initialSession,
+      stepInput: resolved,
+    });
   }
 
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).

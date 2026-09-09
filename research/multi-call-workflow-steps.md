@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: implemented
-last_updated: "2026-09-04"
+last_updated: "2026-09-09"
 ---
 
 # Multi-call Workflow steps
@@ -98,10 +98,10 @@ Only durability changes:
 | Approval/auth/task waits | durable boundary                          | unchanged durable boundary                          |
 
 Compaction summary calls and in-process retries do not consume the N budget;
-the setting counts completed turn-model steps. A cancellation rolls session
-state back to the beginning of the Workflow step, while already completed
-external effects and stream writes remain observable, matching existing
-interrupted-step semantics over a larger unit.
+the setting counts completed turn-model steps. Crash recovery replays the
+uncommitted batch. Steering instead aborts the active model-and-tool cycle,
+commits earlier completed cycles in the batch, and starts the replacement turn
+from that state in the next Workflow step.
 
 ## Implementation
 
@@ -129,7 +129,8 @@ interrupted-step semantics over a larger unit.
   values, and preserve the default when omitted.
 - Focused `turnStep` tests prove a configured batch can complete three ordered
   model steps in one call, the omitted option preserves one step, and pending
-  input or a background task ends the batch.
+  input or a background task ends the batch. Cancellation coverage proves
+  steering retains completed calls in a batch while discarding the active call.
 - The `agent-tools` end-to-end fixture enables a three-call ceiling and runs its
   deterministic sequential two-tool eval through the compiled public config.
 - Before the option is recommended beyond experiments, a hosted paired runtime
