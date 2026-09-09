@@ -232,13 +232,15 @@ describe("normalizeAgentDefinition", () => {
       {
         model: "openai/gpt-5.5",
         experimental: {
-          maxModelCallsPerWorkflowStep: 4,
+          workflow: {
+            modelCallsPerStep: 4,
+          },
         },
       },
       FAILURE_MESSAGE,
     );
 
-    expect(definition.experimental?.maxModelCallsPerWorkflowStep).toBe(4);
+    expect(definition.experimental?.workflow?.modelCallsPerStep).toBe(4);
   });
 
   it.each([0, 1.5, -1, Number.POSITIVE_INFINITY, "4"])(
@@ -249,7 +251,9 @@ describe("normalizeAgentDefinition", () => {
           {
             model: "openai/gpt-5.5",
             experimental: {
-              maxModelCallsPerWorkflowStep: value,
+              workflow: {
+                modelCallsPerStep: value,
+              },
             },
           },
           FAILURE_MESSAGE,

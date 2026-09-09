@@ -182,11 +182,9 @@ const TestTurnAgent = {
   workspaceSpec: {} as never,
 };
 
-function createTurnStepTestBundle(maxModelCallsPerWorkflowStep?: number) {
+function createTurnStepTestBundle(modelCallsPerStep?: number) {
   const config =
-    maxModelCallsPerWorkflowStep === undefined
-      ? {}
-      : { experimental: { maxModelCallsPerWorkflowStep } };
+    modelCallsPerStep === undefined ? {} : { experimental: { workflow: { modelCallsPerStep } } };
   return {
     adapterRegistry: {
       adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),

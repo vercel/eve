@@ -5,7 +5,7 @@ import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 export async function runModelCallBatch(input: {
   readonly initialInput: StepInput | undefined;
   readonly initialSession: HarnessSession;
-  readonly maxModelCallsPerWorkflowStep: number;
+  readonly modelCallsPerStep: number;
   readonly runStep: (input: {
     readonly firstCall: boolean;
     readonly session: HarnessSession;
@@ -26,7 +26,7 @@ export async function runModelCallBatch(input: {
     if (
       !shouldRunAnotherModelCall({
         completedModelCalls,
-        maxModelCallsPerWorkflowStep: input.maxModelCallsPerWorkflowStep,
+        modelCallsPerStep: input.modelCallsPerStep,
         result,
       })
     ) {
@@ -39,11 +39,11 @@ export async function runModelCallBatch(input: {
 
 function shouldRunAnotherModelCall(input: {
   readonly completedModelCalls: number;
-  readonly maxModelCallsPerWorkflowStep: number;
+  readonly modelCallsPerStep: number;
   readonly result: StepResult;
 }): boolean {
   if (
-    input.completedModelCalls >= input.maxModelCallsPerWorkflowStep ||
+    input.completedModelCalls >= input.modelCallsPerStep ||
     typeof input.result.next !== "function" ||
     input.result.backgroundTaskSession !== undefined ||
     input.result.backgroundTasks !== undefined ||

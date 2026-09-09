@@ -259,12 +259,14 @@ import { defineAgent } from "eve";
 export default defineAgent({
   model: "anthropic/claude-opus-4.8",
   experimental: {
-    maxModelCallsPerWorkflowStep: 4,
+    workflow: {
+      modelCallsPerStep: 4,
+    },
   },
 });
 ```
 
-`maxModelCallsPerWorkflowStep` is a positive-integer ceiling. It defaults to
+`experimental.workflow.modelCallsPerStep` is a positive-integer ceiling. It defaults to
 `1` and applies independently to each root agent or declared subagent. A higher
 value can reduce Workflow checkpoint overhead in sequential tool loops, but it
 widens the replay unit: if the Workflow step is interrupted, its earlier model
@@ -287,7 +289,7 @@ for the retry behavior.
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                            |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                   |
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                              |
-| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `maxModelCallsPerWorkflowStep` batches sequential model calls into a wider replay unit.                         |
+| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit.                           |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.             |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output. |
 

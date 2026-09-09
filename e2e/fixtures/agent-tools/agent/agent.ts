@@ -18,7 +18,10 @@ export default defineAgent({
   ...base,
   experimental: {
     ...base.experimental,
-    maxModelCallsPerWorkflowStep: 3,
+    workflow: {
+      ...base.experimental?.workflow,
+      modelCallsPerStep: 3,
+    },
   },
   reasoning: "high",
 });

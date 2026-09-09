@@ -569,6 +569,7 @@ const compiledAgentWorkflowWorldDefinitionSchema = z.string();
 
 const compiledAgentWorkflowDefinitionSchema = z
   .object({
+    modelCallsPerStep: z.number().int().positive().optional(),
     world: compiledAgentWorkflowWorldDefinitionSchema.optional(),
   })
   .strict();
@@ -611,7 +612,6 @@ const compiledAgentConfigBaseFields = {
   experimental: z
     .object({
       instrumentationProviders: z.boolean().optional(),
-      maxModelCallsPerWorkflowStep: z.number().int().positive().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -1211,11 +1211,11 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         ? undefined
         : {
             instrumentationProviders: config.experimental.instrumentationProviders,
-            maxModelCallsPerWorkflowStep: config.experimental.maxModelCallsPerWorkflowStep,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined
                 : {
+                    modelCallsPerStep: config.experimental.workflow.modelCallsPerStep,
                     world: config.experimental.workflow.world,
                   },
           },

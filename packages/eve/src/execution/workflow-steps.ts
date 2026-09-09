@@ -448,8 +448,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
 
   const mode = ctx.require(ModeKey);
-  const maxModelCallsPerWorkflowStep =
-    bundle.resolvedAgent.config?.experimental?.maxModelCallsPerWorkflowStep ?? 1;
+  const modelCallsPerStep =
+    bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
   const capabilities = ctx.get(CapabilitiesKey);
 
   const runHarnessStep = async (
@@ -496,7 +496,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     stepResult = await runModelCallBatch({
       initialInput: resolved,
       initialSession,
-      maxModelCallsPerWorkflowStep,
+      modelCallsPerStep,
       runStep: ({ firstCall, session, stepInput }) =>
         runBackgroundStep(ctx, session, async (enrichedSession) => {
           ctx.setVirtualContext(HandleEventKey, handleEvent);

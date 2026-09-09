@@ -29,9 +29,9 @@ export function assertRootOnlyConfig(
   agentId: string,
 ): void {
   if (isRoot) return;
-  if (config.experimental?.workflow !== undefined) {
+  if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
-      `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${agentId}".`,
+      `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,
     );
   }
 }

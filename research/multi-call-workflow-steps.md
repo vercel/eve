@@ -22,7 +22,9 @@ import { defineAgent } from "eve";
 export default defineAgent({
   model: "openai/gpt-5.6-luna",
   experimental: {
-    maxModelCallsPerWorkflowStep: 4,
+    workflow: {
+      modelCallsPerStep: 4,
+    },
   },
 });
 ```
@@ -103,7 +105,7 @@ interrupted-step semantics over a larger unit.
 
 ## Implementation
 
-1. Add `experimental.maxModelCallsPerWorkflowStep?: number` to the public agent
+1. Add `experimental.workflow.modelCallsPerStep?: number` to the public agent
    definition and carry it through compiled-manifest validation, cloning, and
    runtime resolution. Reject non-positive, non-integer values. Static root and
    subagent definitions may select it; dynamic subagent configuration continues

@@ -16,7 +16,7 @@ Work nests in three levels:
 Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
 
 The experimental
-[`maxModelCallsPerWorkflowStep`](../agent-config#workflow-checkpoint-batching)
+[`workflow.modelCallsPerStep`](../agent-config#workflow-checkpoint-batching)
 agent setting can group several sequential model-and-tool cycles into one
 Workflow step. This reduces checkpoint overhead but makes the entire group one
 replay unit.
@@ -64,7 +64,7 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
 
-With `experimental.maxModelCallsPerWorkflowStep` greater than `1`, an
+With `experimental.workflow.modelCallsPerStep` greater than `1`, an
 interrupted Workflow step can also repeat earlier model calls and inline tool
 executions from the same batch. Approval, input, blocking coordination, and
 background-task boundaries still force a checkpoint before eve waits or

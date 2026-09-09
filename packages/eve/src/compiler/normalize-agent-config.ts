@@ -186,12 +186,9 @@ function normalizeExperimentalDefinition(
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
   }
 
-  if (experimental.maxModelCallsPerWorkflowStep !== undefined) {
-    compiledExperimental.maxModelCallsPerWorkflowStep = experimental.maxModelCallsPerWorkflowStep;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
+      modelCallsPerStep: experimental.workflow.modelCallsPerStep,
       world: experimental.workflow.world,
     };
   }

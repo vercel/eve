@@ -258,8 +258,15 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["world"], message);
+  expectOnlyKnownKeys(record, ["modelCallsPerStep", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.modelCallsPerStep !== undefined) {
+    normalizedDefinition.modelCallsPerStep = expectPositiveInteger(
+      record.modelCallsPerStep,
+      message,
+    );
+  }
 
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
@@ -285,11 +292,7 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(
-    record,
-    ["instrumentationProviders", "maxModelCallsPerWorkflowStep", "workflow"],
-    message,
-  );
+  expectOnlyKnownKeys(record, ["instrumentationProviders", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
 
   if (record.instrumentationProviders !== undefined) {
@@ -297,13 +300,6 @@ function normalizeAgentExperimentalDefinition(
       throw new Error(`${message} "experimental.instrumentationProviders" must be a boolean.`);
     }
     normalizedDefinition.instrumentationProviders = record.instrumentationProviders;
-  }
-
-  if (record.maxModelCallsPerWorkflowStep !== undefined) {
-    normalizedDefinition.maxModelCallsPerWorkflowStep = expectPositiveInteger(
-      record.maxModelCallsPerWorkflowStep,
-      message,
-    );
   }
 
   if (record.workflow !== undefined) {
