@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -280,15 +281,18 @@ function takeBufferedTurnDelivery(
     throw new Error("Cannot take a turn delivery from an empty buffer.");
   }
 
+  const cohort = completionCohort(first, cohorts);
+  const authenticated = first.auth != null && first.auth.principalType !== "anonymous";
   const turnDeliveries = [first];
   let caller = first.caller;
-  const cohort = completionCohort(first, cohorts);
   while (bufferedDeliveries.length > 0) {
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
       ((first.taskDeliveryId !== undefined || next.taskDeliveryId !== undefined) &&
         (cohort === undefined || completionCohort(next, cohorts) !== cohort)) ||
+      (first.taskDeliveryId === undefined &&
+        (!authenticated || !jsonValuesEqual(first.auth, next.auth))) ||
       (caller !== undefined && next.caller !== undefined)
     ) {
       break;

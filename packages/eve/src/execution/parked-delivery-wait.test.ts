@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type {
@@ -117,6 +117,89 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
 }
 
 describe("nextTurnDelivery", () => {
+  it("batches adjacent queued deliveries with equivalent auth", async () => {
+    const auth: SessionAuthContext = {
+      attributes: { scopes: ["read", "write"], team: "support" },
+      authenticator: "slack",
+      issuer: "workspace",
+      principalId: "bob",
+      principalType: "user",
+      subject: "bob-subject",
+    };
+    const first = authenticatedDelivery("first", auth);
+    const second = authenticatedDelivery("second", {
+      ...auth,
+      attributes: { team: "support", scopes: ["read", "write"] },
+    });
+    const input = batchingInputFor([first, second]);
+
+    const next = await nextTurnDelivery(input);
+
+    expect(next).toMatchObject({
+      kind: "turn",
+      delivery: {
+        auth,
+        payloads: [...first.payloads, ...second.payloads],
+        deliveryMetadata: [
+          first.deliveryMetadata![0],
+          { ...second.deliveryMetadata![0], payloadIndex: 1 },
+        ],
+      },
+    });
+    expect(input.bufferedDeliveries).toEqual([]);
+  });
+
+  it("keeps different principals in FIFO turns without regrouping later messages", async () => {
+    const alice = slackAuth("alice");
+    const bob = slackAuth("bob");
+    const deliveries = [
+      authenticatedDelivery("alice-1", alice),
+      authenticatedDelivery("alice-2", alice),
+      authenticatedDelivery("bob", bob),
+      authenticatedDelivery("alice-3", alice),
+    ];
+    const input = batchingInputFor(deliveries);
+
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "alice-1" }, { message: "alice-2" }] },
+      kind: "turn",
+    });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "bob" }] },
+      kind: "turn",
+    });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "alice-3" }] },
+      kind: "turn",
+    });
+    expect(input.bufferedDeliveries).toEqual([]);
+  });
+
+  it.each([
+    { authenticator: "other" },
+    { issuer: "other" },
+    { principalType: "service" },
+    { subject: "other" },
+    { attributes: { scopes: ["write"] } },
+  ])("does not batch when auth context changes: %j", async (change) => {
+    const auth = slackAuth("alice");
+    const first = authenticatedDelivery("first", auth);
+    const second = authenticatedDelivery("second", { ...auth, ...change });
+    const input = batchingInputFor([first, second]);
+
+    await expect(nextTurnDelivery(input)).resolves.toEqual({ delivery: first, kind: "turn" });
+    expect(input.bufferedDeliveries).toEqual([second]);
+  });
+
+  it.each([null, undefined])("does not batch deliveries with auth %j", async (auth) => {
+    const first: DeliverHookPayload = { auth, kind: "deliver", payloads: [{ message: "first" }] };
+    const second: DeliverHookPayload = { auth, kind: "deliver", payloads: [{ message: "second" }] };
+    const input = batchingInputFor([first, second]);
+
+    await expect(nextTurnDelivery(input)).resolves.toEqual({ delivery: first, kind: "turn" });
+    expect(input.bufferedDeliveries).toEqual([second]);
+  });
+
   it("surfaces an authorization callback as its own instruction", async () => {
     const inbox = createMockInbox([authorizationRead()]);
 
@@ -233,6 +316,47 @@ describe("nextTurnDelivery", () => {
     });
   });
 });
+
+function slackAuth(principalId: string): SessionAuthContext {
+  return {
+    attributes: { scopes: ["read"], team: "support" },
+    authenticator: "slack",
+    issuer: "workspace",
+    principalId,
+    principalType: "user",
+    subject: principalId,
+  };
+}
+
+function authenticatedDelivery(message: string, auth: SessionAuthContext): DeliverHookPayload {
+  return {
+    auth,
+    deliveryMetadata: [
+      {
+        channelKind: "slack",
+        channelName: "slack",
+        deliveryId: message,
+        payloadIndex: 0,
+      },
+    ],
+    kind: "deliver",
+    payloads: [{ message }],
+    turnPolicy: "queue",
+  };
+}
+
+function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
+  const input = waitInput(createMockInbox([]));
+  vi.mocked(routeDeliverToChildren).mockImplementation(
+    async ({ delivery, serializedContext, sessionState }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext,
+      sessionState,
+    }),
+  );
+  return { ...input, bufferedDeliveries };
+}
 
 describe("nextTurnDelivery routing", () => {
   it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {

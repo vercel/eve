@@ -11,13 +11,26 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       toolCalls: [{ id: "wait-for-cancellation", input: {}, name: "wait-for-cancellation" }],
     };
   }
-  const marker = /record-request with marker "([^"]+)"/u.exec(message)?.[1];
-  if (marker !== undefined) {
-    const id = `record-${marker}`;
-    const result = request.toolResults.find((entry) => entry.id === id);
-    return result === undefined
-      ? { toolCalls: [{ id, input: { marker }, name: "record-request" }] }
-      : String(result.output);
+  const markers = [...message.matchAll(/record-request with marker "([^"]+)"/gu)].map(
+    (match) => match[1]!,
+  );
+  if (markers.length > 0) {
+    const pending = markers.filter(
+      (marker) => !request.toolResults.some((entry) => entry.id === `record-${marker}`),
+    );
+    return pending.length > 0
+      ? {
+          toolCalls: pending.map((marker) => ({
+            id: `record-${marker}`,
+            input: { marker },
+            name: "record-request",
+          })),
+        }
+      : markers
+          .map((marker) =>
+            String(request.toolResults.find((entry) => entry.id === `record-${marker}`)?.output),
+          )
+          .join("\n");
   }
   if (message.includes("call the sleeper subagent")) {
     return {

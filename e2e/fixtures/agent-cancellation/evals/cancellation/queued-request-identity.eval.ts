@@ -2,7 +2,8 @@ import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
 export default defineEval({
-  description: "Queued channel requests run separately in arrival order with their original auth.",
+  description:
+    "Queued channel requests batch only adjacent matching identities and retain their auth.",
   timeoutMs: 240_000,
   async test(t) {
     const threadId = crypto.randomUUID();
@@ -27,18 +28,20 @@ export default defineEval({
       },
     });
 
-    const requests = [
-      { actor: "bob", marker: "bob-first" },
-      { actor: "carol", marker: "carol-first" },
-      { actor: "carol", marker: "carol-second" },
-      { actor: null, marker: "guest-first" },
+    const groups = [
+      { actor: "bob", markers: ["bob-first"] },
+      { actor: "carol", markers: ["carol-first", "carol-second"] },
+      { actor: "bob", markers: ["bob-second"] },
+      { actor: null, markers: ["guest-first"] },
+      { actor: null, markers: ["guest-second"] },
     ] as const;
-    const messages: string[] = [];
-    for (const { actor, marker } of requests) {
-      const message = `The team is recording separate work requests. Please call record-request with marker "${marker}" exactly once for this request, then report its result.`;
-      messages.push(message);
-      const accepted = await post(message, actor);
-      t.check(accepted.sessionId, equals(sessionId));
+    const messageFor = (marker: string) =>
+      `The team is recording work requests. Please call record-request with marker "${marker}" exactly once for this request, then report its result.`;
+    for (const { actor, markers } of groups) {
+      for (const marker of markers) {
+        const accepted = await post(messageFor(marker), actor);
+        t.check(accepted.sessionId, equals(sessionId));
+      }
     }
 
     // Cancellation releases the held turn only after every follow-up is accepted.
@@ -52,37 +55,40 @@ export default defineEval({
     if (cursor === undefined) throw new Error("Missing stream cursor after cancellation.");
     const turnIds = new Set<string>();
     const deliveryIds = new Set<string>();
-    for (const [index, { actor, marker }] of requests.entries()) {
+    for (const { actor, markers } of groups) {
       const live = t.target.watchTurn(sessionId, { startIndex: cursor });
       const turn = await live.result();
       turn.expectOk();
-      turn.calledTool("record-request", { count: 1, status: "completed" });
-      turn.event("message.received", { count: 1, data: { message: messages[index] } });
-      turn.event("action.result", {
-        count: 1,
-        data: {
-          status: "completed",
-          result: {
-            kind: "tool-result",
-            toolName: "record-request",
-            output: `request=${marker};actor=${actor ?? "anonymous"}`,
+      turn.calledTool("record-request", { count: markers.length, status: "completed" });
+      const message = markers.map(messageFor).join("\n\n");
+      turn.event("message.received", { count: 1, data: { message } });
+      for (const marker of markers) {
+        turn.event("action.result", {
+          count: 1,
+          data: {
+            status: "completed",
+            result: {
+              kind: "tool-result",
+              toolName: "record-request",
+              output: `request=${marker};actor=${actor ?? "anonymous"}`,
+            },
           },
-        },
-      });
+        });
+      }
       turn.notEvent("turn.cancelled");
       turn.notEvent("turn.failed");
       const received = turn.events.find((event) => event.type === "message.received");
       if (received === undefined) throw new Error("Missing queued message event.");
-      await t.require(received.data.message, equals(messages[index]));
+      await t.require(received.data.message, equals(message));
       turnIds.add(received.data.turnId);
       const ids = received.meta.deliveryIds ?? [];
-      t.check(ids.length, equals(1)).label("the turn belongs to one delivery");
+      t.check(ids.length, equals(markers.length)).label("the turn retains every batched delivery");
       for (const id of ids) deliveryIds.add(id);
       cursor = live.session.state?.streamIndex;
       if (cursor === undefined) throw new Error("Missing stream cursor after queued turn.");
     }
-    t.check(turnIds.size, equals(requests.length)).label("each request owns a distinct turn");
-    t.check(deliveryIds.size, equals(requests.length)).label(
+    t.check(turnIds.size, equals(groups.length)).label("each identity group owns a distinct turn");
+    t.check(deliveryIds.size, equals(groups.flatMap((group) => group.markers).length)).label(
       "each request retains its delivery ID",
     );
     t.succeeded();
