@@ -1,6 +1,7 @@
 import { Agent } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -174,6 +175,8 @@ describe("eve dev server live connections", () => {
       const candidateStartedPath = join(app.appRoot, ".candidate-started");
       const candidateReadyPath = join(app.appRoot, ".candidate-ready");
       const streamReleasePath = join(app.appRoot, ".stream-release");
+      let stopRevisionPolling = false;
+      let revisionPoller: Promise<void> | undefined;
 
       try {
         const initialRevision = await readDevelopmentRevision(server.url);
@@ -191,13 +194,12 @@ describe("eve dev server live connections", () => {
         // The parent-owned control route must answer continuously through
         // candidate preparation and promotion, not merely at spot checks.
         const revisionFailures: string[] = [];
-        let stopRevisionPolling = false;
-        const revisionPoller = (async () => {
+        revisionPoller = (async () => {
           while (!stopRevisionPolling) {
             try {
               await readDevelopmentRevision(server.url);
             } catch (error) {
-              revisionFailures.push(String(error));
+              revisionFailures.push(inspect(error, { depth: 4 }));
             }
             await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
           }
@@ -230,7 +232,9 @@ describe("eve dev server live connections", () => {
         await expect(reader.read()).resolves.toEqual(expect.objectContaining({ done: true }));
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
+        stopRevisionPolling = true;
         await server.stop();
+        await revisionPoller;
       }
     },
     DEV_SERVER_SCENARIO_TIMEOUT_MS,

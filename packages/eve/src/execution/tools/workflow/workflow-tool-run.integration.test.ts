@@ -688,12 +688,19 @@ describe("workflow tools", () => {
         const asked = await stream.nextTurn();
         expect(filterEventsByType(asked, "input.requested")).toHaveLength(1);
 
-        const resumed = await stream.nextTurn();
-        const outputs = filterEventsByType(resumed, "action.result").map((event) =>
-          JSON.stringify(event.data.result.output),
-        );
+        const outputs: string[] = [];
+        // A replayed parked boundary may arrive before the deadline result.
+        for (let attempt = 0; attempt < 5 && outputs.length === 0; attempt += 1) {
+          const resumed = await stream.nextTurn();
+          expect(filterEventsByType(resumed, "turn.failed")).toHaveLength(0);
+          expect(filterEventsByType(resumed, "session.failed")).toHaveLength(0);
+          outputs.push(
+            ...filterEventsByType(resumed, "action.result").map((event) =>
+              JSON.stringify(event.data.result.output),
+            ),
+          );
+        }
         expect(outputs.some((output) => output.includes('"decided":"timed out"'))).toBe(true);
-        expect(filterEventsByType(resumed, "turn.failed")).toHaveLength(0);
       } finally {
         stream.dispose();
         await run.cancel();

@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { zeroFailureUpperBound } from "./flake-validation-results.mjs";
+
 const exec = promisify(execFile);
 const [runsText, output, ...args] = process.argv.slice(2);
 const runs = Number(runsText);
@@ -78,7 +80,7 @@ const summary = {
   failures,
   passedTests: trials.reduce((total, trial) => total + trial.testCount, 0),
   confidence: 0.95,
-  oneSidedFailureRateUpperBound: failures === 0 ? -Math.expm1(Math.log(0.05) / runs) : null,
+  oneSidedFailureRateUpperBound: failures === 0 ? zeroFailureUpperBound(runs) : null,
   scope:
     "Repeatability of the selected tests under independent, stationary trials; not the failure rate of all CI jobs.",
 };

@@ -1,5 +1,7 @@
 import { defineChannel, POST, type Session } from "eve/channels";
 
+import { checkDeploymentRevision } from "../lib/deployment-revision";
+
 const smokeTestAuth = {
   attributes: { source: "smoke-test" },
   authenticator: "cross-version-webhook",
@@ -29,6 +31,8 @@ type CrossVersionRouteContext = {
 export default defineChannel({
   routes: [
     POST("/cross-version-webhook", async (req, ctx) => {
+      const pendingDeployment = checkDeploymentRevision(req);
+      if (pendingDeployment !== undefined) return pendingDeployment;
       const body = (await req.json().catch(() => ({}))) as {
         message?: string;
         sessionRef?: string;

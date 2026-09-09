@@ -163,7 +163,9 @@ jobs:
         env:
           EVE_E2E_REPETITIONS: ${{ inputs.repetitions }}
           EVE_E2E_EVAL_IDS: ${{ inputs.evals }}
-        run: node "$GITHUB_WORKSPACE/scripts/repeat-evals.mjs"
+        run: |
+          node --test "$GITHUB_WORKSPACE/scripts/flake-validation-results.test.mjs"
+          node "$GITHUB_WORKSPACE/scripts/repeat-evals.mjs"
 
       - name: Upload repetition evidence
         if: always() && github.event_name == 'workflow_dispatch' && inputs.repetitions > 1

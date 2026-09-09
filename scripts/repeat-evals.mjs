@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { isCleanEvalSummary, zeroFailureUpperBound } from "./flake-validation-results.mjs";
+
 const repetitions = Number(process.env.EVE_E2E_REPETITIONS);
 if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 500) {
   throw new Error("EVE_E2E_REPETITIONS must be an integer from 1 to 500.");
@@ -50,13 +52,7 @@ for (let index = 0; index < repetitions; index += 1) {
   } catch {
     error ??= "The eval process did not produce valid JSON.";
   }
-  const passed =
-    error === undefined &&
-    summary?.failed === 0 &&
-    summary?.errored === 0 &&
-    summary?.skipped === 0 &&
-    summary?.totalEvals > 0 &&
-    summary.passed + summary.scored === summary.totalEvals;
+  const passed = error === undefined && isCleanEvalSummary(summary);
   trials.push({ repetition: index + 1, passed, error, summary });
   await writeFile(resolve(directory, "trials.json"), JSON.stringify(trials, null, 2) + "\n");
   console.log(
@@ -74,7 +70,7 @@ const report = {
   repetitions,
   failures,
   confidence: 0.95,
-  oneSidedFailureRateUpperBound: failures === 0 ? -Math.expm1(Math.log(0.05) / repetitions) : null,
+  oneSidedFailureRateUpperBound: failures === 0 ? zeroFailureUpperBound(repetitions) : null,
   scope:
     "Selected evals in fresh CLI processes, with every failure retained; assumes independent, stationary trials.",
 };
