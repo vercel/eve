@@ -10,6 +10,7 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import { ContextKey } from "#context/key.js";
 import {
   ActivityObserverKey,
+  ActivityRootTurnIdKey,
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
@@ -2224,6 +2225,7 @@ describe("turnStep", () => {
 
   it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
     const observedTaskDeliveries: unknown[] = [];
+    const observedActivityRoots: unknown[] = [];
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
@@ -2251,11 +2253,18 @@ describe("turnStep", () => {
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => {
         observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        observedActivityRoots.push(contextStorage.getStore()?.get(ActivityRootTurnIdKey));
         return { next: { done: true, output: "ok" }, session: stepSession };
       };
     });
 
     const initialSerializedContext = createSerializedContext();
+    initialSerializedContext[ActivityObserverKey.name] = {
+      sink: {
+        url: "https://agent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz",
+        version: 1,
+      },
+    };
 
     const first = await turnStep({
       input: {
@@ -2285,6 +2294,7 @@ describe("turnStep", () => {
     });
 
     expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
+    expect(observedActivityRoots).toEqual(["turn-parent", "turn-parent", "turn_0"]);
   });
 
   it.each(["none", "initiating"] as const)("sets initiating task phase (%s)", async (phase) => {

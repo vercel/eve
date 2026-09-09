@@ -72,6 +72,37 @@ describe("projectSessionActivity", () => {
     ]);
   });
 
+  it("groups a resumed turn with its originating root work", () => {
+    const sessionId = "session-1";
+    const started = projectSessionActivity({
+      event: turnEvent("turn.started", "turn-2"),
+      rootTurnId: "turn-1",
+      sessionId,
+    });
+    expect(started).toEqual([
+      expect.objectContaining({
+        kind: "work.started",
+        work: expect.objectContaining({
+          id: deriveRootTurnActivityWorkId({ sessionId, turnId: "turn-1" }),
+          rootTurnId: "turn-1",
+          turnId: "turn-2",
+        }),
+      }),
+    ]);
+  });
+
+  it("keeps an originating root open while HITL or background work is pending", () => {
+    const event = turnEvent("turn.completed", "turn-1");
+    expect(
+      projectSessionActivity({
+        event,
+        rootTurnId: "turn-1",
+        sessionId: "session-1",
+        suppressRootSettlement: true,
+      }),
+    ).toEqual([]);
+  });
+
   it("reduces replayed root events to one completed work summary", () => {
     const sequence = [turnEvent("turn.started"), turnEvent("turn.completed")];
     const snapshot = reduceProjection({

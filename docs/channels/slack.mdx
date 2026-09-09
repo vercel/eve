@@ -416,6 +416,8 @@ The default handlers reply in-thread and show activity. Typing indicators post a
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
+Experimental activity renderers group progress by the originating user request, not each internal runtime turn. A background task result, a resumed approval or question, and a completed authorization therefore continue updating the activity artifact that started the work. A later independent user message starts a new artifact in the same Slack thread.
+
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
 The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
