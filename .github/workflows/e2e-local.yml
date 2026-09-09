@@ -219,7 +219,8 @@ jobs:
           retention-days: 7
 
   e2e-required:
-    name: e2e-local
+    # A narrowed manual validation must not satisfy the full-matrix required check.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'e2e-local-validation' || 'e2e-local' }}
     runs-on: ubuntu-latest
     needs: [e2e]
     if: always()
