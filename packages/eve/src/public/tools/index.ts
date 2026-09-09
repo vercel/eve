@@ -43,6 +43,7 @@ export {
   type AgentInput,
 } from "#tools/workflow-definition.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+export { WorkflowHistoryAppendError } from "#shared/history-append-error.js";
 export type {
   HistoryBinaryData,
   HistoryContentPart,

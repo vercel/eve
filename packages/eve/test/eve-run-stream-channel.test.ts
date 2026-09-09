@@ -171,6 +171,9 @@ function createEvents(events: readonly MessageStreamEvent[]): ReadableStream<Mes
 function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
   return vi.fn<AttachSessionFn>().mockReturnValue({
     id: "session_xyz",
+    async appendHistory() {
+      return { sessionId: "session_xyz", status: "ok", outcome: "appended" };
+    },
     async send() {
       return { sessionId: "session_xyz", status: "accepted" };
     },

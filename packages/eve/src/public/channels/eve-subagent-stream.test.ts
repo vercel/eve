@@ -210,6 +210,7 @@ function createHarness(input: {
 
   const session: Session = {
     id: coordinates.parentSessionId,
+    appendHistory: vi.fn(),
     send: vi.fn(),
     respond: vi.fn(),
     async cancel() {

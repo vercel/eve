@@ -1,4 +1,4 @@
-export function workflowToolContextErrorMessage(helper: "agent" | "ask"): string {
+export function workflowToolContextErrorMessage(helper: "agent" | "appendHistory" | "ask"): string {
   return `ctx.${helper}() requires a defineWorkflowTool() executor context. Call it inside the workflow tool body.`;
 }
 

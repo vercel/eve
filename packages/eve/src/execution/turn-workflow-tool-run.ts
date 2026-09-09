@@ -1,4 +1,5 @@
 import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import { appendHistoryStep } from "#execution/history-append-step.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
@@ -161,6 +162,32 @@ async function handleWorkflowToolRunRequest(
         requestContext(input),
       ),
     );
+    return;
+  }
+  if (message.request.kind === "history-append") {
+    const recorded = findWorkflowToolRun(
+      cursor.sessionState.snapshot?.session.state,
+      message.from.callId,
+    );
+    const snapshot = cursor.sessionState.snapshot;
+    if (recorded?.runId !== message.from.runId || snapshot === undefined) {
+      await resumeHookStep(message.replyTo, {
+        code: "not_owner",
+        message: "The workflow no longer owns this session operation.",
+        status: "error",
+      });
+      return;
+    }
+    const appended = await appendHistoryStep({
+      messages: message.request.messages,
+      operationId: message.request.operationId,
+      sessionState: cursor.sessionState,
+    });
+    await cursor.adopt({
+      serializedContext: cursor.serializedContext,
+      sessionState: appended.sessionState,
+    });
+    await resumeHookStep(message.replyTo, appended.result);
     return;
   }
   if (message.request.kind === "authorization-request") {

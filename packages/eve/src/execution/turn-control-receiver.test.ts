@@ -7,6 +7,7 @@ import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
@@ -31,6 +32,10 @@ vi.mock("./forward-turn-cancellation-step.js", () => ({
 
 vi.mock("./report-dropped-wire-payload-step.js", () => ({
   reportDroppedWirePayloadStep: vi.fn(),
+}));
+
+vi.mock("./tools/workflow/resume-hook-step.js", () => ({
+  resumeHookStep: vi.fn(),
 }));
 
 describe("TurnControlReceiver", () => {
@@ -155,6 +160,31 @@ describe("TurnControlReceiver", () => {
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+  });
+
+  it("rejects fixed-handle history append while the turn is active", async () => {
+    installControlHook([parkResult()], true);
+
+    await runReceiver([], {
+      commandInbox: createCommandInbox([
+        {
+          kind: "append-history",
+          messages: [{ content: "approved", role: "assistant" }],
+          operationId: "approved:1",
+          replyTo: "append-ack",
+        },
+      ]),
+    });
+
+    expect(resumeHookStep).toHaveBeenCalledWith(
+      "append-ack",
+      {
+        code: "session_busy",
+        message: "Session history can be appended only between turns.",
+        status: "error",
+      },
+      { ifPresent: true },
+    );
   });
 
   it("consumes a replayed task delivery only once", async () => {

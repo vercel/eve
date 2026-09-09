@@ -1,6 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
+import { appendHistoryStep } from "#execution/history-append-step.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -210,6 +212,17 @@ async function waitForNextSessionAction(input: {
       // A lost delivery with an operator-visible signal is the designed
       // failure; reinterpreting an unknown payload is the bug. Stay parked.
       await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+      continue;
+    }
+
+    if (decoded.kind === "append-history") {
+      const appended = await appendHistoryStep({
+        messages: decoded.messages,
+        operationId: decoded.operationId,
+        sessionState: input.stateCursor.sessionState,
+      });
+      input.stateCursor.adoptState(appended);
+      await resumeHookStep(decoded.replyTo, appended.result, { ifPresent: true });
       continue;
     }
 

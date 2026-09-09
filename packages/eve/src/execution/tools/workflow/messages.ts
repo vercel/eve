@@ -7,6 +7,7 @@ import type {
 } from "#execution/tools/subagent/invoke-agent.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { HistoryMessage } from "#shared/history-message.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
@@ -35,6 +36,21 @@ export interface WorkflowToolAskRequest {
   readonly request: ToolInputRequest;
 }
 
+/** Requests an application-owned history mutation from the workflow's session owner. */
+export interface WorkflowToolHistoryAppendRequest {
+  readonly kind: "history-append";
+  readonly messages: readonly HistoryMessage[];
+  readonly operationId: string;
+}
+
+export type WorkflowToolHistoryAppendAcknowledgement =
+  | { readonly status: "ok"; readonly outcome: "already_appended" | "appended" }
+  | {
+      readonly status: "error";
+      readonly code: "conflict" | "invalid_input" | "not_owner" | "unsupported_execution";
+      readonly message: string;
+    };
+
 /**
  * A child subagent's pending input requests for one step, forwarded as a unit
  * so the owner resolves them against the same child step they came from.
@@ -48,6 +64,7 @@ export type WorkflowToolRequest =
   | WorkflowToolAgentRequest
   | WorkflowToolAuthorizationRequest
   | WorkflowToolAskRequest
+  | WorkflowToolHistoryAppendRequest
   | InputRequest
   | WorkflowToolInputRequestBatch;
 

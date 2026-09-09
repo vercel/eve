@@ -21,6 +21,8 @@ import {
   TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import { appendSessionHistory } from "#harness/history-append.js";
+import { copyWorkflowHistory } from "#execution/tools/workflow/history.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
 import { appendPendingInputBatch, getApprovedTools } from "#harness/input-requests.js";
@@ -830,6 +832,13 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       content: [{ text: "The command returned /workspace.", type: "text" }],
       role: "assistant",
     });
+    expect(
+      appendSessionHistory({
+        messages: copyWorkflowHistory(result.session.history),
+        operationId: "approved-tool-history",
+        session: createBaseSession([]),
+      }).session.history,
+    ).toEqual(result.session.history);
   });
 
   // Regression: turn-local context (task state, dynamic skill announcement) was

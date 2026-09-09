@@ -5,11 +5,13 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
+import type { HistoryMessage } from "#shared/history-message.js";
 import type {
   ActivityObserverConfig,
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
+  HistoryAppendCommandResult,
   ResetSessionResult,
   Runtime,
   SessionAuthContext,
@@ -44,6 +46,11 @@ export interface Session {
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
+  /** Appends validated history without starting a model turn. */
+  appendHistory(input: {
+    readonly messages: readonly HistoryMessage[];
+    readonly operationId: string;
+  }): Promise<HistoryAppendCommandResult>;
   /** Requests cancellation of this exact session's active turn and optionally its owned tasks. */
   cancel(options?: {
     taskId?: string;
@@ -146,6 +153,12 @@ export function createSession(
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
       });
+    },
+    async appendHistory(input) {
+      if (runtime.appendHistory === undefined) {
+        throw new Error("This eve runtime does not support session history append.");
+      }
+      return await runtime.appendHistory({ ...input, sessionId: id });
     },
     async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
       const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {

@@ -196,6 +196,8 @@ function normalizeInputRequest(
       throw new TypeError("A workflow agent request cannot be normalized as human input.");
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
+    case "history-append":
+      throw new TypeError("A workflow history append cannot be normalized as human input.");
     case "ask":
       return normalizeAskRequest(request.request, from, requestId);
     default:

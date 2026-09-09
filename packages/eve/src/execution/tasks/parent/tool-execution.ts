@@ -30,6 +30,7 @@ import {
   type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { parseWorkflowToolInput } from "#execution/tools/workflow/background.js";
+import { copyWorkflowHistory } from "#execution/tools/workflow/history.js";
 import {
   sendTaskCommand,
   sendTaskInboundPayload,
@@ -465,6 +466,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         ),
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
+        history: copyWorkflowHistory(this.initialSession.history),
         input: workflowInput,
         resultKind: workflow.resultKind,
         session: buildCallbackContext().session,

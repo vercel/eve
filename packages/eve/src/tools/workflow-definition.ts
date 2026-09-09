@@ -14,7 +14,7 @@ import {
 } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-import type { WorkflowHistory } from "#shared/history-message.js";
+import type { HistoryMessage, WorkflowHistory } from "#shared/history-message.js";
 
 export interface AgentInput {
   readonly agentId?: string;
@@ -38,6 +38,14 @@ export type WorkflowToolContext = Pick<
    * state.
    */
   readonly history: WorkflowHistory;
+  /**
+   * Append validated application-owned messages to this workflow's owning
+   * session. The acknowledgement follows the durable mutation.
+   */
+  appendHistory(input: {
+    readonly operationId: string;
+    readonly messages: readonly HistoryMessage[];
+  }): Promise<{ readonly outcome: "already_appended" | "appended" }>;
   /** Invoke a visible subagent. The key must be unique within this workflow run. */
   agent(input: AgentInput): Promise<JsonValue>;
   /** Ask the human on the session's channel; awaiting the answer suspends the run. */

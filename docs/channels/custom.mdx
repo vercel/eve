@@ -159,6 +159,9 @@ address's current owner as a fixed handle.
   success emits `compaction.requested`, `compaction.completed`, then `session.waiting`.
 - `clear` removes model-message history in place. It preserves the system prompt,
   skills, tools, durable state, limits, address ownership, and session sandbox.
+- `appendHistory` adds validated history only while the session is between turns,
+  including before an idle session's first send. An active session returns a typed
+  `session_busy` error; it does not queue or reconcile the append.
 - `reset` terminally retires the current session. A later address `send()` creates
   a fresh session; a fixed `Session` handle remains pinned to the retired ID.
 

@@ -573,6 +573,9 @@ describe("defineChannel", () => {
 
         return {
           id: channelId,
+          async appendHistory() {
+            return { sessionId: channelId, status: "ok" as const, outcome: "appended" as const };
+          },
           async send() {
             return { sessionId: channelId, status: "accepted" as const };
           },

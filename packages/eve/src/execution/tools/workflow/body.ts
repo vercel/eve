@@ -4,7 +4,7 @@ import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/subagent/invoke-agent.js";
 import { copyWorkflowHistory } from "#execution/tools/workflow/history.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import { appendHistory, ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
@@ -148,6 +148,7 @@ function createWorkflowBodyContext(
   };
   const ctx: ToolContext & WorkflowToolContext = {
     agent: (input) => agent(ctx, input),
+    appendHistory: (input) => appendHistory(ctx, input),
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,

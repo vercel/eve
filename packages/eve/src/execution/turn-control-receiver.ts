@@ -2,6 +2,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
@@ -94,6 +95,18 @@ export class TurnControlReceiver {
     if (command.kind === "deliver") {
       if (!this.acceptTaskDelivery(command)) return undefined;
       await this.bufferDelivery(command);
+      return undefined;
+    }
+    if (command.kind === "append-history") {
+      await resumeHookStep(
+        command.replyTo,
+        {
+          code: "session_busy",
+          message: "Session history can be appended only between turns.",
+          status: "error",
+        },
+        { ifPresent: true },
+      );
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {

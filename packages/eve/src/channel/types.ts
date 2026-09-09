@@ -1,4 +1,5 @@
 import type { UserContent } from "ai";
+import type { HistoryMessage } from "#shared/history-message.js";
 
 import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -54,6 +55,19 @@ export type CompactSessionResult =
 /** Result of queueing a manual context clear for a session. */
 export type ClearSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
+export type HistoryAppendCommandResult =
+  | {
+      readonly status: "ok";
+      readonly outcome: "already_appended" | "appended";
+      readonly sessionId: string;
+    }
+  | {
+      readonly status: "error";
+      readonly code: "conflict" | "invalid_input" | "not_owner" | "session_busy";
+      readonly message: string;
+    }
   | { readonly status: "no_active_session" };
 
 // ---------------------------------------------------------------------------
@@ -225,6 +239,12 @@ export type SessionCommand =
     }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
+  | {
+      readonly kind: "append-history";
+      readonly messages: readonly HistoryMessage[];
+      readonly operationId: string;
+      readonly replyTo: string;
+    }
   | { readonly kind: "reset"; readonly reason?: string };
 
 export type SessionSendCommandResult =
@@ -245,7 +265,9 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
         ? CompactSessionResult
         : TCommand extends { readonly kind: "clear" }
           ? ClearSessionResult
-          : ResetSessionResult;
+          : TCommand extends { readonly kind: "append-history" }
+            ? HistoryAppendCommandResult
+            : ResetSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -595,6 +617,16 @@ export interface Runtime {
    * completion.
    */
   createSession(input: RunInput): Promise<RunHandle>;
+
+  /** Commits validated history without starting a model turn. */
+  appendHistory?(input: {
+    readonly messages: readonly HistoryMessage[];
+    readonly operationId: string;
+    readonly sessionId: string;
+  }): Promise<HistoryAppendCommandResult>;
+
+  /** Waits until a newly created session owns its continuation address. */
+  waitForSessionReady?(continuationToken: string): Promise<{ readonly sessionId: string }>;
 
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,

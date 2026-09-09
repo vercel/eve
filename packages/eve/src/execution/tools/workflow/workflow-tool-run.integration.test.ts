@@ -1,7 +1,9 @@
 import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
+import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
@@ -9,8 +11,10 @@ import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
+  appendHistoryWorkflow,
   askThenRaceWorkflow,
   authorizedDeployWorkflow,
+  backgroundAppendHistoryWorkflow,
   backgroundDeployWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
@@ -24,7 +28,10 @@ import {
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
-import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  workflowToolRunWorkflowReference,
+} from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -77,11 +84,29 @@ async function createWorkflowToolRuntime(input: {
   readonly background?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
+  readonly observeMessages?: (messages: readonly ModelMessage[]) => void;
   readonly toolName: string;
 }): Promise<TestRuntime> {
   return await createTestRuntime({
     agent: { name: input.agentName },
     modules: [
+      ...(input.observeMessages === undefined
+        ? []
+        : [
+            {
+              logicalPath: "tools/history_observer.ts",
+              loadNamespace: async () => ({
+                default: defineDynamic({
+                  events: {
+                    "step.started": (_event, ctx) => {
+                      input.observeMessages?.(ctx.messages);
+                      return null;
+                    },
+                  },
+                }),
+              }),
+            },
+          ]),
       {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
@@ -632,6 +657,16 @@ describe("workflow tools", () => {
 
           const commandToken = sessionCommandHookToken(run.runId);
           await waitForHook(run, { token: commandToken });
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          await expect(
+            workflowRuntime.appendHistory!({
+              messages: [{ content: "Approved context", role: "assistant" }],
+              operationId: "active-turn:approved",
+              sessionId: run.runId,
+            }),
+          ).resolves.toMatchObject({ code: "session_busy", status: "error" });
           await resumeSessionInbox(commandToken, {
             kind: "send",
             payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
@@ -740,6 +775,43 @@ describe("workflow tools", () => {
     });
   }, 30_000);
 
+  it("commits history before the parent's next model step and reports conflicts", async () => {
+    const modelSteps: (readonly ModelMessage[])[] = [];
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-history-append",
+      execute: appendHistoryWorkflow,
+      observeMessages: (messages) => modelSteps.push(messages),
+      toolName: "research",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run research with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-history-append",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const settled = await stream.nextTurn();
+        const results = filterEventsByType(settled, "action.result");
+        expect(results.at(-1)?.data.result.output).toMatchObject({
+          conflict: "conflict",
+          first: "appended",
+        });
+        expect(filterEventsByType(settled, "turn.failed")).toHaveLength(0);
+        const resumed = modelSteps.at(-1) ?? [];
+        expect(resumed.filter((message) => message.content === "approved:api")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
+
   it.each(["inline", "child"] as const)(
     "cancels the run when the waiting turn is cancelled and lets the body clean up (%s)",
     async (owner) => {
@@ -792,6 +864,39 @@ describe("workflow tools", () => {
     },
     60_000,
   );
+
+  it("rejects parent history append from a background workflow", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-history-background",
+      execute: backgroundAppendHistoryWorkflow,
+      toolName: "research",
+    });
+
+    await runtime.run(async () => {
+      enableBackgroundTool(runtime, "research");
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run research with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-history-background",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const receipt = await stream.nextTurn();
+        expect(filterEventsByType(receipt, "turn.failed")).toHaveLength(0);
+        const completed = await stream.nextTurn();
+        expect(JSON.stringify(completed)).toContain("is completed");
+        expect(JSON.stringify(completed)).toContain("unsupported_execution");
+        expect(filterEventsByType(completed, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
   it.each(["inline", "child"] as const)(
     "runs a background workflow tool as its task's executor (%s)",

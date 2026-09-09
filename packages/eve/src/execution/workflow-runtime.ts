@@ -15,6 +15,7 @@ import type {
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
+  HistoryAppendCommandResult,
   RunHandle,
   RunInput,
   Runtime,
@@ -70,6 +71,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+  SESSION_HISTORY_APPEND_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
@@ -126,6 +128,11 @@ export const activityCollectorWorkflowReference = {
 /** Stable workflow reference for authored workflow tool runs. */
 export const workflowToolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for acknowledged session history mutations. */
+export const sessionHistoryAppendWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_HISTORY_APPEND_WORKFLOW_NAME}`,
 };
 
 /**
@@ -267,6 +274,18 @@ export function createWorkflowRuntime(config: {
         },
         sessionId: run.runId,
       };
+    },
+
+    async appendHistory(input) {
+      const run = await startWorkflowOnCurrentDeployment(sessionHistoryAppendWorkflowReference, [
+        input,
+      ]);
+      return await getRun<HistoryAppendCommandResult>(run.runId).returnValue;
+    },
+
+    async waitForSessionReady(continuationToken) {
+      const owner = await waitForCommandHookOwner(continuationToken);
+      return { sessionId: owner.runId };
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(

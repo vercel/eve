@@ -6,6 +6,7 @@ export {
   toolOutput,
   toolOutputPart,
   toolResultFrom,
+  WorkflowHistoryAppendError,
 } from "../../src/public/tools/index.ts";
 export {
   experimental_workflow,

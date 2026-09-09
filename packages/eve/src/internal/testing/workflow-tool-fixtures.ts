@@ -13,6 +13,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import { WorkflowHistoryAppendError } from "#shared/history-append-error.js";
 import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import type { TaskExec, TaskMessage } from "#tools/task.js";
 import {
@@ -45,6 +46,26 @@ export async function deployServiceWorkflow(
 
   const plan = await planDeployStep(input.service);
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
+}
+
+export async function appendHistoryWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  const first = await ctx.appendHistory({
+    messages: [{ content: `approved:${input.service}`, role: "assistant" }],
+    operationId: `approved:${input.service}`,
+  });
+  let conflict: string | undefined;
+  try {
+    await ctx.appendHistory({
+      messages: [{ content: `different:${input.service}`, role: "assistant" }],
+      operationId: `approved:${input.service}`,
+    });
+  } catch (error) {
+    if (!(error instanceof WorkflowHistoryAppendError)) throw error;
+    conflict = error.code;
+  }
+  return { conflict, first: first.outcome, historyLength: ctx.history.length };
 }
 
 export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
@@ -174,6 +195,25 @@ export async function* reportingDeployWorkflow(
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
   return { plan };
+}
+
+export async function backgroundAppendHistoryWorkflow(
+  input: DeployInput,
+  ctx: WorkflowToolContext,
+  _task: TaskExec,
+) {
+  "use workflow";
+
+  try {
+    await ctx.appendHistory({
+      messages: [{ content: `background:${input.service}`, role: "assistant" }],
+      operationId: `background:${input.service}`,
+    });
+    return { outcome: "unexpected-success" };
+  } catch (error) {
+    if (!(error instanceof WorkflowHistoryAppendError)) throw error;
+    return { outcome: error.code };
+  }
 }
 
 export async function* backgroundDeployWorkflow(

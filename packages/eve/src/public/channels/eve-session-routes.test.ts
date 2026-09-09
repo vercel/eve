@@ -18,6 +18,9 @@ function route(method: "GET" | "POST", path: string) {
 function createFixedSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "wrun_A",
+    appendHistory: vi
+      .fn()
+      .mockResolvedValue({ sessionId: "wrun_A", status: "ok", outcome: "appended" }),
     send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),

@@ -1,6 +1,10 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
+import { disposeHook } from "#execution/hook-ownership.js";
+import { WorkflowHistoryAppendError } from "#shared/history-append-error.js";
+import type { HistoryMessage } from "#shared/history-message.js";
 import type {
+  WorkflowToolHistoryAppendAcknowledgement,
   WorkflowToolRunOwner,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
@@ -38,7 +42,7 @@ export function attachWorkflowToolRunContext(
 
 function readWorkflowToolRunContext(
   ctx: ToolContext,
-  helper: "agent" | "ask",
+  helper: "agent" | "appendHistory" | "ask",
 ): WorkflowToolRunContext {
   const context = (ctx as WorkflowToolRunContextCarrier | undefined)?.[WORKFLOW_TOOL_RUN_CONTEXT];
   if (context === undefined) {
@@ -68,6 +72,33 @@ export function readWorkflowToolRunAdmission(
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
+export async function appendHistory(
+  ctx: ToolContext,
+  input: { readonly messages: readonly HistoryMessage[]; readonly operationId: string },
+): Promise<{ readonly outcome: "already_appended" | "appended" }> {
+  const context = readWorkflowToolRunContext(ctx, "appendHistory");
+  if (context.from.execution === "background") {
+    throw new WorkflowHistoryAppendError(
+      "unsupported_execution",
+      "Background workflow tools cannot append parent session history.",
+    );
+  }
+  const acknowledgement = createHook<WorkflowToolHistoryAppendAcknowledgement>();
+  try {
+    await resumeHookStep(context.owner.inbox, {
+      kind: "request",
+      from: context.from,
+      replyTo: acknowledgement.token,
+      request: { kind: "history-append", ...input },
+    });
+    const result = await acknowledgement;
+    if (result.status === "ok") return { outcome: result.outcome };
+    throw new WorkflowHistoryAppendError(result.code, result.message);
+  } finally {
+    await disposeHook(acknowledgement);
+  }
+}
+
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
   const answer = createHook<ToolInputResponse>();

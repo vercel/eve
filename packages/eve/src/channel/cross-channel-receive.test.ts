@@ -24,6 +24,9 @@ function makeRuntime(): Runtime {
 function makeSession(): Session {
   return {
     id: "sess_1",
+    async appendHistory() {
+      return { status: "no_active_session" };
+    },
     async cancel() {
       return { status: "no_active_turn" };
     },

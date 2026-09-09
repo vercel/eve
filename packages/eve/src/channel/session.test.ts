@@ -34,6 +34,11 @@ void fixedSessionRespondTypeChecks;
 
 function createRuntime(): Runtime {
   return {
+    appendHistory: vi.fn().mockResolvedValue({
+      outcome: "appended",
+      sessionId: "sess_1",
+      status: "ok",
+    }),
     createSession: vi.fn(),
     dispatchContinuation: vi.fn(),
     dispatchSession: vi
@@ -85,6 +90,21 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("waits for an acknowledged history append", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+    const messages = [{ content: "Approved context", role: "user" as const }];
+
+    await expect(
+      session.appendHistory({ messages, operationId: "research:approved" }),
+    ).resolves.toEqual({ outcome: "appended", sessionId: "sess_1", status: "ok" });
+    expect(runtime.appendHistory).toHaveBeenCalledWith({
+      messages,
+      operationId: "research:approved",
+      sessionId: "sess_1",
+    });
+  });
+
   it("dispatches ephemeral context separately from durable channel context", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);

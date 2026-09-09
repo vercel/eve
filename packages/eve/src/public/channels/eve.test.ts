@@ -70,6 +70,9 @@ function createJsonMessageRequest(body: unknown): Request {
 function createMockSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "test-session-id",
+    appendHistory: vi
+      .fn()
+      .mockResolvedValue({ sessionId: "test-session-id", status: "ok", outcome: "appended" }),
     send: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
