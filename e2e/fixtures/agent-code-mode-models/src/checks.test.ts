@@ -64,6 +64,21 @@ test("fanout requires actual overlap and the expected per-source outcomes", () =
     }),
   );
   assert.equal(concurrentBalances(calls, ids, "archive"), true);
+  const retry = { ...calls[2]!, callId: "retry", started: 20, finished: 30 };
+  assert.equal(concurrentBalances([retry, ...calls], ids, "archive"), true);
+  const serial = calls.map((entry, index) => ({
+    ...entry,
+    started: index * 20,
+    finished: index * 20 + 10,
+  }));
+  assert.equal(
+    concurrentBalances(
+      [...calls.map((entry) => ({ ...entry, started: 100, finished: 110 })), ...serial],
+      ids,
+      "archive",
+    ),
+    false,
+  );
   assert.equal(
     concurrentBalances(
       calls.map((entry, index) => ({ ...entry, started: index * 20, finished: index * 20 + 10 })),

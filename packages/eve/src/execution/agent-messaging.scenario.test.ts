@@ -78,7 +78,7 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
-  experimental: { codeMode: {} },
+  experimental: { codeMode: true },
   model,
   modelContextWindowTokens: 32_000,
 });

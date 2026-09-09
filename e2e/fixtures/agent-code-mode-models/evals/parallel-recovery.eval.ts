@@ -22,7 +22,7 @@ export default defineEval({
         unavailable[0]!,
       ),
       equals(true),
-    ).label("all account reads overlap, with two successes and one failure");
+    ).label("initial account reads overlap, with two successes and one failure");
     t.check(
       calls
         .filter((call) => call.tool === "save_report" && call.status === "completed")

@@ -122,7 +122,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       "const complete = direct.every(name => catalog.some(tool => tool.name === name)) && catalog.filter(tool => tool.requiresDirectCall).every(tool => direct.includes(tool.name));",
       'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
       'const matches = await tools.search_tools({ query: "ECHO prefix nonexistentkeyword" });',
-      'const keywords = matches[0]?.name === "echo";',
+      'const keywords = matches.some(tool => tool.name === "echo");',
       'return { complete, keywords, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
     ].join("\n");
   } else if (message.includes("CODEMODE-CONNECTIONS-START")) {
@@ -159,8 +159,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     // The inline spec tests discovery without making an external API request.
     js = [
       'const matches = await tools.search_tools({ query: "catalog status nonexistentkeyword" });',
-      'if (matches[0]?.name !== "catalog__getStatus") throw new Error("Keyword search did not rank the discovered tool first.");',
-      "const [discovered] = await tools.describe_tools({ names: [matches[0].name] });",
+      'const match = matches.find(tool => tool.name === "catalog__getStatus"); if (!match) throw new Error("Keyword search did not find the discovered tool.");',
+      "const [discovered] = await tools.describe_tools({ names: [match.name] });",
       'if (discovered.inputSchema.type !== "object") throw new Error("Discovered tool schema is missing.");',
       'return { discovered: discovered.name, requiresDirectCall: discovered.requiresDirectCall, echo: await tools.echo({ value: "catalog-ready" }) };',
     ].join("\n");

@@ -28,18 +28,18 @@ export function concurrentBalances(
   accountIds: readonly string[],
   unavailableId: string,
 ) {
-  const reads = calls.filter((call) => call.tool === "balances");
-  if (
-    reads.length !== accountIds.length ||
-    !accountIds.every((id) =>
-      reads.some(
+  const reads: Call[] = [];
+  for (const id of accountIds) {
+    const first = calls
+      .filter(
         (call) =>
-          (call.input as { accountId: string }).accountId === id &&
-          call.status === (id === unavailableId ? "failed" : "completed"),
-      ),
-    )
-  )
-    return false;
+          call.tool === "balances" && (call.input as { accountId: string }).accountId === id,
+      )
+      .sort((a, b) => a.started - b.started)[0];
+    if (!first || first.status !== (id === unavailableId ? "failed" : "completed")) return false;
+    reads.push(first);
+  }
+  if (reads.length === 0) return false;
   return (
     Math.max(...reads.map((call) => call.started)) <
     Math.min(...reads.map((call) => call.finished ?? Number.NEGATIVE_INFINITY))

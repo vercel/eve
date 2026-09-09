@@ -90,7 +90,7 @@ const model = mockModel((request) => {
   return "still-alive";
 });
 
-export default defineAgent({ model, experimental: { codeMode: {} }, modelContextWindowTokens: 32_000 });
+export default defineAgent({ model, experimental: { codeMode: true }, modelContextWindowTokens: 32_000 });
 `,
       "agent/instructions.md": "Delegate cancellation waits as requested.\n",
       "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
