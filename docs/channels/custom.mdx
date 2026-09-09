@@ -163,8 +163,9 @@ address's current owner as a fixed handle.
   a fresh session; a fixed `Session` handle remains pinned to the retired ID.
 
 Control operations never create a session. A missing session lookup returns a
-no-active status. Cancel and reset wait for settlement; compact and clear return
-once their candidates are accepted and report their outcomes on the stream. Authenticate and deduplicate command webhooks before
+no-active status. Controls return once their candidates are accepted and report
+their outcomes on the stream. Wait for terminal session output before expecting
+a reset address to start a fresh session. Authenticate and deduplicate command webhooks before
 calling `reset`, because a delayed duplicate can retire a newer address owner.
 
 ## CORS

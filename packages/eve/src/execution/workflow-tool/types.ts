@@ -14,6 +14,7 @@ export interface WorkflowToolRunInput {
   readonly stepIndex: number;
   readonly toolName: string;
   readonly workflowId: string;
+  readonly publishOwner?: boolean;
 }
 
 export interface WorkflowToolRunAddress {

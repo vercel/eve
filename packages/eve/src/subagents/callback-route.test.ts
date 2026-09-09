@@ -68,9 +68,17 @@ describe("invocation callback routing", () => {
     }
     expect(sendReply).not.toHaveBeenCalled();
   });
-  it("reports an owner that ended as no longer pending", async () => {
+  it("reports an ended owner through background delivery", async () => {
     sendReply.mockResolvedValueOnce("gone");
-    expect((await handleSessionCallbackRequest(request(completed), context())).status).toBe(404);
+    const outcomes: Promise<unknown>[] = [];
+    const ctx = {
+      ...context(),
+      waitUntil: (task: Promise<unknown>) => {
+        outcomes.push(task.catch((error) => error));
+      },
+    };
+    expect((await handleSessionCallbackRequest(request(completed), ctx)).status).toBe(202);
+    expect(await outcomes[0]).toEqual(new Error("Session callback owner ended."));
   });
   it("requires an explicit turn outcome", async () => {
     expect(

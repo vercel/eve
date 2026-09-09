@@ -8,6 +8,7 @@ import { createDurableSessionState } from "#execution/session/state.js";
 import { createSessionWaitingEvent, stampMessageStreamEvent } from "#protocol/message.js";
 
 const mocks = vi.hoisted(() => ({
+  attempt: 2,
   find: vi.fn(),
   read: vi.fn(),
   append: vi.fn(),
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   log: vi.fn(),
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
-  getStepMetadata: () => ({ stepId: "commit" }),
+  getStepMetadata: () => ({ stepId: "commit", attempt: mocks.attempt }),
   getWorkflowMetadata: () => ({ workflowRunId: "owner" }),
 }));
 vi.mock("#internal/logging.js", () => ({ createLogger: () => ({ error: mocks.log }) }));
@@ -133,6 +134,7 @@ function checkpoint(): InitializedSessionCheckpoint {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.attempt = 2;
   records.clear();
   current = checkpoint();
   records.set(current.writeId, current);
@@ -161,6 +163,21 @@ beforeEach(() => {
 });
 
 describe("turn finalization", () => {
+  it("reads the proposal without retry probes on a first attempt", async () => {
+    mocks.attempt = 1;
+    await finalizeTurnStep({
+      session: resources,
+      eventIds: ["initial"],
+      checkpoint: recordRef("proposal"),
+      kind: "natural",
+      pending: [],
+    });
+    expect(mocks.find).not.toHaveBeenCalled();
+    expect(mocks.read).toHaveBeenCalledExactlyOnceWith(recordRef("proposal"));
+    expect(mocks.append).toHaveBeenCalledWith(resources.snapshots, expect.anything(), {
+      fresh: true,
+    });
+  });
   it("keeps a caller parked on HITL and preserves the accepting candidate of queued input", async () => {
     const original = current as InitializedSessionCheckpoint;
     records.set("proposal", {

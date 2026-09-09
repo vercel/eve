@@ -183,11 +183,11 @@ export async function handleSessionCallbackRequest(
 
   const payload = projectCallbackPayload(body);
   if (payload instanceof Response) return payload;
-  try {
-    if ((await sendSubagentReply(target, payload)) === "gone") throw new Error("Owner ended.");
-  } catch {
-    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
-  }
+  ctx.waitUntil(
+    sendSubagentReply(target, payload).then((result) => {
+      if (result === "gone") throw new Error("Session callback owner ended.");
+    }),
+  );
 
   return Response.json({ ok: true }, { status: 202 });
 }

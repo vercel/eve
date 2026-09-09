@@ -14,6 +14,7 @@ import type {
 } from "#execution/turn/types.js";
 
 const mocks = vi.hoisted(() => ({
+  attempt: 2,
   find: vi.fn(),
   read: vi.fn(),
   latest: vi.fn(),
@@ -28,9 +29,10 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
-  getStepMetadata: () => ({ stepId: "step" }),
+  getStepMetadata: () => ({ stepId: "step", attempt: mocks.attempt }),
 }));
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn() }));
+vi.mock("#internal/workflow/background.js", () => ({ background: vi.fn() }));
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 vi.mock("#execution/session/snapshots.js", () => ({
   sessionSnapshots: {
     find: mocks.find,
@@ -74,6 +76,7 @@ let checkpoint: InitializedSessionCheckpoint;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.attempt = 2;
   const state = createDurableSessionState({
     session: {
       sessionId: session.sessionId,
@@ -127,6 +130,15 @@ const run = (changes: Partial<Parameters<typeof executeTurnStep>[0]> = {}) =>
   });
 
 describe("turn execution boundary", () => {
+  it("skips retry probes and append preflights on a first attempt", async () => {
+    mocks.attempt = 1;
+    await run();
+    expect(mocks.find).not.toHaveBeenCalled();
+    expect(mocks.latest).toHaveBeenCalledOnce();
+    expect(mocks.append).toHaveBeenCalledWith(session.snapshots, expect.anything(), {
+      fresh: true,
+    });
+  });
   it("publishes bootstrap readiness after its first durable checkpoint and before model effects", async () => {
     mocks.latest.mockResolvedValue(undefined);
     const result = await run({

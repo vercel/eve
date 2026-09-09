@@ -1,16 +1,16 @@
-import { getRun } from "#internal/workflow/runtime.js";
+import { forgetStreamRun, getStreamRun } from "#internal/workflow/stream-run.js";
 import { getRunWritable } from "#internal/workflow/run-writable.js";
 import { decodeStreamLocation } from "#execution/session/stream-location.js";
 
 const READ_TIMEOUT_MS = 10_000;
 
-export function readStream<T>(id: string, startIndex?: number) {
+export async function readStream<T>(id: string, startIndex?: number) {
   const { runId, namespace } = decodeStreamLocation(id);
-  return getRun(runId).getReadable<T>({ namespace, startIndex });
+  return (await getStreamRun(runId)).getReadable<T>({ namespace, startIndex });
 }
 
 export async function streamTailIndex(id: string): Promise<number> {
-  const readable = readStream(id);
+  const readable = await readStream(id);
   try {
     return await readable.getTailIndex();
   } finally {
@@ -20,7 +20,7 @@ export async function streamTailIndex(id: string): Promise<number> {
 
 /** Reads one existing record, or waits once for holder initialization. */
 export async function readStreamRecord<T>(id: string, startIndex = 0): Promise<T> {
-  const reader = readStream<T>(id, startIndex).getReader();
+  const reader = (await readStream<T>(id, startIndex)).getReader();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
@@ -34,6 +34,9 @@ export async function readStreamRecord<T>(id: string, startIndex = 0): Promise<T
     ]);
     if (result.done) throw new Error("Session storage record does not exist.");
     return result.value;
+  } catch (error) {
+    await forgetStreamRun(decodeStreamLocation(id).runId);
+    throw error;
   } finally {
     clearTimeout(timeout);
     await reader.cancel();

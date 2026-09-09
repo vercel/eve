@@ -169,12 +169,18 @@ export default defineEval({
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/HTTP-SESSION-FOLLOW-UP-OK/i);
 
+    const liveReset = t.target.watchTurn(sessionId, {
+      startIndex: eventIndex + followUp.events.length,
+    });
     const reset = await postJson<ResetResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/reset`,
       { reason: "Verify immutable HTTP session identity" },
-      200,
+      202,
     );
+
+    const resetEvents = await liveReset.result();
+    resetEvents.event("session.completed", { count: 1 });
     await t.require(
       reset,
       satisfies(
@@ -200,13 +206,13 @@ export default defineEval({
       t.target,
       `/eve/v1/session/${sessionId}/reset`,
       {},
-      200,
+      202,
     );
     await t.require(
       alreadyReset.status,
       satisfies(
-        (status) => status === "no_active_session",
-        "the late submission cannot reopen the terminal session",
+        (status) => status === "reset",
+        "a repeated reset acknowledges the same addressed session",
       ),
     );
 

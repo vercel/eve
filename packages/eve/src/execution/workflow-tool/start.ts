@@ -15,7 +15,7 @@ import type { WorkflowToolRunInput } from "#execution/workflow-tool/types.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { readStartedOwner } from "#execution/inbox/readiness.js";
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
 const log = createLogger("execution.workflow-tool-run");
@@ -30,9 +30,9 @@ function deriveWorkflowToolRunHookToken(input: {
   return `eve:workflow-tool-run:${deriveAgentOperationId(input)}`;
 }
 
-/** Resolves once the workflow tool run owns its hook. Call from a `"use step"` body. */
+/** First attempts trust start's identity; retries resolve the winner of duplicate claims. */
 export async function startWorkflowToolRun(
-  input: Omit<WorkflowToolRunInput, "hookToken"> & { readonly hookToken?: string },
+  input: Omit<WorkflowToolRunInput, "hookToken" | "publishOwner"> & { readonly hookToken?: string },
 ): Promise<{ readonly hookToken: string; readonly runId: string }> {
   const hookToken =
     input.hookToken ??
@@ -41,10 +41,16 @@ export async function startWorkflowToolRun(
       parentSessionId: input.session.id,
       parentTurnId: input.session.turn.id,
     });
-  const workflowToolRunInput = { ...input, hookToken } as WorkflowToolRunInput;
+  const firstAttempt = getStepMetadata().attempt === 1;
+  const workflowToolRunInput = {
+    ...input,
+    hookToken,
+    publishOwner: !firstAttempt,
+  } as WorkflowToolRunInput;
   const started = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
     workflowToolRunInput,
   ]);
+  if (firstAttempt) return { hookToken, runId: started.runId };
   const owner = await readStartedOwner(started.runId);
   return { hookToken: owner.token, runId: owner.ownerRunId };
 }
@@ -53,13 +59,16 @@ export async function startWorkflowToolRun(
 export async function acknowledgeWorkflowTools(input: {
   readonly runs: readonly WorkflowToolRunAddress[];
 }): Promise<void> {
-  for (const run of input.runs) {
-    const delivered = await sendInbox(
-      { token: run.hookToken, ownerRunId: run.runId },
-      { eventId: `${run.runId}:ready`, kind: "tool.ready", payload: {} },
-    );
-    if (delivered === "gone") await getRun(run.runId).returnValue;
-  }
+  await Promise.all(
+    input.runs.map(async (run) => {
+      const delivered = await sendInbox(
+        { token: run.hookToken, ownerRunId: run.runId },
+        { eventId: `${run.runId}:ready`, kind: "tool.ready", payload: {} },
+        { awaitClaim: true },
+      );
+      if (delivered === "gone") await getRun(run.runId).returnValue;
+    }),
+  );
 }
 
 /** Starts one durable workflow task and records it on the owning session. */

@@ -6,19 +6,24 @@ import {
 } from "#execution/tasks/runtime.js";
 import type { TaskView } from "#tasks/types.js";
 
-const { getRun, resumeHook, start, readOwner } = vi.hoisted(() => ({
+const { getRun, resumeHook, start, readOwner, step } = vi.hoisted(() => ({
   getRun: vi.fn(),
   resumeHook: vi.fn(),
   start: vi.fn(),
   readOwner: vi.fn(),
+  step: { attempt: 1 },
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "turn-run" }),
+  getStepMetadata: () => step,
 }));
 vi.mock("#execution/workflow-start.js", () => ({ startWorkflowOnCurrentDeployment: start }));
 vi.mock("#execution/inbox/readiness.js", () => ({ readStartedOwner: readOwner }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getRun, resumeHook }));
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  step.attempt = 1;
+});
 
 function views(view: TaskView) {
   return Object.assign(
@@ -58,10 +63,24 @@ describe("task runtime", () => {
       parentContinuationToken: "session",
       taskInboxToken: "task",
     };
-    expect(await startTaskRun(input)).toEqual({ runId: "winner" });
+    expect(await startTaskRun(input)).toEqual({ runId: "started" });
+    expect(readOwner).not.toHaveBeenCalled();
     expect(start).toHaveBeenCalledWith(expect.anything(), [
-      { ...input, admissionOwnerRunId: "turn-run" },
+      { ...input, admissionOwnerRunId: "turn-run", publishOwner: false },
     ]);
+  });
+  it("resolves duplicate ownership only when retrying a start", async () => {
+    step.attempt = 2;
+    start.mockResolvedValue({ runId: "duplicate" });
+    readOwner.mockResolvedValue({ token: "task", ownerRunId: "winner" });
+    expect(
+      await startTaskRun({
+        initialView: { ...terminal, status: "working" },
+        parentContinuationToken: "session",
+        taskInboxToken: "task",
+      }),
+    ).toEqual({ runId: "winner" });
+    expect(readOwner).toHaveBeenCalledWith("duplicate");
   });
   it("waits for native completion before reading the last terminal view once", async () => {
     const completion = Promise.withResolvers<void>();

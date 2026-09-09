@@ -45,6 +45,12 @@ describe("workflow tool quiescence", () => {
     mocks.next.mockResolvedValue({ eventId: "ready", kind: "tool.ready", payload: {} });
   });
   afterEach(() => vi.useRealTimers());
+  it("publishes the actual owner only when a retry requests resolution", async () => {
+    mocks.claim.mockResolvedValue({ kind: "conflict", runId: "winner" });
+    await workflowToolRunWorkflow({ ...input, publishOwner: true });
+    expect(mocks.publish).toHaveBeenCalledExactlyOnceWith({ token: "tool", ownerRunId: "winner" });
+    expect(mocks.body).not.toHaveBeenCalled();
+  });
   it("disposes without authored work when closure precedes admission", async () => {
     mocks.watch.mockResolvedValue(undefined);
     mocks.next.mockResolvedValue({ eventId: "closed", kind: "admission.closed", payload: null });
@@ -141,7 +147,7 @@ describe("workflow tool quiescence", () => {
     );
     const run = workflowToolRunWorkflow(input);
     await vi.advanceTimersByTimeAsync(0);
-    expect(mocks.publish).toHaveBeenCalledOnce();
+    expect(mocks.publish).not.toHaveBeenCalled();
     expect(mocks.body).not.toHaveBeenCalled();
     const event: InboxEnvelope = {
       eventId: "cancel",

@@ -118,19 +118,22 @@ describe("handleConnectionCallbackRequest", () => {
     });
   });
 
-  it("returns 404 when the workflow runtime reports no session for the supplied ID", async () => {
-    // `resumeHook` throws when no workflow run is currently waiting on
-    // the supplied token, e.g. the workflow already completed,
-    // disposed the hook, or the user replayed a stale callback URL.
+  it("acknowledges the callback and reports delivery failure through background work", async () => {
     dispatchMock.mockRejectedValueOnce(new Error("hook not found"));
+    const outcomes: Promise<unknown>[] = [];
+    const ctx: RouteContext = {
+      ...buildRouteContext({ attemptId: "attempt-1", name: "linear", sessionId: "tok" }),
+      waitUntil: (task) => {
+        outcomes.push(task.catch((error) => error));
+      },
+    };
     const response = await handleConnectionCallbackRequest(
       new Request(
         `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok")}`,
       ),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", sessionId: "tok" }),
+      ctx,
     );
-    expect(response.status).toBe(404);
-    const body = await response.json();
-    expect(body).toEqual(expect.objectContaining({ ok: false }));
+    expect(response.status).toBe(200);
+    expect(await outcomes[0]).toEqual(new Error("hook not found"));
   });
 });

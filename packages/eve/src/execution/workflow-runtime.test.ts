@@ -277,7 +277,7 @@ describe("session ingress", () => {
   });
 
   it.each(["reset", "cancel"] as const)(
-    "classifies a terminal %s using only its own receipt disposition",
+    "accepts %s without reading terminal receipt dispositions",
     async (kind) => {
       getRunMock.mockImplementationOnce(() => ({
         returnValue: Promise.resolve({
@@ -290,23 +290,29 @@ describe("session ingress", () => {
       }));
       await expect(
         runtime().dispatchSession({ sessionId: "session-1", command: { kind } }),
-      ).resolves.toEqual({
-        status: kind === "cancel" ? "no_active_turn" : "no_active_session",
-      });
+      ).resolves.toEqual(
+        kind === "cancel"
+          ? { status: "accepted", sessionId: "session-1" }
+          : { status: "reset", previousSessionId: "session-1" },
+      );
+      expect(getRunMock).not.toHaveBeenCalled();
     },
   );
 
   it.each(["reset", "cancel"] as const)(
-    "classifies an already terminal %s whose input was never applied",
+    "leaves terminal %s disposition to execution",
     async (kind) => {
       getRunMock.mockReturnValueOnce({
         returnValue: Promise.resolve({ terminal: true, deliveries: { previous: "applied" } }),
       });
       await expect(
         runtime().dispatchSession({ sessionId: "session-1", command: { kind } }),
-      ).resolves.toEqual({
-        status: kind === "cancel" ? "no_active_turn" : "no_active_session",
-      });
+      ).resolves.toEqual(
+        kind === "cancel"
+          ? { status: "accepted", sessionId: "session-1" }
+          : { status: "reset", previousSessionId: "session-1" },
+      );
+      expect(getRunMock).not.toHaveBeenCalled();
     },
   );
 
@@ -325,7 +331,7 @@ describe("session ingress", () => {
   });
 
   it.each(["reset", "cancel"] as const)(
-    "waits for %s settlement through the candidate result",
+    "returns %s acceptance while candidate settlement is pending",
     async (kind) => {
       let finish!: () => void;
       const settled = new Promise<void>((resolve) => {
@@ -345,20 +351,26 @@ describe("session ingress", () => {
           completed = true;
           return result;
         });
-      await vi.waitFor(() => expect(startMock).toHaveBeenCalledTimes(1));
-      expect(completed).toBe(false);
-      finish();
       await expect(reset).resolves.toEqual(
         kind === "reset"
           ? { previousSessionId: "session-1", status: "reset" }
           : { sessionId: "session-1", status: "accepted" },
       );
+      expect(completed).toBe(true);
+      expect(getRunMock).not.toHaveBeenCalled();
+      finish();
       expect(getHookByTokenMock).not.toHaveBeenCalled();
     },
   );
 });
 
 describe("holder creation", () => {
+  it("returns a fresh session ID without waiting for resource readiness", async () => {
+    const handle = await runtime().createSession(createInput());
+    expect(handle.sessionId).toBe("candidate-1");
+    expect(resolveHolderMock).not.toHaveBeenCalled();
+    expect(readEventsMock).not.toHaveBeenCalled();
+  });
   it("starts only the holder and places initialization in its first submission", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "accepted");
     const handle = await runtime().createSession({

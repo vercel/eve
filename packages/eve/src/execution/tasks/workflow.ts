@@ -47,6 +47,7 @@ export interface TaskRunWorkflowInput {
   readonly parentContinuationToken: string;
   readonly taskInboxToken: string;
   readonly workflow?: WorkflowBodyDefinition;
+  readonly publishOwner?: boolean;
 }
 
 /** A workflow-body question routed through the task that owns the workflow tool run. */
@@ -96,11 +97,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   try {
     const claim = await inbox.claim();
-    await publishOwnerStep(
-      claim.kind === "owned"
-        ? inbox.address
-        : { token: input.taskInboxToken, ownerRunId: claim.runId },
-    );
+    if (input.publishOwner)
+      await publishOwnerStep(
+        claim.kind === "owned"
+          ? inbox.address
+          : { token: input.taskInboxToken, ownerRunId: claim.runId },
+      );
     if (claim.kind === "conflict") return;
 
     let watcher:

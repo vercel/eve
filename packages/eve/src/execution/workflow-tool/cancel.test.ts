@@ -21,6 +21,7 @@ describe("workflow tool cancellation", () => {
     expect(mocks.send).toHaveBeenCalledWith(
       { token: "tool", ownerRunId: "run" },
       { eventId: "run:cancel", kind: "tool.cancel", payload: { reason: "cancelled" } },
+      { awaitClaim: true },
     );
     expect(ended).not.toHaveBeenCalled();
     finish();

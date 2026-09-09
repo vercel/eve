@@ -50,8 +50,8 @@ export const sessionSnapshots = {
     if ((await streamTailIndex(ref.id)) === -1) return undefined;
     return { ref, checkpoint: await sessionSnapshots.read<Checkpoint>(ref) };
   },
-  async initialize(ref: SnapshotStreamRef): Promise<void> {
-    if ((await readHead(ref)) === undefined) {
+  async initialize(ref: SnapshotStreamRef, options?: { readonly fresh?: boolean }): Promise<void> {
+    if (options?.fresh || (await readHead(ref)) === undefined) {
       await appendStreamRecords<SnapshotEntry>(ref.id, [{ kind: "initialized" }]);
     }
   },
@@ -72,8 +72,15 @@ export const sessionSnapshots = {
   async append<Checkpoint extends SnapshotWrite>(
     stream: SnapshotStreamRef,
     checkpoint: Checkpoint,
+    /** Only for a new step-owned write on its first authoritative execution attempt. */
+    options?: { readonly fresh?: boolean },
   ): Promise<SnapshotRecordRef> {
     const ref = recordRef(stream, checkpoint.writeId);
+    if (options?.fresh === true) {
+      await appendStreamRecords<SnapshotEntry>(stream.id, [{ kind: "record", ref }]);
+      await appendStreamRecords(ref.id, [checkpoint], true);
+      return ref;
+    }
     if ((await streamTailIndex(ref.id)) !== -1) {
       const stored = await sessionSnapshots.read<Checkpoint>(ref);
       if (!(await equalSnapshot(stored, checkpoint))) {

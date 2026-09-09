@@ -1,4 +1,4 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { createHash } from "node:crypto";
 import type { TaskRunWorkflowInput } from "#execution/tasks/workflow.js";
 import { readStartedOwner } from "#execution/inbox/readiness.js";
@@ -6,6 +6,7 @@ import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
 import { taskRunWorkflowReference } from "#execution/workflow-references.js";
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
+import { awaitInboxClaim } from "#execution/inbox/startup.js";
 import {
   TASK_VIEW_STREAM_NAMESPACE,
   isTerminalTaskStatus,
@@ -15,14 +16,17 @@ import {
 } from "#tasks/types.js";
 
 export async function startTaskRun(
-  input: Omit<TaskRunWorkflowInput, "admissionOwnerRunId">,
+  input: Omit<TaskRunWorkflowInput, "admissionOwnerRunId" | "publishOwner">,
 ): Promise<{ readonly runId: string }> {
+  const firstAttempt = getStepMetadata().attempt === 1;
   const started = await startWorkflowOnCurrentDeployment(taskRunWorkflowReference, [
     {
       ...input,
       admissionOwnerRunId: getWorkflowMetadata().workflowRunId,
+      publishOwner: !firstAttempt,
     } satisfies TaskRunWorkflowInput,
   ]);
+  if (firstAttempt) return { runId: started.runId };
   const owner = await readStartedOwner(started.runId);
   return { runId: owner.ownerRunId };
 }
@@ -59,7 +63,14 @@ async function sendTaskPayload(
 ): Promise<{ readonly runId: string } | undefined> {
   try {
     const eventId = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-    const owner = await resumeHook(token, { eventId, kind: "task.command", payload });
+    const send = () => resumeHook(token, { eventId, kind: "task.command", payload });
+    const owner =
+      payload.kind === "task-command" &&
+      (payload.command.kind === "ready" ||
+        payload.command.kind === "reject-dispatch" ||
+        payload.command.kind === "cancel")
+        ? await awaitInboxClaim(send)
+        : await send();
     return { runId: owner.runId };
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return undefined;

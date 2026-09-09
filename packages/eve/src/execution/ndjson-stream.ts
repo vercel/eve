@@ -2,9 +2,8 @@
  * Transforms a byte stream of newline-delimited JSON (NDJSON) into a
  * stream of parsed values.
  *
- * The byte stream is produced lazily by `createByteStream`, so the
- * underlying source (a world-local run readable) is only opened when the
- * returned stream is consumed.
+ * The byte stream may resolve asynchronously, for example while selecting
+ * the storage world's cached run handle.
  *
  * Cancellation is forwarded to the source. When the returned stream is
  * cancelled — e.g. an SSE client disconnects and the server cancels the
@@ -17,18 +16,23 @@
  * throughput for every other session.
  */
 export function parseNdjsonStream<T>(
-  createByteStream: () => ReadableStream<Uint8Array>,
+  createByteStream: () => ReadableStream<Uint8Array> | Promise<ReadableStream<Uint8Array>>,
   parse: (value: unknown) => T = (value) => value as T,
 ): ReadableStream<T> {
   const decoder = new TextDecoder();
   let buffer = "";
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let cancelled = false;
+  let cancellationReason: unknown;
 
   return new ReadableStream<T>({
     async start(controller) {
-      reader = createByteStream().getReader();
       try {
+        reader = (await createByteStream()).getReader();
+        if (cancelled) {
+          await reader.cancel(cancellationReason);
+          return;
+        }
         while (true) {
           const { value, done } = await reader.read();
 
@@ -63,11 +67,12 @@ export function parseNdjsonStream<T>(
       } catch (error) {
         if (!cancelled) controller.error(error);
       } finally {
-        reader.releaseLock();
+        reader?.releaseLock();
       }
     },
     async cancel(reason) {
       cancelled = true;
+      cancellationReason = reason;
       await reader?.cancel(reason);
     },
   });

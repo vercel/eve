@@ -50,26 +50,31 @@ export function bindSlackSessionOperations(input: {
   const auth = (value: SessionAuthContext | null | undefined) =>
     value === undefined ? input.defaultAuth : value;
 
-  const resolveOwner =
-    input.recoverSession === undefined
-      ? undefined
-      : async () => (await input.resolveSession(input.address)) ?? (await input.recoverSession?.());
+  let resolvedOwner: Promise<Session | undefined> | undefined;
+  const resolveOwner = () =>
+    (resolvedOwner ??= input
+      .resolveSession(input.address)
+      .then(async (owner) => owner ?? (await input.recoverSession?.())));
+  const deliveryOwner = () =>
+    input.recoverSession !== undefined || resolvedOwner !== undefined ? resolveOwner() : undefined;
 
   return {
     async send(message, options = {}) {
-      const owner = await resolveOwner?.();
+      const owner = await deliveryOwner();
       if (owner !== undefined) {
         const result = await owner.send(message, { ...options, auth: auth(options.auth) });
         if (result.status === "accepted") return owner;
       }
-      return await source.send(message, {
+      const session = await source.send(message, {
         ...options,
         auth: auth(options.auth),
         state: input.state,
       });
+      resolvedOwner = Promise.resolve(session);
+      return session;
     },
     async respond(inputResponses, options = {}) {
-      const owner = await resolveOwner?.();
+      const owner = await deliveryOwner();
       if (owner !== undefined) {
         const result = await owner.respond(inputResponses, {
           ...options,
@@ -83,21 +88,22 @@ export function bindSlackSessionOperations(input: {
       });
     },
     async cancel(options) {
-      return (await (await resolveOwner?.())?.cancel(options)) ?? (await source.cancel(options));
+      return (await (await deliveryOwner())?.cancel(options)) ?? (await source.cancel(options));
     },
     async compact() {
-      return (await (await resolveOwner?.())?.compact()) ?? (await source.compact());
+      return (await (await deliveryOwner())?.compact()) ?? (await source.compact());
     },
     async clear() {
-      return (await (await resolveOwner?.())?.clear()) ?? (await source.clear());
+      return (await (await deliveryOwner())?.clear()) ?? (await source.clear());
     },
     async reset(options) {
-      return (await (await resolveOwner?.())?.reset(options)) ?? (await source.reset(options));
+      const result =
+        (await (await deliveryOwner())?.reset(options)) ?? (await source.reset(options));
+      resolvedOwner = undefined;
+      return result;
     },
     async resolveSession() {
-      return resolveOwner === undefined
-        ? await input.resolveSession(input.address)
-        : await resolveOwner();
+      return await resolveOwner();
     },
   };
 }

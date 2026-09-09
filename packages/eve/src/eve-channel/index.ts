@@ -1,5 +1,4 @@
 import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
@@ -167,21 +166,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 auth: forwarded.auth,
                 operationId: body.operationId,
               });
-        if (operationToken !== undefined) {
-          const owner = await args.resolveSession(operationToken);
-          if (owner !== undefined) {
-            return Response.json(
-              { ok: true, sessionId: owner.id, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: owner.id,
-                },
-                status: 202,
-              },
-            );
-          }
-        }
 
         const forwardedTraceAssertion =
           parsedParentTraceContext === undefined
@@ -280,7 +264,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params, waitUntil }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
@@ -315,179 +299,124 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
-        let result: Awaited<ReturnType<Session["send"]>>;
-        try {
-          const session = attachSession(sessionId);
-          const options = attachClientContext(
-            {
-              activityObserver: body.activityObserver,
-              auth: dispatchAuth,
-              callback: body.callback,
-              context,
-              outputSchema: body.outputSchema,
-              turnPolicy: body.turnPolicy,
-            },
-            body.context,
-          );
-          result =
-            body.inputResponses === undefined
-              ? await session.send(body.message!, options)
-              : await session.respond(body.inputResponses, options);
-        } catch (error) {
-          const errorId = logError(log, "session-message request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to send the session message.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
-        if (result.status === "session_not_active") {
-          return Response.json(
-            {
-              code: "session_not_active",
-              error: "The session is no longer active.",
-              ok: false,
-            },
-            { headers: { "cache-control": "no-store" }, status: 409 },
-          );
-        }
+        waitUntil(
+          (async () => {
+            const session = attachSession(sessionId);
+            const options = attachClientContext(
+              {
+                activityObserver: body.activityObserver,
+                auth: dispatchAuth,
+                callback: body.callback,
+                context,
+                outputSchema: body.outputSchema,
+                turnPolicy: body.turnPolicy,
+              },
+              body.context,
+            );
+            const result =
+              body.inputResponses === undefined
+                ? await session.send(body.message!, options)
+                : await session.respond(body.inputResponses, options);
+            if (result.status === "session_not_active")
+              throw new Error("The session is no longer active.");
+          })(),
+        );
 
         return Response.json(
-          { ok: true, sessionId: result.sessionId, status: "accepted" },
+          { ok: true, sessionId, status: "accepted" },
           {
             headers: {
               "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: result.sessionId,
+              [EVE_SESSION_ID_HEADER]: sessionId,
             },
             status: 202,
           },
         );
       }),
 
-      POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params, waitUntil }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const body = await parseCancelTurnBody(req);
         if (body instanceof Response) return body;
-        let result: Awaited<ReturnType<Session["cancel"]>>;
-        try {
-          result = await attachSession(sessionId).cancel({
+        waitUntil(
+          attachSession(sessionId).cancel({
             taskId: body.taskId,
             turnId: body.turnId,
-          });
-        } catch (error) {
-          const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to cancel the turn.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
+          }),
+        );
         return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CancelTurnResponse)
-            : ({ ok: true, status: "no_active_turn" } satisfies CancelTurnResponse),
+          {
+            ok: true,
+            sessionId,
+            status: "accepted",
+          } satisfies CancelTurnResponse,
           {
             headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
+            status: 202,
           },
         );
       }),
 
-      POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params, waitUntil }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const body = await parseSessionControlBody(req);
         if (body instanceof Response) return body;
-        let result: Awaited<ReturnType<Session["compact"]>>;
-        try {
-          result = await attachSession(sessionId).compact();
-        } catch (error) {
-          const errorId = logError(log, "session-compaction request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to compact the session.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
+        waitUntil(attachSession(sessionId).compact());
         return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CompactResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies CompactResponse),
+          {
+            ok: true,
+            sessionId,
+            status: "accepted",
+          } satisfies CompactResponse,
           {
             headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
+            status: 202,
           },
         );
       }),
 
-      POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params, waitUntil }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const body = await parseSessionControlBody(req);
         if (body instanceof Response) return body;
-        let result: Awaited<ReturnType<Session["clear"]>>;
-        try {
-          result = await attachSession(sessionId).clear();
-        } catch (error) {
-          const errorId = logError(log, "session-clear request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to clear the session context.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
+        waitUntil(attachSession(sessionId).clear());
         return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies ClearResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies ClearResponse),
+          {
+            ok: true,
+            sessionId,
+            status: "accepted",
+          } satisfies ClearResponse,
           {
             headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
+            status: 202,
           },
         );
       }),
 
-      POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params, waitUntil }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const body = await parseResetBody(req);
         if (body instanceof Response) return body;
-        let result: Awaited<ReturnType<Session["reset"]>>;
-        try {
-          result = await attachSession(sessionId).reset({ reason: body.reason });
-        } catch (error) {
-          const errorId = logError(log, "session-reset request failed", error, { sessionId });
-          return Response.json(
-            { error: "Failed to reset the session.", errorId, ok: false },
-            { status: 500 },
-          );
-        }
+        waitUntil(attachSession(sessionId).reset({ reason: body.reason }));
         return Response.json(
-          result.status === "reset"
-            ? ({
-                ok: true,
-                previousSessionId: result.previousSessionId,
-                status: "reset",
-              } satisfies ResetResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies ResetResponse),
-          { headers: { "cache-control": "no-store" } },
+          {
+            ok: true,
+            previousSessionId: sessionId,
+            status: "reset",
+          } satisfies ResetResponse,
+          { headers: { "cache-control": "no-store" }, status: 202 },
         );
       }),
 

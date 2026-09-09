@@ -24,6 +24,7 @@ let failWrite: string | undefined;
 let pauseFlush: Promise<void> | undefined;
 let reads = 0;
 let cancellations = 0;
+let infoReads = 0;
 
 function streamKey(runId: string, namespace: string | undefined): string {
   return JSON.stringify([runId, namespace ?? null]);
@@ -39,11 +40,13 @@ function stored(key: string): StoredStream {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   streams.clear();
   failWrite = undefined;
   pauseFlush = undefined;
   reads = 0;
   cancellations = 0;
+  infoReads = 0;
   runtime.getWorld.mockResolvedValue({});
   runtime.getRun.mockImplementation((runId: string) => ({
     getReadable: (options: { namespace?: string; startIndex?: number } = {}) => {
@@ -64,7 +67,12 @@ beforeEach(() => {
         },
         { highWaterMark: 0 },
       );
-      return Object.assign(stream, { getTailIndex: async () => source.chunks.length - 1 });
+      return Object.assign(stream, {
+        getTailIndex: async () => {
+          infoReads++;
+          return source.chunks.length - 1;
+        },
+      });
     },
     getWritable: async (options: { namespace?: string; ops: Promise<unknown>[] }) => {
       const key = streamKey(runId, options.namespace);
@@ -112,6 +120,24 @@ afterEach(() => {
 });
 
 describe("session directory", () => {
+  it("reuses run key resolution across fresh reads but isolates storage worlds", async () => {
+    const resources = createSessionResources("holder", "initial");
+    await initializeSessionResources(resources);
+    await sessionSnapshots.append(resources.snapshots, { writeId: "one", value: 1 });
+    expect(
+      (await sessionSnapshots.latest<{ writeId: string; value: number }>(resources.snapshots))
+        ?.checkpoint.value,
+    ).toBe(1);
+    await sessionSnapshots.append(resources.snapshots, { writeId: "two", value: 2 });
+    expect(
+      (await sessionSnapshots.latest<{ writeId: string; value: number }>(resources.snapshots))
+        ?.checkpoint.value,
+    ).toBe(2);
+    expect(runtime.getRun).toHaveBeenCalledTimes(1);
+    runtime.getWorld.mockResolvedValue({});
+    await sessionSnapshots.latest(resources.snapshots);
+    expect(runtime.getRun).toHaveBeenCalledTimes(2);
+  });
   it("resolves the canonical descriptor after duplicate holder bootstrap", async () => {
     const resources = createSessionResources("winner", "first");
     await initializeSessionResources(resources);
@@ -187,7 +213,7 @@ describe("session snapshots", () => {
     await sessionSnapshots.initialize(snapshots);
     failWrite = ".record.";
     const checkpoint = { writeId: "commit", history: ["accepted"] };
-    await expect(sessionSnapshots.append(snapshots, checkpoint)).rejects.toThrow(
+    await expect(sessionSnapshots.append(snapshots, checkpoint, { fresh: true })).rejects.toThrow(
       "Storage unavailable",
     );
     const length = stored(snapshots.id).chunks.length;
@@ -195,6 +221,19 @@ describe("session snapshots", () => {
     const ref = await sessionSnapshots.append(snapshots, checkpoint);
     expect(stored(snapshots.id).chunks).toHaveLength(length);
     expect(await sessionSnapshots.latest(snapshots)).toEqual({ ref, checkpoint });
+  });
+
+  it("writes fresh checkpoints without read preflights and validates retries", async () => {
+    const { snapshots } = createSessionResources("holder", "initial");
+    await sessionSnapshots.initialize(snapshots, { fresh: true });
+    const checkpoint = { writeId: "step", history: ["accepted"] };
+    const ref = await sessionSnapshots.append(snapshots, checkpoint, { fresh: true });
+    expect(infoReads).toBe(0);
+    expect(reads).toBe(0);
+    expect(await sessionSnapshots.append(snapshots, checkpoint)).toEqual(ref);
+    await expect(
+      sessionSnapshots.append(snapshots, { ...checkpoint, history: [] }),
+    ).rejects.toThrow("different state");
   });
 
   it("reports an unfinished predecessor instead of restoring an older checkpoint", async () => {

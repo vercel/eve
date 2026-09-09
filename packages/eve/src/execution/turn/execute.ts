@@ -39,6 +39,7 @@ import { coalesceDeliveries } from "#harness/messages.js";
 import { startSessionTimeout } from "#execution/session-timeout-steps.js";
 import { sessionCommandToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { background } from "#internal/workflow/background.js";
 
 export interface ExecuteTurnInput {
   readonly session: SessionResources;
@@ -52,19 +53,22 @@ export interface ExecuteTurnInput {
 /** The only model boundary: hydrate, do work, commit, and return a small reference. */
 export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExecutionResult> {
   "use step";
-  const writeId = getStepMetadata().stepId;
-  const completed = await sessionSnapshots.find<InitializedSessionCheckpoint>(
-    input.session.snapshots,
-    writeId,
-  );
+  const { stepId: writeId, attempt } = getStepMetadata();
+  const completed =
+    attempt === 1
+      ? undefined
+      : await sessionSnapshots.find<InitializedSessionCheckpoint>(input.session.snapshots, writeId);
   if (completed !== undefined) {
     await acknowledgeCheckpoint(completed.checkpoint);
     return { kind: "progress", progress: projectProgress(completed.ref, completed.checkpoint) };
   }
-  const entered = await sessionSnapshots.find<SessionCheckpoint>(
-    input.session.snapshots,
-    `${writeId}:entered`,
-  );
+  const entered =
+    attempt === 1
+      ? undefined
+      : await sessionSnapshots.find<SessionCheckpoint>(
+          input.session.snapshots,
+          `${writeId}:entered`,
+        );
   if (entered !== undefined) {
     await publishSessionDescriptor(input.session.holderRunId, input.session);
     throw new Error("The previous execution attempt did not commit its effects.");
@@ -153,14 +157,18 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
         },
       }),
     };
-    await setEveAttributes(
-      buildTurnAttributes({
-        parentSessionId: input.session.sessionId,
-        rootSessionId: readRootSessionId(checkpoint.serializedContext) ?? input.session.sessionId,
-        requestId:
-          input.submission.command.kind === "send" ? input.submission.command.requestId : undefined,
-        serializedContext: checkpoint.serializedContext,
-      }),
+    background(
+      setEveAttributes(
+        buildTurnAttributes({
+          parentSessionId: input.session.sessionId,
+          rootSessionId: readRootSessionId(checkpoint.serializedContext) ?? input.session.sessionId,
+          requestId:
+            input.submission.command.kind === "send"
+              ? input.submission.command.requestId
+              : undefined,
+          serializedContext: checkpoint.serializedContext,
+        }),
+      ),
     );
   }
   checkpoint = {
@@ -169,9 +177,11 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     phase: "running",
     writeId: `${writeId}:entered`,
   };
-  await sessionSnapshots.append(input.session.snapshots, checkpoint);
-  if (input.submission.eventId === input.session.initialEventId) {
-    await publishSessionDescriptor(input.session.holderRunId, input.session);
+  await sessionSnapshots.append(input.session.snapshots, checkpoint, { fresh: attempt === 1 });
+  if (input.submission.eventId === input.session.initialEventId && input.checkpoint === undefined) {
+    await publishSessionDescriptor(input.session.holderRunId, input.session, {
+      fresh: attempt === 1,
+    });
   }
 
   const admitted = checkpoint;
@@ -349,7 +359,9 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
     };
   });
   const committed: InitializedSessionCheckpoint = { ...checkpoint, writeId };
-  const ref = await sessionSnapshots.append(input.session.snapshots, committed);
+  const ref = await sessionSnapshots.append(input.session.snapshots, committed, {
+    fresh: attempt === 1,
+  });
   await acknowledgeCheckpoint(committed);
   return { kind: "progress", progress: projectProgress(ref, committed) };
 }

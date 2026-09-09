@@ -28,22 +28,20 @@ export async function handleConnectionCallbackRequest(
 
   const callback = await projectAuthorizationCallback(request);
 
-  try {
-    const authorizationCallback = { attemptId, callback, connectionName: name };
-    const eventId = createHash("sha256")
-      .update(JSON.stringify(authorizationCallback))
-      .digest("base64url");
-    await dispatchSessionCommand(
+  const authorizationCallback = { attemptId, callback, connectionName: name };
+  const eventId = createHash("sha256")
+    .update(JSON.stringify(authorizationCallback))
+    .digest("base64url");
+  ctx.waitUntil(
+    dispatchSessionCommand(
       sessionId,
       {
         kind: "send",
         payload: { authorizationCallback },
       },
       `authorization:${eventId}`,
-    );
-  } catch {
-    return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
-  }
+    ),
+  );
 
   return buildAuthorizationCompletePage();
 }

@@ -33,9 +33,11 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
 ```
 
 eve responds with `202` and the durable `sessionId` in the JSON body and
-`x-eve-session-id` header after its streams and initial state are ready. The first turn
-is already accepted. Follow-ups can arrive immediately; the runtime admits them to
-the active turn or schedules a new turn according to their delivery policy.
+`x-eve-session-id` header once the holding workflow has accepted creation. Streams
+and initial state initialize asynchronously. Follow-ups can arrive immediately;
+their background dispatch waits for initialization before starting a turn candidate.
+Create-once requests with an `operationId` resolve the canonical session before
+returning its ID.
 
 ## Stream a session
 
@@ -183,6 +185,11 @@ One delivery can answer requests from several batches. eve resumes approval-bear
 
 Accepted messages retain their durable admission order. Queued input remains attached to the deployment that accepted it. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering) for the current runtime contract.
 
+The HTTP follow-up route returns `202` after request validation and schedules
+session resolution and dispatch through `waitUntil`. This acknowledges the request,
+not durable delivery. Delivery failures are logged by the host; execution outcomes
+appear on the session stream. There is no synchronous active-session preflight.
+
 ## Cancel the in-flight turn
 
 POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
@@ -192,14 +199,23 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-`"accepted"` means the cancellation candidate has settled and the targeted turn has stopped. An actual cancellation appears on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. Background tasks that were already admitted survive initiating-turn cancellation and are stopped with `task_cancel`; background work that has not yet been admitted is rejected with the cancelled step. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session also returns `"accepted"` and consumes the command as a no-op. `"no_active_turn"` means the session lookup failed, or the candidate found a terminal session without applying this cancellation. Both statuses indicate a successful request. A stale `turnId` does not cancel another turn; its response can wait for that active turn to settle. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the HTTP request passed validation and cancellation dispatch is
+scheduled through `waitUntil`. It does not mean the targeted turn has stopped.
+The route returns `202` with `sessionId` without checking active-turn status.
+An actual cancellation appears on the stream as `turn.cancelled` followed by
+`session.waiting`. A stale `turnId` does not cancel another turn; an idle or terminal
+session consumes the request as a no-op.
 
-The HTTP route returns `202` for `"accepted"` and `200` for
-`"no_active_turn"`. Only the accepted result includes `sessionId`.
+Background tasks that were already admitted survive initiating-turn cancellation
+and are stopped with `task_cancel`; background work that has not yet been admitted
+is rejected with the cancelled step. Each cancelled child reports its own boundary
+on its child-session stream. See the [eve channel](../channels/eve) for the full route contract.
 
 Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
+These imperative operations await candidate start and can return `no_active_turn`
+when address resolution fails, but do not wait for cancellation settlement.
 
 ## Compact, clear, and reset
 
@@ -217,9 +233,16 @@ Compaction summarizes context without adding a user message. User-role instructi
 
 Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. It emits `context.cleared` followed by `session.waiting`.
 
-Reset terminally retires the exact session ID and waits for settlement before responding. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. It returns `"no_active_session"` if the session lookup fails or the reset candidate finds an already-terminal session.
+Reset requests terminal retirement of the exact session ID. The HTTP route returns
+`202` with `status: "reset"` and `previousSessionId` before background dispatch
+completes. Wait for `session.completed` or `session.failed` on the stream to observe
+termination. A reset ID never becomes a new session; create another session
+explicitly for a fresh conversation.
 
-Compact and clear return `"accepted"` once their candidates are durably started; read the stream for their outcomes. If terminal settlement wins the race, the session retires those requests. They return `"no_active_session"` only when the session lookup fails.
+Compact and clear also return `202` with `status: "accepted"` and dispatch through
+`waitUntil`; read the stream for their outcomes. If terminal settlement wins the
+race, the session retires those requests. Imperative channel operations await
+candidate start and can return `no_active_session` when address resolution fails.
 
 ## Reconnect and rewind
 

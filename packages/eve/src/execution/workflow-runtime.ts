@@ -49,6 +49,7 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { HoldingWorkflowInput } from "#execution/session/holding-workflow.js";
 import { sessionDirectory } from "#execution/session/directory.js";
+import { createSessionResources } from "#execution/session/resources.js";
 import { sessionEvents } from "#execution/session/events.js";
 import { waitForTurnReceipt } from "#execution/turn/admission.js";
 import { sessionCallbackToTurnCaller } from "#channel/session.js";
@@ -197,7 +198,10 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      const session = await sessionDirectory.resolveHolder(run.runId);
+      const session =
+        input.continuationToken === undefined
+          ? createSessionResources(run.runId, workflowInput.firstTurn.eventId)
+          : await sessionDirectory.resolveHolder(run.runId);
       let events: ReadableStream<MessageStreamEvent> | undefined;
       return {
         get events() {
@@ -271,12 +275,7 @@ async function dispatchPublicCommand<TCommand extends SessionCommand>(
   dispatch: () => Promise<DispatchedSubmission>,
 ): Promise<SessionCommandResult<TCommand>> {
   try {
-    const { eventId, sessionId, run } = await dispatch();
-    if (command.kind === "reset" || command.kind === "cancel") {
-      const receipt = await waitForTurnReceipt(run.runId);
-      if (receipt.terminal && receipt.deliveries[eventId] !== "applied")
-        return inactiveCommandResult(command);
-    }
+    const { sessionId } = await dispatch();
     return activeCommandResult(command, sessionId);
   } catch (error) {
     if (isInactiveCommandTarget(error)) return inactiveCommandResult(command);
@@ -308,7 +307,7 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
   return result as SessionCommandResult<TCommand>;
 }
 
-/** Returns after the cancellation candidate and its active owner have settled. */
+/** Internal descendant cleanup waits for quiescence before releasing its recorded owner. */
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
@@ -317,9 +316,16 @@ export async function requestWorkflowTurnCancellation(
   };
   if (input.taskId !== undefined) command.taskId = input.taskId;
   if (input.turnId !== undefined) command.turnId = input.turnId;
-  return await dispatchPublicCommand(command, () =>
-    dispatchSessionCommand(input.sessionId, command),
-  );
+  try {
+    const { eventId, sessionId, run } = await dispatchSessionCommand(input.sessionId, command);
+    const receipt = await waitForTurnReceipt(run.runId);
+    return receipt.terminal && receipt.deliveries[eventId] !== "applied"
+      ? { status: "no_active_turn" }
+      : { status: "accepted", sessionId };
+  } catch (error) {
+    if (isInactiveCommandTarget(error)) return { status: "no_active_turn" };
+    throw error;
+  }
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {

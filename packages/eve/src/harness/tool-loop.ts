@@ -110,6 +110,7 @@ import {
   enforceSessionUsageLimit,
 } from "#harness/session-limit-enforcement.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
+import { background } from "#internal/workflow/background.js";
 import {
   advanceStep,
   emitFailedStep,
@@ -1797,15 +1798,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     } catch {
       modelTag = undefined;
     }
-    await setEveAttributes({
-      "$eve.model": modelTag,
-      "$eve.input_tokens": nextTurnUsage.inputTokens,
-      "$eve.output_tokens": nextTurnUsage.outputTokens,
-      "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,
-      "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
-      "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
-      "$eve.tool_count": config.tools.size,
-    });
+    background(
+      setEveAttributes({
+        "$eve.model": modelTag,
+        "$eve.input_tokens": nextTurnUsage.inputTokens,
+        "$eve.output_tokens": nextTurnUsage.outputTokens,
+        "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,
+        "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
+        "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
+        "$eve.tool_count": config.tools.size,
+      }),
+    );
 
     // --- Handle result ------------------------------------------------------
 

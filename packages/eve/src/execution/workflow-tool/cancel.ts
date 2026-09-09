@@ -10,6 +10,7 @@ export async function cancelWorkflowToolRun(
   await sendInbox(
     { token: run.hookToken, ownerRunId: run.runId },
     { eventId: `${run.runId}:cancel`, kind: "tool.cancel", payload: { reason } },
+    { awaitClaim: true },
   );
   await getRun(run.runId).returnValue;
 }

@@ -77,16 +77,18 @@ export async function acknowledgeDelegatedTasks(input: {
     readonly taskRunId: string;
   }[];
 }): Promise<void> {
-  for (const task of input.tasks) {
-    const owner = await sendTaskCommandToOwner({
-      command: { kind: "ready" },
-      taskInboxToken: task.taskInboxToken,
-    });
-    if (owner !== undefined) continue;
-    const view = await readLatestTaskView({ taskRunId: task.taskRunId });
-    if (view !== undefined && isTerminalTaskStatus(view.status)) continue;
-    throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
-  }
+  await Promise.all(
+    input.tasks.map(async (task) => {
+      const owner = await sendTaskCommandToOwner({
+        command: { kind: "ready" },
+        taskInboxToken: task.taskInboxToken,
+      });
+      if (owner !== undefined) return;
+      const view = await readLatestTaskView({ taskRunId: task.taskRunId });
+      if (view !== undefined && isTerminalTaskStatus(view.status)) return;
+      throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
+    }),
+  );
 }
 
 /** Silently terminates a task whose child dispatch failed before parent indexing. */

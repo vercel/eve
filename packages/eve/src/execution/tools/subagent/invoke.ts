@@ -22,7 +22,6 @@ import {
   type DurableSessionState,
 } from "#execution/session/state.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { readLatestTaskView } from "#execution/tasks/runtime.js";
 import {
   getAgentHandleStore,
   writeHandles,
@@ -40,7 +39,6 @@ import {
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus } from "#tasks/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -294,9 +292,7 @@ export async function dispatchTaskAgentInvocation(
   if (input.taskId !== undefined) {
     const session = readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
-    if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-    const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-    if (view === undefined || isTerminalTaskStatus(view.status)) {
+    if (entry === undefined || entry.terminalView !== undefined) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
   }

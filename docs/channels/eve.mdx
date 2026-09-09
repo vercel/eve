@@ -47,8 +47,9 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The `202` response means the session resources and initial state are ready, and the
-first turn is accepted. Immediate follow-ups can safely address the returned session.
+The `202` response means the holding workflow accepted the first message. Resources
+and initial state initialize in that workflow and its first turn. Immediate follow-ups
+can address the returned session; their background dispatch waits for initialization.
 
 Authenticated callers can pass an `operationId` for create-once semantics. The same
 operation under the same authenticated principal resolves to its canonical session,
@@ -74,12 +75,15 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
 
 Follow-up messages use `turnPolicy: "steer"` by default, adding input at the active turn's next safe boundary. Set `turnPolicy: "queue"` when the active turn should finish first, or `turnPolicy: "interrupt"` to replace it. An interruption emits `turn.interrupted` without an idle boundary before the replacement. `inputResponses` never interrupt.
 
-A follow-up `202` means its turn candidate was durably accepted; the session may retire that input if cancellation or terminal settlement wins the race. Read the stream for execution outcomes.
+A follow-up `202` acknowledges the validated request. Session resolution and turn
+dispatch run through the host's `waitUntil` after acknowledgement; the response does
+not confirm durable delivery or execution. Delivery failures are logged by the host.
+Read the session stream for execution outcomes. The route never creates or follows
+a replacement session, and does not preflight whether the session is still active.
 
-Sending a message when the session lookup fails returns `409` with
-`{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
-TypeScript clients expose the stable code as `ClientError.code`. The route never
-creates or follows a replacement session.
+Task-input, authorization, and subagent callbacks also deliver in background work
+after validating their request. A callback acknowledgement does not confirm that
+the receiving owner applied it.
 
 ### Stream events
 
@@ -87,7 +91,7 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. The response waits until the cancellation candidate and the turn it targeted have settled. An actual cancellation appears on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. The route returns `202` and dispatches cancellation through `waitUntil`. An actual cancellation appears on the stream as `turn.cancelled` followed by `session.waiting`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 
@@ -101,7 +105,7 @@ Post to `/eve/v1/session/:sessionId/compact` to summarize context without sendin
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to request terminal retirement. The route returns `202` with `status: "reset"` and `previousSessionId` while dispatch continues through `waitUntil`; the response does not mean retirement has completed. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 
@@ -180,7 +184,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. An accepted HTTP follow-up schedules delivery to its addressed session.
 
 ## Clients
 

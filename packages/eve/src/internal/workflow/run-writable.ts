@@ -1,4 +1,4 @@
-import { getRun } from "#internal/workflow/runtime.js";
+import { forgetStreamRun, getStreamRun } from "#internal/workflow/stream-run.js";
 
 /** The public SDK contract pending the Workflow upgrade. */
 interface RunWritableOptions {
@@ -16,9 +16,15 @@ export async function getRunWritable<T>(
   runId: string,
   options: RunWritableOptions,
 ): Promise<WritableStream<T>> {
-  const run: ReturnType<typeof getRun> & Partial<WritableRun> = getRun(runId);
+  const run: Awaited<ReturnType<typeof getStreamRun>> & Partial<WritableRun> =
+    await getStreamRun(runId);
   if (typeof run.getWritable !== "function") {
     throw new Error("Session storage requires a Workflow SDK with Run#getWritable().");
   }
-  return run.getWritable<T>(options);
+  try {
+    return await run.getWritable<T>(options);
+  } catch (error) {
+    await forgetStreamRun(runId);
+    throw error;
+  }
 }

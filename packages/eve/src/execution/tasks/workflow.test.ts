@@ -91,7 +91,7 @@ beforeEach(() => {
 describe("task owner workflow", () => {
   it("publishes the winning address and terminates a duplicate start", async () => {
     mocks.claim.mockResolvedValue({ kind: "conflict", runId: "winner" });
-    await taskRunWorkflow({ ...base, workflow });
+    await taskRunWorkflow({ ...base, workflow, publishOwner: true });
     expect(mocks.publish).toHaveBeenCalledWith({ token: "task-token", ownerRunId: "winner" });
     expect(mocks.append).not.toHaveBeenCalled();
     expect(mocks.body).not.toHaveBeenCalled();

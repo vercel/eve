@@ -180,6 +180,10 @@ export default {
       entry: "dist/private.js",
       outputPath: "private",
     },
+    {
+      entry: "dist/runtime/wait-until.js",
+      outputPath: "runtime/wait-until",
+    },
   ],
   copyDeclarations,
 };

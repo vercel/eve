@@ -4,6 +4,7 @@ import { readDurableSession } from "#execution/session/state.js";
 import { readLatestTaskView } from "#execution/tasks/runtime.js";
 import { acceptTaskAuthorizationEvent } from "#execution/tools/subagent/accept-event.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
+import { cacheTerminalTaskView } from "#tasks/session-index.js";
 
 vi.mock("#execution/session/state.js", () => ({ readDurableSession: vi.fn() }));
 vi.mock("#execution/tasks/runtime.js", () => ({ readLatestTaskView: vi.fn() }));
@@ -95,7 +96,7 @@ describe("acceptTaskAuthorizationEvent", () => {
         sessionState,
       }),
     ).resolves.toBe(true);
-    expect(readLatestTaskView).toHaveBeenCalledWith({ taskRunId: "task-run" });
+    expect(readLatestTaskView).not.toHaveBeenCalled();
   });
 
   it("accepts the first authorization event while the task child start is still reserved", async () => {
@@ -129,11 +130,15 @@ describe("acceptTaskAuthorizationEvent", () => {
   });
 
   it("rejects an authorization event once the task is terminal", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      lastOutput: { data: "done", type: "result" },
-      metadata: { kind: "tool", name: "export" },
-      status: "completed",
-      taskId: "task-1",
+    const session = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: cacheTerminalTaskView(session.state, {
+        lastOutput: { data: "done", type: "result" },
+        metadata: { kind: "tool", name: "export" },
+        status: "completed",
+        taskId: "task-1",
+      }),
     });
 
     await expect(

@@ -28,14 +28,9 @@ export async function handleTaskInputResponseRequest(
       { status: 400 },
     );
   }
-  try {
-    await dispatchSessionCommandByToken(targetToken, { kind: "send", payload: { inputResponses } });
-  } catch {
-    return Response.json(
-      { error: "Task input target is not pending.", ok: false },
-      { status: 404 },
-    );
-  }
+  ctx.waitUntil(
+    dispatchSessionCommandByToken(targetToken, { kind: "send", payload: { inputResponses } }),
+  );
   return Response.json({ ok: true }, { status: 202 });
 }
 

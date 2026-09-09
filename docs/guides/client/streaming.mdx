@@ -5,7 +5,7 @@ description: "Consume eve client stream events live, reconnect by event index, a
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
-Once `send()` is accepted, `response.cancel()` requests cooperative cancellation of that exact turn. Start consuming the response first; cancellation waits for the stream to identify the turn, guards the request with its ID, and never targets a later turn. The result status is `accepted` when the live session durably queues the command. A response that settles before a turn starts returns `no_active_turn`:
+Once `send()` is accepted, `response.cancel()` requests cooperative cancellation of that exact turn. Start consuming the response first; cancellation waits for the stream to identify the turn, guards the request with its ID, and never targets a later turn. The result status is `accepted` when the HTTP route schedules background delivery. Continue reading to observe cancellation. A response that settles before a turn starts returns `no_active_turn`:
 
 ```ts
 const { response } = await client.sessions.create({ message: "Run the long operation." });

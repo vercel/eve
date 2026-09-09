@@ -27,9 +27,12 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   );
   try {
     const claim = await inbox.claim();
-    await publishOwnerStep(
-      claim.kind === "owned" ? inbox.address : { token: input.hookToken, ownerRunId: claim.runId },
-    );
+    if (input.publishOwner)
+      await publishOwnerStep(
+        claim.kind === "owned"
+          ? inbox.address
+          : { token: input.hookToken, ownerRunId: claim.runId },
+      );
     if (claim.kind === "conflict") return;
     let watcher:
       | Promise<{ kind: "watch-complete" } | { kind: "watch-failed"; error: unknown }>

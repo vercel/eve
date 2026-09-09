@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   dispatch: vi.fn(),
 }));
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getStepMetadata: () => ({ attempt: 1 }),
+}));
 vi.mock("#execution/session/directory.js", () => ({
   initializeSessionResources: mocks.initialize,
   publishSessionDescriptor: mocks.publish,
@@ -20,7 +23,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("holder bootstrap", () => {
   it("prepares storage without publishing readiness before the first turn writes state", async () => {
     const resources = await initializeHolderStep("holder", "first");
-    expect(mocks.initialize).toHaveBeenCalledWith(resources);
+    expect(mocks.initialize).toHaveBeenCalledWith(resources, { fresh: true });
     expect(mocks.publish).not.toHaveBeenCalled();
   });
   it("publishes canonical resources only after dispatching the losing creation's accepted input", async () => {

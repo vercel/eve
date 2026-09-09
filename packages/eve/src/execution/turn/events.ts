@@ -27,6 +27,7 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { background } from "#internal/workflow/background.js";
 
 /** One event path for live progress and committed terminal effects. */
 export function bindTurnEvents(input: {
@@ -71,7 +72,7 @@ export function bindTurnEvents(input: {
         messages,
         nodeId: bundle.nodeId ?? "__root__",
       });
-      void observeSessionActivity({ ctx, event: emitted, sessionId: session.sessionId });
+      background(observeSessionActivity({ ctx, event: emitted, sessionId: session.sessionId }));
       await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: emitted });
       if (emitted.type !== "step.started") {
         await dispatchDynamicModelEvent({

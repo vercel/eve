@@ -115,7 +115,7 @@ await agent.send(message, { turnPolicy: "interrupt" });
 
 Use `turnPolicy: "steer"` to add input at the active turn's next safe boundary. You can answer pending HITL requests with `respond(...)` while the owner remains active. Other message sends reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
 
-`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves once the cancellation candidate and targeted turn have settled, or when no turn is active. It rejects if the cancellation request fails. An actual cancellation emits `turn.cancelled` followed by `session.waiting` on the same stream, so the session is safe to continue.
+`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when the HTTP route acknowledges background delivery, or when the local response has no active turn. It rejects if the HTTP request fails. An actual cancellation emits `turn.cancelled` followed by `session.waiting` on the same stream; wait for that boundary before continuing the session.
 
 ```tsx
 if (agent.status === "submitted" || agent.status === "streaming") {

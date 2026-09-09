@@ -58,16 +58,19 @@ export async function finalizeTurnStep(input: FinalizeTurnInput): Promise<TurnRe
 }
 
 async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
-  const writeId = getStepMetadata().stepId;
-  const completed = await sessionSnapshots.find<SessionCheckpoint>(
-    input.session.snapshots,
-    writeId,
-  );
+  const { stepId: writeId, attempt } = getStepMetadata();
+  const completed =
+    attempt === 1
+      ? undefined
+      : await sessionSnapshots.find<SessionCheckpoint>(input.session.snapshots, writeId);
   if (completed !== undefined) {
     if (isTerminal(completed.checkpoint)) await closeSession(input.session, completed.checkpoint);
     return receipt(completed.ref, completed.checkpoint, input.eventIds);
   }
-  if ((await sessionSnapshots.find(input.session.snapshots, `${writeId}:entered`)) !== undefined) {
+  if (
+    attempt !== 1 &&
+    (await sessionSnapshots.find(input.session.snapshots, `${writeId}:entered`)) !== undefined
+  ) {
     throw new Error("The previous finalization attempt did not commit its effects.");
   }
   const loaded = await sessionSnapshots.read<SessionCheckpoint>(input.checkpoint);
@@ -118,7 +121,7 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
     writeId: `${writeId}:entered`,
     phase: "running",
   };
-  await sessionSnapshots.append(input.session.snapshots, entering);
+  await sessionSnapshots.append(input.session.snapshots, entering, { fresh: attempt === 1 });
 
   checkpoint = await sessionEvents.withWriter(input.session.events, async (events) => {
     let current = checkpoint;
@@ -224,7 +227,9 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<TurnReceipt> {
     inputs: [],
     result: undefined,
   };
-  const ref = await sessionSnapshots.append(input.session.snapshots, checkpoint);
+  const ref = await sessionSnapshots.append(input.session.snapshots, checkpoint, {
+    fresh: attempt === 1,
+  });
   if (terminal) await closeSession(input.session, checkpoint);
   return receipt(ref, checkpoint, input.eventIds);
 }

@@ -1,10 +1,35 @@
 ---
 issue: none
 status: in-progress
-last_updated: "2026-09-04"
+last_updated: "2026-09-08"
 ---
 
 # Stable session storage, a small holder, and independent turns
+
+## Startup latency iteration
+
+The September 8 implementation updates the original readiness contract below:
+fresh ID-only creation returns after holder start, while alias-bearing creation
+still resolves canonical resources. HTTP follow-ups, controls, and callbacks
+acknowledge validated input and dispatch with host `waitUntil`; these responses
+do not attest durable delivery. Imperative runtime commands await candidate start,
+not cancellation/reset settlement. Streams remain the execution-outcome surface;
+the host logs background delivery failures.
+
+First-attempt execution/finalization skips retry-record probes and appends new
+step-owned checkpoints directly. Retry attempts retain immutable-record checks.
+Stream reads reuse bounded World-scoped SDK run handles for key resolution, without
+caching mutable stream contents. Task/tool first starts use the returned run ID;
+retry starts publish and resolve the claim winner. Readiness sends retry a missing
+hook during bootstrap instead of preflighting it. Observability attributes and
+activity reporting use host background work.
+
+Internal descendant cleanup still awaits quiescence before releasing recorded
+ownership. Task authorization and invocation admission validate the already-loaded
+session index and handle bindings instead of rereading task streams. Slack reuses
+request-local owner resolution across subscription checks and delivery.
+
+## Architecture
 
 Replace the session's parent execution loop with a small **holding workflow** and
 independent terminating turn workflows. The holder creates the session resources,

@@ -1,8 +1,7 @@
 import { type DurableSessionState, readDurableSession } from "#execution/session/state.js";
-import { readLatestTaskView } from "#execution/tasks/runtime.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus, type TaskAuthorizationEventDelivery } from "#tasks/types.js";
+import type { TaskAuthorizationEventDelivery } from "#tasks/types.js";
 
 /** Validates that a task child's authorization event came from an agent the task owns. */
 export async function acceptTaskAuthorizationEvent(input: {
@@ -12,7 +11,7 @@ export async function acceptTaskAuthorizationEvent(input: {
   const { hookPayload, taskId } = input.delivery;
   const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, taskId);
-  if (entry === undefined) return false;
+  if (entry === undefined || entry.terminalView !== undefined) return false;
 
   const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
   const claimed = handles.find(
@@ -33,6 +32,5 @@ export async function acceptTaskAuthorizationEvent(input: {
   );
   if (claimed === undefined && reserved.length !== 1) return false;
 
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  return view !== undefined && !isTerminalTaskStatus(view.status);
+  return true;
 }
