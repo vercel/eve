@@ -120,7 +120,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       "const catalog = await tools.search_tools({});",
       `const direct = ${JSON.stringify(direct)};`,
       "const complete = direct.every(name => catalog.some(tool => tool.name === name)) && catalog.filter(tool => tool.requiresDirectCall).every(tool => direct.includes(tool.name));",
-      'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
+      'const schemas = await tools.describe_tools({ names: ["background", "connection_search"] });',
       'const matches = await tools.search_tools({ query: "ECHO prefix nonexistentkeyword" });',
       'const keywords = matches.some(tool => tool.name === "echo");',
       'return { complete, keywords, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
@@ -170,6 +170,24 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       'const answer = await tools.ask_question({ prompt: "Ship the CODEMODE-ASK build?", options: [{ id: "ship", label: "Ship" }, { id: "hold", label: "Hold" }] });',
       'const echo = await tools.echo({ value: "after-ask:" + answer.optionId });',
       "return { answer, echo };",
+    ].join("\n");
+  } else if (message.includes("CODEMODE-APPROVAL-START")) {
+    directive = "CODEMODE-APPROVAL";
+    js = [
+      "const first = await tools.gated({});",
+      "const second = await tools.gated_once({});",
+      "const third = await tools.gated_once({});",
+      "return { first, second, third };",
+    ].join("\n");
+  } else if (message.includes("CODEMODE-DENY-START")) {
+    directive = "CODEMODE-DENY";
+    js = [
+      "try {",
+      "  await tools.gated({});",
+      "  return { denied: false };",
+      "} catch (error) {",
+      '  return { denied: String(error).includes("CODE_MODE_APPROVAL_DENIED") };',
+      "}",
     ].join("\n");
   } else if (message.includes("CODEMODE-WORKFLOW-START")) {
     directive = "CODEMODE-WORKFLOW";

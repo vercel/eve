@@ -4,6 +4,7 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import {
   ask,
+  askApproval,
   readCodeModeRunContext,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
@@ -13,15 +14,21 @@ import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import type { CodeModeCallResolution, CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
+  evaluateCodeModeApprovalStep,
   executeCodeModeToolStep,
   runCodeModeProgramStep,
   type CodeModeCallInterrupt,
   type CodeModePendingCall,
   type CodeModeProgramOutcome,
+  type CodeModeToolCall,
 } from "#execution/code-mode/program-step.js";
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/code-mode/state.js";
+import {
+  adoptCodeModeStateChanges,
+  approvedToolStateChange,
+  type CodeModeStateChange,
+} from "#execution/code-mode/state.js";
 
 /**
  * Durable body behind the framework `code_mode` tool.
@@ -31,7 +38,9 @@ import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/
  * context; subagents go through the owner's `agent-invoke` channel like any
  * workflow tool, so the parent keeps sole ownership of agent handles and
  * session state; authored workflow tools run their body inline, nesting its
- * steps into this run. Each nested call therefore has its own replay boundary.
+ * steps into this run. Approval-gated tools ask the person first through the
+ * workflow-tool `ask` protocol. Each nested call therefore has its own replay
+ * boundary.
  */
 export async function codeModeWorkflow(
   rawInput: unknown,
@@ -110,8 +119,19 @@ async function settleNestedCall(
   const from = readWorkflowToolRunRef(ctx);
   const { sequence, stepIndex, turnId } = from;
   try {
+    const nestedCall: CodeModeToolCall = {
+      event: { sequence, stepIndex, turnId },
+      serializedContext: run.serializedContext,
+      sessionState: run.sessionState,
+      toolCallId,
+      toolInput: call.toolInput,
+      toolName: call.toolName,
+    };
+    const approval = await approveNestedCall(ctx, program, nestedCall);
+    if (approval.status === "denied") return { interrupt, resolution: approval.resolution };
     if (call.target === "workflow") {
-      return { interrupt, resolution: await runNestedWorkflowTool(ctx, from, program, call) };
+      const resolution = await runNestedWorkflowTool(ctx, from, program, call);
+      return { interrupt, resolution, stateChanges: approval.stateChanges };
     }
     if (call.target === "agent") {
       const agentInput = readAgentInput(call.toolInput);
@@ -133,14 +153,7 @@ async function settleNestedCall(
     }
     // Passing `ctx` opts this step into the workflow-tool authorization twin,
     // which parks on sign-in and retries the step; the body only sees results.
-    const settled = await executeCodeModeToolStep(ctx, {
-      event: { sequence, stepIndex, turnId },
-      serializedContext: run.serializedContext,
-      sessionState: run.sessionState,
-      toolCallId,
-      toolInput: call.toolInput,
-      toolName: call.toolName,
-    });
+    const settled = await executeCodeModeToolStep(ctx, nestedCall);
     // The authorization twin never lets a signal reach the body; a bare signal
     // means this step ran without its twin. (Structural check: the harness
     // module is not importable from the workflow driver body.)
@@ -148,11 +161,61 @@ async function settleNestedCall(
       throw new Error(`Tool "${call.toolName}" requested authorization outside a workflow step.`);
     }
     const { stateChanges, ...resolution } = settled;
-    return { interrupt, resolution, stateChanges };
+    return {
+      interrupt,
+      resolution,
+      stateChanges: [...(approval.stateChanges ?? []), ...(stateChanges ?? [])],
+    };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();
     return { interrupt, resolution: { status: "failed", error: toErrorMessage(error) } };
   }
+}
+
+type NestedCallApproval =
+  | { readonly status: "approved"; readonly stateChanges?: readonly CodeModeStateChange[] }
+  | { readonly status: "denied"; readonly resolution: CodeModeCallResolution };
+
+/**
+ * Asks the person before an approval-gated nested call, the way the harness
+ * would before a direct call. The approval renders as a tool-approval card for
+ * the nested tool; a granted approval is recorded as a state change so `once()`
+ * holds for later calls in this program and for the parent session afterwards.
+ */
+async function approveNestedCall(
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
+  program: CodeModeWorkflowInput,
+  nestedCall: CodeModeToolCall,
+): Promise<NestedCallApproval> {
+  const entry = program.toolCatalog.find((candidate) => candidate.name === nestedCall.toolName);
+  if (entry?.approval !== true) return { status: "approved" };
+  const decision = await evaluateCodeModeApprovalStep(nestedCall);
+  switch (decision.status) {
+    case "not-required":
+      return { status: "approved" };
+    case "failed":
+      return { status: "denied", resolution: decision };
+    case "denied":
+      return {
+        status: "denied",
+        resolution: approvalDenied("the approval policy", nestedCall.toolName, decision.reason),
+      };
+    case "required": {
+      const answer = await askApproval(ctx, decision.request, decision.action);
+      if (answer.optionId !== "approve") {
+        return { status: "denied", resolution: approvalDenied("the user", nestedCall.toolName) };
+      }
+      return { status: "approved", stateChanges: [approvedToolStateChange(decision.approvalKey)] };
+    }
+  }
+}
+
+function approvalDenied(by: string, toolName: string, reason?: string): CodeModeCallResolution {
+  const detail = reason === undefined ? "" : ` ${reason}`;
+  return {
+    status: "failed",
+    error: `CODE_MODE_APPROVAL_DENIED: ${by} declined to run "${toolName}".${detail}`,
+  };
 }
 
 /**

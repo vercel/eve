@@ -158,20 +158,29 @@ function extractApprovalRequests(input: {
     }
 
     requests.push({
+      ...createToolApprovalPrompt(toolCall.toolName),
       action: createRuntimeToolCallActionFromToolCall({ toolCall }),
-      allowFreeform: false,
-      display: "confirmation",
       kind: "tool-approval",
-      options: [
-        { id: "approve", label: "Approve" },
-        { id: "cancel", label: "Cancel" },
-      ],
-      prompt: `Approve tool call: ${toolCall.toolName}`,
       requestId: approval.approvalId,
     });
   }
 
   return requests;
+}
+
+/** Prompt, options, and display every tool-approval request renders with. */
+export function createToolApprovalPrompt(
+  toolName: string,
+): Required<Pick<InputRequest, "allowFreeform" | "display" | "options" | "prompt">> {
+  return {
+    allowFreeform: false,
+    display: "confirmation",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "cancel", label: "Cancel" },
+    ],
+    prompt: `Approve tool call: ${toolName}`,
+  };
 }
 
 /**

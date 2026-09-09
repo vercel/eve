@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   workflowToolRunOutcomeToTaskCommand,
   workflowToolRunReportToTaskPayload,
+  workflowToolRunRequestToInputRequestPayload,
   workflowToolRunRequestToTaskInputRequest,
 } from "#execution/tools/workflow/owner-inbox.js";
 
@@ -75,6 +76,78 @@ describe("workflow-tool task input", () => {
       stepIndex: 2,
       turnId: "turn-child",
     });
+  });
+
+  it("normalizes an authored ask as a question about the run's own tool call", () => {
+    expect(
+      workflowToolRunRequestToInputRequestPayload({
+        from,
+        replyTo: "hook-1",
+        request: {
+          kind: "ask",
+          request: { prompt: "Ship it?", options: [{ id: "ship", label: "Ship" }] },
+        },
+      }).event.requests,
+    ).toEqual([
+      {
+        action: {
+          callId: "call-1",
+          input: { message: "Find it" },
+          kind: "tool-call",
+          toolName: "research",
+        },
+        kind: "question",
+        options: [{ id: "ship", label: "Ship" }],
+        prompt: "Ship it?",
+        requestId: "hook-1",
+      },
+    ]);
+  });
+
+  it("normalizes an approval ask as a tool-approval request for the nested call", () => {
+    const request = {
+      approval: { callId: "call-1:tool-0", input: { region: "eu" }, toolName: "gated" },
+      kind: "ask" as const,
+      request: {
+        allowFreeform: false,
+        display: "confirmation" as const,
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
+        ],
+        prompt: "Approve tool call: gated",
+      },
+    };
+    const normalized = {
+      action: {
+        callId: "call-1:tool-0",
+        input: { region: "eu" },
+        kind: "tool-call",
+        toolName: "gated",
+      },
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "tool-approval",
+      options: request.request.options,
+      prompt: "Approve tool call: gated",
+      requestId: "hook-1",
+    };
+
+    const payload = workflowToolRunRequestToInputRequestPayload({
+      from,
+      replyTo: "hook-1",
+      request,
+    });
+    expect(payload).toMatchObject({
+      callId: "call-1",
+      childContinuationToken: "hook-1",
+      event: { requests: [normalized] },
+      kind: "subagent-input-request",
+      subagentName: "research",
+    });
+    expect(
+      workflowToolRunRequestToTaskInputRequest({ from, replyTo: "hook-1", request }),
+    ).toMatchObject({ kind: "task-input-request", request: normalized });
   });
 
   it("does not normalize workflow agent requests as human input", () => {

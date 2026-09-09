@@ -1,4 +1,8 @@
 import { jsonValuesEqual } from "#shared/json.js";
+import { readApprovedToolKeys, writeApprovedToolKeys } from "#harness/hitl/approved-tools.js";
+import type { SessionStateMap } from "#harness/types.js";
+import type { SandboxState } from "#sandbox/state.js";
+import type { DurableSession } from "#execution/durable-session-store.js";
 import type { WorkflowToolRunCodeModeContext } from "#execution/tools/workflow/types.js";
 
 export interface CodeModeStateChange {
@@ -62,11 +66,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * The session fields nested calls may change. Approval keys are keyed by name
+ * so two calls approved in one batch merge instead of conflicting.
+ */
+export function codeModeSessionState(
+  session:
+    | {
+        readonly sandboxState?: SandboxState;
+        readonly state?: SessionStateMap;
+      }
+    | undefined,
+) {
+  const approvedTools: Record<string, true> = {};
+  for (const key of readApprovedToolKeys(session?.state)) approvedTools[key] = true;
+  return {
+    sandboxState: session?.sandboxState,
+    approvedTools: Object.keys(approvedTools).length === 0 ? undefined : approvedTools,
+  };
+}
+
 export function codeModeMutableState(state: WorkflowToolRunCodeModeContext) {
   return {
     serializedContext: state.serializedContext,
-    sandboxState: state.sessionState.snapshot?.session.sandboxState,
+    ...codeModeSessionState(state.sessionState.snapshot?.session),
   };
+}
+
+/** The change a granted approval contributes, so `once()` holds for later calls and the parent. */
+export function approvedToolStateChange(approvalKey: string): CodeModeStateChange {
+  return { path: ["approvedTools", approvalKey], before: undefined, after: true };
 }
 
 export function adoptCodeModeStateChanges(
@@ -75,17 +104,20 @@ export function adoptCodeModeStateChanges(
 ): WorkflowToolRunCodeModeContext {
   const updated = applyCodeModeStateChanges(codeModeMutableState(state), changes);
   const snapshot = state.sessionState.snapshot;
+  if (snapshot === undefined) {
+    return { serializedContext: updated.serializedContext, sessionState: state.sessionState };
+  }
+  const sessionStateMap = writeApprovedToolKeys(
+    snapshot.session.state,
+    Object.keys(updated.approvedTools ?? {}),
+  );
+  const session: { -readonly [K in keyof DurableSession]: DurableSession[K] } = {
+    ...snapshot.session,
+    sandboxState: updated.sandboxState,
+  };
+  if (sessionStateMap !== undefined) session.state = sessionStateMap;
   return {
     serializedContext: updated.serializedContext,
-    sessionState:
-      snapshot === undefined
-        ? state.sessionState
-        : {
-            ...state.sessionState,
-            snapshot: {
-              ...snapshot,
-              session: { ...snapshot.session, sandboxState: updated.sandboxState },
-            },
-          },
+    sessionState: { ...state.sessionState, snapshot: { ...snapshot, session } },
   };
 }

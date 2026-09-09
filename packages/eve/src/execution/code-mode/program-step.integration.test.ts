@@ -159,7 +159,7 @@ describe("code-mode sandbox continuation contract", () => {
             name: "gated",
             description: "Needs approval",
             inputSchema: { type: "object", properties: { value: { type: "string" } } },
-            requiresDirectCall: true,
+            requiresDirectCall: false,
           },
           {
             name: "provider",

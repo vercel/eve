@@ -2438,7 +2438,7 @@ describe("createToolLoopHarness", () => {
     );
   });
 
-  it("advertises dynamic never-approved tools through code mode and keeps approval gates direct", async () => {
+  it("advertises every dynamic tool through code mode, approval-gated ones included", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -2495,8 +2495,9 @@ describe("createToolLoopHarness", () => {
     });
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
     const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
-    expect(Object.keys(advertised ?? {}).sort()).toEqual(["add", "code_mode", "gated_dynamic"]);
+    expect(Object.keys(advertised ?? {}).sort()).toEqual(["add", "code_mode"]);
     expect(advertised?.code_mode?.description).toContain("discovered");
+    expect(advertised?.code_mode?.description).toContain("gated_dynamic");
   });
 
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {

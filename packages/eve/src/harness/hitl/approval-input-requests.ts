@@ -32,9 +32,9 @@ import {
   resolveQuestionBatches,
 } from "#harness/hitl/question-input-requests.js";
 import type { QuestionInputRequest } from "#harness/hitl/question-input-requests.js";
-import type { HarnessSession } from "#harness/types.js";
+import { readApprovedToolKeys, writeApprovedToolKeys } from "#harness/hitl/approved-tools.js";
+import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
-const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
 type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" };
 
@@ -156,8 +156,14 @@ export function getApprovedTools(
 }
 
 function readRecordedApprovedTools(session: HarnessSession): Set<string> {
-  const value = session.state?.[APPROVED_TOOLS_KEY];
-  return Array.isArray(value) ? new Set(value as string[]) : new Set();
+  return new Set(readApprovedToolKeys(session.state));
+}
+
+/** Derives the approval key a definition records for one request: `approvalKey(input)` or the tool name. */
+export function resolveApprovalKeyFromTools(
+  tools: HarnessToolMap,
+): (request: InputRequest) => string | undefined {
+  return (request) => tools.get(request.action.toolName)?.approvalKey?.(request.action.input);
 }
 
 function resolveApprovalBatch(input: {
@@ -205,11 +211,12 @@ function recordApprovedTools(input: {
 
   if (newKeys.length === 0) return input.session;
 
-  const state = { ...input.session.state };
-  state[APPROVED_TOOLS_KEY] = [
-    ...new Set([...readRecordedApprovedTools(input.session), ...newKeys]),
-  ];
-  return { ...input.session, state };
+  return {
+    ...input.session,
+    state: writeApprovedToolKeys(input.session.state, [
+      ...new Set([...readRecordedApprovedTools(input.session), ...newKeys]),
+    ]),
+  };
 }
 
 function buildRejectedActionBatch(

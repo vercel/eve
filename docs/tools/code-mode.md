@@ -46,8 +46,9 @@ With code mode enabled, the model's tool list contains:
 
 Tools supplied by dynamic providers, including connection tools found through
 `connection_search`, are not advertised directly when they are eligible for
-programs. The model reaches them through `code_mode`. Approval-gated dynamic
-tools stay direct so their approval flow is unchanged.
+programs. The model reaches them through `code_mode`, and approval-gated ones
+ask the person from inside the program (see
+[Approvals inside a program](#approvals-inside-a-program)).
 
 The model is instructed to prefer direct calls for single operations and
 programs for work that chains, loops over, or reduces several calls.
@@ -58,7 +59,6 @@ A program can call a tool when all of the following hold:
 
 - The tool has an executor and is not a framework control such as
   `connection_search` or a task-control action.
-- The tool has no approval policy, or its policy is `never()`.
 - The tool is not an ordinary `execution: "background"` tool. Subagent tools
   and authored workflow tools are the exceptions: inside a program they run to
   completion and return their final result instead of a task receipt.
@@ -68,20 +68,24 @@ nested `tools.ask_question({ prompt, options })` parks the program until the
 person answers on the session channel, then returns
 `{ status, optionId?, text? }` like the direct tool does.
 
+An approval policy does not make a tool direct-only. A program can call a tool
+whose policy is not `never()`; the call waits for the person's approval first
+(see [Approvals inside a program](#approvals-inside-a-program)).
+
 Everything else remains callable only directly. Discovery marks those tools with
 `requiresDirectCall: true`.
 
-| Tool                                                | Direct call | Inside a program    |
-| --------------------------------------------------- | ----------- | ------------------- |
-| Built-in tools such as `bash`, `read_file`, `todo`  | yes         | yes                 |
-| Authored `defineTool` tools without approval        | yes         | yes                 |
-| Declared subagents and the built-in `agent` tool    | yes         | yes, awaited result |
-| Discovered connection tools without approval        | no          | yes                 |
-| Any tool with an approval policy other than `never` | yes         | no                  |
-| Authored workflow tools (`defineWorkflowTool`)      | yes         | yes, awaited result |
-| Ordinary background tools                           | yes         | no                  |
-| `ask_question`                                      | yes         | yes, awaited answer |
-| `connection_search`, task controls                  | yes         | no                  |
+| Tool                                                | Direct call         | Inside a program               |
+| --------------------------------------------------- | ------------------- | ------------------------------ |
+| Built-in tools such as `bash`, `read_file`, `todo`  | yes                 | yes                            |
+| Authored `defineTool` tools                         | yes                 | yes                            |
+| Declared subagents and the built-in `agent` tool    | yes                 | yes, awaited result            |
+| Discovered connection tools                         | no                  | yes                            |
+| Any tool with an approval policy other than `never` | yes, unless dynamic | yes, after the person approves |
+| Authored workflow tools (`defineWorkflowTool`)      | yes                 | yes, awaited result            |
+| Ordinary background tools                           | yes                 | no                             |
+| `ask_question`                                      | yes                 | yes, awaited answer            |
+| `connection_search`, task controls                  | yes                 | no                             |
 
 When names overlap, step-scoped dynamic definitions override turn-scoped,
 session-scoped, and static definitions, in that order.
@@ -169,6 +173,27 @@ parent session, waits durably for the matching callback, emits
 `authorization.completed`, and retries only that call. Earlier completed calls
 keep their results, and the program does not observe the pause.
 
+## Approvals inside a program
+
+A nested call to a tool with an approval policy evaluates that policy the same
+way a direct call does, with the session context and the approvals already
+recorded for the session. When the policy asks for the person, eve emits a
+`tool-approval` input request on the session channel for the nested tool (its
+name and input, with the usual `approve` and `cancel` options), and the program
+waits durably for the answer. The `code_mode` call stays pending in the
+meantime.
+
+On approval the tool runs as its own step and the call resolves with its
+result. A `once()` approval is remembered for later calls in the same program
+and carried back to the parent session when the program finishes, so the person
+is asked a single time either way. Declining rejects the JavaScript call with
+`CODE_MODE_APPROVAL_DENIED`; the program can catch it, and nothing runs. A
+policy that answers `denied` rejects the call the same way without asking.
+
+Approval-gated static tools stay directly callable as well. Approval-gated
+dynamic tools, including discovered connection tools, are reached through
+`code_mode` only, like other eligible dynamic tools.
+
 ## Session state across calls
 
 Nested calls run against a snapshot of the parent session taken when the
@@ -205,8 +230,8 @@ workflow step retry policy.
 - Each nested call rebuilds the turn's tool set from the dispatched snapshot.
   Programs with many small sequential calls pay that cost per call.
 - Programs run in the root session only.
-- Dynamic tools with an approval policy other than `never()` remain direct-only;
-  programs cannot wait on a human approval.
+- Approval-gated dynamic tools are program-only: the model cannot call them
+  directly, so their approval always renders from inside a program.
 
 ## Related
 

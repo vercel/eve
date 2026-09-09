@@ -1,5 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type {
+  WorkflowToolAskRequest,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunReport,
   WorkflowToolRunRef,
@@ -10,7 +11,6 @@ import type {
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
-import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundMessage, TaskInboundUpdate } from "#tasks/types.js";
 import { isTaskMessage } from "#tools/task.js";
@@ -197,26 +197,46 @@ function normalizeInputRequest(
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
     case "ask":
-      return normalizeAskRequest(request.request, from, requestId);
+      return normalizeAskRequest(request, from, requestId);
     default:
       return request;
   }
 }
 
 function normalizeAskRequest(
-  authored: ToolInputRequest,
+  { approval, request: authored }: WorkflowToolAskRequest,
   from: WorkflowToolRunRef,
   requestId: string,
 ): InputRequest {
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
-  const normalized: InputRequest = {
-    action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
-    kind: "question",
-    prompt: authored.prompt,
-    requestId,
-  };
+  // The answer routes back to the run's hook by request id, so the owner turn
+  // never dispatches `action`; it exists for rendering and attribution.
+  const normalized: InputRequest =
+    approval === undefined
+      ? {
+          action: {
+            callId: from.callId,
+            input: from.input,
+            kind: "tool-call",
+            toolName: from.toolName,
+          },
+          kind: "question",
+          prompt: authored.prompt,
+          requestId,
+        }
+      : {
+          action: {
+            callId: approval.callId,
+            input: approval.input,
+            kind: "tool-call",
+            toolName: approval.toolName,
+          },
+          kind: "tool-approval",
+          prompt: authored.prompt,
+          requestId,
+        };
   if (authored.allowFreeform !== undefined) normalized.allowFreeform = authored.allowFreeform;
   if (authored.display !== undefined) normalized.display = authored.display;
   if (authored.options !== undefined) normalized.options = [...authored.options];

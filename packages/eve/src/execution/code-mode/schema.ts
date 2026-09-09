@@ -14,6 +14,8 @@ export interface CodeModeToolCatalogEntry {
   readonly inputSchema: JsonObject;
   readonly outputSchema: JsonObject | null;
   readonly target: CodeModeCallTarget;
+  /** Set when the claimed tool has an approval policy other than `never()`; the body asks before each call. */
+  readonly approval?: true;
   /** Registered workflow body of an authored workflow tool; present exactly when `target` is `"workflow"`. */
   readonly workflowId?: string;
 }
@@ -33,9 +35,12 @@ export function serializeCodeModeWorkflowInput(input: CodeModeWorkflowInput): Js
   return {
     js: input.js,
     maxSubagents: input.maxSubagents,
-    toolCatalog: input.toolCatalog.map(({ workflowId, ...entry }) =>
-      workflowId === undefined ? { ...entry } : { ...entry, workflowId },
-    ),
+    toolCatalog: input.toolCatalog.map(({ approval, workflowId, ...entry }) => {
+      const serialized: Record<string, JsonValue> = { ...entry };
+      if (approval !== undefined) serialized.approval = approval;
+      if (workflowId !== undefined) serialized.workflowId = workflowId;
+      return serialized;
+    }),
   };
 }
 
@@ -66,13 +71,21 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
     ) {
       throw new TypeError("code_mode tool catalog entry is invalid.");
     }
-    const parsed: CodeModeToolCatalogEntry = {
+    let parsed: CodeModeToolCatalogEntry = {
       name: entry.name,
       description: entry.description,
       inputSchema: parseJsonObject(entry.inputSchema),
       outputSchema: entry.outputSchema === null ? null : parseJsonObject(entry.outputSchema),
       target: entry.target,
     };
+    if (entry.approval !== undefined) {
+      if (entry.approval !== true || entry.target === "direct" || entry.target === "agent") {
+        throw new TypeError(
+          `code_mode tool catalog entry "${entry.name}" carries an invalid approval marker.`,
+        );
+      }
+      parsed = { ...parsed, approval: true };
+    }
     if (entry.target === "workflow") {
       if (typeof entry.workflowId !== "string" || entry.workflowId.length === 0) {
         throw new TypeError(

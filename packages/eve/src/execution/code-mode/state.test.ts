@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCodeModeStateChanges,
+  approvedToolStateChange,
+  codeModeMutableState,
   diffCodeModeState,
   adoptCodeModeStateChanges,
 } from "./state.js";
+
+const APPROVED = "eve.runtime.hitl.approvedTools";
+
+function withSnapshot(session: Record<string, unknown>) {
+  return { serializedContext: {}, sessionState: { snapshot: { session } } } as never;
+}
 
 describe("Code Mode state changes", () => {
   it("merges parallel file reads without losing either stamp", () => {
@@ -59,5 +67,55 @@ describe("Code Mode state changes", () => {
       state: { agents: ["new-child"] },
       sandboxState: { initialized: true, session: { id: "sandbox" } },
     });
+  });
+
+  it("exposes recorded approvals keyed by name and leaves them out when none exist", () => {
+    expect(codeModeMutableState(withSnapshot({}))).toEqual({
+      serializedContext: {},
+      sandboxState: undefined,
+      approvedTools: undefined,
+    });
+    expect(
+      codeModeMutableState(withSnapshot({ state: { [APPROVED]: ["gated", "deploy:eu"] } }))
+        .approvedTools,
+    ).toEqual({ gated: true, "deploy:eu": true });
+  });
+
+  it("records a granted approval next to existing ones without touching other session state", () => {
+    const state = withSnapshot({ state: { agents: ["child"], [APPROVED]: ["earlier"] } });
+    const adopted = adoptCodeModeStateChanges(state, [approvedToolStateChange("gated")]);
+    expect(adopted.sessionState.snapshot?.session.state).toEqual({
+      agents: ["child"],
+      [APPROVED]: ["earlier", "gated"],
+    });
+  });
+
+  it("merges approvals granted in one batch and accepts a key the parent already holds", () => {
+    const state = withSnapshot({ state: { [APPROVED]: ["gated"] } });
+    const adopted = adoptCodeModeStateChanges(state, [
+      approvedToolStateChange("gated"),
+      approvedToolStateChange("first"),
+      approvedToolStateChange("second"),
+    ]);
+    expect(adopted.sessionState.snapshot?.session.state?.[APPROVED]).toEqual([
+      "gated",
+      "first",
+      "second",
+    ]);
+  });
+
+  it("keeps the session state object when no approval changed", () => {
+    const session = { state: { agents: ["child"] }, sandboxState: null };
+    const adopted = adoptCodeModeStateChanges(withSnapshot(session), [
+      { path: ["serializedContext", "todo"], before: undefined, after: ["x"] },
+    ]);
+    expect(adopted.serializedContext).toEqual({ todo: ["x"] });
+    expect(adopted.sessionState.snapshot?.session.state).toBe(session.state);
+  });
+
+  it("diffs an approval granted during a nested step into the same change shape", () => {
+    const before = { sandboxState: undefined, approvedTools: undefined };
+    const after = { sandboxState: undefined, approvedTools: { gated: true } };
+    expect(diffCodeModeState(before, after)).toEqual([approvedToolStateChange("gated")]);
   });
 });

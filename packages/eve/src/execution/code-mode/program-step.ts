@@ -1,7 +1,11 @@
 import { jsonSchema, type ToolSet } from "ai";
 
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { diffCodeModeState, type CodeModeStateChange } from "#execution/code-mode/state.js";
+import {
+  codeModeSessionState,
+  diffCodeModeState,
+  type CodeModeStateChange,
+} from "#execution/code-mode/state.js";
 import { contextStorage } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
@@ -48,11 +52,21 @@ import {
   isCodeModeAgentTool,
 } from "#harness/code-mode.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { wrapToolExecute } from "#harness/tools.js";
+import {
+  getApprovedTools,
+  resolveApprovalKeyFromTools,
+} from "#harness/hitl/approval-input-requests.js";
+import { createToolApprovalPrompt } from "#harness/input-extraction.js";
+import {
+  evaluateToolApproval,
+  wrapToolExecute,
+  type NativeApprovalStatus,
+} from "#harness/tools.js";
 import { getWorkflowContinuationSecurity } from "#harness/workflow-continuation-security.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { isObject } from "#shared/guards.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   continueWorkflowSandboxInterrupt,
@@ -65,7 +79,7 @@ import {
   unwrapWorkflowSandboxResult,
   type WorkflowSandboxInterrupt,
 } from "#shared/workflow-sandbox.js";
-import type { ToolContext, ToolExecuteOptions } from "#tools/definition.js";
+import type { ToolContext, ToolExecuteOptions, ToolInputRequest } from "#tools/definition.js";
 
 /** Interrupt payload raised by every claimed tool the generated program calls. */
 export const CODE_MODE_CALL_INTERRUPT_KIND = "eve.code-mode-call";
@@ -254,7 +268,7 @@ export async function executeCodeModeToolStep(
   };
   const before = structuredClone({
     serializedContext: toolContext(),
-    sandboxState: session.sandboxState,
+    ...codeModeSessionState(session),
   });
   let updatedSession = session;
   let outcome: CodeModeToolOutcome;
@@ -281,9 +295,90 @@ export async function executeCodeModeToolStep(
   }
   const stateChanges = diffCodeModeState(before, {
     serializedContext: toolContext(),
-    sandboxState: updatedSession.sandboxState,
+    ...codeModeSessionState(updatedSession),
   });
   return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
+}
+
+export type CodeModeApprovalDecision =
+  | { readonly status: "not-required" }
+  | { readonly status: "denied"; readonly reason?: string }
+  | { readonly status: "failed"; readonly error: string }
+  | {
+      readonly status: "required";
+      /** Key `once()` remembers on approval: `approvalKey(input)` when the tool defines one, else the tool name. */
+      readonly approvalKey: string;
+      /**
+       * The nested call as the approval card shows it. `callId` is the
+       * sandbox's nested id (`<code_mode callId>:tool-N`): unique per call, so
+       * the card renders as its own nested tool call instead of rewriting the
+       * `code_mode` card, and never a turn action the owner could dispatch.
+       */
+      readonly action: {
+        readonly callId: string;
+        readonly input: JsonObject;
+        readonly toolName: string;
+      };
+      readonly request: ToolInputRequest;
+    };
+
+/**
+ * Evaluates a claimed tool's approval policy exactly as a direct call would:
+ * with the turn's session context and the keys the person already approved,
+ * including those granted earlier in this program. The body asks the person
+ * only when the policy answers `user-approval`; policy evaluation needs the
+ * harness, so it runs here rather than in the workflow body.
+ */
+export async function evaluateCodeModeApprovalStep(
+  input: CodeModeToolCall,
+): Promise<CodeModeApprovalDecision> {
+  "use step";
+
+  const { ctx, harnessTools, session } = await hydrateTurnTools(input);
+  const definition = harnessTools.get(input.toolName);
+  if (
+    definition === undefined ||
+    isCodeModeAgentTool(definition) ||
+    !claimsForCodeMode(input.toolName, harnessTools)
+  ) {
+    return {
+      status: "failed",
+      error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
+    };
+  }
+  if (definition.approval === undefined) return { status: "not-required" };
+  const toolInput = readApprovalToolInput(input.toolInput);
+  const approvedTools = getApprovedTools(session, resolveApprovalKeyFromTools(harnessTools));
+  let status: NativeApprovalStatus;
+  try {
+    const scoped = await withContextScope(ctx, session, async (enriched) => ({
+      result: await evaluateToolApproval(definition, {
+        approvedTools,
+        callId: input.toolCallId,
+        toolInput: input.toolInput,
+      }),
+      session: enriched,
+    }));
+    status = scoped.result;
+  } catch (error) {
+    return { status: "failed", error: toErrorMessage(error) };
+  }
+  const kind = typeof status === "object" ? status.type : status;
+  switch (kind) {
+    case "user-approval":
+      return {
+        status: "required",
+        approvalKey: definition.approvalKey?.(toolInput) ?? definition.name,
+        action: { callId: input.toolCallId, input: toolInput, toolName: input.toolName },
+        request: createToolApprovalPrompt(input.toolName),
+      };
+    case "denied": {
+      const reason = typeof status === "object" ? status.reason : undefined;
+      return reason === undefined ? { status: "denied" } : { status: "denied", reason };
+    }
+    default:
+      return { status: "not-required" };
+  }
 }
 
 export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {
@@ -369,6 +464,18 @@ async function hydrateTurnTools(input: {
     session,
     rehydrateConnections,
   };
+}
+
+// Approval cards and `approvalKey(input)` expect the object the model would
+// have sent; a program passing anything else still gets its schema error from
+// the tool itself once approved.
+function readApprovalToolInput(value: unknown): JsonObject {
+  if (!isObject(value)) return {};
+  try {
+    return parseJsonObject(value);
+  } catch {
+    return {};
+  }
 }
 
 function readCallInterrupt(interrupt: WorkflowSandboxInterrupt): CodeModeCallInterrupt {

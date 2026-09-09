@@ -15,6 +15,7 @@ export default defineEval({
       "echo",
       "marker",
       "gated",
+      "gated_once",
       "background",
       "plan_deploy",
       "connection_search",

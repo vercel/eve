@@ -13,7 +13,7 @@ import {
 } from "#harness/code-mode.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
-import { always } from "#tools/approval/policies.js";
+import { always, never, once } from "#tools/approval/policies.js";
 import {
   DEFAULT_CODE_MODE_MAX_SUBAGENTS,
   parseCodeModeWorkflowInput,
@@ -100,7 +100,15 @@ describe("claimsForCodeMode", () => {
     ]);
 
     const claimed = [...tools.keys()].filter((name) => claimsForCodeMode(name, tools));
-    expect(claimed).toEqual(["add", "researcher", "agent", "authored_wf", "background_wf"]);
+    expect(claimed).toEqual([
+      "add",
+      "gated",
+      "researcher",
+      "agent",
+      "authored_wf",
+      "background_wf",
+      "gated_wf",
+    ]);
   });
 
   it("claims the framework question tool while other handled tools stay direct", () => {
@@ -155,11 +163,20 @@ describe("applyCodeModeTool", () => {
       );
       expect(input.toolCatalog).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ name: "bash", target: gated ? "direct" : "tool" }),
-          expect.objectContaining({ name: "read_file", target: gated ? "direct" : "tool" }),
+          expect.objectContaining({ name: "bash", target: "tool" }),
+          expect.objectContaining({ name: "read_file", target: "tool" }),
           expect.objectContaining({ name: "remote_lookup", target: "tool" }),
         ]),
       );
+      for (const entry of input.toolCatalog) {
+        if (entry.name === "remote_lookup" || entry.name === CODE_MODE_TOOL_NAME) {
+          expect(entry).not.toHaveProperty("approval");
+        } else if (gated) {
+          expect(entry.approval).toBe(true);
+        } else {
+          expect(entry).not.toHaveProperty("approval");
+        }
+      }
     },
   );
 
@@ -254,9 +271,45 @@ describe("applyCodeModeTool", () => {
       toolCatalog: expect.arrayContaining([
         expect.objectContaining({ name: "add", target: "tool", outputSchema: { type: "number" } }),
         expect.objectContaining({ name: "researcher", target: "agent" }),
-        expect.objectContaining({ name: "gated", target: "direct" }),
+        expect.objectContaining({ name: "gated", target: "tool", approval: true }),
       ]),
     });
+    expect(
+      parseCodeModeWorkflowInput(executeInput).toolCatalog.find((entry) => entry.name === "add"),
+    ).not.toHaveProperty("approval");
+  });
+
+  it("marks approval-gated tools and workflow tools for the body and keeps them direct", async () => {
+    const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      ["gated", tool("gated", { approval: always() })],
+      ["gated_once", tool("gated_once", { approval: once() })],
+      ["open", tool("open", { approval: never() })],
+      ["gated_wf", workflowTool("gated_wf", { approval: always() })],
+      ["gated_dynamic", tool("gated_dynamic", { approval: always(), dynamic: true })],
+      [CODE_MODE_TOOL_NAME, codeModeDefinition()],
+    ]);
+    const tools = buildToolSet({ tools: harnessTools });
+    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    expect(Object.keys(applied.modelTools).sort()).toEqual([
+      CODE_MODE_TOOL_NAME,
+      "gated",
+      "gated_once",
+      "gated_wf",
+      "open",
+    ]);
+    const input = parseCodeModeWorkflowInput(
+      applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return 1;" }),
+    );
+    const byName = new Map(input.toolCatalog.map((entry) => [entry.name, entry]));
+    expect(byName.get("gated")).toMatchObject({ approval: true, target: "tool" });
+    expect(byName.get("gated_once")).toMatchObject({ approval: true, target: "tool" });
+    expect(byName.get("gated_dynamic")).toMatchObject({ approval: true, target: "tool" });
+    expect(byName.get("gated_wf")).toMatchObject({
+      approval: true,
+      target: "workflow",
+      workflowId: "workflow//app//gated_wf",
+    });
+    expect(byName.get("open")).not.toHaveProperty("approval");
   });
 
   it("lists names only and advertises discovery helpers", async () => {
@@ -286,7 +339,7 @@ describe("applyCodeModeTool", () => {
 
   it("keeps code_mode available for discovery when nothing is claimable", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      ["gated", tool("gated", { approval: always() })],
+      ["background", tool("background", { execution: "background" })],
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
     const applied = await applyCodeModeTool({
@@ -296,7 +349,7 @@ describe("applyCodeModeTool", () => {
       tools: buildToolSet({ tools: harnessTools }),
     });
     expect(applied.harnessTools.has(CODE_MODE_TOOL_NAME)).toBe(true);
-    expect(Object.keys(applied.modelTools)).toEqual(["gated", "code_mode"]);
+    expect(Object.keys(applied.modelTools)).toEqual(["background", "code_mode"]);
   });
 
   it("pins every advertised tool for discovery", async () => {
@@ -319,7 +372,7 @@ describe("applyCodeModeTool", () => {
     expect(input.toolCatalog.map((entry) => entry.name)).toEqual(Object.keys(tools).sort());
     expect(
       input.toolCatalog.filter((entry) => entry.target !== "direct").map((entry) => entry.name),
-    ).toEqual(["add"]);
+    ).toEqual(["add", "gated"]);
     expect(input.toolCatalog.find((entry) => entry.name === "gated")?.inputSchema).toEqual({
       type: "object",
       properties: { q: { type: "string" } },

@@ -64,6 +64,7 @@ export async function applyCodeModeTool(input: {
     let description = typeof tool.description === "string" ? tool.description : "";
     let target: CodeModeToolCatalogEntry["target"] = "direct";
     let workflowId: string | undefined;
+    let approval = false;
     if (claimsForCodeMode(name, input.harnessTools)) {
       const definition = input.harnessTools.get(name)!;
       if (isCodeModeAgentTool(definition)) {
@@ -74,6 +75,7 @@ export async function applyCodeModeTool(input: {
       } else {
         target = "tool";
       }
+      approval = target !== "agent" && isApprovalGated(definition);
     }
     if (target === "agent") {
       description = description.replace(AGENT_TASK_RECEIPT_DESCRIPTION, "").trim();
@@ -97,6 +99,7 @@ export async function applyCodeModeTool(input: {
             : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
         target,
       };
+    if (approval) entry.approval = true;
     if (workflowId !== undefined) entry.workflowId = workflowId;
     toolCatalog.push(entry);
   }
@@ -135,8 +138,9 @@ export async function applyCodeModeTool(input: {
 
 /**
  * Subagents are awaited through the owner and authored workflow tools run
- * inline inside the program's run; other background tools, approval gates,
- * and framework controls stay direct.
+ * inline inside the program's run; other background tools and framework
+ * controls stay direct. Approval-gated tools are claimed too: the body asks
+ * the person before each gated call (see `approval` on the catalog entry).
  */
 export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean {
   if (name === CODE_MODE_TOOL_NAME) return false;
@@ -157,16 +161,15 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   if (definition.workflowId !== undefined) {
     // The catalog carries only the workflow id, so a body that depends on a
     // pinned `executeInput` cannot be started from a program.
-    return definition.executeInput === undefined && isUngated(definition);
+    return definition.executeInput === undefined;
   }
   if (definition.execution === "background") return false;
   if (definition.execute === undefined) return false;
-  if (definition.behavior?.handling !== undefined) return false;
-  return isUngated(definition);
+  return definition.behavior?.handling === undefined;
 }
 
-function isUngated(definition: HarnessToolDefinition): boolean {
-  return definition.approval === undefined || isNeverApproval(definition.approval);
+function isApprovalGated(definition: HarnessToolDefinition): boolean {
+  return definition.approval !== undefined && !isNeverApproval(definition.approval);
 }
 
 /**

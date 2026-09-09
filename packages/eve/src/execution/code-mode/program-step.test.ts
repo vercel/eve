@@ -7,7 +7,9 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { createStepStartedEvent } from "#protocol/message.js";
 import { resolveConnectionSearchDynamicTools } from "#execution/tools/connection-search.js";
-import { never, always } from "#tools/approval/policies.js";
+import { never, always, once } from "#tools/approval/policies.js";
+import { APPROVED_TOOLS_KEY } from "#harness/hitl/approved-tools.js";
+import type { ApprovalContext } from "#approval/definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import {
   AuthKey,
@@ -42,6 +44,7 @@ import { defineTool } from "#tools/definition.js";
 
 const state = vi.hoisted(() => ({
   ctx: undefined as ContextContainer | undefined,
+  sessionState: {} as Record<string, unknown>,
   tools: new Map<string, HarnessToolDefinition>(),
 }));
 vi.mock("#context/serialize.js", async (importOriginal) => ({
@@ -88,6 +91,7 @@ vi.mock("#execution/session.js", () => ({
     history: [],
     state: {
       "eve.harness.workflowContinuationSecurity": { version: 1, signingKey: "a".repeat(43) },
+      ...state.sessionState,
     },
   }),
 }));
@@ -95,7 +99,7 @@ vi.mock("#runtime/graph.js", () => ({ getResolvedRuntimeAgentNode: () => ({}) })
 vi.mock("#context/dynamic-subagent-lifecycle.js", () => ({ buildDynamicSubagentTools: () => [] }));
 
 const { BundleKey } = await import("#runtime/sessions/runtime-context-keys.js");
-const { executeCodeModeToolStep, runCodeModeProgramStep } =
+const { evaluateCodeModeApprovalStep, executeCodeModeToolStep, runCodeModeProgramStep } =
   await import("#execution/code-mode/program-step.js");
 
 function definition(
@@ -190,17 +194,128 @@ beforeEach(() => {
   state.ctx.set(SessionIdKey, "parent-session");
   state.ctx.set(CallbackBaseUrlKey, "https://app.example");
   state.ctx.set(BundleKey, { graph: {}, nodeId: "root", resolvedAgent: {} } as never);
+  state.sessionState = {};
   state.tools = new Map();
 });
 
-describe("executeCodeModeToolStep", () => {
+describe("evaluateCodeModeApprovalStep", () => {
+  const approvalRequest = {
+    allowFreeform: false,
+    display: "confirmation",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "cancel", label: "Cancel" },
+    ],
+    prompt: "Approve tool call: gated",
+  };
+
+  it("asks for an always() tool with the direct path's prompt and the nested call as the action", async () => {
+    state.tools.set("gated", definition("gated", { approval: always() }));
+    await expect(
+      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "eu" } })),
+    ).resolves.toEqual({
+      status: "required",
+      approvalKey: "gated",
+      action: { callId: "inner", input: { region: "eu" }, toolName: "gated" },
+      request: approvalRequest,
+    });
+  });
+
+  it("keys once() on the recorded approval and skips the prompt afterwards", async () => {
+    state.tools.set("gated", definition("gated", { approval: once() }));
+    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toMatchObject({
+      status: "required",
+      approvalKey: "gated",
+    });
+    state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated"] };
+    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toEqual({
+      status: "not-required",
+    });
+  });
+
+  it("uses the definition's approvalKey for recording and remembered approvals", async () => {
+    state.tools.set(
+      "gated",
+      definition("gated", {
+        approval: ({ approvedTools, toolName, toolInput }) =>
+          approvedTools.has(`${toolName}:${String(toolInput?.region)}`)
+            ? "not-applicable"
+            : "user-approval",
+        approvalKey: (toolInput) => `gated:${String(toolInput.region)}`,
+      }),
+    );
+    // Fine-grained policies key on input: a different region still prompts.
+    state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated:us"] };
+    await expect(
+      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "eu" } })),
+    ).resolves.toMatchObject({ status: "required", approvalKey: "gated:eu" });
+    await expect(
+      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "us" } })),
+    ).resolves.toEqual({ status: "not-required" });
+  });
+
   it.each([
-    { policy: "unset", approval: undefined, allowed: true },
-    { policy: "never", approval: never(), allowed: true },
-    { policy: "always", approval: always(), allowed: false },
+    ["unset", {}, { status: "not-required" }],
+    ["never()", { approval: never() }, { status: "not-required" }],
+    ["approved", { approval: () => "approved" as const }, { status: "not-required" }],
+    ["true", { approval: () => true }, { status: "required" }],
+    ["false", { approval: () => false }, { status: "not-required" }],
+    ["denied", { approval: () => "denied" as const }, { status: "denied" }],
+    [
+      "denied with reason",
+      { approval: () => ({ type: "denied" as const, reason: "outside business hours" }) },
+      { status: "denied", reason: "outside business hours" },
+    ],
+  ] as const)("maps a %s policy answer", async (_label, extra, expected) => {
+    state.tools.set("gated", definition("gated", extra as Partial<HarnessToolDefinition>));
+    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toMatchObject(
+      expected,
+    );
+  });
+
+  it("evaluates the policy with the turn's session context", async () => {
+    const approval = vi.fn((_context: ApprovalContext) => "user-approval" as const);
+    state.tools.set("gated", definition("gated", { approval }));
+    await evaluateCodeModeApprovalStep(nestedInput("gated"));
+    expect(approval).toHaveBeenCalledOnce();
+    expect(approval.mock.calls[0]?.[0]).toMatchObject({
+      callId: "inner",
+      session: { id: "parent-session" },
+      toolName: "gated",
+    });
+  });
+
+  it("fails for tools the program cannot call and when the policy throws", async () => {
+    state.tools.set("background", definition("background", { execution: "background" }));
+    await expect(evaluateCodeModeApprovalStep(nestedInput("background"))).resolves.toEqual({
+      status: "failed",
+      error: 'Tool "background" is not available to code_mode in this session.',
+    });
+    state.tools.set(
+      "gated",
+      definition("gated", {
+        approval: () => {
+          throw new Error("policy exploded");
+        },
+      }),
+    );
+    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toEqual({
+      status: "failed",
+      error: "policy exploded",
+    });
+  });
+});
+
+describe("executeCodeModeToolStep", () => {
+  // Approval is settled by the body before this step runs, so a gated
+  // connection tool executes here like an ungated one.
+  it.each([
+    { policy: "unset", approval: undefined },
+    { policy: "never", approval: never() },
+    { policy: "always", approval: always() },
   ])(
     "restores and executes a discovered connection with $policy approval after a cold start",
-    async ({ approval, allowed }) => {
+    async ({ approval }) => {
       const executeTool = vi.fn(async () => ({ issues: ["issue-1"] }));
       const resolver: ResolvedDynamicToolResolver = {
         slug: "connection_search",
@@ -260,23 +375,15 @@ describe("executeCodeModeToolStep", () => {
       });
       clearDurableDynamicCallbacks("parent-session");
 
-      await expect(nested("tracker__list_issues")).resolves.toEqual(
-        allowed
-          ? { status: "completed", output: { issues: ["issue-1"] } }
-          : {
-              status: "failed",
-              error: 'Tool "tracker__list_issues" is not available to code_mode in this session.',
-            },
+      await expect(nested("tracker__list_issues")).resolves.toEqual({
+        status: "completed",
+        output: { issues: ["issue-1"] },
+      });
+      expect(executeTool).toHaveBeenCalledExactlyOnceWith(
+        "list_issues",
+        {},
+        expect.objectContaining({ callId: "inner" }),
       );
-      if (allowed) {
-        expect(executeTool).toHaveBeenCalledExactlyOnceWith(
-          "list_issues",
-          {},
-          expect.objectContaining({ callId: "inner" }),
-        );
-      } else {
-        expect(executeTool).not.toHaveBeenCalled();
-      }
       await expect(nested("connection_search")).resolves.toMatchObject({ status: "failed" });
     },
   );

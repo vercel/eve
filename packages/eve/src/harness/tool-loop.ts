@@ -137,6 +137,7 @@ import {
   resolvePendingInput,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { resolveApprovalKeyFromTools } from "#harness/hitl/approval-input-requests.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import {
   convertStaleResponsesToUserMessage,
@@ -3020,23 +3021,6 @@ async function maybeCompact(input: {
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
-}
-
-/**
- * Creates an approval-key resolver from the tool map. The resolver computes
- * compound keys at recording time instead of pre-computing and persisting
- * them on the pending batch.
- */
-function resolveApprovalKeyFromTools(
-  tools: HarnessToolMap,
-): (request: InputRequest) => string | undefined {
-  return (request) => {
-    const toolDef = tools.get(request.action.toolName);
-    if (toolDef?.approvalKey === undefined) {
-      return undefined;
-    }
-    return toolDef.approvalKey(request.action.input);
-  };
 }
 
 /**

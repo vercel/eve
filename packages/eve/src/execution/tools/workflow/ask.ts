@@ -1,6 +1,8 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type {
+  WorkflowToolAskApproval,
+  WorkflowToolAskRequest,
   WorkflowToolRunOwner,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
@@ -71,13 +73,30 @@ export function readWorkflowToolRunAdmission(ctx: object): WorkflowToolRunContex
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
 export function ask(ctx: object, request: ToolInputRequest): Hook<ToolInputResponse> {
+  return send(ctx, { kind: "ask", request });
+}
+
+/**
+ * Asks the person to approve a nested tool call. The owner renders it as the
+ * tool-approval card for `approval.toolName`, so channels show the same prompt
+ * a direct call would; the answer arrives like any other `ask` answer.
+ */
+export function askApproval(
+  ctx: object,
+  request: ToolInputRequest,
+  approval: WorkflowToolAskApproval,
+): Hook<ToolInputResponse> {
+  return send(ctx, { approval, kind: "ask", request });
+}
+
+function send(ctx: object, request: WorkflowToolAskRequest): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {
     kind: "request",
     from: context.from,
     replyTo: answer.token,
-    request: { kind: "ask", request },
+    request,
   });
   return answer;
 }

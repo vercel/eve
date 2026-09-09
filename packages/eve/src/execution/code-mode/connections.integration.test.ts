@@ -8,7 +8,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { applyCodeModeTool } from "#harness/code-mode.js";
-import { buildToolSet, buildToolApproval } from "#harness/tools.js";
+import { buildToolSet, evaluateToolApproval } from "#harness/tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createStepStartedEvent } from "#protocol/message.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -40,15 +40,22 @@ const authoredTools = new Map<string, HarnessToolDefinition>([
 ]);
 
 describe("connection tools in code mode", () => {
+  // Every discovered connection tool is claimed; gated ones carry the approval
+  // marker so the body asks before the nested step runs.
   it.each([
-    { policy: "unset", approval: undefined, claimed: true },
-    { policy: "never", approval: never(), claimed: true },
-    { policy: "always", approval: always(), claimed: false },
-    { policy: "once", approval: once(), claimed: false },
-    { policy: "custom", approval: () => "not-applicable" as const, claimed: false },
+    { policy: "unset", approval: undefined, gated: false, decision: undefined },
+    { policy: "never", approval: never(), gated: false, decision: "not-applicable" },
+    { policy: "always", approval: always(), gated: true, decision: "user-approval" },
+    { policy: "once", approval: once(), gated: true, decision: "user-approval" },
+    {
+      policy: "custom",
+      approval: () => "not-applicable" as const,
+      gated: true,
+      decision: "not-applicable",
+    },
   ])(
     "preserves discovery and $policy approval across step serialization",
-    async ({ policy, approval, claimed }) => {
+    async ({ approval, gated, decision }) => {
       const executeTool = vi.fn(async () => ({ issues: ["issue-1"] }));
       const registry: ConnectionRegistry = {
         dispose: async () => {},
@@ -120,37 +127,36 @@ describe("connection tools in code mode", () => {
 
       const next = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(parent))));
       const second = await step(next, 1);
-      expect(Object.keys(second.modelTools).sort()).toEqual(
-        claimed
-          ? ["code_mode", "connection_search"]
-          : ["code_mode", "connection_search", "linear__list_issues"],
-      );
+      expect(Object.keys(second.modelTools).sort()).toEqual(["code_mode", "connection_search"]);
       expect(executeTool).not.toHaveBeenCalled();
 
-      if (!claimed) {
-        const check = buildToolApproval(second.modelTools);
-        if (typeof check !== "function") throw new Error("Expected an approval policy");
-        await expect(
-          contextStorage.run(next, () =>
-            check({
-              toolCall: { toolName: "linear__list_issues", input: {}, toolCallId: "call" },
-            } as never),
-          ),
-        ).resolves.toBe(policy === "custom" ? "not-applicable" : "user-approval");
-        return;
-      }
       const pinned = parseCodeModeWorkflowInput(
         second.harnessTools.get("code_mode")!.executeInput!({
           js: "return await tools.linear__list_issues({});",
         }),
       );
-      expect(
-        pinned.toolCatalog.filter((entry) => entry.target !== "direct").map((entry) => entry.name),
-      ).toEqual(["linear__list_issues"]);
+      const claimed = pinned.toolCatalog.filter((entry) => entry.target !== "direct");
+      expect(claimed.map((entry) => entry.name)).toEqual(["linear__list_issues"]);
+      if (gated) {
+        expect(claimed[0]).toMatchObject({ approval: true });
+      } else {
+        expect(claimed[0]).not.toHaveProperty("approval");
+      }
 
       const nested = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(next))));
       provide(nested);
       const nestedTools = buildResponseAuthorizationTools({ authoredTools, context: nested });
+      // The restored policy answers inside the nested step the way it would
+      // for a direct call.
+      await expect(
+        contextStorage.run(nested, () =>
+          evaluateToolApproval(nestedTools.get("linear__list_issues")!, {
+            approvedTools: new Set(),
+            callId: "nested-call",
+            toolInput: {},
+          }),
+        ),
+      ).resolves.toBe(decision);
       await expect(
         contextStorage.run(nested, () =>
           nestedTools.get("linear__list_issues")!.execute!(
