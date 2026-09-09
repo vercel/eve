@@ -5,14 +5,24 @@ packages:
   - e2e/fixtures/*
   - packages/*
 
+virtualStoreType: global
+
+packageExtensions:
+  "@nuxt/kit@4":
+    dependencies:
+      "@nuxt/schema": "^4.0.0"
+
 allowBuilds:
   "@google/genai": false # No-op preinstall.
+  "@mongodb-js/zstd": false # Optional native binding is not required.
   "@parcel/watcher": false # Builds from source only when explicitly requested.
   "@swc/core": false # Only its pure transform-utils module is vendored (via @workflow/builders); eve never runs SWC.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.
   bufferutil: false # The package already includes the supported prebuilt bindings.
+  cbor-extract: false # Optional native binding is not required.
   cpu-features: false # Optional ssh2 acceleration; JavaScript fallback is sufficient.
   esbuild: true # Verifies the installed platform binary.
+  node-liblzma: false # Optional native binding is not required.
   phase: false # Would install its own Git hooks.
   protobufjs: false # Only checks the package version.
   sharp: false # Prebuilt platform packages need no install script.
