@@ -8,6 +8,7 @@ export default defineEval({
     turn.expectOk();
     turn.calledTool("code_mode", { count: 1, status: "completed" });
     turn.messageIncludes('"complete":true');
+    turn.messageIncludes('"keywords":true');
     turn.messageIncludes('"schemas":true');
     t.noFailedActions();
   },

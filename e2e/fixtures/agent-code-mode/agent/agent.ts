@@ -121,19 +121,49 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       `const direct = ${JSON.stringify(direct)};`,
       "const complete = direct.every(name => catalog.some(tool => tool.name === name)) && catalog.filter(tool => tool.requiresDirectCall).every(tool => direct.includes(tool.name));",
       'const schemas = await tools.describe_tools({ names: ["background", "connection_search", "gated"] });',
-      'return { complete, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
+      'const matches = await tools.search_tools({ query: "ECHO prefix nonexistentkeyword" });',
+      'const keywords = matches[0]?.name === "echo";',
+      'return { complete, keywords, schemas: schemas.every(tool => tool.requiresDirectCall && tool.inputSchema.type === "object") };',
     ].join("\n");
   } else if (message.includes("CODEMODE-CONNECTIONS-START")) {
     directive = "CODEMODE-CONNECTIONS";
+    if (!request.toolResults.some((entry) => entry.id === "CODEMODE-CONNECTIONS-MISSING")) {
+      return {
+        toolCalls: [
+          {
+            id: "CODEMODE-CONNECTIONS-MISSING",
+            name: "code_mode",
+            input: {
+              js: [
+                'const matches = await tools.search_tools({ query: "getStatus" });',
+                'if (matches.length !== 0) throw new Error("Undiscovered connection tool was already loaded.");',
+                'const [fallback] = await tools.describe_tools({ names: ["connection_search"] });',
+                'if (!fallback.requiresDirectCall) throw new Error("Connection discovery must run directly.");',
+                "return { missing: true };",
+              ].join("\n"),
+            },
+          },
+        ],
+      };
+    }
     if (!request.toolResults.some((entry) => entry.name === "connection_search")) {
-      return { toolCalls: [{ name: "connection_search", input: { keywords: "status" } }] };
+      return {
+        toolCalls: [
+          { name: "connection_search", input: { connection: "catalog", keywords: "status" } },
+        ],
+      };
     }
     if (request.tools.some((tool) => tool.name === "catalog__getStatus")) {
       throw new Error("Code Mode exposed the discovered connection tool directly.");
     }
     // The inline spec tests discovery without making an external API request.
-    js =
-      'const [discovered] = await tools.describe_tools({ names: ["catalog__getStatus"] }); return { discovered: discovered.name, requiresDirectCall: discovered.requiresDirectCall, echo: await tools.echo({ value: "catalog-ready" }) };';
+    js = [
+      'const matches = await tools.search_tools({ query: "catalog status nonexistentkeyword" });',
+      'if (matches[0]?.name !== "catalog__getStatus") throw new Error("Keyword search did not rank the discovered tool first.");',
+      "const [discovered] = await tools.describe_tools({ names: [matches[0].name] });",
+      'if (discovered.inputSchema.type !== "object") throw new Error("Discovered tool schema is missing.");',
+      'return { discovered: discovered.name, requiresDirectCall: discovered.requiresDirectCall, echo: await tools.echo({ value: "catalog-ready" }) };',
+    ].join("\n");
   } else if (message.includes("CODEMODE-AUTH-START")) {
     directive = "CODEMODE-AUTH";
     js =

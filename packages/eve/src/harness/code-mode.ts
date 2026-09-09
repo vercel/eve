@@ -29,7 +29,9 @@ const ORCHESTRATION_INSTRUCTION =
   "Reuse fetched results; avoid repeated fetches and duplicate computation.";
 
 const DISCOVERY_INSTRUCTION =
-  "Use tools.search_tools and tools.describe_tools to discover every available tool. " +
+  "Use tools.search_tools and tools.describe_tools to inspect this program's tool catalog. " +
+  "This catalog excludes connection tools that have not been discovered yet. " +
+  "For missing connection tools, call connection_search directly outside this program, then start a new program with the discovered tools. " +
   "Tools marked requiresDirectCall must be called directly outside this program.";
 
 /**
@@ -164,15 +166,22 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
   return {
     [SEARCH_TOOLS_NAME]: {
       description:
-        "Search all available tools by case-insensitive substring of their name or description. " +
-        "Use a short term, or omit query to list all tools.",
+        "Search this program's tool catalog by case-insensitive keywords in names and descriptions. " +
+        "Matches any keyword; tools matching more keywords rank first. Omit query to list the catalog. " +
+        "Undiscovered connection tools are excluded: call connection_search directly to find them, then start a new program.",
       inputSchema: z.object({ query: z.string().optional() }),
       outputSchema: z.array(toolSummarySchema),
       execute: async ({ query }: { readonly query?: string }) => {
-        const needle = query?.toLowerCase().trim() ?? "";
+        const keywords = [...new Set(searchWords(query ?? ""))];
         return descriptions
-          .filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(needle))
-          .map(({ description, name, requiresDirectCall }) => ({
+          .map((entry) => {
+            const text = searchWords(`${entry.name} ${entry.description}`).join(" ");
+            const score = keywords.filter((keyword) => text.includes(keyword)).length;
+            return { entry, score };
+          })
+          .filter(({ score }) => keywords.length === 0 || score > 0)
+          .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+          .map(({ entry: { description, name, requiresDirectCall } }) => ({
             description,
             name,
             requiresDirectCall,
@@ -196,6 +205,14 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
         }),
     },
   } satisfies ToolSet;
+}
+
+function searchWords(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 }
 
 function readProgram(toolInput: unknown): string {

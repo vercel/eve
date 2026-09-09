@@ -107,9 +107,10 @@ describe("code-mode sandbox continuation contract", () => {
       applied.harnessTools.get("code_mode")!.executeInput!({
         js: [
           "const before = await tools.search_tools({});",
+          'const matches = await tools.search_tools({ query: "APPROVAL nonexistentkeyword" });',
           'const schemas = await tools.describe_tools({ names: ["gated", "provider", "unknown"] });',
           "const result = await tools.echo({});",
-          "return { before, schemas, result, after: await tools.search_tools({}) };",
+          'return { before, schemas, result, after: await tools.search_tools({}), matches: matches.map(tool => tool.name), resumedMatches: (await tools.search_tools({ query: "approval nonexistentkeyword" })).map(tool => tool.name) };',
         ].join("\n"),
       }),
     );
@@ -151,6 +152,8 @@ describe("code-mode sandbox continuation contract", () => {
         before: names,
         after: names,
         result: "done",
+        matches: ["gated"],
+        resumedMatches: ["gated"],
         schemas: [
           {
             name: "gated",

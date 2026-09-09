@@ -233,7 +233,9 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain(DESCRIBE_TOOLS_NAME);
     expect(description).toContain('"names"');
     expect(description).toContain('"query"');
-    expect(description).toContain("substring");
+    expect(description).toContain("Matches any keyword");
+    expect(description).toContain("call connection_search directly");
+    expect(description).toContain("then start a new program");
     expect(description).not.toContain('"q"');
     expect(Object.keys(applied.modelTools)).toEqual(["add", CODE_MODE_TOOL_NAME]);
     expect(description).not.toContain("Prefer direct tools");
@@ -341,6 +343,45 @@ describe("createDiscoveryTools", () => {
       success: true,
       value: [],
     });
+  });
+
+  it("ranks individual keywords across names and descriptions without requiring the whole phrase", async () => {
+    const search = createDiscoveryTools([
+      { ...entry, name: "venmo__login", description: "Login to your account." },
+      { ...entry, name: "simple_note__login", description: "Login to your account." },
+      { ...entry, name: "simple_note__listNotes", description: "List notes." },
+      { ...entry, name: "unrelated", description: "Add numbers." },
+    ])[SEARCH_TOOLS_NAME];
+    const names = async (query: string) =>
+      (await search.execute({ query })).map((tool) => tool.name);
+
+    expect(await names("login authenticate access token simple note venmo")).toEqual([
+      "simple_note__login",
+      "simple_note__listNotes",
+      "venmo__login",
+    ]);
+    expect(await names("VENMO login login")).toEqual(["venmo__login", "simple_note__login"]);
+    expect(await names("simple-note/listNotes")).toEqual([
+      "simple_note__listNotes",
+      "simple_note__login",
+    ]);
+    expect(await names("LOGIN missing")).toEqual(["simple_note__login", "venmo__login"]);
+    expect(await names("missing")).toEqual([]);
+    expect(await names("   ")).toEqual([
+      "simple_note__listNotes",
+      "simple_note__login",
+      "unrelated",
+      "venmo__login",
+    ]);
+  });
+
+  it("does not mistake a missing connection tool for a loaded one", async () => {
+    const search = createDiscoveryTools([
+      { ...entry, name: "connection_search", description: "Search connections.", target: "direct" },
+    ])[SEARCH_TOOLS_NAME];
+    expect(await search.execute({ query: "venmo login" })).toEqual([]);
+    expect(search.description).toContain("Undiscovered connection tools are excluded");
+    expect(search.description).toContain("call connection_search directly");
   });
 
   it("declares both known-tool descriptions and unknown-tool errors", async () => {

@@ -337,9 +337,16 @@ policy. `code_mode` remains available for discovery even when all other tools
 require direct calls.
 
 `tools.search_tools({ query })` returns an array of matching tools; `query` is a
-case-insensitive substring of the name or description. Omit it to list every
-tool. `tools.describe_tools({ names })` returns an array of descriptions and
+case-insensitive keyword search over names and descriptions. A tool can match
+any keyword; more matching keywords rank first, with ties sorted by tool name.
+Whitespace, punctuation, and camel-case boundaries separate words. Omit `query`
+to list the program's catalog. `tools.describe_tools({ names })` returns an array of descriptions and
 input schemas for the requested tool names.
+
+This catalog excludes connection tools that have not been discovered yet. An
+empty search result does not mean the connection lacks that API. Call
+`connection_search` directly with the connection name and relevant keywords,
+then start a new program to search or describe the discovered tools.
 
 Dynamic tools, including discovered connection tools, use the same eligibility
 rules. `connection_search` stays direct so its discoveries reach the next model
