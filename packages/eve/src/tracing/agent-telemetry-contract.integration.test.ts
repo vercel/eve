@@ -445,10 +445,10 @@ describe("exported agent telemetry contract", () => {
           kind: "subagent-result",
           origin: "child",
           subagentName: "child",
-          output: "private failure",
+          output: "private reply",
           outcome: {
             kind: "terminal",
-            result: { kind: "failed", error: { message: "private failure" } },
+            result: { kind: "succeeded", output: "private reply" },
             usageDelta: {
               inputTokens: 10,
               outputTokens: 5,
@@ -458,7 +458,7 @@ describe("exported agent telemetry contract", () => {
           },
         },
       });
-      if (audience === "private") expect(JSON.stringify(settled)).not.toContain("private failure");
+      if (audience === "private") expect(JSON.stringify(settled)).not.toContain("private reply");
       parent = await deserializeContext(settled);
       await contextStorage.run(parent, async () => {
         await runtime.forceFlush();
@@ -634,19 +634,20 @@ describe("exported agent telemetry contract", () => {
       expect(caller.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
       expect(caller.attributes["gen_ai.usage.output_tokens"]).toBeUndefined();
       expect(normalizeTraceForest(parsed, exported)).toEqual([
-        "trace child:turn_0 outcome=completed",
-        "  invoke_agent child",
-        "    agent.step",
-        "      chat test",
-        "  link invoke_agent child --agent.dispatch--> parent:turn_0/agent.action child role=caller",
+        "conversation original-conversation",
         "trace parent:turn_0 outcome=completed channel=http:web delivery=delivery",
+        "  invoked from external via channel.request",
         "  invoke_agent parent",
         "    agent.step",
         "      agent.action coordinate",
         "        agent.action child role=caller",
         "        agent.approval approved",
         "        execute_tool coordinate",
-        "  link invoke_agent parent --channel.request--> external",
+        "trace child:turn_0 outcome=completed",
+        "  invoked from parent:turn_0/agent.action child role=caller via agent.dispatch",
+        "  invoke_agent child",
+        "    agent.step",
+        "      chat test",
         "trace parent:turn_1 outcome=failed channel=http:web delivery=delivery-failed",
         "  invoke_agent parent",
         "trace parent:turn_2 outcome=cancelled channel=http:web delivery=delivery-cancelled",
@@ -671,7 +672,7 @@ describe("exported agent telemetry contract", () => {
       );
       expect(metadata).not.toContain("private ");
       if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
-      else expect(new TextDecoder().decode(bytes)).toContain("private failure");
+      else expect(new TextDecoder().decode(bytes)).toContain("private reply");
       await runtime.shutdown();
     },
   );
@@ -886,15 +887,35 @@ function normalizeTraceForest(
       )}`,
     ]),
   );
+  const causalParents = new Map(
+    exported.flatMap((span) =>
+      span.links
+        .filter(
+          (link) =>
+            link.attributes?.["eve.link.type"] === "agent.dispatch" &&
+            aliases.has(link.context.traceId),
+        )
+        .map((link) => [span.spanContext().traceId, link.context.traceId] as const),
+    ),
+  );
   const byIdentity = new Map(spans.map((span) => [`${span.traceId}:${span.spanId}`, span]));
   const children = Map.groupBy(
     spans.filter((span) => span.parentSpanId !== undefined),
     (span) => `${span.traceId}:${span.parentSpanId!}`,
   );
-  const lines: string[] = [];
-  for (const root of roots.toSorted((left, right) =>
-    aliases.get(left.traceId)!.localeCompare(aliases.get(right.traceId)!),
-  )) {
+  const conversationIds = [
+    ...new Set(roots.map((root) => String(root.attributes["gen_ai.conversation.id"]))),
+  ];
+  const lines =
+    conversationIds.length === 1 ? [`conversation ${conversationIds[0]}`] : ["conversation mixed"];
+  for (const root of roots.toSorted((left, right) => {
+    if (causalParents.get(left.traceId) === right.traceId) return 1;
+    if (causalParents.get(right.traceId) === left.traceId) return -1;
+    const sequence =
+      Number(left.attributes["agent.turn.sequence"]) -
+      Number(right.attributes["agent.turn.sequence"]);
+    return sequence || aliases.get(left.traceId)!.localeCompare(aliases.get(right.traceId)!);
+  })) {
     const alias = aliases.get(root.traceId)!;
     const channelKind = root.attributes["agent.channel.kind"];
     const channelName = root.attributes["agent.channel.name"];
@@ -906,25 +927,22 @@ function normalizeTraceForest(
           : ` channel=${String(channelKind)}:${String(channelName)} delivery=${String(deliveryId)}`
       }`,
     );
-    appendTree(root, 1);
     const links = exported
       .filter((span) => span.spanContext().traceId === root.traceId)
       .flatMap((span) =>
         span.links.map((link) => {
-          const source = byIdentity.get(
-            `${span.spanContext().traceId}:${span.spanContext().spanId}`,
-          )!;
           const target = byIdentity.get(`${link.context.traceId}:${link.context.spanId}`);
           const type = String(link.attributes?.["eve.link.type"] ?? "unknown");
-          return `  link ${spanLabel(source)} --${type}--> ${
+          return `  invoked from ${
             target === undefined
               ? "external"
               : `${aliases.get(target.traceId)}/${spanLabel(target)}`
-          }`;
+          } via ${type}`;
         }),
       )
       .sort();
     lines.push(...links);
+    appendTree(root, 1);
   }
   return lines;
 
