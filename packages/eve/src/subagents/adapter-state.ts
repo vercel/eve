@@ -1,3 +1,5 @@
+import { isReplyTarget, type ReplyTarget } from "#execution/inbox/types.js";
+
 /**
  * Durable state for the subagent adapter, split from the adapter itself so
  * harness code can identify a delegated child run without reaching the
@@ -8,9 +10,8 @@
  * Durable adapter kind used for delegated subagent child runs.
  *
  * Framework-owned — authored channel code never constructs a subagent
- * adapter directly. Emitted by `buildSubagentRunInput`
- * (`execution/subagent-tool.ts`) when a parent dispatches a child
- * subagent.
+ * adapter directly. Emitted by `buildSubagentRunInput` when a parent
+ * dispatches a child subagent.
  */
 export const SUBAGENT_ADAPTER_KIND = "subagent";
 
@@ -27,7 +28,7 @@ export const SUBAGENT_ADAPTER_KIND = "subagent";
  */
 export interface SubagentAdapterState extends Record<string, unknown> {
   readonly callId: string;
-  readonly parentContinuationToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly parentSessionId: string;
   readonly subagentName: string;
   /** Owning task when this child was started by a background workflow tool. */
@@ -51,8 +52,7 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
   return (
     typeof state.callId === "string" &&
     state.callId.length > 0 &&
-    typeof state.parentContinuationToken === "string" &&
-    state.parentContinuationToken.length > 0 &&
+    isReplyTarget(state.parentReplyTo) &&
     typeof state.parentSessionId === "string" &&
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0 &&

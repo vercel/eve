@@ -43,7 +43,7 @@ export default defineEval({
       : await waitForMessage(t, blocked, GOOG_PRICE);
     completed.messageIncludes(GOOG_PRICE);
 
-    t.succeeded();
+    completed.succeeded();
     t.calledSubagent("stock-price", {
       count: 1,
     });

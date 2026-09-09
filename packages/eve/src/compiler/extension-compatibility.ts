@@ -42,9 +42,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 31,
+    current: 32,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 32,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -53,42 +53,47 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       26: "Background tools now use task yield descriptors",
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      31: "The holder runtime changes turn events and workflow reply ownership.",
     },
   },
   channel: {
-    current: 19,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19],
+    current: 20,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 20],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      19: "The holder runtime changes turn events and workflow reply ownership.",
     },
   },
   schedule: {
-    current: 11,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11],
+    current: 12,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 12],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      11: "The holder runtime changes turn events and workflow reply ownership.",
     },
   },
   subagent: {
-    current: 10,
-    supported: [3, 4, 6, 7, 8, 9, 10],
+    current: 11,
+    supported: [3, 4, 6, 7, 8, 9, 11],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
+      10: "The holder runtime changes turn events and workflow reply ownership.",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   connection: {
-    current: 15,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 16],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
+      15: "The holder runtime changes turn events and workflow reply ownership.",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   hook: {
-    current: 22,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22],
+    current: 23,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -100,22 +105,25 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      22: "Hooks observe queued events before persistence in the holder runtime.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 17,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17],
+    current: 18,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 18],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      17: "The holder runtime adds turn.interrupted to lifecycle events.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 18,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18],
+    current: 19,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 19],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      18: "The holder runtime adds turn.interrupted to lifecycle events.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

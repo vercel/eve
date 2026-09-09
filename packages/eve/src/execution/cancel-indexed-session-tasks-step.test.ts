@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { DurableSessionState } from "#execution/session/state.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
@@ -17,7 +17,7 @@ vi.mock("#execution/effective-agent-config.js", () => ({
   resolveEffectiveAgentRuntime: vi.fn(() => ({ turnAgent: "turn-agent" })),
 }));
 vi.mock("#execution/session.js", () => ({ hydrateDurableSession: hydrateDurableSessionMock }));
-vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: cancelOwnedTaskMock }));
+vi.mock("#execution/tasks/control.js", () => ({ cancelOwnedTask: cancelOwnedTaskMock }));
 
 describe("cancelAllIndexedSessionTasksStep", () => {
   beforeEach(() => {
@@ -86,8 +86,6 @@ function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessi
         sessionId: "parent-session",
         state: { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } },
       },
-      version: 1,
     },
-    version: 1,
   };
 }

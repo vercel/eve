@@ -95,7 +95,6 @@ describe("dynamic tool source edits across a restart", () => {
     async () => {
       const app = await scenarioApp(EDITABLE_DYNAMIC_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-source-edit",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
@@ -103,7 +102,11 @@ describe("dynamic tool source edits across a restart", () => {
       try {
         const client = new Client({ host: server.url });
         const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.response.result()).resolves.toMatchObject({
+        await expect(
+          created.response.result().catch((error) => {
+            throw new Error(`${String(error)}\n${server.stderr()}`, { cause: error });
+          }),
+        ).resolves.toMatchObject({
           inputRequests: [],
           status: "waiting",
         });
@@ -113,6 +116,17 @@ describe("dynamic tool source edits across a restart", () => {
         ).result();
         expect(waiting.status).toBe("waiting");
         expect(waiting.inputRequests).toHaveLength(2);
+        const turnId = waiting.events.findLast((event) => event.type === "turn.started")?.data
+          .turnId;
+        await waitForCondition(async () => {
+          const run = JSON.parse(
+            await readFile(
+              join(app.appRoot, ".eve", ".workflow-data", "runs", `${turnId?.slice(5)}.json`),
+              "utf8",
+            ),
+          );
+          return run.status === "completed";
+        }, "The approval turn did not commit before restart.");
 
         // Edit the callback module while approvals are parked: pad the top of
         // the file (shifting every byte offset below — the old identity scheme

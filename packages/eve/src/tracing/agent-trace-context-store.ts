@@ -404,8 +404,13 @@ function deserializeError(value: unknown): Error | undefined {
 
 function isTurnTerminalType(
   value: string,
-): value is "turn.cancelled" | "turn.completed" | "turn.failed" {
-  return value === "turn.cancelled" || value === "turn.completed" || value === "turn.failed";
+): value is "turn.cancelled" | "turn.completed" | "turn.failed" | "turn.interrupted" {
+  return (
+    value === "turn.cancelled" ||
+    value === "turn.completed" ||
+    value === "turn.failed" ||
+    value === "turn.interrupted"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -206,6 +206,11 @@
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
     },
+    "./workflow": {
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
@@ -291,9 +296,9 @@
       "default": "./dist/src/public/context/index.js"
     },
     "./internal/workflow-step-execution": {
-      "types": "./dist/src/execution/tools/workflow/step-execution.d.ts",
-      "import": "./dist/src/execution/tools/workflow/step-execution.js",
-      "default": "./dist/src/execution/tools/workflow/step-execution.js"
+      "types": "./dist/src/execution/workflow-tool/step-execution.d.ts",
+      "import": "./dist/src/execution/workflow-tool/step-execution.js",
+      "default": "./dist/src/execution/workflow-tool/step-execution.js"
     },
     "./internal/programmatic-source-loader": {
       "types": "./dist/src/internal/programmatic-source-loader.d.ts",
@@ -496,14 +501,14 @@
     "@vercel/sandbox": "catalog:",
     "@vercel/sandbox-drives": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/builders": "5.0.0-beta.48",
-    "@workflow/core": "5.0.0-beta.48",
-    "@workflow/errors": "5.0.0-beta.20",
-    "@workflow/serde": "5.0.0-beta.2",
-    "@workflow/utils": "5.0.0-beta.10",
-    "@workflow/world": "5.0.0-beta.33",
-    "@workflow/world-local": "5.0.0-beta.42",
-    "@workflow/world-vercel": "5.0.0-beta.44",
+    "@workflow/builders": "https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz",
+    "@workflow/core": "https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz",
+    "@workflow/errors": "https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz",
+    "@workflow/serde": "https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz",
+    "@workflow/utils": "https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz",
+    "@workflow/world": "https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz",
+    "@workflow/world-local": "https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz",
+    "@workflow/world-vercel": "https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz",
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.34.0",
@@ -514,7 +519,6 @@
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
     "gray-matter": "4.0.3",
-    "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",

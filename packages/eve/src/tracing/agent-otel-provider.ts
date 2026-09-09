@@ -276,7 +276,11 @@ export function createAgentOtelInstrumentation(
   };
 
   const onTurnTerminal = async (event: InstrumentationTurnTerminalEvent): Promise<void> => {
-    if (event.type === "turn.cancelled" || event.type === "turn.failed") {
+    if (
+      event.type === "turn.cancelled" ||
+      event.type === "turn.interrupted" ||
+      event.type === "turn.failed"
+    ) {
       await actions.deleteForTurn(event.sessionId, event.turnId);
     }
     await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
@@ -547,6 +551,7 @@ export function createAgentOtelInstrumentation(
         "session.waiting": onSessionTransition,
         ...tools.events,
         "turn.cancelled": onTurnTerminal,
+        "turn.interrupted": onTurnTerminal,
         "turn.completed": onTurnTerminal,
         "turn.failed": onTurnTerminal,
         "turn.started": onTurnStarted,

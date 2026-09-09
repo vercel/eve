@@ -15,6 +15,19 @@ Work nests in three levels:
 
 Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
 
+The first execution step reads the latest settled session snapshot once, after
+claiming the turn inbox. Intermediate state travels through Workflow step inputs
+and results. At turn end, eve finalizes lifecycle effects, appends one full session
+snapshot, and then releases the inbox. The shared snapshot stream is not read or
+written between execution steps. Live response events use a separate event stream.
+
+Event writes enqueue locally and drain eagerly in order while model preparation
+and execution continue. Opening storage and writing preamble events do not block
+the model request. The step registers its final drain with `waitUntil` and waits
+for persistence before completing, so later steps and stream closure cannot
+overtake earlier output. Lifecycle handlers that prepare context still run before
+the model call. A failed drain aborts active model work and fails the step.
+
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
 When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
@@ -44,7 +57,7 @@ An eve agent spans two execution environments with different responsibilities:
 
 <AgentRuntimeDiagram />
 
-The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
+Each turn runs as an independent durable workflow in the app runtime. A small holding workflow keeps the session streams and continuation aliases alive between turns. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
 App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, and `write_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
 
@@ -57,6 +70,11 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 ## Resuming after a crash
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+
+Snapshot publication is a separate step after finalization. If its write is retried,
+it reuses the finalized state without rerunning lifecycle handlers. A retry can append
+an identical snapshot; the latest record remains the settled state. Intermediate
+execution uses normal Workflow retries rather than additional snapshot markers.
 
 There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
 
@@ -79,22 +97,13 @@ requests a parent-agent turn. See [background execution](../tools#background-exe
 
 ## Message delivery and steering
 
-eve does not maintain a durable FIFO queue of user messages for a session. An
-ID-addressed HTTP delivery and a channel-address delivery both target the
-session's current command inbox; neither is a general message queue.
+Channels resolve the session's immutable resource descriptor and start an independent turn workflow with the accepted input. The descriptor holds stream references; conversation history is restored inside the winning turn after it claims execution ownership. The session event stream stays stable across turns and deployments.
 
-Only one active session can own a channel continuation token. A channel-created
-session commits both its stable session-ID alias and its channel alias before
-processing the first turn, and fails creation if another run already owns the
-channel alias. Rekeying replaces only that channel alias. An HTTP-created
-session has the stable ID alias and no channel continuation token. Competing
-channel input is not forwarded to the owner.
+Only one holder can own a channel continuation token. When simultaneous first messages compete for an address, the losing holder forwards its accepted input to the winner. Rekeying claims an additional alias and retains earlier aliases. HTTP-created sessions use their stable session ID and do not need a channel continuation token.
 
-When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
+Only one turn owns session execution at a time. A candidate that finds another owner forwards its input there and waits for a durable disposition. Messages default to `turnPolicy: "steer"`, which introduces them at the active turn's next safe boundary. `turnPolicy: "queue"` waits until that turn settles. `turnPolicy: "interrupt"` stops the active turn and starts a replacement; `turn.interrupted` closes the old turn without an intervening `session.waiting`. Completed side effects and already-streamed output remain observable.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the driver checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
-
-Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
+Structured `inputResponses` address pending requests by ID and never interrupt a turn. Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. Accepted queued input keeps the deployment that accepted it, while steering is handled by the active owner's deployment. Separate sessions run independently.
 
 ## Subagents
 

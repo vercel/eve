@@ -46,6 +46,7 @@ export interface HookEventMap {
   readonly "subagent.event": ProtocolEvent<"subagent.event">;
   readonly "subagent.started": ProtocolEvent<"subagent.started">;
   readonly "turn.cancelled": ProtocolEvent<"turn.cancelled">;
+  readonly "turn.interrupted": ProtocolEvent<"turn.interrupted">;
   readonly "turn.completed": ProtocolEvent<"turn.completed">;
   readonly "turn.failed": ProtocolEvent<"turn.failed">;
   readonly "turn.started": ProtocolEvent<"turn.started">;
@@ -102,7 +103,8 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
  * Public hook definition authored in `agent/hooks/*.ts`.
  *
  * Hook files declare stream-event subscribers (under `events:`) that
- * fire after eve has accepted and durably recorded each event.
+ * fire after eve has accepted and queued each event for persistence. The
+ * execution step flushes its events before completing.
  * Handlers are observe-only: they cannot inject model context. To
  * contribute runtime model messages, use `defineDynamic` +
  * `defineInstructions` in `agent/instructions/`.

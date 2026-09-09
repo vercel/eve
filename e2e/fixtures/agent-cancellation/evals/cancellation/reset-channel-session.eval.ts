@@ -32,7 +32,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
 /**
  * Reset a parked continuation-addressed conversation from a custom channel.
  *
- * The reset route does not call `send`: after its fixed acknowledgement the
+ * The reset route does not call `send`: after terminal settlement the
  * token has no owner. The next ordinary message claims the same thread token
  * for a different workflow session.
  */
@@ -60,6 +60,9 @@ export default defineEval({
     initialTurn.notEvent("session.failed");
     initialTurn.messageIncludes(/RESET-INITIAL-OK/i);
 
+    const retiring = t.target.watchTurn(previousSessionId, {
+      startIndex: initialTurn.events.length,
+    });
     const reset = await postJson<ResetResponse>(t.target, `/threads/${threadId}/new`, {});
     await t.require(
       reset,
@@ -72,6 +75,7 @@ export default defineEval({
       ),
     );
 
+    (await retiring.result()).event("session.completed", { count: 1 });
     const afterReset = await postJson<OwnerResponse>(t.target, `/threads/${threadId}/owner`, {});
     await t.require(
       afterReset,

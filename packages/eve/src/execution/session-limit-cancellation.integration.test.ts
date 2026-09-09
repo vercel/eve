@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { dispatchSessionCommandByToken } from "#execution/session/ingress.js";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
@@ -8,7 +8,7 @@ import {
   filterEventsByType,
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { startTestSession } from "#internal/testing/session.js";
 import { experimental_workflow } from "#tools/workflow.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -44,26 +44,11 @@ function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): 
   }
 }
 
-/**
- * Sends a command to the session inbox, retrying through its claim window.
- * `waitForHook` cannot gate repeated commands on one token — it treats a hook
- * that ever received a payload as consumed — so the retry is the barrier here.
- */
 async function deliver(
   continuationToken: string,
-  payload: Record<string, unknown>,
-  timeout = 15_000,
+  payload: import("#channel/types.js").DeliverPayload,
 ): Promise<void> {
-  const deadline = Date.now() + timeout;
-  while (true) {
-    try {
-      await resumeHook(continuationToken, { auth: null, kind: "send", payload });
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+  await dispatchSessionCommandByToken(continuationToken, { auth: null, kind: "send", payload });
 }
 
 function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[]): string {
@@ -84,16 +69,14 @@ describe("session-limit continuation decline integration", () => {
     const continuationToken = "http:limit-decline-root";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "Hello there" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
+      const run = await startTestSession({
+        input: { message: "Hello there" },
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          continuationToken,
+          mode: "conversation",
+        }),
+      });
       const stream = captureTurnEvents(run);
 
       try {
@@ -156,19 +139,17 @@ describe("session-limit continuation decline integration", () => {
     const continuationToken = "http:limit-decline-child";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "Delegate through Workflow to a subagent: summarize the weather." },
-          serializedContext: {
-            ...buildSerializedContext({
-              channelKind: "http",
-              continuationToken,
-              mode: "conversation",
-            }),
-            "eve.capabilities": { requestInput: true },
-          },
+      const run = await startTestSession({
+        input: { message: "Delegate through Workflow to a subagent: summarize the weather." },
+        serializedContext: {
+          ...buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+          "eve.capabilities": { requestInput: true },
         },
-      ]);
+      });
       const stream = captureTurnEvents(run);
 
       try {
@@ -187,7 +168,7 @@ describe("session-limit continuation decline integration", () => {
         expect(filterEventsByType(hitlTurn, "input.requested")).toHaveLength(1);
         const requestId = requestIdFromPromptTurn(hitlTurn);
         // The prompt belongs to the root, not the delegated child.
-        expect(requestId.startsWith(`${run.runId}:limit:`)).toBe(true);
+        expect(requestId.startsWith(`${run.sessionId}:limit:`)).toBe(true);
 
         // Declining the root's own prompt is a user action the stream must
         // show: the turn settles as cancelled and the session stays

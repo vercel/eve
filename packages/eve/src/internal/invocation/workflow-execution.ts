@@ -22,6 +22,8 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { dispatchSessionCommand } from "#execution/session/ingress.js";
+import { waitForTurnReceipt } from "#execution/turn/admission.js";
 import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -72,12 +74,17 @@ export class WorkflowAgentInvocationExecution {
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return undefined;
 
-    if (isTerminalRunStatus(run.status)) {
-      const events =
-        run.status === "failed" ? await readRecentPersistedEvents(input.invocationId) : [];
-      return await terminalInvocation(run, events);
-    }
     const events = await readRecentPersistedEvents(input.invocationId);
+    if (
+      events.some((event) => event.type === "session.completed" || event.type === "session.failed")
+    )
+      return projectNonterminal(
+        run.runId,
+        run.createdAt.toISOString(),
+        run.expiredAt?.toISOString(),
+        events,
+      );
+    if (isTerminalRunStatus(run.status)) return await terminalInvocation(run, events);
     return projectNonterminal(
       run.runId,
       run.createdAt.toISOString(),
@@ -152,7 +159,8 @@ export class WorkflowAgentInvocationExecution {
     const current = await this.read(input);
     if (current === undefined || isTerminal(current.status)) return current;
     try {
-      await getRun(input.invocationId).cancel();
+      const { run } = await dispatchSessionCommand(input.invocationId, { kind: "reset" });
+      await waitForTurnReceipt(run.runId);
     } catch (error) {
       if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
       throw error;
@@ -319,6 +327,7 @@ function projectNonterminal(
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
   let inputBatch: PendingInputBatch | undefined;
   let result: JsonValue | undefined;
+  let cancelled = false;
   for (const event of events) {
     if (event.type === "input.requested") {
       inputBatch = pendingInputBatch(event);
@@ -330,6 +339,7 @@ function projectNonterminal(
       authorizations.clear();
       inputBatch = undefined;
       result = undefined;
+      cancelled = false;
     } else if (event.type === "authorization.required") {
       const authorization: {
         authorization?: AgentInvocationAuthorizationRequest["authorization"];
@@ -355,6 +365,22 @@ function projectNonterminal(
       event.data.message !== null
     ) {
       result = safeJson(event.data.message);
+    } else if (event.type === "result.completed") {
+      result = safeJson(event.data.result);
+    } else if (event.type === "turn.cancelled") {
+      cancelled = true;
+    } else if (event.type === "session.completed") {
+      return cancelled
+        ? { createdAt, expiresAt, invocationId, status: "cancelled" }
+        : { createdAt, expiresAt, invocationId, result, status: "completed" };
+    } else if (event.type === "session.failed") {
+      return {
+        createdAt,
+        expiresAt,
+        invocationId,
+        error: publicInvocationFailure(invocationId, events),
+        status: "failed",
+      };
     }
   }
   const pendingAuthorizations = [...authorizations.values()];

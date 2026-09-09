@@ -48,6 +48,7 @@ describe("activityCollectorWorkflow", () => {
       mocks.createHook.mockReturnValue({
         token: "activity",
         getConflict: async () => null,
+        dispose: vi.fn(),
         async *[Symbol.asyncIterator]() {
           if (debouncing) {
             yield {

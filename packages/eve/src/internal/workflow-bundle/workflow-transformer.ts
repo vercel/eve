@@ -8,8 +8,7 @@ import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import type { WorkflowManifest } from "./workflow-builders.js";
 
 // Step names whose `stepId` must be emitted as the bare function name,
-// not `step//<idBase>//<name>`. The workflow-body shim's
-// `setAttributes` (and Workflow's compiled equivalent)
+// not `step//<idBase>//<name>`. The Workflow SDK's `setAttributes`
 // dispatches builtins via `useStep("<name>")` with the unqualified
 // identifier — if the registry stored these under their version-stamped
 // `step//...//name` ids, the lookup would miss and the runtime would
@@ -140,10 +139,10 @@ export async function transformWorkflowDirectives(input: {
   const suffixes: string[] = [];
   let hasStepRegistration = false;
   // The driver bundle resolves eve aliases itself; app-bundled step registrations need the export.
-  const workflowStepImport = "#execution/tools/workflow/step.js";
+  const workflowStepImport = "#execution/workflow-tool/step.js";
   const stepExecutionImport = input.authored
     ? "eve/internal/workflow-step-execution"
-    : "#execution/tools/workflow/step-execution.js";
+    : "#execution/workflow-tool/step-execution.js";
 
   for (const fn of functions) {
     if (fn.directive === "use step") {

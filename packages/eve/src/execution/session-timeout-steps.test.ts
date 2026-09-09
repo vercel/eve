@@ -1,41 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  cancelSessionTimeoutStep,
+  cancelSessionTimeout,
   signalSessionTimeoutStep,
-  startSessionTimeoutStep,
+  startSessionTimeout,
 } from "#execution/session-timeout-steps.js";
-import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js";
+import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.js";
 
 const cancelRunMock = vi.fn();
 const getWorldMock = vi.fn();
-const getHookByTokenMock = vi.fn();
-const resumeHookMock = vi.fn();
+const dispatchMock = vi.fn();
 const startMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
-  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getWorld: (...args: unknown[]) => getWorldMock(...args),
-  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
 
-const TIMEOUT_HOOK = {
-  metadata: { sessionInboxWireVersion: 1 },
-  runId: "session-1",
-  token: "session-1:session-timeout",
-};
-
-beforeEach(() => {
-  getHookByTokenMock.mockResolvedValue(TIMEOUT_HOOK);
-});
+vi.mock("#execution/workflow-references.js", () => ({
+  sessionTimeoutWorkflowReference: { workflowId: "workflow//eve//sessionTimeoutWorkflow" },
+}));
 
 afterEach(() => {
   cancelRunMock.mockReset();
-  getHookByTokenMock.mockReset();
   getWorldMock.mockReset();
-  resumeHookMock.mockReset();
+  dispatchMock.mockReset();
   startMock.mockReset();
   vi.unstubAllEnvs();
 });
@@ -49,24 +39,27 @@ describe("session timeout steps", () => {
       token: "session-1:session-timeout",
     };
 
-    await expect(startSessionTimeoutStep(input)).resolves.toEqual({ runId: "timer-run" });
+    await expect(startSessionTimeout(input)).resolves.toEqual({ runId: "timer-run" });
     expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input]);
   });
 
-  it("signals the owning session hook", async () => {
-    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+  it("admits a session expiry candidate with a stable event identity", async () => {
+    dispatchMock.mockResolvedValue({ runId: "session-1" });
 
     await signalSessionTimeoutStep({ token: "session-1:session-timeout" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(TIMEOUT_HOOK, {
-      kind: "session-timeout",
-      version: 1,
-    });
+    expect(dispatchMock).toHaveBeenCalledWith(
+      "session-1:session-timeout",
+      {
+        kind: "session-timeout",
+      },
+      "expiry:session-1:session-timeout",
+    );
   });
 
   it("ignores a signal after the owning session is gone", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    resumeHookMock.mockRejectedValue(new HookNotFoundError("session-1:session-timeout"));
+    dispatchMock.mockRejectedValue(new HookNotFoundError("session-1:session-timeout"));
 
     await expect(
       signalSessionTimeoutStep({ token: "session-1:session-timeout" }),
@@ -78,7 +71,7 @@ describe("session timeout steps", () => {
     getWorldMock.mockResolvedValue(world);
     cancelRunMock.mockResolvedValue(undefined);
 
-    await cancelSessionTimeoutStep({ runId: "timer-run" });
+    await cancelSessionTimeout({ runId: "timer-run" });
 
     expect(cancelRunMock).toHaveBeenCalledWith(world, "timer-run", {
       cancelReason: "Session ended before its timeout",
@@ -94,12 +87,12 @@ describe("session timeout steps", () => {
       }),
     );
 
-    await expect(cancelSessionTimeoutStep({ runId: "timer-run" })).resolves.toBeUndefined();
+    await expect(cancelSessionTimeout({ runId: "timer-run" })).resolves.toBeUndefined();
   });
 
   it("propagates unexpected timeout runtime failures", async () => {
     const signalFailure = new Error("resume failed");
-    resumeHookMock.mockRejectedValue(signalFailure);
+    dispatchMock.mockRejectedValue(signalFailure);
     await expect(signalSessionTimeoutStep({ token: "session-1:session-timeout" })).rejects.toBe(
       signalFailure,
     );
@@ -107,6 +100,13 @@ describe("session timeout steps", () => {
     const cancelFailure = new Error("cancel failed");
     getWorldMock.mockResolvedValue({});
     cancelRunMock.mockRejectedValue(cancelFailure);
-    await expect(cancelSessionTimeoutStep({ runId: "timer-run" })).rejects.toBe(cancelFailure);
+    await expect(cancelSessionTimeout({ runId: "timer-run" })).rejects.toBe(cancelFailure);
   });
 });
+
+vi.mock("#execution/session/ingress.js", () => ({
+  dispatchSessionCommandByToken: (...args: unknown[]) => dispatchMock(...args),
+}));
+vi.mock("#execution/workflow-start.js", () => ({
+  startWorkflowOnCurrentDeployment: (...args: unknown[]) => startMock(...args),
+}));

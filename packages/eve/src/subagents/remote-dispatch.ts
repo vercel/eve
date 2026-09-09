@@ -29,7 +29,6 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 
@@ -103,7 +102,7 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
-      taskId: input.taskId ?? readTaskIdFromInboxToken(callbackToken),
+      taskId: input.taskId,
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,

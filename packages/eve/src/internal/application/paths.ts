@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { holdingWorkflowReference } from "#execution/workflow-references.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -135,7 +135,7 @@ export function getApplicationInfo(appRoot: string): ApplicationInfo {
   return {
     appRoot,
     outputDir: resolveOutputDirectory(appRoot),
-    workflowId: workflowEntryReference.workflowId,
+    workflowId: holdingWorkflowReference.workflowId,
     workflowBuildDir: resolveWorkflowBuildDirectory(appRoot),
     workflowSourceDir: resolvePackageSourceDirectoryPath("src/execution"),
   };

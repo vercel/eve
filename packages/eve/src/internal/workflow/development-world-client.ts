@@ -9,7 +9,7 @@ import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { turnWorkflowReference } from "#execution/workflow-runtime.js";
+import { turnWorkflowReference } from "#execution/workflow-references.js";
 import {
   decodeDevelopmentWorldJson,
   decodeDevelopmentWorldValue,

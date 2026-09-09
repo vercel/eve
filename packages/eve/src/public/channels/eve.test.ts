@@ -95,7 +95,9 @@ function createRouteArgs(): RouteHandlerArgs {
     attachSession: () => createMockSession(),
     to: vi.fn() as never,
     params: {},
-    waitUntil: () => undefined,
+    waitUntil: (task) => {
+      void task.catch(() => {});
+    },
     requestIp: "127.0.0.1",
   };
 }
@@ -871,7 +873,7 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("returns session_not_active instead of starting a replacement session", async () => {
+  it("accepts delivery without a synchronous session-status check", async () => {
     const handler = createEveContinueHandler({ auth: none() });
     handler.send.mockResolvedValueOnce({ status: "session_not_active" });
 
@@ -881,11 +883,12 @@ describe("eveChannel — onMessage", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
-      code: "session_not_active",
-      error: "The session is no longer active.",
-      ok: false,
+      sessionId: "test-session-id",
+      status: "accepted",
+      ok: true,
+      deliveryId: expect.any(String),
     });
   });
 });
@@ -901,10 +904,10 @@ describe("eveChannel — create session idempotency", () => {
     expect(response.status).toBe(202);
     const token = handler.send.mock.calls[0]?.[1]?.continuationToken;
     expect(token).toMatch(/^eve:op:[0-9a-f]{32}$/);
-    expect(handler.resolveSession).toHaveBeenCalledWith(token);
+    expect(handler.resolveSession).not.toHaveBeenCalled();
   });
 
-  it("returns the existing child for a replayed operation without dispatching again", async () => {
+  it("lets holder creation resolve replayed operations without a preflight", async () => {
     const handler = createEveCreateHandler(
       { auth: () => ACCEPTED_AUTH },
       { activeSessionId: "child-1" },
@@ -915,8 +918,12 @@ describe("eveChannel — create session idempotency", () => {
     );
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({ ok: true, sessionId: "child-1" });
-    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      sessionId: "test-session-id",
+    });
+    expect(handler.createSession).toHaveBeenCalledOnce();
+    expect(handler.resolveSession).not.toHaveBeenCalled();
   });
 
   it("scopes the operation token to the complete authenticated principal", async () => {
@@ -1559,34 +1566,16 @@ describe("eveChannel — uploadPolicy enforcement", () => {
 });
 
 describe("eveChannel — continue session HITL (inputResponses)", () => {
-  it("returns the server-issued delivery id in an accepted message acknowledgement", async () => {
-    const handler = createEveContinueHandler({ auth: none() });
-    handler.send.mockResolvedValue({
-      sessionId: "test-session-id",
-      status: "accepted",
-      deliveryId: "accepted-delivery",
-    });
-    const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
-    expect(response.status).toBe(202);
-    expect(response.headers.get("x-eve-session-id")).toBe("test-session-id");
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      sessionId: "test-session-id",
-      status: "accepted",
-      deliveryId: "accepted-delivery",
-    });
-  });
-
-  it("returns a structured 500 when fixed-session delivery fails", async () => {
+  it("acknowledges fixed-session delivery before background failure", async () => {
     const handler = createEveContinueHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));
 
     const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Failed to send the session message.",
-      ok: false,
+      status: "accepted",
+      ok: true,
     });
   });
 
@@ -1762,6 +1751,14 @@ describe("eveChannel — auth array shape", () => {
 });
 
 describe("eveChannel — cancel turn", () => {
+  it("responds while cancellation dispatch is still pending", async () => {
+    const handler = createEveCancelHandler({ auth: none() });
+    const pending = Promise.withResolvers<unknown>();
+    handler.cancelTurn.mockReturnValue(pending.promise);
+    const response = await handler.fetch(cancelRequest());
+    expect(response.status).toBe(202);
+    pending.resolve({ status: "accepted", sessionId: "test-session-id" });
+  });
   it("cancels the current turn with no body and reports 'accepted'", async () => {
     const handler = createEveCancelHandler({ auth: none() });
 
@@ -1805,16 +1802,17 @@ describe("eveChannel — cancel turn", () => {
     });
   });
 
-  it("reports 'no_active_turn' as success when nothing is cancellable", async () => {
+  it("accepts cancellation without waiting for its disposition", async () => {
     const handler = createEveCancelHandler({ auth: none() });
     handler.cancelTurn.mockResolvedValue({ status: "no_active_turn" });
 
     const response = await handler.fetch(cancelRequest());
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      status: "no_active_turn",
+      status: "accepted",
+      sessionId: "test-session-id",
     });
   });
 
@@ -1840,16 +1838,16 @@ describe("eveChannel — cancel turn", () => {
     expect(handler.cancelTurn).not.toHaveBeenCalled();
   });
 
-  it("returns 500 when the cancellation request fails unexpectedly", async () => {
+  it("returns acceptance before a background cancellation failure", async () => {
     const handler = createEveCancelHandler({ auth: none() });
     handler.cancelTurn.mockRejectedValue(new Error("backing store outage"));
 
     const response = await handler.fetch(cancelRequest());
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Failed to cancel the turn.",
-      ok: false,
+      status: "accepted",
+      ok: true,
     });
   });
 });
@@ -1860,7 +1858,7 @@ describe("eveChannel — reset session", () => {
 
     const response = await handler.fetch(resetRequest({ reason: "Start over" }));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
       ok: true,
@@ -1876,8 +1874,12 @@ describe("eveChannel — reset session", () => {
 
     const response = await handler.fetch(resetRequest({}));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      status: "reset",
+      previousSessionId: "test-session-id",
+    });
   });
 
   it("rejects unauthenticated reset requests", async () => {
@@ -1902,16 +1904,16 @@ describe("eveChannel — reset session", () => {
     expect(handler.reset).not.toHaveBeenCalled();
   });
 
-  it("returns 500 when reset fails unexpectedly", async () => {
+  it("returns acceptance before a background reset failure", async () => {
     const handler = createEveResetHandler({ auth: none() });
     handler.reset.mockRejectedValue(new Error("backing store outage"));
 
     const response = await handler.fetch(resetRequest({}));
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Failed to reset the session.",
-      ok: false,
+      status: "reset",
+      ok: true,
     });
   });
 });
@@ -1938,8 +1940,12 @@ describe("eveChannel — compact session", () => {
 
     const response = await handler.fetch(compactRequest({}));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      status: "accepted",
+      sessionId: "test-session-id",
+    });
   });
 });
 
@@ -1965,8 +1971,12 @@ describe("eveChannel — clear session context", () => {
 
     const response = await handler.fetch(clearRequest({}));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      status: "accepted",
+      sessionId: "test-session-id",
+    });
   });
 });
 
@@ -2142,7 +2152,7 @@ describe("eveChannel — forwarded principal", () => {
     await expect(secondResponse.json()).resolves.toMatchObject({
       sessionId: "test-session-id",
     });
-    expect(second.resolveSession).toHaveBeenCalledWith(secondToken);
+    expect(second.resolveSession).not.toHaveBeenCalled();
     expect(second.resolveSession).not.toHaveBeenCalledWith(firstToken);
   });
 

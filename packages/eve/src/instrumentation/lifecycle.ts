@@ -348,7 +348,7 @@ export interface InstrumentationTurnStartedEvent {
  * `turn.cancelled` → `session.waiting`, with no failure surfaced anywhere.
  */
 export interface InstrumentationTurnSettledEvent {
-  readonly type: "turn.cancelled" | "turn.completed";
+  readonly type: "turn.cancelled" | "turn.completed" | "turn.interrupted";
   readonly idempotencyKey: string;
   readonly sessionId: string;
   readonly turnId: string;
@@ -562,6 +562,7 @@ export interface InstrumentationProviderDefinition {
     readonly "tool.call.completed"?: InstrumentationEventHandler<InstrumentationToolCallCompletedEvent>;
     readonly "tool.call.failed"?: InstrumentationEventHandler<InstrumentationToolCallFailedEvent>;
     readonly "turn.cancelled"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
+    readonly "turn.interrupted"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
     readonly "turn.completed"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
     readonly "turn.failed"?: InstrumentationEventHandler<InstrumentationTurnFailedEvent>;
     readonly "turn.started"?: InstrumentationEventHandler<InstrumentationTurnStartedEvent>;

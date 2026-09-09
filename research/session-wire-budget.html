@@ -1,0 +1,2795 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Session Wire Budget</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --ground: #f3f5f8;
+        --surface: #ffffff;
+        --surface-2: #e9edf2;
+        --ink: #161b22;
+        --ink-2: #4b5563;
+        --ink-3: #6f7a89;
+        --rule: #d6dce4;
+        --rule-2: #c3cad4;
+        --accent: #2a78d6;
+        --c-ws: #2a78d6;
+        --c-vqs: #eb6834;
+        --c-compute: #1baf7a;
+        --c-replay: #4a3aa7;
+        --c-ws-soft: #dbe7f7;
+        --c-vqs-soft: #fbe3d8;
+        --c-compute-soft: #d6f2e6;
+        --c-replay-soft: #e2ddf5;
+        --warn: #b45309;
+        --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+        --font-body: "IBM Plex Sans", "Segoe UI", Roboto, sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          color-scheme: dark;
+          --ground: #101419;
+          --surface: #171c23;
+          --surface-2: #1f262f;
+          --ink: #e6eaf0;
+          --ink-2: #b4bcc8;
+          --ink-3: #8a94a3;
+          --rule: #2a313b;
+          --rule-2: #3a434f;
+          --accent: #3987e5;
+          --c-ws: #3987e5;
+          --c-vqs: #d95926;
+          --c-compute: #199e70;
+          --c-replay: #9085e9;
+          --c-ws-soft: #1b3450;
+          --c-vqs-soft: #4a2617;
+          --c-compute-soft: #123d2e;
+          --c-replay-soft: #2d2856;
+          --warn: #f59e0b;
+        }
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --ground: #101419;
+        --surface: #171c23;
+        --surface-2: #1f262f;
+        --ink: #e6eaf0;
+        --ink-2: #b4bcc8;
+        --ink-3: #8a94a3;
+        --rule: #2a313b;
+        --rule-2: #3a434f;
+        --accent: #3987e5;
+        --c-ws: #3987e5;
+        --c-vqs: #d95926;
+        --c-compute: #199e70;
+        --c-replay: #9085e9;
+        --c-ws-soft: #1b3450;
+        --c-vqs-soft: #4a2617;
+        --c-compute-soft: #123d2e;
+        --c-replay-soft: #2d2856;
+        --warn: #f59e0b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      a:focus-visible,
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      code,
+      .mono {
+        font-family: var(--font-mono);
+        font-size: 0.86em;
+      }
+      code {
+        background: var(--surface-2);
+        padding: 0.05em 0.35em;
+        border-radius: 3px;
+      }
+      pre {
+        background: var(--surface-2);
+        padding: 12px 14px;
+        border-radius: 4px;
+        overflow-x: auto;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+      }
+
+      .page {
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 0 24px 96px;
+      }
+      .prose {
+        max-width: 68ch;
+      }
+      .prose p,
+      .prose li {
+        color: var(--ink);
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        font-family: var(--font-display);
+        text-wrap: balance;
+        margin: 0;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: clamp(38px, 5vw, 56px);
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.005em;
+        margin-top: 72px;
+        padding-top: 24px;
+        border-top: 2px solid var(--ink);
+      }
+      h3 {
+        font-size: 19px;
+        font-weight: 600;
+        margin-top: 36px;
+      }
+      h4 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-top: 20px;
+        color: var(--ink-2);
+      }
+      h2 + p,
+      h3 + p {
+        margin-top: 12px;
+      }
+      p {
+        margin: 12px 0;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .dek {
+        font-size: 19px;
+        color: var(--ink-2);
+        max-width: 62ch;
+        margin-top: 16px;
+      }
+
+      header.hero {
+        padding-top: 56px;
+      }
+      .provenance {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px 28px;
+        font-size: 13px;
+        color: var(--ink-2);
+        border-top: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+        padding: 14px 0;
+      }
+      .provenance b {
+        display: block;
+        font-weight: 500;
+        color: var(--ink-3);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+      }
+
+      nav.toc {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--ground);
+        border-bottom: 1px solid var(--rule);
+        margin: 32px -24px 0;
+        padding: 10px 24px;
+        display: flex;
+        gap: 4px 18px;
+        flex-wrap: wrap;
+        font-size: 13px;
+      }
+      nav.toc a {
+        color: var(--ink-2);
+      }
+      nav.toc a:hover {
+        color: var(--ink);
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 22px;
+        margin: 20px 0 0;
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .legend span::before {
+        content: "";
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        margin-right: 7px;
+        vertical-align: -2px;
+        background: var(--sw);
+      }
+      .legend .ws {
+        --sw: var(--c-ws);
+      }
+      .legend .vqs {
+        --sw: var(--c-vqs);
+      }
+      .legend .compute {
+        --sw: var(--c-compute);
+      }
+      .legend .replay {
+        --sw: var(--c-replay);
+      }
+
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 1px;
+        background: var(--rule);
+        border: 1px solid var(--rule);
+        margin-top: 28px;
+      }
+      .tile {
+        background: var(--surface);
+        padding: 18px 18px 16px;
+      }
+      .tile .n {
+        font-family: var(--font-display);
+        font-size: 40px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .tile .u {
+        font-size: 14px;
+        color: var(--ink-3);
+        margin-left: 4px;
+        font-weight: 500;
+      }
+      .tile .l {
+        font-size: 13px;
+        color: var(--ink-2);
+        margin-top: 8px;
+        line-height: 1.4;
+      }
+
+      figure {
+        margin: 28px 0;
+      }
+      figure.wide {
+        max-width: 1160px;
+      }
+      figure svg {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+      }
+      figcaption {
+        font-size: 13px;
+        color: var(--ink-2);
+        margin-top: 10px;
+        max-width: 80ch;
+      }
+      figcaption b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+        margin: 18px 0;
+      }
+      .tablewrap {
+        overflow-x: auto;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--rule);
+        vertical-align: top;
+      }
+      th {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        font-weight: 500;
+        border-bottom: 1px solid var(--rule-2);
+      }
+      td.num,
+      th.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      td .k {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      .k.ws {
+        background: var(--c-ws);
+      }
+      .k.vqs {
+        background: var(--c-vqs);
+      }
+      .k.compute {
+        background: var(--c-compute);
+      }
+      .k.replay {
+        background: var(--c-replay);
+      }
+      tbody tr.total td {
+        border-top: 1px solid var(--rule-2);
+        font-weight: 600;
+      }
+
+      ol.hops {
+        padding-left: 0;
+        list-style: none;
+        counter-reset: hop;
+        margin: 16px 0;
+        max-width: 78ch;
+      }
+      ol.hops li {
+        counter-increment: hop;
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px dashed var(--rule);
+        font-size: 14.5px;
+      }
+      ol.hops li::before {
+        content: counter(hop);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-3);
+        padding-top: 3px;
+      }
+      ol.hops li .where {
+        display: inline-block;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-right: 8px;
+      }
+      ol.hops li .rt {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .tag {
+        display: inline-block;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        margin-left: 6px;
+        vertical-align: 1px;
+      }
+      .tag.ws {
+        background: var(--c-ws-soft);
+        color: var(--ink);
+      }
+      .tag.vqs {
+        background: var(--c-vqs-soft);
+        color: var(--ink);
+      }
+      .tag.compute {
+        background: var(--c-compute-soft);
+        color: var(--ink);
+      }
+      .tag.replay {
+        background: var(--c-replay-soft);
+        color: var(--ink);
+      }
+
+      .callout {
+        border-left: 3px solid var(--warn);
+        background: var(--surface);
+        padding: 12px 16px;
+        margin: 20px 0;
+        max-width: 78ch;
+        font-size: 14.5px;
+      }
+      .callout b {
+        color: var(--ink);
+      }
+      .two {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 28px;
+        align-items: start;
+      }
+      .small {
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .path-head {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-top: 56px;
+      }
+      .path-head .letter {
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 34px;
+        color: var(--accent);
+        line-height: 1;
+      }
+      .path-head h3 {
+        margin-top: 0;
+        font-size: 22px;
+      }
+      .budget {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1px;
+        background: var(--rule);
+        border: 1px solid var(--rule);
+        margin: 18px 0;
+        max-width: 900px;
+      }
+      .budget div {
+        background: var(--surface);
+        padding: 10px 12px;
+      }
+      .budget .n {
+        font-family: var(--font-display);
+        font-size: 26px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+      }
+      .budget .l {
+        font-size: 12px;
+        color: var(--ink-2);
+        margin-top: 4px;
+        line-height: 1.3;
+      }
+      .tt {
+        position: fixed;
+        pointer-events: none;
+        background: var(--ink);
+        color: var(--ground);
+        font-size: 12px;
+        padding: 5px 8px;
+        border-radius: 3px;
+        opacity: 0;
+        transition: opacity 80ms;
+        z-index: 20;
+        max-width: 280px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .tt {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="eyebrow">eve · research · PR #3063 · session holder runtime</div>
+        <h1>Session Wire Budget</h1>
+        <p class="dek">
+          Every network round trip between an incoming message and the step that calls the model,
+          for each path through the new holder-and-turn architecture, with the hosted timings that
+          show where a one-second turn actually goes.
+        </p>
+        <div class="provenance">
+    <div><b>eve</b> branch <span class="mono">barba/session-holder-runtime</span> at <span class="mono">5a95ccb4d</span> (Sep 9 snapshot simplification)</div>
+    <div><b>Workflow SDK</b> <span class="mono">@workflow/*</span> from labs tarballs of workflow <span class="mono">main</span> (9a5660f); no local patches</div>
+    <div><b>World</b> Vercel World (WebSocket event transport, run long-poll)</div>
+    <div><b>Hosted samples</b> <a href="https://github.com/vercel/eve/actions/runs/34381220523">run 34381220523</a> (Sep 9) against <a href="https://github.com/vercel/eve/actions/runs/34271267671">run 34271267671</a> (Sep 8), agent-workflow-stress, 99 warm turns, mock model</div>
+  </div>
+  <nav class="toc">
+          <a href="#tldr">Summary</a>
+          <a href="#arch">Architecture</a>
+          <a href="#wire">What a primitive costs</a>
+          <a href="#paths">Paths A–G</a>
+          <a href="#time">Where the time goes</a>
+          <a href="#levers">Levers</a>
+          <a href="#addendum">Recommendations</a>
+          <a href="#sound">Soundness</a>
+          <a href="#method">Method</a>
+        </nav>
+      </header>
+
+      <section id="tldr">
+  <h2>Summary</h2>
+  <div class="prose">
+    <p>A warm follow-up turn on the current branch takes about 1.3 seconds at the client while the mock model takes 7 ms, and every event the turn emits is constructed within a 9 ms window inside the execute step. Everything else is transport: one queue hop, then a chain of workflow-server requests across three steps. The Sep 9 redesign removed the entered-marker writes and the finalize step's snapshot reads, but it added a third step boundary and now ships the full session checkpoint through step inputs and results five times per turn. Against the Sep 8 checkpoint the warm median is about 300 ms slower and grows faster with history.</p>
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="n">1,330<span class="u">ms</span></div><div class="l">Client p50, warm follow-up, Sep 9 tip. Sep 8 checkpoint: 1,035 ms.</div></div>
+    <div class="tile"><div class="n">9<span class="u">ms</span></div><div class="l">from turn.started to session.waiting construction inside the step. The other 99% is the wire.</div></div>
+    <div class="tile"><div class="n">3</div><div class="l">steps per turn: execute, finalize, commit. Each pays step_started and step_completed.</div></div>
+    <div class="tile"><div class="n">5×</div><div class="l">the full SessionCheckpoint crosses the wire per turn: two step results, two step inputs, one snapshot append.</div></div>
+    <div class="tile"><div class="n">5.2<span class="u">ms/turn</span></div><div class="l">client latency slope over 99 turns. Turns 2–11: 1,158 ms. Turns 91–100: 1,618 ms.</div></div>
+    <div class="tile"><div class="n">0</div><div class="l">native phase profiles since Sep 8. The profiler that split that run into phases did not survive the history rewrite.</div></div>
+  </div>
+  <div class="legend">
+    <span class="ws">workflow-server request (events, hooks, streams, runs)</span>
+    <span class="vqs">queue service (VQS) publish, hop, or ack</span>
+    <span class="compute">eve compute inside a step</span>
+    <span class="replay">Workflow VM replay in-process</span>
+  </div>
+</section>
+
+      <section id="arch">
+        <h2>Architecture</h2>
+        <div class="prose">
+          <p>
+            A session is two kinds of workflow run. The <b>holding workflow</b> is created once,
+            claims the session's addresses, creates two streams, publishes a small immutable
+            descriptor, starts the first turn, then parks on its control hook. It never reads a
+            snapshot or runs the model. Each accepted message starts a <b>turn workflow</b>, a
+            terminating candidate that claims the session-wide hook
+            <code>eve:turn:&lt;sessionId&gt;</code>. The winner hydrates from the snapshot stream,
+            runs the model inside one step, appends events to the holder's event stream, commits a
+            checkpoint, and finalizes in a second step. A loser forwards its message to the winner
+            and follows the winner's receipt.
+          </p>
+          <p>
+            Hooks are the coordination primitive: a hook claim is mutual exclusion, and every owner
+            (holder, turn, tool body, task) has exactly one receiving hook wrapped as an inbox.
+            Streams are the storage primitive: independent runs write to the holder's streams by
+            reference, which the SDK patch makes possible.
+          </p>
+        </div>
+        <figure class="wide">
+          <svg
+            viewBox="0 0 1100 500"
+            role="img"
+            aria-label="Holder run owns hooks, streams, and descriptor; ingress starts turn candidates that claim the turn hook and write to holder streams; clients read the event stream."
+          >
+            <defs>
+              <marker
+                id="ar"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0L10 5L0 10z" fill="currentColor" />
+              </marker>
+              <marker
+                id="ar-ws"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0L10 5L0 10z" fill="var(--c-ws)" />
+              </marker>
+              <marker
+                id="ar-vqs"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0L10 5L0 10z" fill="var(--c-vqs)" />
+              </marker>
+            </defs>
+            <g font-family="IBM Plex Sans, sans-serif" font-size="12" fill="var(--ink)">
+              <!-- Ingress column -->
+              <text
+                x="40"
+                y="34"
+                font-family="IBM Plex Mono, monospace"
+                font-size="11"
+                fill="var(--ink-3)"
+                letter-spacing="1"
+              >
+                INGRESS (HTTP / WEBHOOK HANDLER)
+              </text>
+              <rect
+                x="40"
+                y="48"
+                width="200"
+                height="54"
+                rx="3"
+                fill="var(--surface-2)"
+                stroke="var(--rule-2)"
+              />
+              <text x="52" y="70" font-weight="600">POST /sessions</text>
+              <text x="52" y="88" fill="var(--ink-2)">start(holdingWorkflow)</text>
+              <rect
+                x="40"
+                y="118"
+                width="200"
+                height="54"
+                rx="3"
+                fill="var(--surface-2)"
+                stroke="var(--rule-2)"
+              />
+              <text x="52" y="140" font-weight="600">POST /sessions/:id/messages</text>
+              <text x="52" y="158" fill="var(--ink-2)">start(turnWorkflow) · zero reads</text>
+              <rect
+                x="40"
+                y="188"
+                width="200"
+                height="70"
+                rx="3"
+                fill="var(--surface-2)"
+                stroke="var(--rule-2)"
+              />
+              <text x="52" y="210" font-weight="600">Slack webhook</text>
+              <text x="52" y="228" fill="var(--ink-2)">hooks.getByToken(alias) → holder id</text>
+              <text x="52" y="246" fill="var(--ink-2)">start(turnWorkflow)</text>
+              <rect
+                x="40"
+                y="274"
+                width="200"
+                height="54"
+                rx="3"
+                fill="var(--surface-2)"
+                stroke="var(--rule-2)"
+              />
+              <text x="52" y="296" font-weight="600">GET /sessions/:id/stream</text>
+              <text x="52" y="314" fill="var(--ink-2)">read event stream by cursor</text>
+
+              <!-- Holder -->
+              <rect
+                x="320"
+                y="48"
+                width="260"
+                height="316"
+                rx="4"
+                fill="none"
+                stroke="var(--ink)"
+                stroke-width="1.5"
+              />
+              <text
+                x="334"
+                y="72"
+                font-family="Archivo, sans-serif"
+                font-size="14"
+                font-weight="700"
+              >
+                holdingWorkflow
+              </text>
+              <text x="334" y="90" fill="var(--ink-3)" font-size="11">
+                one run per session, parked on control.next()
+              </text>
+              <rect x="334" y="104" width="232" height="30" rx="3" fill="var(--c-replay-soft)" />
+              <text x="344" y="124" font-size="11">
+                hook
+                <tspan font-family="IBM Plex Mono, monospace">eve:holder:&lt;runId&gt;</tspan>
+                · rekey only
+              </text>
+              <rect x="334" y="140" width="232" height="30" rx="3" fill="var(--c-replay-soft)" />
+              <text x="344" y="160" font-size="11">alias hooks · provider tokens, lookup-only</text>
+              <rect x="334" y="184" width="232" height="30" rx="3" fill="var(--c-ws-soft)" />
+              <text x="344" y="204" font-size="11">event stream · turns append, clients read</text>
+              <rect x="334" y="220" width="232" height="30" rx="3" fill="var(--c-ws-soft)" />
+              <text x="344" y="240" font-size="11">snapshot log · one stream, index 0 = seed</text>
+              <rect x="334" y="256" width="232" height="30" rx="3" fill="var(--c-ws-soft)" />
+              <text x="344" y="276" font-size="11">descriptor · immutable stream routing</text>
+              <text x="334" y="318" fill="var(--ink-2)" font-size="11.5">
+                Bootstrap only: initializeHolderStep, startTurnStep.
+              </text>
+              <text x="334" y="334" fill="var(--ink-2)" font-size="11.5">
+                Afterwards it costs nothing until a rekey arrives.
+              </text>
+              <text x="334" y="352" fill="var(--ink-3)" font-size="11">
+                First token turn: rekey / rekey.response over the control hook.
+              </text>
+
+              <!-- Turns -->
+              <rect
+                x="690"
+                y="48"
+                width="370"
+                height="130"
+                rx="4"
+                fill="var(--surface)"
+                stroke="var(--c-compute)"
+                stroke-width="1.5"
+              />
+              <text
+                x="704"
+                y="72"
+                font-family="Archivo, sans-serif"
+                font-size="14"
+                font-weight="700"
+              >
+                turnWorkflow (owner)
+              </text>
+              <text x="704" y="92" fill="var(--ink-2)">
+                claim
+                <tspan font-family="IBM Plex Mono, monospace">eve:turn:&lt;sessionId&gt;</tspan>
+                → owned
+              </text>
+              <text x="704" y="112" fill="var(--ink-2)">
+                step executeTurnStep: hydrate, model, events, commit
+              </text>
+              <text x="704" y="132" fill="var(--ink-2)">
+                step finalizeTurnStep: settle, session.waiting, commit
+              </text>
+              <text x="704" y="152" fill="var(--ink-2)">
+                run completes; streams and holder stay alive
+              </text>
+              <text x="704" y="170" fill="var(--ink-3)" font-size="11">
+                also holds a system AbortController hook for interrupt
+              </text>
+
+              <rect
+                x="690"
+                y="204"
+                width="370"
+                height="96"
+                rx="4"
+                fill="var(--surface)"
+                stroke="var(--rule-2)"
+                stroke-dasharray="4 3"
+              />
+              <text
+                x="704"
+                y="228"
+                font-family="Archivo, sans-serif"
+                font-size="14"
+                font-weight="700"
+              >
+                turnWorkflow (candidate, lost claim)
+              </text>
+              <text x="704" y="248" fill="var(--ink-2)">claim → conflict(ownerRunId)</text>
+              <text x="704" y="268" fill="var(--ink-2)">
+                step forwardSubmissionStep: resumeHook(owner), then
+              </text>
+              <text x="704" y="288" fill="var(--ink-2)">
+                long-poll owner.returnValue until its receipt names this event
+              </text>
+
+              <!-- arrows -->
+              <path
+                d="M240 75 H320"
+                stroke="var(--c-vqs)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-vqs)"
+              />
+              <text x="246" y="68" fill="var(--c-vqs)" font-size="11">queue hop</text>
+              <path
+                d="M240 145 C 290 145, 290 26, 470 26 C 640 26, 690 40, 690 100"
+                stroke="var(--c-vqs)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-vqs)"
+              />
+              <text x="470" y="20" fill="var(--c-vqs)" font-size="11" text-anchor="middle">
+                queue hop
+              </text>
+              <path
+                d="M240 236 C 280 236, 280 386, 480 386 C 650 386, 690 380, 690 262"
+                stroke="var(--c-vqs)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-vqs)"
+              />
+              <text x="480" y="400" fill="var(--c-vqs)" font-size="11" text-anchor="middle">
+                queue hop
+              </text>
+              <path
+                d="M240 301 C 290 301, 300 199, 334 199"
+                stroke="var(--c-ws)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-ws)"
+              />
+              <text x="246" y="292" fill="var(--c-ws)" font-size="11">streams.get, long-lived</text>
+              <path
+                d="M690 120 C 640 120, 630 199, 566 199"
+                stroke="var(--c-ws)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-ws)"
+              />
+              <path
+                d="M690 128 C 645 128, 630 235, 566 235"
+                stroke="var(--c-ws)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar-ws)"
+              />
+              <text x="600" y="192" fill="var(--c-ws)" font-size="11" text-anchor="middle">
+                append
+              </text>
+              <text x="604" y="252" fill="var(--c-ws)" font-size="11" text-anchor="middle">
+                read · append
+              </text>
+              <path
+                d="M690 268 C 640 268, 640 118, 690 118"
+                stroke="var(--c-replay)"
+                stroke-width="1.5"
+                fill="none"
+                marker-end="url(#ar)"
+                style="color: var(--c-replay)"
+              />
+              <text x="650" y="286" fill="var(--c-replay)" font-size="11" text-anchor="middle">
+                resumeHook
+              </text>
+              <text x="650" y="299" fill="var(--c-replay)" font-size="11" text-anchor="middle">
+                (steer · cancel)
+              </text>
+
+              <!-- bottom band -->
+              <line x1="40" y1="414" x2="1060" y2="414" stroke="var(--rule-2)" />
+              <text
+                x="40"
+                y="438"
+                font-family="IBM Plex Mono, monospace"
+                font-size="11"
+                fill="var(--ink-3)"
+                letter-spacing="1"
+              >
+                UNDERNEATH
+              </text>
+              <rect x="40" y="450" width="480" height="38" rx="3" fill="var(--c-ws-soft)" />
+              <text x="52" y="474">
+                workflow-server · runs, events, hooks, streams ·
+                <tspan font-family="IBM Plex Mono, monospace">vercel-workflow.com/api</tspan>
+                , WS channel per invocation
+              </text>
+              <rect x="540" y="450" width="520" height="38" rx="3" fill="var(--c-vqs-soft)" />
+              <text x="552" y="474">
+                VQS · publish, push to
+                <tspan font-family="IBM Plex Mono, monospace">/.well-known/workflow/v1/flow</tspan>
+                , lease ack · a fresh function per hop
+              </text>
+            </g>
+          </svg>
+          <figcaption>
+            <b>What talks to what.</b> Ingress only ever starts a run (or does one alias lookup
+            first). The holder is bootstrap plus rekey. All session reads and writes happen inside
+            turn steps against the holder's streams. Replay-colored edges are hook traffic;
+            storage-colored edges are stream traffic; queue-colored edges are the hops that create a
+            new function invocation.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="wire">
+        <h2>What a primitive costs</h2>
+        <div class="prose">
+          <p>
+            Two servers sit under the SDK. The <b>workflow server</b> stores runs, events, hooks,
+            and streams. Inside a queue-driven invocation, single event writes ride a WebSocket
+            channel opened once per invocation; from an ordinary request handler (where
+            <code>start()</code> and <code>resumeHook()</code> usually run) they are plain HTTPS
+            POSTs. Stream reads and writes and run metadata are always HTTPS. The
+            <b>queue service</b> (VQS) delivers each workflow or step invocation as an HTTP POST to
+            the deployment's flow route, which is a fresh function invocation each time. The
+            producer pays one publish; the consumer pays one lease ack (and a lease extension every
+            60 s for long bodies).
+          </p>
+          <p>
+            The table maps every SDK call eve uses to its requests. Counts assume the same
+            deployment (encryption keys derive locally, no key request) and the workflow main tarballs the branch installs.
+          </p>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SDK call</th>
+                <th>World calls → requests</th>
+                <th class="num">RTs</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>start(fn, args)</code> from a handler</td>
+                <td>
+                  <span class="k ws"></span>POST run_created (HTTPS) <b>‖</b>
+                  <span class="k vqs"></span>POST publish
+                </td>
+                <td class="num">2 ∥</td>
+                <td>
+                  Parallel. Returns before the invocation begins. Message carries the input so the
+                  run can be recreated on a failed create.
+                </td>
+              </tr>
+              <tr>
+                <td>Queue hop → invocation</td>
+                <td>
+                  <span class="k vqs"></span>VQS pushes POST to flow route;
+                  <span class="k ws"></span>POST run_started (backgrounded, turbo) ;
+                  <span class="k vqs"></span>DELETE lease ack at end
+                </td>
+                <td class="num">1 + 1 bg + 1</td>
+                <td>
+                  Hosted p50 from run creation to run start: 60 ms. First delivery skips the
+                  event-log preload; redeliveries and wakes preload the full log in the run_started
+                  response.
+                </td>
+              </tr>
+              <tr>
+                <td>Lone <code>"use step"</code> in sequence</td>
+                <td>
+                  <span class="k ws"></span>POST step_started (lazy, carries input) → body inline →
+                  <span class="k ws"></span>POST step_completed (sinceCursor, response carries the
+                  event delta) → <span class="k replay"></span>in-process replay
+                </td>
+                <td class="num">2</td>
+                <td>No events.list per step. The guard flag that once gated this with open hooks is gone.</td>
+              </tr>
+              <tr>
+                <td>Parallel steps</td>
+                <td>
+                  <span class="k ws"></span>createBatch step_created + <span class="k vqs"></span>1
+                  publish per step → 1 hop each → step_started, step_completed,
+                  <span class="k ws"></span>GET events.list + replay per completion
+                </td>
+                <td class="num">≥4 per step + hop</td>
+                <td>
+                  Upstream inlines up to three lone siblings; larger fan-outs pay hops. eve's turn path has none.
+                </td>
+              </tr>
+              <tr><td><code>createHook</code> + <code>await getConflict()</code></td><td><span class="k ws"></span>POST hook_created (guarded, sinceCursor; a conflict returns in the response) → <span class="k replay"></span>settle on the retained VM in the same invocation</td><td class="num">1 or 2</td><td>Zero reads only when the suspension created exactly one hook and the World returned the delta. eve's turn registers the inbox hook and the AbortController hook in one suspension, so it pays one incremental <span class="k ws"></span>GET events.list. <a href="https://github.com/vercel/workflow/pull/4048">workflow#4048</a> would remove it.</td></tr>
+              <tr>
+                <td><code>new AbortController()</code> in a workflow</td>
+                <td>
+                  <span class="k ws"></span>POST hook_created (system hook <code>abrt_*</code>). On
+                  <code>abort()</code>: hook_received + PUT abort packet to the run's abort stream
+                </td>
+                <td class="num">1 (+2 on abort)</td>
+                <td>Every step that receives the signal opens a real-time <span class="k ws"></span>GET on that abort stream for the step's duration. eve passes it into every execute step. The post-success abort was removed on Sep 9.</td>
+              </tr>
+              <tr>
+                <td><code>resumeHook(token, payload)</code></td>
+                <td>
+                  <span class="k ws"></span>GET hooks/by-token → <span class="k ws"></span>POST
+                  hook_received → <span class="k vqs"></span>publish (idempotent) → hop → target run
+                  replays with preload
+                </td>
+                <td class="num">3 + hop</td>
+                <td>
+                  Sequential since beta.47. The awaiting run observes it only in its next invocation
+                  or, if a step is live, in that step's completion delta.
+                </td>
+              </tr>
+              <tr>
+                <td><code>getRun(id).getReadable().read()</code></td>
+                <td><span class="k ws"></span>GET /v3/runs/:id/stream/:name?startIndex</td>
+                <td class="num">1</td>
+                <td>Chunked, long-lived. eve resolves stream runs with <code>getRun()</code> cached per process (256 handles), so the first read or write on a cold process also does one GET /v2/runs/:id for the key; warm processes do none.</td>
+              </tr>
+              <tr>
+                <td><code>getWritable()</code> write / writeMulti</td>
+                <td>
+                  <span class="k ws"></span>PUT /v2/runs/:id/stream/:name (one PUT per chunk, or one
+                  X-Stream-Multi PUT per group)
+                </td>
+                <td class="num">1 per group</td>
+                <td>Group-commit window is the upstream default (0 ms): the first chunk goes immediately, chunks arriving while a PUT is in flight share the next one. eve's event writer hands the SDK one chunk per event in batches, so a short turn lands in roughly three to six PUTs.</td>
+              </tr>
+              <tr>
+                <td><code>getTailIndex()</code> / <code>close()</code></td>
+                <td><span class="k ws"></span>GET streams/:name/info / PUT with X-Stream-Done</td>
+                <td class="num">1</td>
+                <td>eve's warm turn does neither; bootstrap does.</td>
+              </tr>
+              <tr>
+                <td><code>getStreamReference()</code> / <code>run.status</code></td>
+                <td><span class="k ws"></span>GET /v2/runs/:id</td>
+                <td class="num">1</td>
+                <td>Not on the warm path; the process-level run-handle cache covers it.</td>
+              </tr>
+              <tr>
+                <td><code>await run.returnValue</code></td>
+                <td>
+                  <span class="k ws"></span>GET /v2/runs/:id/status?waitMs=50000 (re-issued up to
+                  10×) → <span class="k ws"></span>GET /v2/runs/:id with data
+                </td>
+                <td class="num">≥2</td>
+                <td>
+                  Long poll, not a Workflow sleep. Used by forwarding candidates, successors, HTTP
+                  cancel, and tool watchers. Holds the calling step open.
+                </td>
+              </tr>
+              <tr>
+                <td><code>sleep(ms)</code></td>
+                <td>
+                  <span class="k ws"></span>wait_created (batched) →
+                  <span class="k vqs"></span>delayed publish → hop → wait_completed
+                </td>
+                <td class="num">2 + hop</td>
+                <td>Only session timeout and model-requested sleeps. Not on the hot path.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="wide">
+          <div id="fig-hop"></div>
+          <figcaption>
+            <b>Anatomy of one queue hop.</b> The producer's publish and the consumer's ack are both
+            VQS requests; the invocation in between is a fresh function on the flow route. The
+            run_started write is backgrounded under turbo, so replay begins before it lands. A hook
+            wake or redelivery instead awaits run_started and receives the full event log in its
+            response.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="paths">
+        <h2>Paths A–G</h2>
+        <div class="prose">
+          <p>
+            Each path is drawn as a sequence with time flowing down. Lanes are the places code runs.
+            Arrows are requests, colored by which server answers them; a paired mark means the two
+            requests were issued in parallel. Boxes on a lane are compute. Measured phase labels
+            come from the hosted sample's native run and step timestamps.
+          </p>
+        </div>
+
+        <div class="path-head"><span class="letter">A</span><h3>New session over HTTP</h3></div>
+  <div class="prose">
+    <p>The handler starts the holder inside <code>waitUntil</code> and returns 202. The holder claims its control hook, runs one bootstrap step that writes the null sentinel into a fresh snapshot stream, then a second step that starts the first turn. The first turn arrives with resources inlined. Its tail read returns the sentinel, so it builds the initial checkpoint locally, and it publishes the descriptor and starts the session-timeout workflow in parallel with the model call. The client's stream GET blocks until that descriptor lands, up to ten seconds. Two queue hops still sit on the critical path.</p>
+  </div>
+  <figure class="wide"><div id="fig-a"></div>
+    <figcaption><b>Path A at 5a95ccb4d.</b> The holder is down to two small steps, and the first-turn extras now overlap the model instead of preceding it. The cold first turn measured 2,897 ms in the newest run and 1,726 to 1,733 ms in the two runs before it, so the sample is noisy; the Sep 8 design measured 1,928 ms.</figcaption>
+  </figure>
+  <div class="budget">
+    <div><div class="n">2</div><div class="l">queue hops before the model (handler→holder, holder→turn)</div></div>
+    <div><div class="n">~12</div><div class="l">serial workflow-server RTs before the model call</div></div>
+    <div><div class="n">5</div><div class="l">steps (holder 2, turn 3)</div></div>
+    <div><div class="n">3</div><div class="l">hooks created (holder control; turn inbox and abort in one suspension)</div></div>
+    <div><div class="n">≤10 s</div><div class="l">client stream GET waits on the descriptor the first turn publishes mid-step</div></div>
+  </div>
+
+<div class="path-head"><span class="letter">B</span><h3>Follow-up on an idle session over HTTP</h3></div>
+  <div class="prose">
+    <p>This is the path the stress fixture measures. The handler mints an event id and starts a candidate with the session locator inside <code>waitUntil</code>; the 202 goes out before the start resolves. On a warm process nothing is read; a cold process first resolves the session descriptor (one stream GET plus one run metadata GET) because the turn input now carries the resources inline. The candidate registers two hooks in one suspension, claims, and reads the snapshot tail inside its execute step. Events are enqueued locally during the model call and drained to the event stream in the background; the drain is awaited before the step returns. The execute step returns the whole updated checkpoint as its result. The finalize step receives it as input, decides the settlement, writes <code>turn.completed</code> and <code>session.waiting</code>, and returns the checkpoint again. The commit step receives it a third time and appends it to the snapshot stream. Then the run completes.</p>
+    <p>The client sees completion when finalize's event PUT lands. The commit step and run completion are off the client path, but they hold the function and delay the release of the turn hook.</p>
+  </div>
+  <figure class="wide"><div id="fig-b"></div>
+    <figcaption><b>Path B at 5a95ccb4d, warm process.</b> About six serial requests and one hop before the model. After the model: the event drain, then two step boundaries carrying the checkpoint before the client-visible write. A cold process adds one GET /v2/runs/:holder for the stream key. Hover a row for the request inside it.</figcaption>
+  </figure>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Per warm turn</th><th class="num">Sep 8 (d78e52197)</th><th class="num">Sep 9 (5a95ccb4d)</th><th>What changed</th></tr></thead>
+    <tbody>
+      <tr><td>Steps</td><td class="num">2</td><td class="num">3</td><td>commitTurnStep split out of finalize</td></tr>
+      <tr><td>hook_created writes</td><td class="num">2</td><td class="num">2</td><td>same suspension both times; one events.list read follows in both</td></tr>
+      <tr><td>Snapshot stream GETs</td><td class="num">2</td><td class="num">1</td><td>finalize no longer re-reads the head</td></tr>
+      <tr><td>Snapshot stream PUTs</td><td class="num">4</td><td class="num">1</td><td>entered markers and the execute commit are gone; one append in commit</td></tr>
+      <tr><td>Event PUT groups</td><td class="num">2</td><td class="num">4–8</td><td>1 ms batching window gone; writer hands one chunk per event</td></tr>
+      <tr><td>Checkpoint copies on step payloads</td><td class="num">0</td><td class="num">4</td><td>execute result, finalize input and result, commit input</td></tr>
+      <tr><td>Serial RTs before model (warm)</td><td class="num">7</td><td class="num">6</td><td>no entered marker</td></tr>
+      <tr><td>Serial RTs model → client sees waiting</td><td class="num">7</td><td class="num">4</td><td>drain, step_completed, step_started, event PUT</td></tr>
+      <tr class="total"><td>Client p50 / slope</td><td class="num">1,035 ms / 3.2 ms per turn</td><td class="num">1,330 ms / 5.2 ms per turn</td><td>fewer requests, more bytes per request</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout"><b>Why fewer requests got slower is not settled.</b> The request count fell but the median rose and the per-turn slope rose. The only per-turn quantity that grew is the checkpoint payload, which now rides four step events plus one append and scales with conversation history. The native profiler that would confirm this by splitting created→execute, execute body, and the step gaps was lost in the history rewrite; the <a href="#levers">first lever</a> is to put it back.</div>
+
+<div class="path-head">
+          <span class="letter">C</span>
+          <h3>Steer or interrupt while a turn is active</h3>
+        </div>
+        <div class="prose">
+          <p>
+            The candidate loses the claim, disposes its hook, and in a step resumes the owner's hook
+            with the submission, then long-polls the owner's run status. The resume publishes a
+            queue message, so a <b>second invocation of the owner run</b> starts while the owner's
+            first invocation is still inside its execute step. That second invocation replays, feeds
+            the envelope to the inbox, finds the execute step owned by a live lease, arms a delayed
+            backstop wake, and exits. A plain steer therefore lands only when the first invocation's
+            step completes and replays with the delta. An interrupt is different: replay calls
+            <code>controller.abort()</code>, which writes an abort packet to the run's abort stream,
+            and the real-time reader inside the live step cancels the model call.
+          </p>
+        </div>
+        <figure class="wide">
+          <div id="fig-c"></div>
+          <figcaption>
+            <b>Path C.</b> Relative to Path B the steer adds a whole candidate run, a second owner
+            invocation with a full log preload, and one more execute step in the owner. Hosted
+            forwarded turns took 609 ms from creation to execute versus 260 ms uncontested, with the
+            forward step body itself at 113 ms p50. If the owner settles without consuming the event
+            (queue policy), the candidate loops: new inbox hook, claim, and Path B from the queued
+            head.
+          </figcaption>
+        </figure>
+        <div class="budget">
+          <div>
+            <div class="n">+13</div>
+            <div class="l">
+              workflow-server RTs in the candidate: 10 protocol, 3 for the resume, plus ≥2 poll GETs
+            </div>
+          </div>
+          <div>
+            <div class="n">+1</div>
+            <div class="l">
+              owner invocation that does no work except deliver the envelope and arm a backstop
+            </div>
+          </div>
+          <div>
+            <div class="n">+3</div><div class="l">owner RTs for the extra execute step (2 protocol, 1 event PUT group), plus the checkpoint riding both</div>
+          </div>
+          <div>
+            <div class="n">2</div>
+            <div class="l">queue hops added (candidate start, owner wake)</div>
+          </div>
+        </div>
+
+        <div class="path-head">
+          <span class="letter">D</span>
+          <h3>Slack message on an existing thread</h3>
+        </div>
+        <div class="prose">
+          <p>
+            The webhook returns 200 immediately; the work runs under <code>waitUntil</code>. After
+            Slack API calls to fetch thread context, eve does exactly one workflow-server lookup,
+            GET hooks/by-token on the thread's alias, which returns the holder's run id, and starts
+            a candidate with that locator. From there it is Path B (idle) or Path C (busy).
+          </p>
+        </div>
+        <div class="budget">
+          <div>
+            <div class="n">1</div>
+            <div class="l">alias lookup before start</div>
+          </div>
+          <div>
+            <div class="n">+0</div>
+            <div class="l">hops beyond Path B</div>
+          </div>
+          <div>
+            <div class="n">+1</div>
+            <div class="l">workflow-server RT beyond Path B</div>
+          </div>
+        </div>
+
+        <div class="path-head">
+          <span class="letter">E</span>
+          <h3>First Slack message: competing holders and the rekey exchange</h3>
+        </div>
+        <div class="prose">
+          <p>
+            A miss on the alias lookup leads to session recovery (Slack
+            <code>conversations.replies</code> plus two more by-token lookups), then a holder start
+            with <code>initialToken</code>. Unlike Path A the handler <b>blocks</b> on the
+            descriptor read until the holder publishes it, so the holder's bootstrap is on the
+            response path. The holder makes two serial hook claims (control, then alias). If the
+            alias is already owned, the loser runs a redirect step: read the winner's descriptor,
+            start the turn against the winner, publish the winner's descriptor under its own run id
+            so the blocked handler resolves to the winning session.
+          </p>
+          <p>
+            Then the first turn pays a cost no later turn pays. After its execute step,
+            <code>progress.continuationToken</code> is set but
+            <code>claimedContinuationToken</code> is not, so the turn sends a <code>rekey</code> to
+            the holder's control hook and suspends waiting for the reply. That is two steps, two
+            hook resumes, and two queue hops (holder wake, turn wake) inserted between execute and
+            finalize.
+          </p>
+        </div>
+        <figure class="wide">
+          <div id="fig-e"></div>
+          <figcaption>
+            <b>Path E, the rekey exchange on the first turn.</b> Ten workflow-server requests and
+            two invocations for a claim the holder already holds (it returns
+            <code>claimed</code> from its in-memory alias map without creating a hook). Every Slack
+            thread and every operation-id session pays this once.
+          </figcaption>
+        </figure>
+
+        <div class="path-head">
+          <span class="letter">F</span>
+          <h3>Blocking workflow tool and ask()</h3>
+        </div>
+        <ol class="hops">
+          <li>
+            <span
+              ><span class="where">owner</span>Model proposes a tool →
+              <code>executeTurnStep({work: dispatch})</code> <span class="tag ws">step_started</span
+              ><span class="tag ws">step_completed</span></span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">owner · in step</span><code>start(workflowToolRunWorkflow)</code>
+              <span class="tag ws">run_created</span><span class="tag vqs">publish</span> then read
+              the tool's <code>eve.owner</code> record
+              <span class="tag ws">GET stream</span> (blocks ≤10 s until published)</span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">tool run</span>hook + AbortController
+              <span class="tag ws">hook_created ×2</span> → claim → <code>publishOwnerStep</code>
+              <span class="tag ws">PUT + close</span> → watch the owner
+              <span class="tag ws">long-poll returnValue</span> raced with
+              <code>inbox.next()</code></span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">owner · in step</span>commit with pending tool ack →
+              <code>sendInbox(tool.ready)</code> <span class="tag ws">GET by-token</span
+              ><span class="tag ws">hook_received</span><span class="tag vqs">publish</span></span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">owner</span><code>awaitRunStep(toolRun)</code> per tool
+              <span class="tag ws">long-poll</span> raced with <code>inbox.next()</code></span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">tool run</span>each report, <code>ask()</code>, or outcome is a
+              <code>sendInboxStep</code>: <span class="tag ws">step_started</span
+              ><span class="tag ws">GET by-token</span><span class="tag ws">hook_received</span
+              ><span class="tag vqs">publish</span><span class="tag ws">step_completed</span></span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">owner</span>each inbound envelope costs one more
+              <code>executeTurnStep</code>: <span class="tag ws">step_started</span
+              ><span class="tag ws">PUT events</span><span class="tag ws">checkpoint in step input and result</span
+              ><span class="tag ws">step_completed</span></span
+            >
+          </li>
+        </ol>
+        <p class="small prose">
+          Each tool report or question therefore costs roughly six requests on the sender, one queue
+          hop, and six on the receiver. A tool that asks three questions adds about forty
+          workflow-server requests and six hops to the turn.
+        </p>
+
+        <div class="path-head">
+          <span class="letter">G</span>
+          <h3>Cancel and session timeout</h3>
+        </div>
+        <ol class="hops">
+          <li>
+            <span
+              ><span class="where">handler</span>HTTP cancel: <code>start(candidate)</code>
+              <span class="tag ws">run_created</span><span class="tag vqs">publish</span> and then
+              <b>the handler awaits the receipt</b>
+              <span class="tag ws">long-poll returnValue</span>, so the HTTP response waits for
+              settlement.</span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">candidate</span>conflict → <code>forwardSubmissionStep</code> as
+              in Path C; the owner's replay calls <code>controller.abort(TurnCancelledError)</code>
+              <span class="tag ws">hook_received</span
+              ><span class="tag ws">PUT abort packet</span> and the live step's abort reader cancels
+              the model.</span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">timeout run</span><code>sessionTimeoutWorkflow</code>: durable
+              <span class="tag ws">wait_created</span><span class="tag vqs">delayed publish</span> →
+              hop → <code>signalSessionTimeoutStep</code> →
+              <code>start(candidate, session-timeout)</code>. The token encodes the session id so
+              there is no hook lookup.</span
+            >
+          </li>
+          <li>
+            <span
+              ><span class="where">candidate</span>idle: claim → execute returns without a model
+              call → finalize kind <code>timeout</code>, terminal → <code>closeSession</code>:
+              <span class="tag ws">streams.close ×2</span
+              ><span class="tag ws">cancelRun(holder)</span></span
+            >
+          </li>
+        </ol>
+
+        <h3>Side by side</h3>
+        <figure class="wide">
+          <div id="fig-compare"></div>
+          <figcaption>
+            <b>Critical-path requests before the model call, per path.</b> Serial workflow-server
+            requests and queue hops between ingress and the first model token. The model itself is
+            not counted. Path C counts the candidate's requests plus the owner's extra execute step;
+            Path E adds the rekey exchange even though it lands after the model, because it delays
+            the visible completion.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="time">
+  <h2>Where the time goes</h2>
+  <div class="prose">
+    <p>Two kinds of evidence. The client-side stress numbers exist for every run. The native phase split, which reads run and step timestamps from the Workflow API, exists only for the Sep 8 run, because the profiler script and its report hook were dropped when the branch was rewritten. What survives in every run is the event log: event construction timestamps show that the whole model bracket, from <code>turn.started</code> to <code>session.waiting</code>, is about ten milliseconds in every design. So the phase chart below is a Sep 8 split of costs that are all still present in some form, and the benchmark chart shows how the client total moved since.</p>
+  </div>
+  <figure class="wide"><div id="fig-bench"></div>
+    <figcaption><b>Warm-turn client latency across the last four hosted runs.</b> Median of turns 2–100, then the first ten and last ten warm turns to show growth with history. The 6166ed00a run is the first commit on the new design and the main tarballs; the two later runs are the author's follow-up fixes. Concurrent second turns held near 1.3 s throughout.</figcaption>
+  </figure>
+  <figure class="wide"><div id="fig-waterfall"></div>
+    <figcaption><b>Sep 8 warm turn, native p50 by phase.</b> The last phase split available. Under the Sep 9 design the entered marker inside execute→model and the head read and marker inside the finalize body are gone, the finalize body carries only the event write, and a commit step with one append sits between finalize and run completion. What is not visible here, because it did not exist then, is the checkpoint payload riding each step boundary.</figcaption>
+  </figure>
+  <div class="two">
+    <figure><div id="fig-checkpoints"></div>
+      <figcaption><b>Warm p50 across the PR's hosted checkpoints, Sep 8 series.</b> Separate observations, not paired trials. The Sep 9 series continues in the benchmark chart above.</figcaption>
+    </figure>
+    <figure><div id="fig-variants"></div>
+      <figcaption><b>Sep 8 variants of the same fixture.</b> Cold creation and contested turns each added roughly one hop plus several serial requests to the uncontested path; the same structure holds on Sep 9.</figcaption>
+    </figure>
+  </div>
+</section>
+
+      <section id="levers">
+  <h2>Levers</h2>
+  <div class="prose">
+    <p>Ranked for the warm Path B path at 5a95ccb4d. The first is measurement, because the current numbers cannot be attributed without it.</p>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Lever</th><th>What it removes</th><th>Where</th><th class="num">Est. saving</th><th>Risk / condition</th></tr></thead>
+    <tbody>
+      <tr><td><b>Restore the native turn profiler</b> in the stress job</td><td>guessing. Re-adds created→started, started→execute, per-step bodies, and step gaps from the Workflow API, using the VERCEL_TOKEN, ORG, and PROJECT secrets the job already has.</td><td><code>scripts/workflow-turn-profile.mjs</code>, <code>workflow-stress-report.mjs --native-vercel</code>, <code>e2e-vercel.yml</code></td><td class="num">n/a</td><td>Low. Existed at 905545d3c; the report script has since diverged and needs a small re-merge.</td></tr>
+      <tr><td><b>Stop shipping the checkpoint through step payloads</b></td><td>four copies of the session checkpoint per turn on step_completed and step_started, growing with history. Execute writes the checkpoint once and returns a small reference; finalize and commit read by reference only when they must.</td><td><code>turn/execute.ts</code>, <code>turn/workflow.ts</code>, <code>turn/finalize.ts</code></td><td class="num">likely the 5 ms/turn slope, plus fixed serialization cost</td><td>This is the immutable-record design the Sep 9 simplification deliberately replaced. The middle ground is one append at execute end and references afterward, which is two snapshot PUTs per turn instead of one.</td></tr>
+      <tr><td><b>Fold finalize and commit into one step</b> for the natural-completion case</td><td>one step_completed and one step_started with a replay between them, and one checkpoint round trip</td><td><code>turn/workflow.ts</code></td><td class="num">~70–100 ms</td><td>The commit was split out so a retry of the append cannot rerun lifecycle effects. A merged step needs the append to be idempotent on retry, which the write id already gives it.</td></tr>
+      <tr><td><b>Settle in execute when the drained inbox is empty</b></td><td>the finalize boundary too, so session.waiting rides the execute event drain and the client sees completion two boundaries earlier</td><td><code>turn/workflow.ts</code>, <code>turn/finalize.ts</code></td><td class="num">~150–250 ms client</td><td>Steering that arrives during the merged step lands on the next turn, which is already the documented step-boundary semantics.</td></tr>
+      <tr><td><b>Batch event chunks before the SDK</b></td><td>most of the four to eight event PUTs; one group per drain pass instead of one chunk per event with the SDK's 0 ms window</td><td><code>session/event-writer.ts</code> or an upstream group-commit default</td><td class="num">2–5 RTs, overlapped with the model, so mostly tail</td><td>Cursor compatibility requires one SDK chunk per event; batching chunks into one PUT keeps that.</td></tr>
+      <tr><td><b>Land <a href="https://github.com/vercel/workflow/pull/4048">workflow#4048</a></b></td><td>the GET events.list after the two-hook claim suspension</td><td>SDK</td><td class="num">40–80 ms</td><td>Draft is open; eve is now a direct consumer since the AbortController registers before the claim again.</td></tr>
+      <tr><td><b>Resolve stream runs from references</b> instead of <code>getRun()</code></td><td>the GET /v2/runs/:holder key lookup a cold process pays before its first stream read</td><td><code>internal/workflow/stream-run.ts</code></td><td class="num">1 RT on cold instances</td><td>The upstream <code>Run.fromStreamReference</code> amendment did not ship; needs the routing embedded in the descriptor.</td></tr>
+      <tr><td><b>Parallel holder and turn start</b> for new sessions</td><td>the second hop and the holder's chain from Path A's critical path</td><td>handler, <code>session/dispatch.ts</code></td><td class="num">~500 ms on creation</td><td>See Recommendations. Token-bearing sessions keep the serial path.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout"><b>What is not a lever.</b> The queue hop is about 60 ms and there is one on the warm path. The model bracket is ten milliseconds. Storage operations are at four to nine per turn against a floor of about three. The remaining budget is step boundaries and the bytes they carry.</div>
+</section>
+
+      <section id="sound">
+        <h2>Soundness</h2>
+        <div class="prose">
+          <p>Things the trace confirms hold, and things it shows are still open.</p>
+          <h3>Holds</h3>
+          <ul>
+            <li>
+              <b>Claim before read.</b> Every path reads mutable state only inside the first execute
+              step after the hook claim succeeds. Ingress never preflights. The stale-revision race
+              in the research doc cannot occur.
+            </li>
+            <li><b>Two hooks share one activation.</b> The inbox hook and the abort hook register in the same suspension by design, so the claim costs one hook write plus one incremental log read, not two serial hook phases. The first step_started lands in the same invocation.</li>
+            <li>
+              <b>Steer is step-boundary steering.</b> A second owner invocation cannot touch a step
+              owned by a live lease; it arms a backstop and exits. The envelope is applied when the
+              live step completes and replays with the delta. This matches the documented
+              <code>DEFAULT_TURN_POLICY</code>.
+            </li>
+            <li>
+              <b>Interrupt reaches a live step.</b> The abort packet travels by stream, not by
+              replay, so the model call is cancelled without waiting for the boundary. This depends
+              on the abort reader staying open for the whole step.
+            </li>
+            <li>
+              <b>Losers follow the actual owner.</b> The candidate long-polls the run it resumed
+              into and re-claims if the receipt does not name its event, so an owner change between
+              conflict and resume is handled by the loop.
+            </li>
+          </ul>
+          <h3>Open</h3>
+          <ul>
+            <li><b>Second owner invocations are pure overhead.</b> Each steer, cancel, tool report, or ask wakes the owner run with a full log preload only to buffer an envelope. With the checkpoint now in step results, that preload also carries every checkpoint the turn has produced.</li>
+            <li>
+              <b>Backstop wakes.</b> When the second invocation finds a live lease it arms a delayed
+              publish. If the first invocation's step completes normally, that delayed message is a
+              wasted invocation later. The count per turn under load is not measured.
+            </li>
+            <li>
+              <b>Concurrent tail.</b> Second turns in the concurrent scenario show 1,345 ms p50 but
+              4,272 ms p95. Contended claims turn into forwards and polls; the tail is where Path
+              C's extra hop and preload show up.
+            </li>
+            <li>
+              <b>Release gates from the research doc remain.</b> Fencing after hard cancellation,
+              recovery of a failed candidate without new input, and the Slack post-to-rekey race are
+              implementation gates, not properties this trace can establish.
+            </li>
+            <li><b>SDK pin is a moving target.</b> The branch installs tarballs of workflow <code>main</code>, so the runtime changes under the branch without a commit. Any paired measurement must record the tarball build sha.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="addendum">
+        <h2>Recommendations</h2>
+        <div class="prose">
+          <p class="eyebrow">Addendum by Pranay Prakash · proposed, not implemented</p>
+          <p>
+            The new-session path is three functions in a chain: handler, holder, turn. Each link is
+            a queue hop, and inside each link every request waits for the previous one. The holder
+            sits in the middle doing bookkeeping the turn does not need before it can call the
+            model. The turn needs three things: the claim on its hook, a durable marker that effects
+            began, and the first message, which is already in its input. So the goal is to run the
+            turn in parallel with the holder rather than after it.
+          </p>
+          <ol>
+            <li>
+              <b>Start the holder and the first turn from the handler, in parallel.</b> The holder
+              run id is generated client-side before <code>start()</code>, the deployment id is in
+              the environment, and same-deployment keys derive locally, so the handler can build the
+              resources without the holder's metadata read and pass them into both starts. The turn
+              hops once and claims while the holder bootstraps; its head read waits, bounded, for
+              the seed. Token-bearing sessions keep the serial path, or wait on the alias outcome,
+              because the turn must not begin effects before the alias claim is known.
+            </li>
+            <li>
+              <b>Let the first turn write index zero.</b> The initial entered marker already embeds
+              full state. An early follow-up that wins the claim and finds an empty log defers to
+              the initial event's candidate through the existing predecessor mechanism. This changes
+              the first-input-precedence contract and must be written down with it.
+            </li>
+            <li><b>Move the session-timeout start off the path.</b> Done on Sep 9: it starts in parallel with the model inside the first execute step.</li>
+            <li><b>Overlap the entered marker with model request assembly.</b> Moot on Sep 9: the marker no longer exists, so there is no pre-model write left; the pre-model read is the snapshot tail.</li>
+            <li><b>Trim holder bootstrap.</b> Largely done on Sep 9: the holder writes one sentinel and starts the turn; descriptor publication moved into the first turn. What remains is merging its two steps.</li>
+            <li>
+              <b>Hook-claim reads belong upstream.</b> Rather than moving the turn's
+              <code>AbortController</code> out of the claim suspension, generalize the SDK: when a
+              suspension posts several guarded events from the same base cursor, the longest event
+              suffix any of them returns contains every event the suspension wrote, so the runtime
+              can continue inline replay from it with no read. See
+              <a href="https://github.com/vercel/workflow/pull/4048">vercel/workflow#4048</a>. eve
+              keeps two hooks per turn.
+            </li>
+          </ol>
+        </div>
+        <figure class="wide">
+          <div id="fig-a2"></div>
+          <figcaption>
+            <b>Path A after the recommendations.</b> The handler issues four requests in one
+            parallel batch and returns. Both hops run concurrently. The turn reaches the model after
+            one hook write, one step start, and one marker write, while the holder finishes its own
+            bootstrap alongside. About four sequential requests and one hop, against twenty-one and
+            two today.
+          </figcaption>
+        </figure>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Recommendation</th>
+                <th class="num">Serial RTs removed</th>
+                <th class="num">Hops removed</th>
+                <th>Where</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Parallel holder and turn start from the handler</td>
+                <td class="num">~13</td>
+                <td class="num">1</td>
+                <td>handler, <code>session/dispatch.ts</code>, <code>holding-workflow.ts</code></td>
+              </tr>
+              <tr>
+                <td>First turn writes index zero</td>
+                <td class="num">1 + seed wait</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code>, <code>checkpoint-log.ts</code></td>
+              </tr>
+              <tr>
+                <td>Timeout start off-path</td>
+                <td class="num">1</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code> or holder</td>
+              </tr>
+              <tr>
+                <td>Overlap entered marker</td>
+                <td class="num">~1</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code></td>
+              </tr>
+              <tr>
+                <td>Holder trims (off-path after the first item)</td>
+                <td class="num">6</td>
+                <td class="num">0</td>
+                <td><code>holding-steps.ts</code>, <code>stream-storage.ts</code></td>
+              </tr>
+              <tr>
+                <td>Multi-event suspension delta, upstream</td>
+                <td class="num">1 + cold replay</td>
+                <td class="num">0</td>
+                <td>vercel/workflow suspension handler and runtime</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="method">
+  <h2>Method</h2>
+  <div class="prose">
+    <p>Request counts come from reading eve at 5a95ccb4d (turn workflow, execute, finalize, session storage, inbox, channel handlers) and the Workflow SDK sources at workflow <code>main</code>, with the vendored bundle checked for the in-process hook settle. The Sep 8 columns come from the same trace done against d78e52197 with the then-pinned patch. No native test fixes the current storage budget; the earlier 8/10 test was removed with the redesign.</p>
+    <p>Client timings come from the <code>workflow-stress-performance</code> artifacts of runs 34271267671, 34372229316, 34376073850, and 34381220523. The in-step event span is the difference between <code>turn.started</code> and <code>session.waiting</code> construction timestamps in each run's event log. The Sep 8 native phases come from that run's report, produced by a profiler that no longer exists on the branch.</p>
+    <p>Not counted: Slack API calls, OpenTelemetry attribute writes, model provider requests, VQS lease extensions on bodies over 60 seconds.</p>
+  </div>
+</section>
+    </div>
+    <div class="tt" id="tt"></div>
+
+    <script>
+      (function () {
+        var COLORS = {
+          ws: "var(--c-ws)",
+          vqs: "var(--c-vqs)",
+          compute: "var(--c-compute)",
+          replay: "var(--c-replay)",
+        };
+        var SOFT = {
+          ws: "var(--c-ws-soft)",
+          vqs: "var(--c-vqs-soft)",
+          compute: "var(--c-compute-soft)",
+          replay: "var(--c-replay-soft)",
+        };
+        var NS = "http://www.w3.org/2000/svg";
+        function el(name, attrs, text) {
+          var e = document.createElementNS(NS, name);
+          for (var k in attrs) e.setAttribute(k, attrs[k]);
+          if (text !== undefined) e.textContent = text;
+          return e;
+        }
+        var tt = document.getElementById("tt");
+        function hover(node, text) {
+          node.addEventListener("mousemove", function (ev) {
+            tt.textContent = text;
+            tt.style.opacity = 1;
+            tt.style.left = ev.clientX + 12 + "px";
+            tt.style.top = ev.clientY + 12 + "px";
+          });
+          node.addEventListener("mouseleave", function () {
+            tt.style.opacity = 0;
+          });
+        }
+
+        // ---------- Sequence diagram renderer ----------
+        function seq(id, spec) {
+          var W = 1100,
+            laneTop = 44,
+            rowH = 26,
+            pad = 20;
+          var rowHeight = function (e) {
+            if (e.t === "phase") return rowH;
+            return e.rt || e.t === "hop" ? rowH + 12 : rowH;
+          };
+          var H =
+            laneTop +
+            22 +
+            spec.events.reduce(function (acc, e) {
+              return acc + rowHeight(e);
+            }, 0) +
+            pad;
+          var svg = el("svg", {
+            viewBox: "0 0 " + W + " " + H,
+            role: "img",
+            "aria-label": spec.aria,
+          });
+          var defs = el("defs");
+          ["ws", "vqs", "compute", "replay"].forEach(function (k) {
+            var m = el("marker", {
+              id: id + "-m-" + k,
+              viewBox: "0 0 10 10",
+              refX: "9",
+              refY: "5",
+              markerWidth: "7",
+              markerHeight: "7",
+              orient: "auto-start-reverse",
+            });
+            m.appendChild(el("path", { d: "M0 0L10 5L0 10z", fill: COLORS[k] }));
+            defs.appendChild(m);
+          });
+          svg.appendChild(defs);
+          var n = spec.lanes.length,
+            left = 110,
+            right = W - 40;
+          var xs = spec.lanes.map(function (_, i) {
+            return left + (right - left) * (n === 1 ? 0.5 : i / (n - 1));
+          });
+          var g = el("g", {
+            "font-family": "IBM Plex Sans, sans-serif",
+            "font-size": "12",
+            fill: "var(--ink)",
+          });
+          svg.appendChild(g);
+          spec.lanes.forEach(function (l, i) {
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: xs[i],
+                  y: 22,
+                  "text-anchor": "middle",
+                  "font-family": "Archivo, sans-serif",
+                  "font-weight": "600",
+                  "font-size": "13",
+                },
+                l.label,
+              ),
+            );
+            if (l.sub)
+              g.appendChild(
+                el(
+                  "text",
+                  {
+                    x: xs[i],
+                    y: 37,
+                    "text-anchor": "middle",
+                    "font-size": "10.5",
+                    fill: "var(--ink-3)",
+                  },
+                  l.sub,
+                ),
+              );
+            g.appendChild(
+              el("line", {
+                x1: xs[i],
+                y1: laneTop,
+                x2: xs[i],
+                y2: H - pad + 6,
+                stroke: "var(--rule-2)",
+                "stroke-dasharray": "2 4",
+              }),
+            );
+          });
+          var y = laneTop + 18;
+          spec.events.forEach(function (e) {
+            if (e.t === "phase") {
+              g.appendChild(
+                el("rect", {
+                  x: 8,
+                  y: y - 12,
+                  width: W - 16,
+                  height: 20,
+                  fill: "var(--surface-2)",
+                  rx: 2,
+                }),
+              );
+              g.appendChild(
+                el(
+                  "text",
+                  {
+                    x: 16,
+                    y: y + 3,
+                    "font-family": "IBM Plex Mono, monospace",
+                    "font-size": "11",
+                    fill: "var(--ink-2)",
+                  },
+                  e.label,
+                ),
+              );
+              if (e.ms !== undefined)
+                g.appendChild(
+                  el(
+                    "text",
+                    {
+                      x: W - 16,
+                      y: y + 3,
+                      "text-anchor": "end",
+                      "font-family": "IBM Plex Mono, monospace",
+                      "font-size": "11",
+                      fill: "var(--ink)",
+                      "font-weight": "500",
+                    },
+                    e.ms,
+                  ),
+                );
+            } else if (e.t === "self") {
+              var w = Math.max(120, e.label.length * 6.4 + 18);
+              var x = Math.min(Math.max(xs[e.lane], w / 2 + 12), W - w / 2 - 12);
+              var box = el("rect", {
+                x: x - w / 2,
+                y: y - 10,
+                width: w,
+                height: 20,
+                rx: 3,
+                fill: SOFT[e.kind || "compute"],
+                stroke: COLORS[e.kind || "compute"],
+                "stroke-width": "1",
+              });
+              g.appendChild(box);
+              g.appendChild(
+                el(
+                  "text",
+                  { x: x, y: y + 4, "text-anchor": "middle", "font-size": "11.5" },
+                  e.label,
+                ),
+              );
+              if (e.note) hover(box, e.note);
+            } else {
+              var x1 = xs[e.from],
+                x2 = xs[e.to],
+                k = e.kind || "ws";
+              var dash = e.t === "hop" ? "6 4" : e.bg ? "3 3" : null;
+              var attrs = {
+                x1: x1,
+                y1: y,
+                x2: x2,
+                y2: y,
+                stroke: COLORS[k],
+                "stroke-width": e.t === "hop" ? "2" : "1.5",
+                "marker-end": "url(#" + id + "-m-" + k + ")",
+              };
+              if (dash) attrs["stroke-dasharray"] = dash;
+              var line = el("line", attrs);
+              g.appendChild(line);
+              var mid = (x1 + x2) / 2,
+                anchor = "middle";
+              var label = e.label + (e.par ? "  ∥" : "") + (e.bg ? "  (background)" : "");
+              var lbl = el(
+                "text",
+                {
+                  x: mid,
+                  y: y - 5,
+                  "text-anchor": anchor,
+                  "font-size": "11.5",
+                  fill: "var(--ink)",
+                },
+                label,
+              );
+              g.appendChild(lbl);
+              if (e.rt)
+                g.appendChild(
+                  el(
+                    "text",
+                    {
+                      x: mid,
+                      y: y + 13,
+                      "text-anchor": anchor,
+                      "font-family": "IBM Plex Mono, monospace",
+                      "font-size": "10",
+                      fill: COLORS[k],
+                    },
+                    e.rt,
+                  ),
+                );
+              if (e.note) {
+                hover(line, e.note);
+                hover(lbl, e.note);
+              }
+              if (e.t === "hop") {
+                var tag = el(
+                  "text",
+                  {
+                    x: x2 + (x2 > x1 ? -6 : 6),
+                    y: y + 13,
+                    "text-anchor": x2 > x1 ? "end" : "start",
+                    "font-family": "IBM Plex Mono, monospace",
+                    "font-size": "10",
+                    fill: COLORS.vqs,
+                  },
+                  "new invocation",
+                );
+                g.appendChild(tag);
+              }
+            }
+            y += rowHeight(e);
+          });
+          document.getElementById(id).appendChild(svg);
+        }
+
+        var L = {
+          client: { label: "Client", sub: "browser / eval" },
+          handler: { label: "Ingress handler", sub: "HTTP or webhook function" },
+          vqs: { label: "VQS", sub: "queue service" },
+          holder: { label: "Holder invocation", sub: "holdingWorkflow run" },
+          turn: { label: "Turn invocation", sub: "turnWorkflow run" },
+          turn2: { label: "Owner, 2nd invocation", sub: "same run, new function" },
+          cand: { label: "Candidate invocation", sub: "losing turnWorkflow" },
+          ws: { label: "workflow-server", sub: "runs · events · hooks · streams" },
+        };
+
+        // Figure: anatomy of a hop
+        seq("fig-hop", {
+          aria: "One queue hop: publish, VQS push to the flow route, run_started in background, work, ack.",
+          lanes: [L.handler, L.vqs, L.turn, L.ws],
+          events: [
+            {
+              t: "msg",
+              from: 0,
+              to: 3,
+              label: "POST /v4/runs/:id/events/run_created",
+              kind: "ws",
+              rt: "HTTPS, no WS channel in a handler",
+              par: true,
+            },
+            {
+              t: "msg",
+              from: 0,
+              to: 1,
+              label: "POST /api/v3/topic/__wkf_workflow_*",
+              kind: "vqs",
+              rt: "Vqs-Idempotency-Key, payload inline",
+              par: true,
+            },
+            {
+              t: "hop",
+              from: 1,
+              to: 2,
+              label: "POST /.well-known/workflow/v1/flow",
+              kind: "vqs",
+              rt: "binary CloudEvent, retryAfterSeconds 5",
+            },
+            { t: "self", lane: 2, label: "open WS channel wss://…/runs/:id", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 3,
+              label: "run_started",
+              kind: "ws",
+              bg: true,
+              note: "Turbo: first delivery skips the event-log preload. A wake or redelivery awaits this and receives the full log in the response.",
+            },
+            { t: "self", lane: 2, label: "replay workflow body from empty log", kind: "replay" },
+            { t: "phase", label: "… steps, hooks, streams (see paths) …" },
+            { t: "msg", from: 2, to: 3, label: "run_completed", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 1,
+              label: "DELETE consumer/default/lease/:receipt",
+              kind: "vqs",
+              rt: "ack; lease extension every 60 s if still running",
+            },
+          ],
+        });
+
+        // Path A
+  seq("fig-a", {
+    aria: "New session at 5a95ccb4d: handler starts holder; holder writes a sentinel and starts the turn; the turn builds the initial checkpoint and overlaps descriptor publication and timeout start with the model.",
+    lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
+    events: [
+      { t: "msg", from: 0, to: 4, label: "run_created (holder)", kind: "ws", par: true },
+      { t: "msg", from: 0, to: 1, label: "publish holder", kind: "vqs", par: true },
+      { t: "self", lane: 0, label: "202 (inside waitUntil); client GETs stream, blocks on descriptor ≤10 s", kind: "compute" },
+      { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 2, to: 4, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 2, to: 4, label: "hook_created eve:holder:<runId>", kind: "ws", rt: "single hook: settles in-process, delta permitting" },
+      { t: "msg", from: 2, to: 4, label: "step_started initializeHolderStep", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "GET /v2/runs/:self (first stream handle) · PUT null sentinel to snapshots", kind: "ws", rt: "2 serial" },
+      { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "step_started startTurnStep", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "run_created (turn, resources inlined)", kind: "ws", par: true },
+      { t: "msg", from: 2, to: 1, label: "publish turn", kind: "vqs", par: true },
+      { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
+      { t: "self", lane: 2, label: "control.next() → suspend on hook; ack; parked", kind: "replay" },
+      { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 3, to: 4, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 3, to: 4, label: "hook_created ×2 (inbox + AbortController, one suspension)", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "GET events.list (two hooks → no delta) → claim owned", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "step_started executeTurnStep · abort-reader GET opens", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "GET snapshot tail → null sentinel", kind: "ws" },
+      { t: "self", lane: 3, label: "initializeCheckpoint from the submission's seed (bundle compile)", kind: "compute" },
+      { t: "msg", from: 3, to: 4, label: "PUT descriptor + done  ∥  run_created + publish (timeout)  ∥  model", kind: "ws", rt: "overlapped with the model call" },
+      { t: "self", lane: 3, label: "model call · events enqueued locally, drained in background", kind: "compute" },
+      { t: "phase", label: "continues as Path B from the drain onward" },
+    ],
+  });
+
+// Path A after the recommendations
+        seq("fig-a2", {
+          aria: "Proposed new session: handler starts holder and turn in parallel; both hop at once; turn reaches the model after one hook write, one step start, and one marker write.",
+          lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
+          events: [
+            {
+              t: "self",
+              lane: 0,
+              label: "build SessionResources locally: holder runId, deployment id, derived key",
+              kind: "compute",
+            },
+            { t: "msg", from: 0, to: 4, label: "run_created (holder)", kind: "ws", par: true },
+            { t: "msg", from: 0, to: 1, label: "publish holder", kind: "vqs", par: true },
+            {
+              t: "msg",
+              from: 0,
+              to: 4,
+              label: "run_created (turn, resources inlined)",
+              kind: "ws",
+              par: true,
+            },
+            { t: "msg", from: 0, to: 1, label: "publish turn", kind: "vqs", par: true },
+            { t: "self", lane: 0, label: "202 to client", kind: "compute" },
+            { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+            { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
+            { t: "msg", from: 2, to: 4, label: "run_started", kind: "ws", bg: true },
+            { t: "msg", from: 3, to: 4, label: "run_started", kind: "ws", bg: true },
+            {
+              t: "msg",
+              from: 2,
+              to: 4,
+              label: "hook_created eve:holder:<runId>",
+              kind: "ws",
+              rt: "single hook: delta carried, no reload",
+            },
+            {
+              t: "msg",
+              from: 3,
+              to: 4,
+              label: "hook_created ×2 (inbox, AbortController)",
+              kind: "ws",
+              rt: "upstream multi-event delta: no reload",
+            },
+            { t: "msg", from: 2, to: 4, label: "step_started bootstrapStep (merged)", kind: "ws" },
+            { t: "msg", from: 3, to: 4, label: "step_started executeTurnStep", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 4,
+              label: "PUT descriptor (+ done) · run_created ∥ publish timeout",
+              kind: "ws",
+              rt: "no metadata read, no tail probes",
+            },
+            {
+              t: "msg",
+              from: 3,
+              to: 4,
+              label: "PUT initial entered marker (index 0, embeds state)",
+              kind: "ws",
+              rt: "overlapped with model request assembly",
+            },
+            { t: "self", lane: 3, label: "model call", kind: "compute" },
+            {
+              t: "phase",
+              label: "holder finishes off-path: step_completed, park on control.next(), ack",
+            },
+          ],
+        });
+
+        // Path B
+  seq("fig-b", {
+    aria: "Follow-up on idle session at 5a95ccb4d: start inside waitUntil, one hop, two-hook claim with one log read, execute with tail read and background event drain, finalize writes session.waiting, commit appends the checkpoint.",
+    lanes: [L.handler, L.vqs, L.turn, L.ws],
+    events: [
+      { t: "self", lane: 0, label: "acceptSubmission: mint eventId · 202 returned · descriptor from cache (cold: 2 GETs)", kind: "compute" },
+      { t: "msg", from: 0, to: 3, label: "run_created", kind: "ws", par: true, note: "Runs inside waitUntil after the 202 has been sent." },
+      { t: "msg", from: 0, to: 1, label: "publish", kind: "vqs", par: true },
+      { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 2, to: 3, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 2, to: 3, label: "hook_created ×2: eve:turn:<sid> + abrt_ (one suspension)", kind: "ws", rt: "conflict would return in this response" },
+      { t: "msg", from: 2, to: 3, label: "GET events.list (two hooks → no carried delta)", kind: "ws", rt: "workflow#4048 removes this" },
+      { t: "self", lane: 2, label: "settle on retained VM → claim owned → executeTurnStep", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started (lazy, carries input) · abort-reader GET opens", kind: "ws" },
+      { t: "self", lane: 2, label: "cold process only: GET /v2/runs/:holder for the stream key", kind: "compute" },
+      { t: "msg", from: 2, to: 3, label: "GET snapshot tail (startIndex −1) → full checkpoint", kind: "ws" },
+      { t: "self", lane: 2, label: "hydrate, admit input, bind caller", kind: "compute" },
+      { t: "phase", label: "≈6 serial requests + 1 hop before the model" },
+      { t: "self", lane: 2, label: "model call (mock 7 ms) · events enqueued to the step-local writer", kind: "compute" },
+      { t: "msg", from: 2, to: 3, label: "PUT event chunks, one per event, grouped only while a PUT is in flight (≈3–6 PUTs)", kind: "ws", rt: "drain runs in background; finish() awaited before the step returns" },
+      { t: "msg", from: 2, to: 3, label: "step_completed · result = full SessionCheckpoint (copy 1)", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay · drain inbox · reduceTurnBoundary → finalize", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started finalizeTurnStep · input = full checkpoint (copy 2)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "PUT events: turn.completed, session.waiting", kind: "ws", rt: "client latency ends here (≈1,330 ms)" },
+      { t: "msg", from: 2, to: 3, label: "step_completed · result = full checkpoint (copy 3)", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay → commitTurnStep", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started commitTurnStep · input = full checkpoint (copy 4)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "PUT snapshot append (copy 5)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "step_completed", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay → return receipt", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "run_completed", kind: "ws" },
+      { t: "msg", from: 2, to: 1, label: "DELETE lease (ack)", kind: "vqs" },
+    ],
+  });
+
+// Path C
+        seq("fig-c", {
+          aria: "Steer on an active turn: candidate loses claim, resumes the owner hook, a second owner invocation buffers the envelope, the live step applies it at its boundary.",
+          lanes: [L.handler, L.vqs, L.cand, L.turn2, L.turn, L.ws],
+          events: [
+            { t: "msg", from: 0, to: 5, label: "run_created (candidate)", kind: "ws", par: true },
+            { t: "msg", from: 0, to: 1, label: "publish", kind: "vqs", par: true },
+            {
+              t: "self",
+              lane: 4,
+              label: "owner: executeTurnStep in flight (model running)",
+              kind: "compute",
+            },
+            { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+            { t: "msg", from: 2, to: 5, label: "run_started", kind: "ws", bg: true },
+            {
+              t: "msg",
+              from: 2,
+              to: 5,
+              label: "hook_created ×2 → response carries hook_conflict",
+              kind: "ws",
+            },
+            { t: "msg", from: 2, to: 5, label: "GET events.list (patch reload)", kind: "ws" },
+            {
+              t: "self",
+              lane: 2,
+              label: "claim → conflict(ownerRunId) → inbox.dispose()",
+              kind: "replay",
+            },
+            { t: "msg", from: 2, to: 5, label: "hook_disposed", kind: "ws" },
+            { t: "msg", from: 2, to: 5, label: "step_started forwardSubmissionStep", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 5,
+              label: "GET hooks/by-token eve:turn:<sid>",
+              kind: "ws",
+              rt: "resumeHook 1/3",
+            },
+            {
+              t: "msg",
+              from: 2,
+              to: 5,
+              label: "POST hook_received (session.submit envelope)",
+              kind: "ws",
+              rt: "resumeHook 2/3",
+            },
+            {
+              t: "msg",
+              from: 2,
+              to: 1,
+              label: "publish owner wake",
+              kind: "vqs",
+              rt: "resumeHook 3/3",
+            },
+            {
+              t: "msg",
+              from: 2,
+              to: 5,
+              label: "GET /v2/runs/:owner/status?waitMs=50000",
+              kind: "ws",
+              rt: "long poll; step slot held",
+            },
+            { t: "phase", label: "forward step body", ms: "113 ms p50 (5/99 turns)" },
+            { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
+            {
+              t: "msg",
+              from: 3,
+              to: 5,
+              label: "run_started with full event-log preload",
+              kind: "ws",
+              rt: "not turbo: wake delivery",
+            },
+            {
+              t: "self",
+              lane: 3,
+              label: "replay: inbox pump yields envelope → observeEnvelope",
+              kind: "replay",
+            },
+            {
+              t: "msg",
+              from: 3,
+              to: 5,
+              label: "interrupt only: hook_received (abrt_) + PUT abort packet",
+              kind: "ws",
+              note: "The abort reader opened by the live execute step receives this packet and cancels the model call in real time. A plain steer writes nothing here.",
+            },
+            {
+              t: "self",
+              lane: 3,
+              label: "execute step owned by live lease → arm delayed backstop wake",
+              kind: "replay",
+            },
+            { t: "msg", from: 3, to: 1, label: "delayed publish (backstop) · ack", kind: "vqs" },
+            {
+              t: "self",
+              lane: 4,
+              label: "model ends (or is cancelled) · PUT events · PUT commit",
+              kind: "compute",
+            },
+            {
+              t: "msg",
+              from: 4,
+              to: 5,
+              label: "step_completed (delta includes hook_received)",
+              kind: "ws",
+            },
+            {
+              t: "self",
+              lane: 4,
+              label: "inline replay · drain → reduceTurnBoundary → steer: model",
+              kind: "replay",
+            },
+            {
+              t: "msg",
+              from: 4,
+              to: 5,
+              label: "step_started executeTurnStep({model, envelopes})",
+              kind: "ws",
+            },
+            {
+              t: "msg",
+              from: 4,
+              to: 5,
+              label: "checkpoint arrives as step input · model · PUT events · result = checkpoint", kind: "ws", rt: "no snapshot I/O in a mid-turn execute",
+            },
+            {
+              t: "msg",
+              from: 4,
+              to: 5,
+              label: "step_completed → finalize (as Path B) → run_completed",
+              kind: "ws",
+            },
+            {
+              t: "msg",
+              from: 5,
+              to: 2,
+              label: "long poll returns terminal → GET /v2/runs/:owner (receipt)",
+              kind: "ws",
+            },
+            {
+              t: "self",
+              lane: 2,
+              label: "receipt names eventId → step_completed → run_completed → ack",
+              kind: "replay",
+            },
+          ],
+        });
+
+        // Path E rekey
+        seq("fig-e", {
+          aria: "First turn rekey: turn sends rekey to holder control hook, suspends; holder wakes, replies; turn wakes and finalizes.",
+          lanes: [L.vqs, L.holder, L.turn, L.ws],
+          events: [
+            {
+              t: "self",
+              lane: 2,
+              label: "executeTurnStep done · progress.continuationToken set, claimed unset",
+              kind: "compute",
+            },
+            { t: "msg", from: 2, to: 3, label: "step_started sendInboxStep(rekey)", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 3,
+              label: "GET hooks/by-token eve:holder:<runId>",
+              kind: "ws",
+            },
+            { t: "msg", from: 2, to: 3, label: "POST hook_received (rekey)", kind: "ws" },
+            { t: "msg", from: 2, to: 0, label: "publish holder wake", kind: "vqs" },
+            { t: "msg", from: 2, to: 3, label: "step_completed", kind: "ws" },
+            {
+              t: "self",
+              lane: 2,
+              label: "await inbox.response(requestId) → suspend; ack",
+              kind: "replay",
+            },
+            { t: "hop", from: 0, to: 1, label: "flow route", kind: "vqs" },
+            { t: "msg", from: 1, to: 3, label: "run_started with preload", kind: "ws" },
+            {
+              t: "self",
+              lane: 1,
+              label: 'replay → control.next() yields → aliases.has(token) → "claimed"',
+              kind: "replay",
+            },
+            {
+              t: "msg",
+              from: 1,
+              to: 3,
+              label: "step_started sendInboxStep(rekey.response)",
+              kind: "ws",
+            },
+            { t: "msg", from: 1, to: 3, label: "GET hooks/by-token eve:turn:<sid>", kind: "ws" },
+            { t: "msg", from: 1, to: 3, label: "POST hook_received (rekey.response)", kind: "ws" },
+            { t: "msg", from: 1, to: 0, label: "publish turn wake", kind: "vqs" },
+            { t: "msg", from: 1, to: 3, label: "step_completed", kind: "ws" },
+            { t: "self", lane: 1, label: "park on control.next(); ack", kind: "replay" },
+            { t: "hop", from: 0, to: 2, label: "flow route", kind: "vqs" },
+            { t: "msg", from: 2, to: 3, label: "run_started with preload", kind: "ws" },
+            {
+              t: "self",
+              lane: 2,
+              label: "replay → response resolves → finalizeTurnStep (as Path B)",
+              kind: "replay",
+            },
+          ],
+        });
+
+        // ---------- Horizontal stacked bar: waterfall ----------
+        (function () {
+          var segs = [
+            {
+              k: "vqs",
+              label: "created → started",
+              ms: 60,
+              note: "run_created ∥ publish, VQS delivery, function start",
+            },
+            {
+              k: "ws",
+              label: "started → execute",
+              ms: 200,
+              note: "run_started (bg), hook_created ×2, GET events.list, cold replay, step_started, abort-reader GET",
+            },
+            {
+              k: "ws",
+              label: "execute → model",
+              ms: 141,
+              note: "GET snapshot head, hydrate, PUT entered marker",
+            },
+            { k: "compute", label: "model", ms: 7, note: "mock model bracket" },
+            {
+              k: "ws",
+              label: "model → execute done",
+              ms: 190,
+              note: "PUT event batch, PUT commit, durability await, dehydrate",
+            },
+            {
+              k: "replay",
+              label: "execute → finalize",
+              ms: 73,
+              note: "step_completed (delta), inline replay, step_started",
+            },
+            {
+              k: "ws",
+              label: "finalize body",
+              ms: 312,
+              note: "GET head, PUT entered, PUT events (client sees session.waiting), PUT commit",
+            },
+            {
+              k: "replay",
+              label: "finalize → run done",
+              ms: 153,
+              note: "step_completed, replay, run_completed, ack",
+            },
+          ];
+          var total = segs.reduce(function (a, s) {
+            return a + s.ms;
+          }, 0);
+          var W = 1100,
+            H = 190,
+            x0 = 20,
+            x1 = W - 20,
+            barY = 46,
+            barH = 34;
+          var svg = el("svg", {
+            viewBox: "0 0 " + W + " " + H,
+            role: "img",
+            "aria-label": "Stacked bar of a warm turn by phase, 1,136 ms total; model is 7 ms.",
+          });
+          var g = el("g", {
+            "font-family": "IBM Plex Sans, sans-serif",
+            "font-size": "12",
+            fill: "var(--ink)",
+          });
+          svg.appendChild(g);
+          var scale = (x1 - x0) / total,
+            x = x0;
+          // client end marker at 1035
+          segs.forEach(function (s, i) {
+            var w = s.ms * scale;
+            var r = el("rect", {
+              x: x,
+              y: barY,
+              width: Math.max(w - 2, 1),
+              height: barH,
+              fill: COLORS[s.k],
+              rx: i === 0 ? 3 : 0,
+            });
+            g.appendChild(r);
+            hover(r, s.label + ": " + s.ms + " ms. " + s.note);
+            var lx = x + w / 2,
+              up = i % 2 === 0;
+            var ly = up ? barY - 14 : barY + barH + 18;
+            if (w > 30 || s.k === "compute") {
+              g.appendChild(
+                el("line", {
+                  x1: lx,
+                  y1: up ? barY - 4 : barY + barH + 4,
+                  x2: lx,
+                  y2: up ? ly + 4 : ly - 12,
+                  stroke: "var(--rule-2)",
+                }),
+              );
+              g.appendChild(
+                el("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": "11.5" }, s.label),
+              );
+              g.appendChild(
+                el(
+                  "text",
+                  {
+                    x: lx,
+                    y: ly + (up ? -13 : 14),
+                    "text-anchor": "middle",
+                    "font-family": "IBM Plex Mono, monospace",
+                    "font-size": "11",
+                    fill: "var(--ink-2)",
+                  },
+                  s.ms + " ms",
+                ),
+              );
+            }
+            x += w;
+          });
+          var cx = x0 + 1035 * scale;
+          g.appendChild(
+            el("line", {
+              x1: cx,
+              y1: barY - 6,
+              x2: cx,
+              y2: barY + barH + 6,
+              stroke: "var(--ink)",
+              "stroke-width": "1.5",
+            }),
+          );
+          g.appendChild(
+            el(
+              "text",
+              {
+                x: cx,
+                y: barY + barH + 52,
+                "text-anchor": "middle",
+                "font-size": "11.5",
+                "font-weight": "600",
+              },
+              "client sees completion ≈ 1,035 ms",
+            ),
+          );
+          g.appendChild(
+            el(
+              "text",
+              {
+                x: x1,
+                y: barY + barH + 52,
+                "text-anchor": "end",
+                "font-family": "IBM Plex Mono, monospace",
+                "font-size": "11",
+                fill: "var(--ink-2)",
+              },
+              "native run 1,177 ms p50",
+            ),
+          );
+          // axis ticks
+          [0, 250, 500, 750, 1000].forEach(function (t) {
+            var tx = x0 + t * scale;
+            g.appendChild(
+              el("line", {
+                x1: tx,
+                y1: barY + barH + 60,
+                x2: tx,
+                y2: barY + barH + 66,
+                stroke: "var(--rule-2)",
+              }),
+            );
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: tx,
+                  y: barY + barH + 80,
+                  "text-anchor": t === 0 ? "start" : "middle",
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "10.5",
+                  fill: "var(--ink-3)",
+                },
+                t + " ms",
+              ),
+            );
+          });
+          g.appendChild(
+            el("line", {
+              x1: x0,
+              y1: barY + barH + 63,
+              x2: x1,
+              y2: barY + barH + 63,
+              stroke: "var(--rule-2)",
+            }),
+          );
+          document.getElementById("fig-waterfall").appendChild(svg);
+        })();
+
+        // ---------- Horizontal bars: checkpoints ----------
+        function hbars(id, rows, opts) {
+          var W = 560,
+            rowH = 26,
+            top = 14,
+            labelW = opts.labelW || 250,
+            right = 70;
+          var H = top + rows.length * rowH + 30;
+          var max =
+            opts.max ||
+            Math.max.apply(
+              null,
+              rows.map(function (r) {
+                return r.v;
+              }),
+            );
+          var svg = el("svg", {
+            viewBox: "0 0 " + W + " " + H,
+            role: "img",
+            "aria-label": opts.aria,
+          });
+          var g = el("g", {
+            "font-family": "IBM Plex Sans, sans-serif",
+            "font-size": "12",
+            fill: "var(--ink)",
+          });
+          svg.appendChild(g);
+          var x0 = labelW,
+            x1 = W - right,
+            scale = (x1 - x0) / max;
+          rows.forEach(function (r, i) {
+            var y = top + i * rowH;
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: x0 - 10,
+                  y: y + 15,
+                  "text-anchor": "end",
+                  "font-size": "11.5",
+                  fill: r.em ? "var(--ink)" : "var(--ink-2)",
+                  "font-weight": r.em ? "600" : "400",
+                },
+                r.label,
+              ),
+            );
+            var rect = el("rect", {
+              x: x0,
+              y: y + 3,
+              width: Math.max(r.v * scale, 2),
+              height: rowH - 8,
+              fill: COLORS[r.k || "ws"],
+              rx: 3,
+              opacity: r.em ? 1 : 0.8,
+            });
+            g.appendChild(rect);
+            hover(
+              rect,
+              r.label +
+                ": " +
+                r.v.toLocaleString() +
+                (opts.unit || " ms") +
+                (r.note ? ". " + r.note : ""),
+            );
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: x0 + r.v * scale + 6,
+                  y: y + 15,
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "11",
+                  fill: "var(--ink)",
+                },
+                r.v.toLocaleString() + (opts.unit || ""),
+              ),
+            );
+          });
+          var ticks = opts.ticks || [0, max / 2, max];
+          ticks.forEach(function (t) {
+            var tx = x0 + t * scale,
+              y = top + rows.length * rowH + 4;
+            g.appendChild(
+              el("line", { x1: tx, y1: y, x2: tx, y2: y + 5, stroke: "var(--rule-2)" }),
+            );
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: tx,
+                  y: y + 18,
+                  "text-anchor": "middle",
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "10.5",
+                  fill: "var(--ink-3)",
+                },
+                t.toLocaleString() + (opts.unit || " ms"),
+              ),
+            );
+          });
+          g.appendChild(
+            el("line", {
+              x1: x0,
+              y1: top + rows.length * rowH + 4,
+              x2: x1,
+              y2: top + rows.length * rowH + 4,
+              stroke: "var(--rule-2)",
+            }),
+          );
+          document.getElementById(id).appendChild(svg);
+        }
+        hbars(
+          "fig-checkpoints",
+          [
+            { label: "Original holder implementation", v: 3326 },
+            { label: "Success-abort cleanup", v: 3535 },
+            {
+              label: "Single snapshot log",
+              v: 1593,
+              em: true,
+              note: "replaced pointer + per-record streams; 53 → 20 holder ops",
+            },
+            { label: "Direct tails + metadata cache", v: 1470 },
+            { label: "Step storage scope, overlapped writes", v: 1408 },
+            {
+              label: "In-process hook claim replay",
+              v: 1145,
+              em: true,
+              note: "SDK patch: no requeue after hook_created",
+            },
+            {
+              label: "Direct candidate admission",
+              v: 1082,
+              note: "no holder preflight at ingress",
+            },
+            { label: "Background observability", v: 1114 },
+            { label: "Immutable stream references", v: 1035, em: true },
+          ],
+          {
+            aria: "Warm p50 client latency across nine hosted checkpoints, 3,326 ms down to 1,035 ms.",
+            max: 3600,
+            ticks: [0, 1000, 2000, 3000],
+            labelW: 240,
+          },
+        );
+
+        hbars(
+          "fig-variants",
+          [
+            { label: "Warm follow-up, client p50", v: 1035, em: true },
+            { label: "Warm follow-up, native run p50", v: 1177 },
+            {
+              label: "Forwarded turn, created → execute",
+              v: 609,
+              k: "vqs",
+              note: "versus 260 ms uncontested",
+            },
+            { label: "Uncontested, created → execute", v: 260, k: "vqs" },
+            {
+              label: "Cold first turn, client",
+              v: 1928,
+              em: true,
+              note: "handler + holder bootstrap + turn",
+            },
+            { label: "Cold first turn, turn run only", v: 1233 },
+            { label: "Concurrent 2nd turn, p50 (50 sessions)", v: 1345 },
+            {
+              label: "Concurrent 2nd turn, p95",
+              v: 4272,
+              note: "contention tail: forwards, wakes, polls",
+            },
+          ],
+          {
+            aria: "Hosted timings for warm, forwarded, cold, and concurrent variants.",
+            max: 4500,
+            ticks: [0, 1000, 2000, 3000, 4000],
+            labelW: 240,
+          },
+        );
+
+        hbars("fig-bench", [
+    { label: "Sep 8 d78e52197 · warm p50", v: 1035, em: true },
+    { label: "Sep 8 · turns 2–11", v: 994 },
+    { label: "Sep 8 · turns 91–100", v: 1065 },
+    { label: "Sep 9 6166ed00a · warm p50", v: 2805, em: true, k: "vqs", note: "first run on the snapshot simplification and main tarballs" },
+    { label: "Sep 9 6166ed00a · turns 2–11", v: 2829, k: "vqs" },
+    { label: "Sep 9 6166ed00a · turns 91–100", v: 2748, k: "vqs" },
+    { label: "Sep 9 b41a00bd2 · warm p50", v: 1696, em: true, k: "replay" },
+    { label: "Sep 9 b41a00bd2 · turns 2–11", v: 1659, k: "replay" },
+    { label: "Sep 9 b41a00bd2 · turns 91–100", v: 1939, k: "replay" },
+    { label: "Sep 9 5a95ccb4d · warm p50", v: 1330, em: true, k: "compute", note: "AbortController before the claim, success abort removed" },
+    { label: "Sep 9 5a95ccb4d · turns 2–11", v: 1158, k: "compute" },
+    { label: "Sep 9 5a95ccb4d · turns 91–100", v: 1618, k: "compute" },
+  ], { aria: "Warm-turn client latency for four hosted runs: overall median, first ten, and last ten warm turns.", max: 3000, ticks: [0, 1000, 2000, 3000], labelW: 260 });
+
+// ---------- Grouped bars: critical path per path ----------
+        (function () {
+          var rows = [
+            { label: "B  follow-up, warm process", ws: 6, hops: 1, note: "run_created, hook_created ×2, events.list, step_started, GET snapshot tail" },
+            { label: "B  follow-up, cold process", ws: 7, hops: 1, note: "+ GET /v2/runs/:holder for the stream key" },
+            { label: "D  Slack existing thread", ws: 7, hops: 1, note: "B warm + GET hooks/by-token" },
+            { label: "A  new session (HTTP)", ws: 12, hops: 2, note: "handler 1; holder 7 incl. 2 storage; turn 5 (descriptor and timeout overlap the model)" },
+            {
+              label: "C  steer on active owner",
+              ws: 17,
+              hops: 2,
+              note: "candidate 9 + resume 3; owner wake preload 1; owner extra execute 4 before its model",
+            },
+            {
+              label: "E  Slack first message + rekey",
+              ws: 30,
+              hops: 4,
+              note: "A with token: +alias claim, +blocking descriptor read, +10 for rekey, 2 extra hops",
+            },
+          ];
+          var W = 1100,
+            rowH = 40,
+            top = 30,
+            labelW = 250,
+            right = 40;
+          var H = top + rows.length * rowH + 40;
+          var maxWs = 32,
+            maxHops = 5;
+          var svg = el("svg", {
+            viewBox: "0 0 " + W + " " + H,
+            role: "img",
+            "aria-label":
+              "Serial workflow-server requests and queue hops before the model call, per path.",
+          });
+          var g = el("g", {
+            "font-family": "IBM Plex Sans, sans-serif",
+            "font-size": "12",
+            fill: "var(--ink)",
+          });
+          svg.appendChild(g);
+          var x0 = labelW,
+            x1 = W - right,
+            scale = (x1 - x0) / maxWs;
+          g.appendChild(
+            el(
+              "text",
+              {
+                x: x0,
+                y: 16,
+                "font-family": "IBM Plex Mono, monospace",
+                "font-size": "11",
+                fill: "var(--ink-3)",
+              },
+              "serial workflow-server requests before model (top) · queue hops (bottom, 1 hop drawn as 4 units)",
+            ),
+          );
+          rows.forEach(function (r, i) {
+            var y = top + i * rowH;
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: x0 - 12,
+                  y: y + 20,
+                  "text-anchor": "end",
+                  "font-size": "12",
+                  "font-weight": "500",
+                },
+                r.label,
+              ),
+            );
+            var b1 = el("rect", {
+              x: x0,
+              y: y + 4,
+              width: r.ws * scale,
+              height: 14,
+              fill: COLORS.ws,
+              rx: 3,
+            });
+            g.appendChild(b1);
+            hover(b1, r.label.trim() + ": " + r.ws + " serial workflow-server requests. " + r.note);
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: x0 + r.ws * scale + 6,
+                  y: y + 15,
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "11",
+                },
+                r.ws + " RTs",
+              ),
+            );
+            var b2 = el("rect", {
+              x: x0,
+              y: y + 20,
+              width: r.hops * 4 * scale,
+              height: 10,
+              fill: COLORS.vqs,
+              rx: 3,
+            });
+            g.appendChild(b2);
+            hover(
+              b2,
+              r.label.trim() +
+                ": " +
+                r.hops +
+                " queue hop" +
+                (r.hops > 1 ? "s" : "") +
+                ", each a new function invocation.",
+            );
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: x0 + r.hops * 4 * scale + 6,
+                  y: y + 29,
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "11",
+                  fill: "var(--ink-2)",
+                },
+                r.hops + " hop" + (r.hops > 1 ? "s" : ""),
+              ),
+            );
+          });
+          [0, 8, 16, 24, 32].forEach(function (t) {
+            var tx = x0 + t * scale,
+              y = top + rows.length * rowH + 2;
+            g.appendChild(
+              el("line", { x1: tx, y1: y, x2: tx, y2: y + 5, stroke: "var(--rule-2)" }),
+            );
+            g.appendChild(
+              el(
+                "text",
+                {
+                  x: tx,
+                  y: y + 18,
+                  "text-anchor": "middle",
+                  "font-family": "IBM Plex Mono, monospace",
+                  "font-size": "10.5",
+                  fill: "var(--ink-3)",
+                },
+                t + " RTs",
+              ),
+            );
+          });
+          g.appendChild(
+            el("line", {
+              x1: x0,
+              y1: top + rows.length * rowH + 2,
+              x2: x1,
+              y2: top + rows.length * rowH + 2,
+              stroke: "var(--rule-2)",
+            }),
+          );
+          document.getElementById("fig-compare").appendChild(svg);
+        })();
+      })();
+    </script>
+  </body>
+</html>

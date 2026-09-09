@@ -1,3 +1,5 @@
+import { createCallbackCapability } from "#subagents/callback-capability.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 /** Continuation delivery for task-owned agent sessions. */
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -16,7 +18,6 @@ import {
   isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
-import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { hydrateDurableSession } from "#execution/session.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -24,7 +25,6 @@ import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import type { TaskOwnedAgentHandle } from "#subagents/handles/store.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
@@ -77,21 +77,8 @@ export async function dispatchToClaimedAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
-  readonly parentToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
-  readonly taskId?: string;
-}): Promise<DispatchOutcome> {
-  return await dispatchToAgentAddress(input);
-}
-
-/** Delivers a continuation to an already-claimed local or remote agent address. */
-async function dispatchToAgentAddress(input: {
-  readonly action: RuntimeAgentHandleAction;
-  readonly auth: SessionAuthContext | null;
-  readonly bundle: CompiledBundle;
-  readonly currentSession: RuntimeSession;
-  readonly parentToken: string;
-  readonly handle: { readonly address: AgentAddress; readonly identity: AgentIdentity };
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
   const { action, handle } = input;
@@ -103,7 +90,7 @@ async function dispatchToAgentAddress(input: {
     auth: input.auth,
     bundle: input.bundle,
     identity: handle.identity,
-    parentToken: input.parentToken,
+    parentReplyTo: input.parentReplyTo,
     taskId: input.taskId,
   });
   if (!delivery.ok) {
@@ -156,7 +143,7 @@ async function deliverToAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
-  readonly parentToken: string;
+  readonly parentReplyTo: ReplyTarget;
   readonly taskId?: string;
 }): Promise<
   Result<
@@ -180,16 +167,17 @@ async function deliverToAgentAddress(input: {
       return err({ cause: error, deliveryAmbiguous: false, permanent: true });
     }
     try {
+      const callbackToken = createCallbackCapability(input.parentReplyTo);
       await continueRemoteAgentSession({
         auth: input.auth,
         callback: {
           callId: action.callId,
           subagentName: identity.name,
-          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
-          token: input.parentToken,
+          taskId: input.taskId,
+          token: callbackToken,
           url: createWorkflowCallbackUrl(
             address.callbackBaseUrl,
-            createEveCallbackRoutePath(input.parentToken),
+            createEveCallbackRoutePath(callbackToken),
           ),
         },
         message: readSubagentMessage(action),
@@ -217,9 +205,9 @@ async function deliverToAgentAddress(input: {
         auth: input.auth,
         caller: {
           callId: action.callId,
-          replyTo: { kind: "hook", token: input.parentToken },
+          replyTo: input.parentReplyTo,
           subagentName: identity.name,
-          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
+          taskId: input.taskId,
         },
         kind: "send",
         payload: {
@@ -237,8 +225,7 @@ async function deliverToAgentAddress(input: {
       });
     }
   } catch (error) {
-    const permanent = isRuntimeNoActiveSessionError(error);
-    return err({ cause: error, deliveryAmbiguous: !permanent, permanent });
+    return err({ cause: error, deliveryAmbiguous: true, permanent: false });
   }
   return ok(undefined);
 }

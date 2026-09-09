@@ -13,7 +13,7 @@ export default defineChannel({
       const body = (await req.json().catch(() => ({}))) as {
         message?: string;
         sessionRef?: string;
-        turnPolicy?: "queue" | "steer";
+        turnPolicy?: "queue" | "steer" | "interrupt";
       };
       const session = await ctx
         .to(target, { sessionRef: body.sessionRef ?? crypto.randomUUID() })

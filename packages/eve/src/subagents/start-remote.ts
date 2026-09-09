@@ -1,3 +1,5 @@
+import { createCallbackCapability } from "#subagents/callback-capability.js";
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
@@ -26,7 +28,7 @@ export async function startRemoteSubagent(input: {
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
   >;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
-  readonly parentContinuationToken: string | undefined;
+  readonly parentReplyTo: ReplyTarget;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
@@ -88,7 +90,7 @@ export async function startRemoteSubagent(input: {
       action,
       auth: input.auth,
       callbackBaseUrl,
-      callbackToken: input.parentContinuationToken,
+      callbackToken: createCallbackCapability(input.parentReplyTo),
       originAudience: input.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,

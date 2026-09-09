@@ -151,6 +151,7 @@ export interface GitHubChannelEvents {
   readonly "session.waiting"?: GitHubEventHandler<"session.waiting">;
   readonly "turn.completed"?: GitHubEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: GitHubEventHandler<"turn.cancelled">;
+  readonly "turn.interrupted"?: GitHubEventHandler<"turn.interrupted">;
   readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }

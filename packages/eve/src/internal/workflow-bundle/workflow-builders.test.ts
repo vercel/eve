@@ -11,7 +11,7 @@ import {
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
-import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
+import { withWorkflowStepAuthorization } from "#execution/workflow-tool/step-execution.js";
 
 describe("applyWorkflowTransform", () => {
   it("preserves native arguments and receivers for Workflow built-in steps", async () => {
@@ -47,7 +47,7 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("keeps eve workflow references stable when eve is the project root", async () => {
-    const filename = "src/execution/turn-workflow.ts";
+    const filename = "src/execution/turn/workflow.ts";
     const transformed = await applyWorkflowTransform(
       filename,
       ["export async function turnWorkflow(): Promise<void> {", '  "use workflow";', "}", ""].join(
@@ -165,7 +165,7 @@ describe("applyWorkflowTransform", () => {
       },
     });
     expect(transformed.code).toContain(
-      'import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";',
+      'import { withWorkflowStepAuthorization } from "#execution/workflow-tool/step-execution.js";',
     );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./src/internal/testing/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
@@ -178,7 +178,7 @@ describe("applyWorkflowTransform", () => {
       fixturePath,
     );
     expect(workflow.code).toContain(
-      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+      'import { workflowToolStep } from "#execution/workflow-tool/step.js";',
     );
     expect(workflow.code).toContain(
       'export var ping = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/internal/testing/ping//ping:eve-authorization"));',
@@ -216,9 +216,9 @@ describe("applyWorkflowTransform", () => {
 
   it("registers workflow functions in workflow mode", async () => {
     const transformed = await applyWorkflowTransform(
-      "src/execution/workflow-entry.ts",
+      "src/execution/session/holding-workflow.ts",
       [
-        "export async function workflowEntry(input: { id: string }): Promise<string> {",
+        "export async function holdingWorkflow(input: { id: string }): Promise<string> {",
         '  "use workflow";',
         "  return input.id;",
         "}",
@@ -231,26 +231,26 @@ describe("applyWorkflowTransform", () => {
 
     expect(transformed.workflowManifest).toEqual({
       workflows: {
-        "src/execution/workflow-entry.ts": {
-          workflowEntry: {
-            workflowId: "workflow//eve//workflowEntry",
+        "src/execution/session/holding-workflow.ts": {
+          holdingWorkflow: {
+            workflowId: "workflow//eve//holdingWorkflow",
           },
         },
       },
     });
     expect(transformed.code).toContain(
-      'workflowEntry.workflowId = "workflow//eve//workflowEntry";',
+      'holdingWorkflow.workflowId = "workflow//eve//holdingWorkflow";',
     );
     expect(transformed.code).toContain(
-      'globalThis.__private_workflows.set("workflow//eve//workflowEntry", workflowEntry);',
+      'globalThis.__private_workflows.set("workflow//eve//holdingWorkflow", holdingWorkflow);',
     );
   });
 
   it("does not attach a later step directive to an earlier async function", async () => {
     const transformed = await applyWorkflowTransform(
-      "src/execution/workflow-entry.ts",
+      "src/execution/session/holding-workflow.ts",
       [
-        "export async function workflowEntry(input: { value: string }): Promise<string> {",
+        "export async function holdingWorkflow(input: { value: string }): Promise<string> {",
         '  "use workflow";',
         "  return await runWorkflowLoop(input);",
         "}",
@@ -259,7 +259,7 @@ describe("applyWorkflowTransform", () => {
         "  return input.value;",
         "}",
         "",
-        "async function notifyDelegatedParentStep(input: { value: string }): Promise<{ value: string }> {",
+        "async function notifyDelegatedParent(input: { value: string }): Promise<{ value: string }> {",
         '  "use step";',
         "  return input;",
         "}",
@@ -272,25 +272,27 @@ describe("applyWorkflowTransform", () => {
 
     expect(transformed.workflowManifest).toEqual({
       steps: {
-        "src/execution/workflow-entry.ts": {
-          notifyDelegatedParentStep: {
-            stepId: "step//./src/execution/workflow-entry//notifyDelegatedParentStep",
+        "src/execution/session/holding-workflow.ts": {
+          notifyDelegatedParent: {
+            stepId: "step//./src/execution/session/holding-workflow//notifyDelegatedParent",
           },
         },
       },
       workflows: {
-        "src/execution/workflow-entry.ts": {
-          workflowEntry: {
-            workflowId: "workflow//eve//workflowEntry",
+        "src/execution/session/holding-workflow.ts": {
+          holdingWorkflow: {
+            workflowId: "workflow//eve//holdingWorkflow",
           },
         },
       },
     });
     expect(transformed.code).toContain("async function runWorkflowLoop");
     expect(transformed.code).toContain(
-      'var notifyDelegatedParentStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/workflow-entry//notifyDelegatedParentStep");',
+      'var notifyDelegatedParent = globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./src/execution/session/holding-workflow//notifyDelegatedParent");',
     );
-    expect(transformed.code).not.toContain("step//./src/execution/workflow-entry//runWorkflowLoop");
+    expect(transformed.code).not.toContain(
+      "step//./src/execution/session/holding-workflow//runWorkflowLoop",
+    );
   });
 
   it("strips the @<version> stamp for stable workflow names but not for steps", async () => {
@@ -299,7 +301,7 @@ describe("applyWorkflowTransform", () => {
     // version-stamped because they are per-deployment internal
     // identifiers, not cross-deployment routing keys.
     const transformed = await transformWorkflowDirectives({
-      filename: "src/execution/turn-workflow.ts",
+      filename: "src/execution/turn/workflow.ts",
       mode: "workflow",
       moduleSpecifier: "eve@1.2.3",
       source: [
@@ -320,14 +322,14 @@ describe("applyWorkflowTransform", () => {
 
     expect(transformed.workflowManifest).toEqual({
       steps: {
-        "src/execution/turn-workflow.ts": {
+        "src/execution/turn/workflow.ts": {
           notifyDriverStep: {
             stepId: "step//eve@1.2.3//notifyDriverStep",
           },
         },
       },
       workflows: {
-        "src/execution/turn-workflow.ts": {
+        "src/execution/turn/workflow.ts": {
           turnWorkflow: {
             workflowId: "workflow//eve//turnWorkflow",
           },
@@ -397,7 +399,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     });
     // The driver bundle resolves eve source aliases even when the app has no eve dependency.
     expect(transformed.code).toContain(
-      'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
+      'import { workflowToolStep } from "#execution/workflow-tool/step.js";',
     );
     expect(transformed.code).toContain(
       'var planDeploy = workflowToolStep(globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy"), globalThis[Symbol.for("WORKFLOW_USE_STEP")]("step//./agent/tools/deploy//planDeploy:eve-authorization"));',
@@ -521,7 +523,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
   it("treats eve package sources as framework modules even under the project root", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/turn-workflow.ts";
+    const filename = "src/execution/turn/workflow.ts";
     const transformed = await applyWorkflowTransform(
       filename,
       ["export async function turnWorkflow(): Promise<void> {", '  "use workflow";', "}", ""].join(
@@ -537,9 +539,9 @@ describe("applyWorkflowTransform for authored application modules", () => {
     );
   });
 
-  it("keeps the session command inbox factory visible in workflow driver builds", async () => {
+  it("keeps the owner inbox factory visible in workflow builds", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/session-command-inbox.ts";
+    const filename = "src/execution/inbox/owner.ts";
     const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
     const transformed = await applyWorkflowTransform(
       filename,
@@ -549,7 +551,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
       eveRoot,
     );
 
-    expect(transformed.code).toContain("export function createSessionCommandInbox");
+    expect(transformed.code).toContain("export function createOwnerInbox");
     expect(transformed.code).not.toContain("subagent");
     expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });

@@ -1,7 +1,11 @@
 import { satisfies } from "eve/evals/expect";
 
 import { defineTaskEval } from "./task-transition.js";
-import { requireBackgroundTaskId, requireSessionStreamIndex } from "./shared.js";
+import {
+  requireBackgroundTaskId,
+  requireSessionStreamIndex,
+  type TaskEvalSessionDriver,
+} from "./shared.js";
 
 const UPDATE = "TASK-UPDATE-PROGRESS";
 
@@ -20,10 +24,20 @@ export default defineTaskEval({
 
     const sessionId = t.sessionId;
     if (sessionId === undefined) throw new Error("Task update eval has no parent session id.");
-    const live = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(t, "Task update wait"),
-    });
-    const updateTurn = await live.result();
+    let session: TaskEvalSessionDriver = t;
+    let updateTurn = started;
+    for (
+      let attempt = 0;
+      attempt < 10 && !updateTurn.message?.includes("TASK-UPDATE-RECEIVED");
+      attempt++
+    ) {
+      const live = t.target.watchTurn(sessionId, {
+        startIndex: requireSessionStreamIndex(session, "Task update wait"),
+      });
+      updateTurn = await live.result();
+      updateTurn.expectOk();
+      session = live.session;
+    }
     updateTurn.expectOk();
     updateTurn.messageIncludes("TASK-UPDATE-RECEIVED");
     await t.require(

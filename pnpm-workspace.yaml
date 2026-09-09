@@ -44,7 +44,7 @@ catalog:
   "@vercel/otel": "2.1.3"
   "@vercel/sandbox": "3.2.1"
   "@vercel/sandbox-drives": "npm:@vercel/sandbox@3.1.0-beta.1"
-  "@workflow/world-postgres": "5.0.0-beta.40"
+  "@workflow/world-postgres": "https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz"
   ai: "^7.0.82"
   better-auth: "1.6.26"
   marked: "17.0.6"
@@ -57,6 +57,19 @@ catalog:
   typescript: "7.0.2"
   vitest: "4.1.10"
   zod: "4.5.4"
+
+# Keep direct and transitive Workflow packages on the same main-branch build.
+blockExoticSubdeps: false # Workflow main tarballs declare URL-based sibling dependencies.
+overrides:
+  "@workflow/builders": "https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz"
+  "@workflow/core": "https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz"
+  "@workflow/errors": "https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz"
+  "@workflow/serde": "https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz"
+  "@workflow/utils": "https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz"
+  "@workflow/world": "https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz"
+  "@workflow/world-local": "https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz"
+  "@workflow/world-postgres": "https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz"
+  "@workflow/world-vercel": "https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz"
 
 minimumReleaseAge: 2880 # 2 days
 
@@ -73,6 +86,3 @@ minimumReleaseAgeExclude:
   - unstorage@2.0.0-alpha.10
   - run
   - workflow
-
-patchedDependencies:
-  "@workflow/world-local@5.0.0-beta.42": patches/@workflow__world-local@5.0.0-beta.42.patch

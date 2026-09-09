@@ -6,7 +6,7 @@ const FALLBACK_TIMEOUT_MS = 10 * 60_000;
 
 export default defineTool({
   description:
-    "Waits until the current turn is cancelled. Only call when the user explicitly asks you to wait for a cross-version follow-up.",
+    "Waits until the current turn is cancelled. Only call when the user explicitly asks you to wait for a replacement turn.",
   inputSchema: z.object({}),
   approval: never(),
   execute(_input, ctx) {

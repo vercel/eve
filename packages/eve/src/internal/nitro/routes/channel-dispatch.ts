@@ -224,7 +224,11 @@ function buildRouteArgs(
   }
 
   const waitUntil = (task: Promise<unknown>) => {
-    backgroundTasks.push(task);
+    backgroundTasks.push(
+      task.catch((error) => {
+        logError(log, "channel background task failed", error, { channel: channelName });
+      }),
+    );
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };

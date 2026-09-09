@@ -383,6 +383,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       }));
 
     case "turn.cancelled":
+    case "turn.interrupted":
       // Finalize whatever the cancelled turn streamed: no message.completed
       // or reasoning.completed will follow a partial append.
       return updateAssistantMessage(data, event.data.turnId, (message) => ({

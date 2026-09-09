@@ -12,6 +12,7 @@ export interface HarnessEmissionState {
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
+  readonly nextTurnId?: string;
 }
 
 const HARNESS_EMISSION_STATE_KEY = "eve.harness.emission";

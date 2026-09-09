@@ -1,8 +1,8 @@
 import { deserializeContext } from "#context/serialize.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { readDurableSession, type DurableSessionState } from "#execution/session/state.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
+import { cancelOwnedTask } from "#execution/tasks/control.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -15,8 +15,6 @@ export async function cancelAllIndexedSessionTasksStep(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<void> {
-  "use step";
-
   let durable;
   try {
     durable = await readDurableSession(input.sessionState);

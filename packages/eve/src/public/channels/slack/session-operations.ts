@@ -1,3 +1,4 @@
+import type { Session } from "#channel/session.js";
 import type {
   ChannelFrom,
   ChannelResolveSession,
@@ -39,6 +40,7 @@ export interface SlackSessionOperations {
 /** Binds Slack state and default auth needed only when a message creates a session. */
 export function bindSlackSessionOperations(input: {
   readonly address: string;
+  readonly recoverSession?: () => Promise<Session | undefined>;
   readonly defaultAuth: SessionAuthContext | null;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -48,34 +50,60 @@ export function bindSlackSessionOperations(input: {
   const auth = (value: SessionAuthContext | null | undefined) =>
     value === undefined ? input.defaultAuth : value;
 
+  let resolvedOwner: Promise<Session | undefined> | undefined;
+  const resolveOwner = () =>
+    (resolvedOwner ??= input
+      .resolveSession(input.address)
+      .then(async (owner) => owner ?? (await input.recoverSession?.())));
+  const deliveryOwner = () =>
+    input.recoverSession !== undefined || resolvedOwner !== undefined ? resolveOwner() : undefined;
+
   return {
     async send(message, options = {}) {
-      return await source.send(message, {
+      const owner = await deliveryOwner();
+      if (owner !== undefined) {
+        const result = await owner.send(message, { ...options, auth: auth(options.auth) });
+        if (result.status === "accepted") return owner;
+      }
+      const session = await source.send(message, {
         ...options,
         auth: auth(options.auth),
         state: input.state,
       });
+      resolvedOwner = Promise.resolve(session);
+      return session;
     },
     async respond(inputResponses, options = {}) {
+      const owner = await deliveryOwner();
+      if (owner !== undefined) {
+        const result = await owner.respond(inputResponses, {
+          ...options,
+          auth: auth(options.auth),
+        });
+        if (result.status === "accepted") return owner;
+      }
       return await source.respond(inputResponses, {
         ...options,
         auth: auth(options.auth),
       });
     },
     async cancel(options) {
-      return await source.cancel(options);
+      return (await (await deliveryOwner())?.cancel(options)) ?? (await source.cancel(options));
     },
     async compact() {
-      return await source.compact();
+      return (await (await deliveryOwner())?.compact()) ?? (await source.compact());
     },
     async clear() {
-      return await source.clear();
+      return (await (await deliveryOwner())?.clear()) ?? (await source.clear());
     },
     async reset(options) {
-      return await source.reset(options);
+      const result =
+        (await (await deliveryOwner())?.reset(options)) ?? (await source.reset(options));
+      resolvedOwner = undefined;
+      return result;
     },
     async resolveSession() {
-      return await input.resolveSession(input.address);
+      return await resolveOwner();
     },
   };
 }

@@ -36,7 +36,9 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
     attachSession: () => session,
     to: vi.fn() as never,
     params: { sessionId: "wrun_A" },
-    waitUntil: vi.fn(),
+    waitUntil: vi.fn((task) => {
+      void task.catch(() => {});
+    }),
     requestIp: "127.0.0.1",
   };
 }
@@ -182,7 +184,7 @@ describe("eve ID-addressed session routes", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
   });
 
-  it("returns conflict instead of creating when an exact session is inactive", async () => {
+  it("acknowledges background delivery without creating a replacement", async () => {
     const session = createFixedSession({
       send: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     });
@@ -195,11 +197,12 @@ describe("eve ID-addressed session routes", () => {
       createArgs(session),
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
-      code: "session_not_active",
-      error: "The session is no longer active.",
-      ok: false,
+      sessionId: "wrun_A",
+      status: "accepted",
+      deliveryId: expect.any(String),
+      ok: true,
     });
   });
 
@@ -243,7 +246,7 @@ describe("eve ID-addressed session routes", () => {
     });
   });
 
-  it("returns a synchronous inactive cancellation result without a session id", async () => {
+  it("acknowledges cancellation without an active-owner preflight", async () => {
     const session = createFixedSession({
       cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
     });
@@ -252,8 +255,12 @@ describe("eve ID-addressed session routes", () => {
       createArgs(session),
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_turn" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      status: "accepted",
+      sessionId: "wrun_A",
+    });
   });
 
   it.each([

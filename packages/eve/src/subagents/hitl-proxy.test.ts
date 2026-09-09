@@ -26,16 +26,14 @@ describe("routeDeliverPayload", () => {
         [
           "req-a",
           {
-            childContinuationToken: "child-alias",
-            childSessionInbox: { sessionId: "child-a", version: 1 },
+            childContinuationToken: "eve:session:child-a:inbox",
             kind: "question",
           },
         ],
         [
           "req-b",
           {
-            childContinuationToken: "child-alias",
-            childSessionInbox: { sessionId: "child-b", version: 1 },
+            childContinuationToken: "eve:session:child-b:inbox",
             kind: "question",
           },
         ],
@@ -56,13 +54,11 @@ describe("routeDeliverPayload", () => {
 
     expect(routed.forChildren).toMatchObject([
       {
-        childContinuationToken: "child-alias",
-        childSessionInbox: { sessionId: "child-a", version: 1 },
+        childContinuationToken: "eve:session:child-a:inbox",
         payload: { inputResponses: [{ requestId: "req-a", text: "A" }] },
       },
       {
-        childContinuationToken: "child-alias",
-        childSessionInbox: { sessionId: "child-b", version: 1 },
+        childContinuationToken: "eve:session:child-b:inbox",
         payload: { inputResponses: [{ requestId: "req-b", text: "B" }] },
       },
     ]);

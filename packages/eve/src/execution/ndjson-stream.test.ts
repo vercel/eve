@@ -20,6 +20,22 @@ async function drain<T>(stream: ReadableStream<T>): Promise<T[]> {
 }
 
 describe("parseNdjsonStream", () => {
+  it("cancels a source that resolves after its consumer disconnects", async () => {
+    const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
+    let reason: unknown;
+    const parsed = parseNdjsonStream(() => pending.promise);
+    await parsed.cancel("disconnected");
+    pending.resolve(
+      new ReadableStream({
+        cancel(value) {
+          reason = value;
+        },
+      }),
+    );
+    await pending.promise;
+    await Promise.resolve();
+    expect(reason).toBe("disconnected");
+  });
   it("parses newline-delimited JSON into values", async () => {
     const source = new ReadableStream<Uint8Array>({
       start(controller) {

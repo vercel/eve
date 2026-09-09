@@ -1,9 +1,9 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type {
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
 } from "#channel/types.js";
-import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { WorkflowToolAgentRequest } from "#execution/workflow-tool/messages.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
@@ -161,7 +161,7 @@ export interface TaskInboundUpdate {
 /** One workflow-executor request bound to its private answer hook. */
 export interface TaskInboundInputRequest {
   readonly kind: "task-input-request";
-  readonly replyTo: string;
+  readonly replyTo: ReplyTarget;
   readonly requests: readonly TaskInputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
@@ -172,7 +172,6 @@ export interface TaskInboundInputRequest {
 export interface TaskInboundAnswerInput {
   readonly auth?: unknown;
   readonly childContinuationToken: string;
-  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly inputResponses: readonly {
     readonly optionId?: string;
@@ -191,7 +190,7 @@ export type TaskRunInboundPayload =
 
 /** Generic task-owned request sent through the parent session payload. */
 interface TaskInputRequestDeliveryBase {
-  readonly replyTo: string;
+  readonly replyTo: ReplyTarget;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly taskId: string;
@@ -228,7 +227,7 @@ export function taskAuthorizationRequestId(event: SubagentAuthorizationEvent): s
  * apply, forwarded after task admission. `replyTo` is the run's reply hook.
  */
 export interface TaskAgentRequestDelivery {
-  readonly replyTo: string;
+  readonly replyTo: ReplyTarget;
   readonly request: WorkflowToolAgentRequest;
   readonly taskId: string;
 }

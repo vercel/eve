@@ -4,7 +4,7 @@ import { defineAgent } from "eve";
 export default defineAgent({
   ...e2eAgentConfig({
     mock: ({ lastUserMessage }) =>
-      lastUserMessage?.includes("Please wait for cross-version follow-up.") === true
+      lastUserMessage?.includes("Wait for a replacement turn.") === true
         ? {
             toolCalls: [
               {

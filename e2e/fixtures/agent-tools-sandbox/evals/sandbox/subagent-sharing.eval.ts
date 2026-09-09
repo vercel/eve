@@ -23,14 +23,22 @@ export default defineEval({
     childTurn.expectOk();
     const sessionId = childTurn.sessionId;
     if (sessionId === undefined) throw new Error("Shared sandbox turn has no session id.");
-    const completed = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(t),
-    });
-    const childCompletion = await completed.result();
+    let session: Pick<typeof t, "state" | "send"> = t;
+    let childCompletion = childTurn;
+    for (
+      let attempt = 0;
+      attempt < 10 && !childCompletion.message?.includes(PARENT_TOKEN);
+      attempt++
+    ) {
+      const completed = t.target.watchTurn(sessionId, { startIndex: requireStreamIndex(session) });
+      childCompletion = await completed.result();
+      childCompletion.expectOk();
+      session = completed.session;
+    }
     childCompletion.expectOk();
     await t.require(childCompletion.message, includes(PARENT_TOKEN));
 
-    const parentRead = await completed.session.send(
+    const parentRead = await session.send(
       `Run the bash command \`cat ${CHILD_PATH}\` and reply with the file contents verbatim.`,
     );
 

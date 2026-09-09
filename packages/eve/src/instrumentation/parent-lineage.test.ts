@@ -15,7 +15,7 @@ describe("resolveParentLineage", () => {
       resolveParentLineage(parent, {
         state: {
           callId: "call-1",
-          parentContinuationToken: "token-1",
+          parentReplyTo: { kind: "session", token: "token-1" },
           parentSessionId: "session-1",
           subagentName: "researcher",
         },

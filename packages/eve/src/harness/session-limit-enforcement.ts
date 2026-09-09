@@ -165,7 +165,12 @@ async function parkOnSessionUsageLimit(input: {
   );
 
   if (input.config.mode === "conversation") {
-    emissionState = await emitTurnEpilogue(input.emit, emissionState, input.config.mode);
+    emissionState = await emitTurnEpilogue(
+      input.emit,
+      emissionState,
+      input.config.mode,
+      input.config.handleSettlement,
+    );
   }
 
   return {
@@ -210,15 +215,20 @@ async function failSessionUsageLimit(input: {
         };
 
   if (input.emit) {
-    await emitFailedStep(input.emit, input.emissionState, {
-      code:
-        input.violation.kind === "token-cost"
-          ? SESSION_TOKEN_COST_LIMIT_REACHED_CODE
-          : SESSION_TOKEN_LIMIT_REACHED_CODE,
-      details,
-      message,
-      sessionId: input.session.sessionId,
-    });
+    await emitFailedStep(
+      input.emit,
+      input.emissionState,
+      {
+        code:
+          input.violation.kind === "token-cost"
+            ? SESSION_TOKEN_COST_LIMIT_REACHED_CODE
+            : SESSION_TOKEN_LIMIT_REACHED_CODE,
+        details,
+        message,
+        sessionId: input.session.sessionId,
+      },
+      input.config.handleSettlement,
+    );
   }
 
   return {

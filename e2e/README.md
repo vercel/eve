@@ -113,25 +113,20 @@ identically at build and runtime, and Vercel has no team variable at runtime.
 ### Redeploy suite
 
 `agent-tools-sandbox/evals/sandbox/redeploy.eval.ts` proves sandbox semantics
-across deployment updates as they behave on preview targets: a parked session
-keeps working (with its `/workspace` state intact) when messages route through
-a new deployment, its turns stay pinned to the deployment that created it
-(branch-less CLI preview deploys cannot resolve a "latest" deployment; see
-`shouldRouteToLatestDeployment` in `execution/workflow-runtime.ts`), and new
-sessions adopt the new deployment — a skill added by the redeploy loads there.
-The pinned-turn assertion is a deliberate tripwire: it must be flipped when
-turn dispatch gains preview latest-routing
-(https://github.com/vercel/eve/issues/582).
+across deployment updates on preview targets: a parked session accepts turns
+on the deployment serving each request, preserves its `/workspace` files
+when workspace resources are unchanged, and rotates its sandbox when those
+resources change. New and continuing sessions both load the accepting
+deployment's agent code.
 
-`agent-channels/evals/custom-channels/cross-version-session-inbox.eval.ts`
-deploys the fixture with the published `eve@0.30.8`, holds a turn active in
-that old consumer, then redeploys the current checkout and sends a replacement
-message through the same durable session. It verifies both sides of the codec:
-the current producer must choose the old consumer's wire version, and the real
-old consumer must decode and buffer it. The eval then cancels the deliberately
-blocked turn and verifies that the old session runs the buffered follow-up.
+`agent-channels/evals/custom-channels/session-holder-concurrency.eval.ts`
+checks that concurrent channel deliveries share one ready session and both
+inputs reach its event stream. `session-holder-interrupt.eval.ts` replaces an
+active tool call through the same stream, checking that interruption does not
+publish an idle boundary before the replacement turn. These run in the main
+suite without a historical package or redeployment.
 
-The eval redeploys from inside its test body: it mutates the agent source,
+The sandbox eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
 Because immutable deployment URLs never change what they serve, the eval

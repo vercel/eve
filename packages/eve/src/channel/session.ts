@@ -30,6 +30,7 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { readDeliveryId } from "#internal/delivery-identity.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -80,7 +81,7 @@ export type SessionRespondOptions = SessionDeliveryOptions;
  * `deliver` and event handlers. The framework hydrates the read-only
  * fields from the active context at step start. A write through
  * `continuation.rekey()` updates the context so the
- * runtime can re-key the parked workflow hook at the next step boundary.
+ * turn can ask the holder to claim the additional alias before committing.
  */
 export interface SessionHandle {
   readonly id: string;
@@ -100,6 +101,9 @@ export function createSession(
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
+      const deliveryId = readDeliveryId(options);
+      if (delivery !== undefined && deliveryId !== undefined)
+        Object.assign(delivery, { deliveryId });
       const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const payload = attachClientContext<{
         context?: readonly string[];

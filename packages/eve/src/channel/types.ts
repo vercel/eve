@@ -1,6 +1,6 @@
+import type { ReplyTarget } from "#execution/inbox/types.js";
 import type { UserContent } from "ai";
 
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -159,7 +159,7 @@ export interface TurnCaller {
   /** Present when this turn is the executor for a durable background task. */
   readonly taskId?: string;
   readonly replyTo:
-    | { readonly kind: "hook"; readonly token: string }
+    | ReplyTarget
     | { readonly kind: "callback"; readonly token: string; readonly url: string };
 }
 
@@ -195,12 +195,12 @@ export interface DeliverPayload {
 }
 
 /** Controls how a channel message interacts with an active turn. */
-export type TurnPolicy = "steer" | "queue";
+export type TurnPolicy = "steer" | "queue" | "interrupt";
 
 /** Default policy for message sends produced by current channel surfaces. */
 export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 
-/** One command accepted by a durable session inbox. */
+/** One command admitted through an independent session turn. */
 export type SessionCommand =
   | {
       readonly auth?: SessionAuthContext | null;
@@ -211,7 +211,7 @@ export type SessionCommand =
       readonly requestId?: string;
       /**
        * Replay-stable identity for one task-owned child delivery; lets the
-       * parent inbox dedupe retried durable-step deliveries. See
+       * session dedupe retried durable-step deliveries. See
        * {@link DeliverHookPayload.taskDeliveryId}.
        */
       readonly taskDeliveryId?: string;
@@ -227,6 +227,7 @@ export type SessionCommand =
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
 
+/** Acceptance confirms a durable candidate; terminal settlement may retire its input. */
 export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
   | { readonly status: "session_not_active" };
@@ -278,8 +279,8 @@ export interface DeliverHookPayload {
   /**
    * Replay-stable identity for one task-owned child delivery. Task-run steps
    * derive it from deterministic inputs (task id, event kind, sequence) so the
-   * parent inbox can drop the duplicate when a durable step retries after
-   * `resumeHook` already succeeded.
+   * session can drop the duplicate when a durable step retries after
+   * dispatch already succeeded.
    */
   readonly taskDeliveryId?: string;
   readonly kind: "deliver";
@@ -287,7 +288,7 @@ export interface DeliverHookPayload {
   readonly turnPolicy?: TurnPolicy;
 }
 
-/** Internal deadline signal sent through the stable session command inbox. */
+/** Internal deadline signal admitted as a session turn. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
 }
@@ -303,10 +304,9 @@ export interface ClearSessionHookPayload {
 }
 
 /**
- * Results resumed back into a parked parent workflow by the work it
- * dispatched: child-produced subagent results and authored workflow tool
- * results. Workflow-owner dispatch failures use the same private reply hook so
- * `agent()` can settle instead of waiting forever.
+ * Results delivered to the invocation owner's inbox by delegated agents
+ * and authored workflow tools. Dispatch failures use the same reply route
+ * so `agent()` can settle instead of waiting for a child that never started.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
@@ -342,7 +342,6 @@ export interface SubagentInputRequestHookPayload {
   readonly callId: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;
-  readonly childSessionInbox?: SessionInboxAddress;
   readonly event: SubagentInputRequestEvent;
   readonly kind: "subagent-input-request";
   readonly subagentName: string;

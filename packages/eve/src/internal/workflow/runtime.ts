@@ -2,6 +2,7 @@ import * as workflowRuntime from "#compiled/@workflow/core/runtime.js";
 import type { Hook } from "#compiled/@workflow/world/index.js";
 
 export * from "#compiled/@workflow/core/runtime.js";
+export { safeWaitUntil } from "#compiled/@workflow/core/runtime/wait-until.js";
 export type {
   StartOptionsWithoutDeploymentId,
   WorkflowFunction,

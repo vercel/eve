@@ -26,7 +26,7 @@ describe("authorization callback URLs", () => {
     ctx.set(SessionIdKey, "session-1");
 
     expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
-      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/session-1%3Aauth?x-vercel-protection-bypass=secret+value",
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/session-1?x-vercel-protection-bypass=secret+value",
     );
   });
 });

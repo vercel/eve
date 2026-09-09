@@ -7,7 +7,7 @@ export interface SessionTimeoutWorkflowInput {
   readonly token: string;
 }
 
-/** Sleeps until the session deadline, then signals its driver. */
+/** Sleeps until the session deadline, then admits an expiry turn. */
 export async function sessionTimeoutWorkflow(input: SessionTimeoutWorkflowInput): Promise<void> {
   "use workflow";
 

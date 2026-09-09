@@ -1,7 +1,7 @@
 import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createDurableSessionState } from "#execution/session/state.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";

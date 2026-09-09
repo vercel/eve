@@ -57,9 +57,6 @@ catalogs:
     '@vercel/sandbox-drives':
       specifier: npm:@vercel/sandbox@3.1.0-beta.1
       version: 3.1.0-beta.1
-    '@workflow/world-postgres':
-      specifier: 5.0.0-beta.40
-      version: 5.0.0-beta.40
     ai:
       specifier: ^7.0.82
       version: 7.0.84
@@ -94,8 +91,16 @@ catalogs:
       specifier: 4.5.4
       version: 4.5.4
 
-patchedDependencies:
-  '@workflow/world-local@5.0.0-beta.42': 593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8
+overrides:
+  '@workflow/builders': https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz
+  '@workflow/core': https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz
+  '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+  '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
+  '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+  '@workflow/world': https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
+  '@workflow/world-local': https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz
+  '@workflow/world-postgres': https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+  '@workflow/world-vercel': https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz
 
 importers:
 
@@ -411,8 +416,8 @@ importers:
         specifier: workspace:*
         version: link:../../../e2e/fixtures/e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       dd-trace:
         specifier: 6.13.0
         version: 6.13.0
@@ -590,8 +595,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -612,8 +617,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -634,8 +639,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -656,8 +661,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -678,8 +683,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -690,9 +695,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      historical-eve-0-30-8:
-        specifier: npm:eve@0.30.8
-        version: eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(ai@7.0.84(zod@4.5.4))(aws4fetch@1.0.20)(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(lru-cache@11.5.2)(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -703,8 +705,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -722,8 +724,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -744,8 +746,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -766,8 +768,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -788,8 +790,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -807,8 +809,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -826,8 +828,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -848,8 +850,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -870,8 +872,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -892,8 +894,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -914,8 +916,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -933,8 +935,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -955,8 +957,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -977,8 +979,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -999,8 +1001,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1027,8 +1029,8 @@ importers:
         specifier: file:./fixtures/dynamic-import-dependency
         version: file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1049,8 +1051,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1071,8 +1073,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1093,8 +1095,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1115,8 +1117,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1134,8 +1136,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1156,8 +1158,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1200,8 +1202,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1231,8 +1233,8 @@ importers:
         specifier: workspace:*
         version: link:../e2e-config
       '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1435,29 +1437,29 @@ importers:
         specifier: 1.28.8
         version: 1.28.8
       '@workflow/builders':
-        specifier: 5.0.0-beta.48
-        version: 5.0.0-beta.48(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/core':
-        specifier: 5.0.0-beta.48
-        version: 5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/errors':
-        specifier: 5.0.0-beta.20
-        version: 5.0.0-beta.20
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
       '@workflow/serde':
-        specifier: 5.0.0-beta.2
-        version: 5.0.0-beta.2
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       '@workflow/utils':
-        specifier: 5.0.0-beta.10
-        version: 5.0.0-beta.10
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
       '@workflow/world':
-        specifier: 5.0.0-beta.33
-        version: 5.0.0-beta.33
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
       '@workflow/world-local':
-        specifier: 5.0.0-beta.42
-        version: 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
-        specifier: 5.0.0-beta.44
-        version: 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+        specifier: https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz
+        version: https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       ai:
         specifier: 'catalog:'
         version: 7.0.84(zod@4.5.4)
@@ -1481,16 +1483,13 @@ importers:
         version: 0.6.0
       env-runner:
         specifier: 0.1.16
-        version: 0.1.16
+        version: 0.1.16(@vercel/queue@0.5.0(@opentelemetry/api@1.9.1))
       eventsource-parser:
         specifier: 3.1.0
         version: 3.1.0
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
-      historical-eve-0-30-8:
-        specifier: npm:eve@0.30.8
-        version: eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(ai@7.0.84(zod@4.5.4))(aws4fetch@1.0.20)(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(lru-cache@11.5.2)(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       jose:
         specifier: 6.2.3
         version: 6.2.3
@@ -8563,59 +8562,63 @@ packages:
   '@webgpu/types@0.1.71':
     resolution: {integrity: sha512-mMy8/ODcKhab808co15eW+yN+HgXoQxRQHTiBV9Mrvl1r0ufnid7YOcI+gi4eUWSWl9ezD6TW2KXccrL8HCh2A==}
 
-  '@workflow/builders@5.0.0-beta.48':
-    resolution: {integrity: sha512-hkB4/Xzs4TRnvN3ZUkWaG1b3wUhOEeJeK2bVl29ABzYV0Q9HWLKR12ybIUJv9VNrm/dhqRQxaA7/nnaYkeFQXw==}
+  '@workflow/builders@https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz':
+    resolution: {integrity: sha512-pdDuMlBVf8iboupJW1XY2PZdkrH8G6vQ+ImjI7JNgF+aewdsWTNM8lqi2oH9Dl5uA3pnyFrKzUBiMm6waLEazQ==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-builders.tgz}
+    version: 5.0.0-beta.48-9a5660f
 
-  '@workflow/core@5.0.0-beta.48':
-    resolution: {integrity: sha512-XPgShb5N1AAtygHdnblIL50l2IsxlYNupbNbX+00qhKXDVnZI4LW00o66vRjpIDzRB6xPprhtVpRhAQ+RIQo8g==}
+  '@workflow/core@https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz':
+    resolution: {integrity: sha512-ECnqiT5my027LTd5Y0SHWeCQ9BYroC+CPhaGSkDrLnhFcrL1Rj30+A6mUbsEi1yvDbK3Zzz+07DeAw7slAeI3g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-core.tgz}
+    version: 5.0.0-beta.48-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/errors@5.0.0-beta.20':
-    resolution: {integrity: sha512-unNjhxAgwjZB54DasFvtG3U1BXKJS+qjyR47d7y34hs1uhTVNkq9HJ4uEgNCVgmyH7NzvieOC03Fkkp8cMF/3A==}
+  '@workflow/errors@https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz':
+    resolution: {integrity: sha512-B4hKGVD8DGBMZvAbYonx0nOi+AAjux8zQYyg1/4chSnOMJGaMji2NgF4CXocLF1Ihdb1CxXYy6mspT7vxKOAnw==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-errors.tgz}
+    version: 5.0.0-beta.20-9a5660f
 
-  '@workflow/serde@4.1.0':
-    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+  '@workflow/serde@https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz':
+    resolution: {integrity: sha512-4DgMoVAa3X5P7NR2hVTiH61nXJ1F6kFcQkjgviTEyyxLVm417y4riA4mD6ItAZyLjbxKsqS9JDJ0ybBQHuvULg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-serde.tgz}
+    version: 5.0.0-beta.2-9a5660f
 
-  '@workflow/serde@4.1.0-beta.2':
-    resolution: {integrity: sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww==}
-
-  '@workflow/serde@5.0.0-beta.2':
-    resolution: {integrity: sha512-INB+FcEKQkkFZa+s53sEMTNRFiBa2g9vzjsNuEDagvWxtI0t/cnCyoc57i7kS7nj+3/vGeRjO4Yn5ccbT0hyBQ==}
-
-  '@workflow/swc-plugin@5.0.0-beta.5':
-    resolution: {integrity: sha512-Xk2UQePkuxTrgqU0EWZPRWM9Ttj9bcMAY+x700yg/0TQnD3MSxjY6/yC3e8wGr2dfzXik5zuH+Ixrog1CdBqeg==}
+  '@workflow/swc-plugin@https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-swc-plugin.tgz':
+    resolution: {integrity: sha512-KiL9/gI4GQzr/49RC9W8eEXEfVqujw0yiFh0AGJwXZgdSAi17xR1KQWkRp+L/19q4t8kRZHM1jp3DViCaGnePA==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-swc-plugin.tgz}
+    version: 5.0.0-beta.5-9a5660f
     peerDependencies:
       '@swc/core': 1.15.3
 
-  '@workflow/utils@5.0.0-beta.10':
-    resolution: {integrity: sha512-LVypRMbZG3z1GHSSyChhR/7WaDFjjlIpeGcysX5eI3/1sOVv8NHNOfCxXConvqGj9fSkM1oBlieS/eLO5kDaow==}
+  '@workflow/utils@https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz':
+    resolution: {integrity: sha512-uRQrw0vQ7eVjZxKF/3OTCf88OTcvm7opwlYoL+v6emAmKGlzcof4JqGDH9M7P9xFmDrZ8sEpI4OfuU3kU7s/6g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-utils.tgz}
+    version: 5.0.0-beta.10-9a5660f
 
-  '@workflow/world-local@5.0.0-beta.42':
-    resolution: {integrity: sha512-0dSBToDQ4LVwacuaGVPHpY7x8n8pSqZySE6roWm/kWUAPxLTrXMFSErw4Z9TcstqbMogoJkH0d8h2yEUx+SNFA==}
+  '@workflow/world-local@https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz':
+    resolution: {integrity: sha512-km6Y8adkn3jBOeYXm7sBB1j1RjCAud4u3A7DxkfF7BIi1jhS9OkZ4ua3Az4O4/2w7bunPUDJ5jyUiLKw7tUt9g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-local.tgz}
+    version: 5.0.0-beta.42-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world-postgres@5.0.0-beta.40':
-    resolution: {integrity: sha512-zj1pVYvsfCciEXTVJMMzE4ogHV1e/bq1E6pOehKf+ZVevJJp1Fbl7rYXxsABTFJNen0I10mCihR7iTpbKsq5gA==}
+  '@workflow/world-postgres@https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz':
+    resolution: {integrity: sha512-97vJykDx06cQRJsvOEAPFo1ebLnjk/+FOUUkrlHfAZxz5xTraTXusYevMe1hDqk4Ohk9eVDMpM0dLK2a3MtVwg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-postgres.tgz}
+    version: 5.0.0-beta.40-9a5660f
     hasBin: true
 
-  '@workflow/world-vercel@5.0.0-beta.44':
-    resolution: {integrity: sha512-kcsW0vsssSe9cTzQyg6xRZW24pL28GEX0uxbXmSK3lWRV2ztRsG6JZqtu/eVvMnaShewUrfumm+iJAodbQVDNA==}
+  '@workflow/world-vercel@https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz':
+    resolution: {integrity: sha512-n+2IQ8+KGQ8LF0Z71S1JwQxq+CPv6fk/LqNi+ugYd8/LJEoapxMkCGpVLWrGtc5BJCCx/yqCfz8yobD+hf/FkA==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-vercel.tgz}
+    version: 5.0.0-beta.44-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world@5.0.0-beta.33':
-    resolution: {integrity: sha512-Cn57JHXlx6jhzeJn8OqtqrCDNx+Xnaqy7FtMJPl15Z/TdAsUju6ZA5ShyYY+nBWj6Ibc9LOenBwmIhCCkvawlA==}
+  '@workflow/world@https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz':
+    resolution: {integrity: sha512-GstcjlMTUsi/y93yUdkpV3AjyjEF4QyqfjLF50Reeov710/hYhYHxWyJbp3JkfeSe7AnDOgjETwm6TX0bPQcdg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world.tgz}
+    version: 5.0.0-beta.33-9a5660f
 
   '@zernio/chat-sdk-adapter@0.5.0':
     resolution: {integrity: sha512-YYcnbCqUhJOymTd3UPaKd1H6Kn8atFE075I5vDETYkTjToIeZd90as/JvShB7OurMdDLLSmJRMJs3RWVqAGW9w==}
@@ -10555,26 +10558,6 @@ packages:
       ai: '>=7.0.0-beta.178'
       eve: '>=0.11.0'
 
-  eve@0.30.8:
-    resolution: {integrity: sha512-ATF9CHJQBNce7+3leWH87w6Cc7TlsNlfpGAENzmkD4d7oBpSI+P7KB3cvtGM75t+9gT+nJ0R+u7u8hF8BJdBiw==}
-    engines: {node: '>=24'}
-    hasBin: true
-    peerDependencies:
-      '@opentelemetry/api': ^1.0.0
-      ai: ^7.0.38
-      braintrust: ^3.0.0
-      just-bash: ^3.0.0
-      microsandbox: ^0.5.0
-    peerDependenciesMeta:
-      '@opentelemetry/api':
-        optional: true
-      braintrust:
-        optional: true
-      just-bash:
-        optional: true
-      microsandbox:
-        optional: true
-
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
@@ -11162,16 +11145,6 @@ packages:
 
   h3@1.15.11:
     resolution: {integrity: sha512-L3THSe2MPeBwgIZVSH5zLdBBU90TOxarvhK9d04IDY2AmVS8j2Jz2LIWtwsGOU3lu2I5jCN7FNvVfY2+XyF+mg==}
-
-  h3@2.0.1-rc.22:
-    resolution: {integrity: sha512-Esv0DMIuPkCTSWCA0vO73vcTqwzH1wjSrAO1TXNu/K3up1sZHa9EKMapbmxCDYBeymC3fVTk4qxp7ogQWQ+KgA==}
-    engines: {node: '>=20.11.1'}
-    hasBin: true
-    peerDependencies:
-      crossws: ^0.4.1
-    peerDependenciesMeta:
-      crossws:
-        optional: true
 
   h3@2.0.1-rc.31:
     resolution: {integrity: sha512-AG7qZzF99a0BSYoXT3evJgIhwSIUKow7R+hwkLRZS06WJ9nbSb7QXUDgs1ByBjp6svTvl++N/GKA7I9YPz9cQQ==}
@@ -12780,9 +12753,6 @@ packages:
       sass:
         optional: true
 
-  nf3@0.3.17:
-    resolution: {integrity: sha512-N9zEWySuJFw+gR0lhS5863YsvNeudOdqRyFvNb+jMXbeTJOdrjDqkCpDginIZfUm0LzT1t1nCRiDeqQm/8kirQ==}
-
   nf3@0.3.24:
     resolution: {integrity: sha512-HxLK4bo+5jNsEETZp4w3tJblHOA9MCBY14IN9nZJJV8JDxt9yNIYxuBuLMjTAR5GFa3HL61+8VQDUrXv3/C8fw==}
 
@@ -12791,37 +12761,6 @@ packages:
 
   nice-grpc@2.1.16:
     resolution: {integrity: sha512-Cl3Pn00212Hl8/U6bpgMxmhZj5lyv3nWoJov4cd3FjWarktrMHP4DNvSjCnDwkMWYx4W1tyscEia4JX6Y4GVCQ==}
-
-  nitro@3.0.260610-beta:
-    resolution: {integrity: sha512-KPb4L5yaF/Rx/xoGMpgHRJvZhbhGiqbRKOwwPLCH9jKTKTsEUHLjnJas85AeCzaswqa8Wi52eQBtRsODC4PS0Q==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    hasBin: true
-    peerDependencies:
-      '@vercel/queue': ^0.3.0
-      dotenv: '*'
-      giget: '*'
-      jiti: ^2.7.0
-      rollup: ^4.61.1
-      vite: ^7 || ^8
-      xml2js: ^0.6.2
-      zephyr-agent: ^0.2.0
-    peerDependenciesMeta:
-      '@vercel/queue':
-        optional: true
-      dotenv:
-        optional: true
-      giget:
-        optional: true
-      jiti:
-        optional: true
-      rollup:
-        optional: true
-      vite:
-        optional: true
-      xml2js:
-        optional: true
-      zephyr-agent:
-        optional: true
 
   nitro@3.0.260903-beta:
     resolution: {integrity: sha512-54gANPi62O8rfMvepiJUVuIzEIinYfpeHbebywlLxvVTgIYXDwSvpaU9Id+0sJOBjBx0wC1/CVYXJkH7SY+l0g==}
@@ -13011,9 +12950,6 @@ packages:
   obug@2.1.3:
     resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
     engines: {node: '>=12.20.0'}
-
-  ocache@0.1.5:
-    resolution: {integrity: sha512-kNNnkkVQup/QDvmTz8Q84wc2ntiyoVHDxa6eHWKt5qdGAmFRBIxy83rxgCYEjW0x06UJ9E3P6VgM2yY4rOBH4w==}
 
   ocache@0.3.0:
     resolution: {integrity: sha512-RS/9P0zeBb0gDJmadGERLH8lZNXK7xbufTDhclkXGvFGTsj0G4M5/cLk+mizcERH29mLXNnocfB5wjcK70wGJg==}
@@ -15396,80 +15332,6 @@ packages:
   unstorage@2.0.0-alpha.10:
     resolution: {integrity: sha512-6h1veZp8gnp4dGllf0tDijoXxDYymJu251IpKKkrSVH+QHL6tXFbwG85KM+CBHSgpkkgtPuIiZ9oLCLP5+1Evw==}
 
-  unstorage@2.0.0-alpha.7:
-    resolution: {integrity: sha512-ELPztchk2zgFJnakyodVY3vJWGW9jy//keJ32IOJVGUMyaPydwcA1FtVvWqT0TNRch9H+cMNEGllfVFfScImog==}
-    peerDependencies:
-      '@azure/app-configuration': ^1.11.0
-      '@azure/cosmos': ^4.9.1
-      '@azure/data-tables': ^13.3.2
-      '@azure/identity': ^4.13.0
-      '@azure/keyvault-secrets': ^4.10.0
-      '@azure/storage-blob': ^12.31.0
-      '@capacitor/preferences': ^6 || ^7 || ^8
-      '@deno/kv': '>=0.13.0'
-      '@netlify/blobs': ^6.5.0 || ^7.0.0 || ^8.1.0 || ^9.0.0 || ^10.0.0
-      '@planetscale/database': ^1.19.0
-      '@upstash/redis': ^1.36.2
-      '@vercel/blob': '>=0.27.3'
-      '@vercel/functions': ^2.2.12 || ^3.0.0
-      '@vercel/kv': ^1.0.1
-      aws4fetch: ^1.0.20
-      chokidar: ^4 || ^5
-      db0: '>=0.3.4'
-      idb-keyval: ^6.2.2
-      ioredis: ^5.9.3
-      lru-cache: ^11.2.6
-      mongodb: ^6 || ^7
-      ofetch: '*'
-      uploadthing: ^7.7.4
-    peerDependenciesMeta:
-      '@azure/app-configuration':
-        optional: true
-      '@azure/cosmos':
-        optional: true
-      '@azure/data-tables':
-        optional: true
-      '@azure/identity':
-        optional: true
-      '@azure/keyvault-secrets':
-        optional: true
-      '@azure/storage-blob':
-        optional: true
-      '@capacitor/preferences':
-        optional: true
-      '@deno/kv':
-        optional: true
-      '@netlify/blobs':
-        optional: true
-      '@planetscale/database':
-        optional: true
-      '@upstash/redis':
-        optional: true
-      '@vercel/blob':
-        optional: true
-      '@vercel/functions':
-        optional: true
-      '@vercel/kv':
-        optional: true
-      aws4fetch:
-        optional: true
-      chokidar:
-        optional: true
-      db0:
-        optional: true
-      idb-keyval:
-        optional: true
-      ioredis:
-        optional: true
-      lru-cache:
-        optional: true
-      mongodb:
-        optional: true
-      ofetch:
-        optional: true
-      uploadthing:
-        optional: true
-
   untun@0.1.3:
     resolution: {integrity: sha512-4luGP9LMYszMRZwsvyUd9MrxgEGZdZuZgpVQHEEX0lCYFESasVRvZd0EYpCkOIbJKHMuv0LskpXc/8Un+MJzEQ==}
 
@@ -16345,7 +16207,7 @@ snapshots:
     dependencies:
       '@ai-sdk/provider': 4.0.7
       '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       eventsource-parser: 3.1.0
       undici: 7.29.0
       zod: 4.5.4
@@ -16354,7 +16216,7 @@ snapshots:
     dependencies:
       '@ai-sdk/provider': 4.0.8
       '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       eventsource-parser: 3.1.0
       undici: 7.29.0
       zod: 4.5.4
@@ -23051,7 +22913,7 @@ snapshots:
   '@vercel/sandbox@1.10.2':
     dependencies:
       '@vercel/oidc': 3.2.0
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       async-retry: 1.3.3
       jsonlines: 0.1.1
       ms: 2.1.3
@@ -23067,7 +22929,7 @@ snapshots:
   '@vercel/sandbox@3.0.0':
     dependencies:
       '@vercel/oidc': 3.2.0
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       async-retry: 1.3.3
       jose: 6.2.3
       jsonlines: 0.1.1
@@ -23084,7 +22946,7 @@ snapshots:
   '@vercel/sandbox@3.1.0-beta.1':
     dependencies:
       '@vercel/oidc': 3.2.0
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       async-retry: 1.3.3
       jose: 6.2.3
       jsonlines: 0.1.1
@@ -23102,7 +22964,7 @@ snapshots:
   '@vercel/sandbox@3.2.1':
     dependencies:
       '@vercel/oidc': 3.2.0
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       async-retry: 1.3.3
       jose: 6.2.3
       jsonlines: 0.1.1
@@ -23430,13 +23292,13 @@ snapshots:
 
   '@webgpu/types@0.1.71': {}
 
-  '@workflow/builders@5.0.0-beta.48(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/builders@https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@swc/core': 1.15.3(@swc/helpers@0.5.23)
-      '@workflow/core': 5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
-      '@workflow/errors': 5.0.0-beta.20
-      '@workflow/swc-plugin': 5.0.0-beta.5(@swc/core@1.15.3(@swc/helpers@0.5.23))
-      '@workflow/utils': 5.0.0-beta.10
+      '@workflow/core': https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+      '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+      '@workflow/swc-plugin': https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-swc-plugin.tgz(@swc/core@1.15.3(@swc/helpers@0.5.23))
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
       builtin-modules: 5.0.0
       chalk: 5.6.2
       enhanced-resolve: 5.19.0
@@ -23452,19 +23314,19 @@ snapshots:
       - utf-8-validate
       - ws
 
-  '@workflow/core@5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/core@https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31
       '@standard-schema/spec': 1.0.0
       '@types/ms': 2.1.0
       '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
-      '@workflow/errors': 5.0.0-beta.20
-      '@workflow/serde': 5.0.0-beta.2
-      '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.33
-      '@workflow/world-local': 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
-      '@workflow/world-vercel': 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+      '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+      '@workflow/world': https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
+      '@workflow/world-local': https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz(@opentelemetry/api@1.9.1)
+      '@workflow/world-vercel': https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       debug: 4.4.3(supports-color@10.2.2)
       devalue: 5.9.0
       ms: 2.1.3
@@ -23482,31 +23344,27 @@ snapshots:
       - utf-8-validate
       - ws
 
-  '@workflow/errors@5.0.0-beta.20':
+  '@workflow/errors@https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz':
     dependencies:
-      '@workflow/utils': 5.0.0-beta.10
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
       ms: 2.1.3
 
-  '@workflow/serde@4.1.0': {}
+  '@workflow/serde@https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz': {}
 
-  '@workflow/serde@4.1.0-beta.2': {}
-
-  '@workflow/serde@5.0.0-beta.2': {}
-
-  '@workflow/swc-plugin@5.0.0-beta.5(@swc/core@1.15.3(@swc/helpers@0.5.23))':
+  '@workflow/swc-plugin@https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-swc-plugin.tgz(@swc/core@1.15.3(@swc/helpers@0.5.23))':
     dependencies:
       '@swc/core': 1.15.3(@swc/helpers@0.5.23)
 
-  '@workflow/utils@5.0.0-beta.10':
+  '@workflow/utils@https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz':
     dependencies:
       ms: 2.1.3
 
-  '@workflow/world-local@5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)':
+  '@workflow/world-local@https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.20
-      '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.33
+      '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+      '@workflow/world': https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
       async-sema: 3.1.1
       proper-lockfile: 4.1.2
       ulid: 3.0.2
@@ -23515,13 +23373,13 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
 
-  '@workflow/world-postgres@5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)':
+  '@workflow/world-postgres@https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)':
     dependencies:
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.20
-      '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.33
-      '@workflow/world-local': 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
+      '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+      '@workflow/world': https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
+      '@workflow/world-local': https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz(@opentelemetry/api@1.9.1)
       cbor-x: 1.6.0
       dotenv: 17.3.1
       drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1)
@@ -23562,14 +23420,14 @@ snapshots:
       - supports-color
       - typescript
 
-  '@workflow/world-vercel@5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
+  '@workflow/world-vercel@https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
     dependencies:
       '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
       '@vercel/oidc': 3.2.0
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.20
-      '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.33
+      '@workflow/errors': https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz
+      '@workflow/utils': https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz
+      '@workflow/world': https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz
       cbor-x: 1.6.0
       ulid: 3.0.2
       undici: 7.29.0
@@ -23582,7 +23440,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@workflow/world@5.0.0-beta.33':
+  '@workflow/world@https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz':
     dependencies:
       ulid: 3.0.2
       zod: 4.3.6
@@ -24275,7 +24133,7 @@ snapshots:
 
   chat@4.30.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1(supports-color@10.2.2)
       remark-parse: 11.0.0(supports-color@10.2.2)
@@ -24290,7 +24148,7 @@ snapshots:
 
   chat@4.34.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1(supports-color@10.2.2)
       remark-parse: 11.0.0(supports-color@10.2.2)
@@ -24305,7 +24163,7 @@ snapshots:
 
   chat@4.35.0(ai@7.0.84(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
-      '@workflow/serde': 4.1.0-beta.2
+      '@workflow/serde': https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1(supports-color@10.2.2)
       remark-parse: 11.0.0(supports-color@10.2.2)
@@ -25288,12 +25146,14 @@ snapshots:
 
   env-paths@3.0.0: {}
 
-  env-runner@0.1.16:
+  env-runner@0.1.16(@vercel/queue@0.5.0(@opentelemetry/api@1.9.1)):
     dependencies:
       crossws: 0.4.10(srvx@0.11.22)
       exsolve: 1.1.0
       httpxy: 0.5.5
       srvx: 0.11.22
+    optionalDependencies:
+      '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
 
   env-runner@0.2.1:
     dependencies:
@@ -25827,106 +25687,6 @@ snapshots:
     dependencies:
       ai: 7.0.84(zod@4.5.4)
       eve: link:packages/eve
-
-  eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(ai@7.0.84(zod@4.5.4))(aws4fetch@1.0.20)(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(lru-cache@11.5.2)(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      ai: 7.0.84(zod@4.5.4)
-      nitro: 3.0.260610-beta(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lru-cache@11.5.2)(rollup@4.62.2)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
-      undici: 8.9.0
-    optionalDependencies:
-      '@opentelemetry/api': 1.9.1
-      braintrust: 3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
-      just-bash: 3.1.0(supports-color@10.2.2)
-      microsandbox: 0.5.5
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@netlify/blobs'
-      - '@netlify/runtime'
-      - '@planetscale/database'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - '@vercel/queue'
-      - aws4fetch
-      - better-sqlite3
-      - chokidar
-      - dotenv
-      - drizzle-orm
-      - giget
-      - idb-keyval
-      - ioredis
-      - jiti
-      - lru-cache
-      - miniflare
-      - mongodb
-      - mysql2
-      - rollup
-      - sqlite3
-      - uploadthing
-      - vite
-      - wrangler
-      - xml2js
-      - zephyr-agent
-
-  eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(ai@7.0.84(zod@4.5.4))(aws4fetch@1.0.20)(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(lru-cache@11.5.2)(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      ai: 7.0.84(zod@4.5.4)
-      nitro: 3.0.260610-beta(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lru-cache@11.5.2)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
-      undici: 8.9.0
-    optionalDependencies:
-      '@opentelemetry/api': 1.9.1
-      braintrust: 3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
-      just-bash: 3.1.0(supports-color@10.2.2)
-      microsandbox: 0.5.5
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@netlify/blobs'
-      - '@netlify/runtime'
-      - '@planetscale/database'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - '@vercel/queue'
-      - aws4fetch
-      - better-sqlite3
-      - chokidar
-      - dotenv
-      - drizzle-orm
-      - giget
-      - idb-keyval
-      - ioredis
-      - jiti
-      - lru-cache
-      - miniflare
-      - mongodb
-      - mysql2
-      - rollup
-      - sqlite3
-      - uploadthing
-      - vite
-      - wrangler
-      - xml2js
-      - zephyr-agent
 
   event-target-shim@5.0.1: {}
 
@@ -26741,13 +26501,6 @@ snapshots:
       radix3: 1.1.2
       ufo: 1.6.4
       uncrypto: 0.1.3
-
-  h3@2.0.1-rc.22(crossws@0.4.10(srvx@0.11.22)):
-    dependencies:
-      rou3: 0.8.1
-      srvx: 0.11.22
-    optionalDependencies:
-      crossws: 0.4.10(srvx@0.11.22)
 
   h3@2.0.1-rc.31(crossws@0.4.12(srvx@1.0.3))(ocache@0.3.0):
     dependencies:
@@ -28873,8 +28626,6 @@ snapshots:
       - '@types/node'
       - babel-plugin-macros
 
-  nf3@0.3.17: {}
-
   nf3@0.3.24: {}
 
   nice-grpc-common@2.0.3:
@@ -28886,114 +28637,6 @@ snapshots:
       '@grpc/grpc-js': 1.14.4
       abort-controller-x: 0.5.0
       nice-grpc-common: 2.0.3
-
-  nitro@3.0.260610-beta(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lru-cache@11.5.2)(rollup@4.62.2)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      consola: 3.4.2
-      crossws: 0.4.10(srvx@0.11.22)
-      db0: 0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))
-      env-runner: 0.1.16
-      h3: 2.0.1-rc.22(crossws@0.4.10(srvx@0.11.22))
-      hookable: 6.1.1
-      nf3: 0.3.17
-      ocache: 0.1.5
-      ofetch: 2.0.0-alpha.3
-      ohash: 2.0.11
-      rolldown: 1.1.5
-      srvx: 0.11.22
-      unenv: 2.0.0-rc.24
-      unstorage: 2.0.0-alpha.7(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(db0@0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1)))(ioredis@5.11.1(supports-color@10.2.2))(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3)
-    optionalDependencies:
-      dotenv: 17.4.2
-      giget: 3.3.0
-      jiti: 2.7.0
-      rollup: 4.62.2
-      vite: 8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@netlify/blobs'
-      - '@netlify/runtime'
-      - '@planetscale/database'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - aws4fetch
-      - better-sqlite3
-      - chokidar
-      - drizzle-orm
-      - idb-keyval
-      - ioredis
-      - lru-cache
-      - miniflare
-      - mongodb
-      - mysql2
-      - sqlite3
-      - uploadthing
-      - wrangler
-
-  nitro@3.0.260610-beta(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(dotenv@17.4.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))(giget@3.3.0)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lru-cache@11.5.2)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      consola: 3.4.2
-      crossws: 0.4.10(srvx@0.11.22)
-      db0: 0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))
-      env-runner: 0.1.16
-      h3: 2.0.1-rc.22(crossws@0.4.10(srvx@0.11.22))
-      hookable: 6.1.1
-      nf3: 0.3.17
-      ocache: 0.1.5
-      ofetch: 2.0.0-alpha.3
-      ohash: 2.0.11
-      rolldown: 1.1.5
-      srvx: 0.11.22
-      unenv: 2.0.0-rc.24
-      unstorage: 2.0.0-alpha.7(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(db0@0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1)))(ioredis@5.11.1(supports-color@10.2.2))(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3)
-    optionalDependencies:
-      dotenv: 17.4.2
-      giget: 3.3.0
-      jiti: 2.7.0
-      rollup: 4.62.2
-      vite: 8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@netlify/blobs'
-      - '@netlify/runtime'
-      - '@planetscale/database'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - aws4fetch
-      - better-sqlite3
-      - chokidar
-      - drizzle-orm
-      - idb-keyval
-      - ioredis
-      - lru-cache
-      - miniflare
-      - mongodb
-      - mysql2
-      - sqlite3
-      - uploadthing
-      - wrangler
 
   nitro@3.0.260903-beta:
     dependencies:
@@ -29651,10 +29294,6 @@ snapshots:
       es-object-atoms: 1.1.2
 
   obug@2.1.3: {}
-
-  ocache@0.1.5:
-    dependencies:
-      ohash: 2.0.11
 
   ocache@0.3.0: {}
 
@@ -32758,18 +32397,6 @@ snapshots:
       ioredis: 5.11.1(supports-color@10.2.2)
 
   unstorage@2.0.0-alpha.10: {}
-
-  unstorage@2.0.0-alpha.7(@upstash/redis@1.38.4)(@vercel/blob@2.8.0)(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(aws4fetch@1.0.20)(chokidar@5.0.0)(db0@0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1)))(ioredis@5.11.1(supports-color@10.2.2))(lru-cache@11.5.2)(ofetch@2.0.0-alpha.3):
-    optionalDependencies:
-      '@upstash/redis': 1.38.4
-      '@vercel/blob': 2.8.0
-      '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
-      aws4fetch: 1.0.20
-      chokidar: 5.0.0
-      db0: 0.3.4(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1))
-      ioredis: 5.11.1(supports-color@10.2.2)
-      lru-cache: 11.5.2
-      ofetch: 2.0.0-alpha.3
 
   untun@0.1.3:
     dependencies:

@@ -377,6 +377,14 @@ function readWorkflowVersionFromManifest(value: unknown): string | undefined {
     const declared = section?.[EXPECTED_WORKFLOW_VERSION_PACKAGE];
 
     if (typeof declared === "string" && declared.trim().length > 0) {
+      if (declared.startsWith("https://")) {
+        const root = tryResolvePackageRoot();
+        if (root === undefined) return undefined;
+        const vendor = JSON.parse(
+          readFileSync(join(root, "node_modules", "@workflow", "core", "package.json"), "utf8"),
+        ) as { version?: string };
+        return vendor.version;
+      }
       return declared;
     }
   }

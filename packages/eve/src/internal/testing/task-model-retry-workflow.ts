@@ -11,7 +11,7 @@ import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
-} from "#execution/durable-session-store.js";
+} from "#execution/session/state.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -70,7 +70,7 @@ export async function taskModelRetryStep(input: {
   "use step";
 
   const { attempt } = getStepMetadata();
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const session = hydrateDurableSession({ durable, turnAgent: createTurnAgent() });
   const historyBeforeModelCall = [...session.history];
   const model = new MockLanguageModelV3({

@@ -169,12 +169,18 @@ export default defineEval({
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/HTTP-SESSION-FOLLOW-UP-OK/i);
 
+    const liveReset = t.target.watchTurn(sessionId, {
+      startIndex: eventIndex + followUp.events.length,
+    });
     const reset = await postJson<ResetResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/reset`,
       { reason: "Verify immutable HTTP session identity" },
-      200,
+      202,
     );
+
+    const resetEvents = await liveReset.result();
+    resetEvents.event("session.completed", { count: 1 });
     await t.require(
       reset,
       satisfies(
@@ -183,18 +189,30 @@ export default defineEval({
       ),
     );
 
-    const rejected = await postJson<{ readonly code?: string; readonly ok?: boolean }>(
+    const late = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
       { message: "This must not create or follow a replacement." },
-      409,
+      202,
     );
     await t.require(
-      rejected,
+      late,
       satisfies(
-        (value: { readonly code?: string; readonly ok?: boolean }) =>
-          value.ok === false && value.code === "session_not_active",
-        "a reset session ID cannot send or create a replacement",
+        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        "a late candidate remains addressed to the retired session",
+      ),
+    );
+    const alreadyReset = await postJson<ResetResponse>(
+      t.target,
+      `/eve/v1/session/${sessionId}/reset`,
+      {},
+      202,
+    );
+    await t.require(
+      alreadyReset.status,
+      satisfies(
+        (status) => status === "reset",
+        "a repeated reset acknowledges the same addressed session",
       ),
     );
 

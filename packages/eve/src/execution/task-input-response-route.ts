@@ -1,5 +1,5 @@
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { dispatchSessionCommandByToken } from "#execution/session/ingress.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -28,16 +28,9 @@ export async function handleTaskInputResponseRequest(
       { status: 400 },
     );
   }
-  // Child inboxes outlive deployments; cross the hook in the durable
-  // delivery envelope like every other session-inbox producer.
-  try {
-    await resumeSessionInbox(targetToken, { kind: "send", payload: { inputResponses } });
-  } catch {
-    return Response.json(
-      { error: "Task input target is not pending.", ok: false },
-      { status: 404 },
-    );
-  }
+  ctx.waitUntil(
+    dispatchSessionCommandByToken(targetToken, { kind: "send", payload: { inputResponses } }),
+  );
   return Response.json({ ok: true }, { status: 202 });
 }
 

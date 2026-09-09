@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { holdingWorkflowReference } from "#execution/workflow-references.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
@@ -21,7 +21,7 @@ export function healthResponse(): Response {
   return Response.json({
     ok: true,
     status: "ready",
-    workflowId: workflowEntryReference.workflowId,
+    workflowId: holdingWorkflowReference.workflowId,
   });
 }
 

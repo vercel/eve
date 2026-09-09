@@ -154,12 +154,10 @@ describe("upsertProxyInputRequests", () => {
 
 describe("toProxyInputRequestEntries", () => {
   it("persists the original child's inbox through a session snapshot round trip", () => {
-    const childSessionInbox = { sessionId: "original-child", version: 1 };
     const entries = toProxyInputRequestEntries({
       callId: "call-1",
-      childContinuationToken: "reusable-alias",
+      childContinuationToken: "eve:session:original-child:inbox",
       childSessionId: "original-child",
-      childSessionInbox,
       event: {
         requests: [createRequest("req-1", "question")],
         sequence: 0,
@@ -171,12 +169,12 @@ describe("toProxyInputRequestEntries", () => {
     });
     const session = upsertProxyInputRequests({
       entries,
-      forChildContinuationToken: "reusable-alias",
+      forChildContinuationToken: "eve:session:original-child:inbox",
       session: createSession(),
     });
 
     expect(getProxyInputRequests(JSON.parse(JSON.stringify(session.state))).get("req-1")).toEqual(
-      expect.objectContaining({ childSessionInbox }),
+      expect.objectContaining({ childContinuationToken: "eve:session:original-child:inbox" }),
     );
   });
 
