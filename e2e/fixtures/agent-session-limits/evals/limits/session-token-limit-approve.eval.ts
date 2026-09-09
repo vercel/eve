@@ -45,27 +45,31 @@ export default defineEval({
     if (activeState === undefined) {
       throw new Error("The active eval session did not expose client state.");
     }
-    // Both messages were queued behind the active turn, so eve delivers them
-    // coalesced into one follow-up turn while the limit prompt stays pending.
-    const queuedSession = t.target.watchTurn(active.sessionId, {
+    const firstQueuedSession = t.target.watchTurn(active.sessionId, {
       startIndex: activeState.streamIndex,
     });
+    const firstQueued = await firstQueuedSession.result();
+    firstQueued.event("message.received", {
+      count: 1,
+      data: { message: 'Queued message A: preserve the original reply "approved".' },
+    });
+    firstQueued.notEvent("input.requested");
+
+    const firstQueuedState = firstQueuedSession.session.state;
+    if (firstQueuedState === undefined) throw new Error("Missing first queued turn cursor.");
+    const queuedSession = t.target.watchTurn(active.sessionId, {
+      startIndex: firstQueuedState.streamIndex,
+    });
     const queued = await queuedSession.result();
-    queued.event("message.received", { count: 1 });
+    queued.event("message.received", {
+      count: 1,
+      data: { message: 'Queued message B: preserve the original reply "approved".' },
+    });
     queued.notEvent("input.requested");
-    queued.eventsSatisfy(
-      "coalesces messages A and B in order while preserving the pending prompt",
-      (events) => {
-        const received = events.find((event) => event.type === "message.received");
-        if (received === undefined) return false;
-        const messageAIndex = received.data.message.indexOf("Queued message A");
-        const messageBIndex = received.data.message.indexOf("Queued message B");
-        return messageAIndex !== -1 && messageBIndex > messageAIndex;
-      },
-    );
     t.check(
-      [...prompted.events, ...queued.events].filter((event) => event.type === "input.requested")
-        .length,
+      [...prompted.events, ...firstQueued.events, ...queued.events].filter(
+        (event) => event.type === "input.requested",
+      ).length,
       equals(1),
     );
 

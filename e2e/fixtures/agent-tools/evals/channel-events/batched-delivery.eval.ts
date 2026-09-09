@@ -6,7 +6,7 @@ import { coalesceDeliverPayloads } from "../../../../../packages/eve/src/executi
 
 export default defineEval({
   tags: ["real-model"],
-  description: "Delivery batching smoke: queued messages and context coalesce in arrival order.",
+  description: "Payloads within one delivery combine their messages and context in order.",
   async test(t) {
     const firstMessage = "Remember synthetic marker BATCH-FIRST.";
     const secondMessage = "Remember synthetic marker BATCH-SECOND.";

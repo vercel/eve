@@ -11,6 +11,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       toolCalls: [{ id: "wait-for-cancellation", input: {}, name: "wait-for-cancellation" }],
     };
   }
+  const marker = /record-request with marker "([^"]+)"/u.exec(message)?.[1];
+  if (marker !== undefined) {
+    const id = `record-${marker}`;
+    const result = request.toolResults.find((entry) => entry.id === id);
+    return result === undefined
+      ? { toolCalls: [{ id, input: { marker }, name: "record-request" }] }
+      : String(result.output);
+  }
   if (message.includes("call the sleeper subagent")) {
     return {
       toolCalls: [

@@ -28,6 +28,8 @@ export default defineChannel({
 });
 ```
 
+Queued message deliveries are processed separately in the order they reach the session inbox, even when they come from the same user. Each delivery keeps its original auth, attachments, and context; a later sender's auth does not replace an earlier queued request's auth. Turns still share the session's conversation history.
+
 `from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
 
 Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.
