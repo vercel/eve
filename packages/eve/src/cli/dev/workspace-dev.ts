@@ -70,15 +70,11 @@ function waitForWorkspaceAgent(input: {
     const settle = (outcome: () => void) => {
       if (settled) return;
       settled = true;
-      clearTimeout(deadline);
+      input.signal.removeEventListener("abort", onAbort);
       input.child.off("error", onError);
       input.child.off("exit", onExit);
       outcome();
     };
-    const deadline = setTimeout(
-      () => settle(() => reject(new Error(`Timed out waiting for ${input.serverUrl}.`))),
-      30_000,
-    );
     const onExit = (code: number | null) =>
       settle(() =>
         reject(
@@ -86,9 +82,10 @@ function waitForWorkspaceAgent(input: {
         ),
       );
     const onError = (error: Error) => settle(() => reject(error));
+    const onAbort = () => settle(resolve);
     const poll = async () => {
       if (input.signal.aborted) {
-        settle(resolve);
+        onAbort();
         return;
       }
       try {
@@ -102,6 +99,7 @@ function waitForWorkspaceAgent(input: {
       } catch {}
       if (!settled) setTimeout(() => void poll(), 200).unref();
     };
+    input.signal.addEventListener("abort", onAbort, { once: true });
     input.child.once("error", onError);
     input.child.once("exit", onExit);
     void poll();
