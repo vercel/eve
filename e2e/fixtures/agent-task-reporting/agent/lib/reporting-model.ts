@@ -6,7 +6,7 @@ export function reportingControl(instruction: PendingInstruction): string {
   return `<reporting-eval pending-instruction="${instruction}"/>\n`;
 }
 
-const PENDING_INSTRUCTION = "Background task control: incomplete cohort\n";
+const PENDING_INSTRUCTION = "Background task reporting: waiting for remaining results\n";
 
 // Both arms remove their control marker before inference. Only the off arm
 // removes the pending instruction; task state, results and other guidance stay.
