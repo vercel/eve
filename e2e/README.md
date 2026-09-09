@@ -85,7 +85,9 @@ pnpm test:e2e
 
 Vercel e2e uses the same fixture evals against immutable preview deployment
 URLs. All fixture deployments link to the same Vercel project id; isolation
-comes from the deployment URL returned by `vc deploy --prebuilt`.
+comes from the deployment URL returned by `vc deploy --prebuilt`. The deploy
+output also includes an **Inspect** URL for the exact Vercel deployment exercised
+by that matrix job.
 
 One-time project setup:
 
