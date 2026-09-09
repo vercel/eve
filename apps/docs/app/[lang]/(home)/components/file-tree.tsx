@@ -111,8 +111,7 @@ export default defineTool({
     NavIcon: IconSandbox,
     description:
       "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
-    code: `import { defineSandbox } from
-  "eve/sandbox";
+    code: `import { defineSandbox } from "eve/sandbox";
 
 export default defineSandbox({
   async bootstrap({ sandbox }) {
