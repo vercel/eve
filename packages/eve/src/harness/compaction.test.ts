@@ -765,6 +765,38 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.slice(2, 4)).toEqual([recentCall, recentResult]);
   });
 
+  it("replays a folded-away task when recent tool results survive", async () => {
+    const task = user("Keep the original request and its final task sentinel.");
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 100 });
+    const { result, summarizer } = await compact(
+      [user("old notes ".repeat(4_000)), task, call, resultMsg],
+      { recentWindowSize: 2, threshold: 2_048 },
+    );
+
+    expect(summarizer).toHaveBeenCalled();
+    expect(result).toContainEqual(call);
+    expect(result).toContainEqual(resultMsg);
+    expect(result.at(-1)).toEqual(task);
+  });
+
+  it("makes room for the original task before keeping a large tool-result tail", async () => {
+    const task = user("Keep these requirements. ".repeat(25));
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 600 });
+    const summary = "s".repeat(2_800);
+    const head = checkpointHead(summary);
+    const threshold = Math.floor(
+      (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
+    );
+    const { result } = await compact([user("old notes ".repeat(4_000)), task, call, resultMsg], {
+      recentWindowSize: 2,
+      summary,
+      threshold,
+    });
+
+    expect(result.at(-1)).toEqual(task);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
+  });
+
   it("strips tool activity from the tail when verbatim does not fit but text does", async () => {
     const oldProse = user("investigation notes ".repeat(2_000));
     const [recentCall, recentResult] = toolExchange({

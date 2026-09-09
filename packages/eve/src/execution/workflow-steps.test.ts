@@ -1,5 +1,5 @@
 import type { ModelMessage } from "ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
   DeliverPayload,
@@ -228,7 +228,16 @@ function createSerializedContext(
 ): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
-  ctx.set(BundleKey, {
+  ctx.set(BundleKey, createStubBundle());
+  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ContinuationTokenKey, "http:thread-context");
+  ctx.set(ModeKey, mode);
+  ctx.set(SessionIdKey, "session-1");
+  return serializeContext(ctx);
+}
+
+function createStubBundle(): Awaited<ReturnType<typeof getCompiledRuntimeAgentBundle>> {
+  return {
     adapterRegistry: {
       adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
     },
@@ -245,13 +254,12 @@ function createSerializedContext(
     subagentRegistry: {},
     toolRegistry: {},
     turnAgent: TestTurnAgent,
-  } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
-  ctx.set(ContinuationTokenKey, "http:thread-context");
-  ctx.set(ModeKey, mode);
-  ctx.set(SessionIdKey, "session-1");
-  return serializeContext(ctx);
+  } as never;
 }
+
+beforeEach(() => {
+  vi.mocked(getCompiledRuntimeAgentBundle).mockReset().mockResolvedValue(createStubBundle());
+});
 
 afterEach(() => {
   getRunMock.mockReset();

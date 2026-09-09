@@ -7,17 +7,19 @@ import {
 } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
 
 const ALICE_WORKSPACE_LABEL = "Maple Studio";
 const BOB_WORKSPACE_LABEL = "Cedar Workshop";
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 const CREATE_CHILD_MESSAGE = [
+  WORKSPACE_FORWARDING_MARKER,
   "Use remote-loopback with this message:",
   JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
+  WORKSPACE_FORWARDING_MARKER,
   "A different user is making this request now.",
   "Continue that same remote-loopback agent using its agentId with this message:",
   JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
@@ -30,7 +32,7 @@ const CLARIFICATION = [
 
 /** Three users resume one remote child; each tool call resolves only its current caller's workspace membership. */
 export default defineEval({
-  tags: ["principal-forwarding", "real-model"],
+  tags: ["principal-forwarding"],
   description:
     "A persistent remote child switches between two workspace memberships and denies a third caller with none.",
   async test(t) {

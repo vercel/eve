@@ -240,9 +240,11 @@ vi.mock("./compaction.js", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.mocked(shouldCompact).mockReset().mockReturnValue(false);
+  vi.mocked(compactMessages).mockReset();
   vi.unstubAllEnvs();
   declareTelemetry(undefined);
-  mockGetRegisteredTelemetryIntegrations.mockReturnValue([]);
+  mockGetRegisteredTelemetryIntegrations.mockReset().mockReturnValue([]);
 });
 
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {

@@ -141,13 +141,7 @@ describe("packed package consumption", () => {
 
     await run(
       "pnpm",
-      [
-        "install",
-        "--ignore-scripts",
-        "--no-frozen-lockfile",
-        "--prefer-offline",
-        "--config.minimum-release-age=0",
-      ],
+      ["install", "--ignore-scripts", "--no-frozen-lockfile", "--prefer-offline"],
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));

@@ -24,6 +24,9 @@ if (
 const packageRoot = fileURLToPath(new URL("../packages/eve/", import.meta.url));
 const vitest = resolve(packageRoot, "node_modules/vitest/vitest.mjs");
 const directory = resolve(output);
+const workerArgs = args.some((arg) => arg === "--maxWorkers" || arg.startsWith("--maxWorkers="))
+  ? []
+  : ["--maxWorkers=1"];
 await mkdir(directory, { recursive: true });
 const trials = [];
 const startedAt = new Date().toISOString();
@@ -43,7 +46,7 @@ for (let trial = 0; trial < runs; trial += 1) {
         "run",
         ...args,
         "--retry=0",
-        "--maxWorkers=1",
+        ...workerArgs,
         "--sequence.shuffle",
         `--sequence.seed=${seed}`,
         "--reporter=json",

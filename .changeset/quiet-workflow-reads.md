@@ -3,3 +3,5 @@
 ---
 
 Retry transient Windows file-sharing errors when reading local workflow state, matching the bounded retries already used for writes. Persistent access errors and malformed state still fail.
+
+Preserve a folded-away task that fits the compaction budget when recent tool results survive summarization.

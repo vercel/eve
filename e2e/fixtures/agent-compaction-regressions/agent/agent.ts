@@ -173,12 +173,10 @@ const taskModel = mockModel({
     // These are fixture markers, not compaction protocol fields. `marker` records the
     // regression work tool; `SECOND_CHECKPOINT_MARKER` records the test-only tool
     // whose output makes the harness cross the compaction threshold a second time.
-    // Completion evidence is detected in any assistant message: compaction may
-    // leave it as a summarization checkpoint or as an eviction trail line, and
-    // the model must not repeat work in either case. User messages are
-    // excluded because the eval instructions themselves quote the markers.
-    if (assistantEvidenceContains(request.messages, marker)) {
-      if (assistantEvidenceContains(request.messages, SECOND_CHECKPOINT_MARKER)) {
+    // Kept tool results, checkpoints, and eviction trails all prove completed work.
+    // User messages are excluded because the eval instructions quote the markers.
+    if (completionEvidenceContains(request.messages, marker)) {
+      if (completionEvidenceContains(request.messages, SECOND_CHECKPOINT_MARKER)) {
         return `Done: ${marker}; ${SECOND_CHECKPOINT_MARKER}`;
       }
 
@@ -273,9 +271,12 @@ function completionMarker(
     : "SOURCE_ANALYSIS_COMPLETE";
 }
 
-function assistantEvidenceContains(
+function completionEvidenceContains(
   messages: MockModelRequest["messages"],
   marker: string,
 ): boolean {
-  return messages.some((message) => message.role === "assistant" && message.text.includes(marker));
+  return messages.some(
+    (message) =>
+      (message.role === "assistant" || message.role === "tool") && message.text.includes(marker),
+  );
 }
