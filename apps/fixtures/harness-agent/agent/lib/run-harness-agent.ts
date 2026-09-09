@@ -1,10 +1,11 @@
-import { HarnessAgent } from "@ai-sdk/harness/agent";
+import { HarnessAgent, type HarnessAgentAdapter } from "@ai-sdk/harness/agent";
 import { type FlexibleSchema, Output } from "ai";
 import type { SandboxSession } from "eve/sandbox";
 
 import { adaptHarnessNetworkSandboxSession } from "./sandbox-session";
 import type {
   CreateHarnessAgentToolSettings,
+  HarnessBridgeSettings,
   HarnessAgentToolOutput,
   OptionalOutputSchema,
 } from "./types";
@@ -14,6 +15,7 @@ type RunHarnessAgentSettings<TOutputSchema extends OptionalOutputSchema = undefi
   "description"
 > & {
   readonly abortSignal?: AbortSignal;
+  readonly harness: (settings: HarnessBridgeSettings) => HarnessAgentAdapter;
   readonly sandbox: SandboxSession;
   readonly task: string;
 };
@@ -40,6 +42,7 @@ export async function runHarnessAgent<TOutputSchema extends OptionalOutputSchema
       harness: input.harness({ port, portEndpoint }),
       id: input.id,
       instructions: input.instructions,
+      model: input.model,
       output:
         input.outputSchema === undefined
           ? undefined

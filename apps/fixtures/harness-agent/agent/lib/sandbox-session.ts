@@ -11,11 +11,13 @@ type VercelSandbox = Awaited<
 >;
 
 export async function adaptHarnessNetworkSandboxSession(input: {
+  readonly leaseId?: string;
   readonly sandbox: SandboxSession;
 }): Promise<HarnessV1NetworkSandboxSession> {
   const vercelSandbox = await resolveVercelSandbox(input.sandbox);
   const ports = resolveHarnessPorts(vercelSandbox);
   const lease = await reserveHarnessPort({
+    leaseId: input.leaseId,
     ports,
     sandbox: input.sandbox,
   });
@@ -96,13 +98,18 @@ function resolveHarnessPorts(vercelSandbox: VercelSandbox): readonly number[] {
 }
 
 async function reserveHarnessPort(input: {
+  readonly leaseId?: string;
   readonly ports: readonly number[];
   readonly sandbox: Pick<SandboxSession, "run">;
 }): Promise<{ readonly port: number; readonly release: () => Promise<void> }> {
-  const owner = randomUUID();
+  const owner = input.leaseId ?? randomUUID();
   const result = await input.sandbox.run({
     command:
       `root=${HARNESS_ROOT}/ports; mkdir -p "$root"; ` +
+      "for port in $EVE_HARNESS_PORTS; do " +
+      `if [ "$(cat "$root/$port/owner" 2>/dev/null)" = "$EVE_HARNESS_PORT_OWNER" ]; then ` +
+      `printf '%s' "$port"; exit 0; fi; ` +
+      "done; " +
       "for port in $EVE_HARNESS_PORTS; do " +
       `node -e 'const net=require("node:net"); const server=net.createServer(); ` +
       `server.unref(); server.once("error",()=>process.exit(1)); ` +

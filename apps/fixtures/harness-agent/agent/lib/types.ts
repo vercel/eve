@@ -1,6 +1,5 @@
 import { posix } from "node:path";
 
-import { type HarnessAgentAdapter } from "@ai-sdk/harness/agent";
 import type { StandardJSONSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
 
@@ -63,8 +62,6 @@ export interface CreateHarnessAgentToolSettings<
 > extends HarnessAgentSettings {
   /** Model-facing description for this HarnessAgent tool. */
   readonly description: string;
-  /** Harness creator callback. */
-  readonly harness: (settings: HarnessBridgeSettings) => HarnessAgentAdapter;
   /** Optional model override for the harness. Otherwise it'll use its default model. */
   readonly model?: string;
   /** Structured result required from the harness and returned by this eve tool. */

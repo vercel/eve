@@ -9,28 +9,23 @@ import type {
   OptionalOutputSchema,
 } from "./types";
 
-/**
- * Creates an approval-gated HarnessAgent tool definition whose instructions,
- * skills, and default workDir are configured in code. The calling model
- * chooses the task and may override workDir for that invocation.
- */
-export function createHarnessAgentTool<TOutputSchema extends OptionalOutputSchema = undefined>(
+export function createHarnessAgentWorkflowTool<
+  TOutputSchema extends OptionalOutputSchema = undefined,
+>(
   settings: CreateHarnessAgentToolSettings<TOutputSchema>,
 ): {
   readonly definition: Omit<
     ToolDefinition<HarnessAgentToolInput, HarnessAgentToolOutput<TOutputSchema>>,
     "execute"
-  >;
+  > & { readonly sandbox: true };
   readonly agentSettings: Omit<CreateHarnessAgentToolSettings<TOutputSchema>, "description">;
 } {
   const { description, ...agentSettings } = settings;
-  const definition: Omit<
-    ToolDefinition<HarnessAgentToolInput, HarnessAgentToolOutput<TOutputSchema>>,
-    "execute"
-  > = {
+  const definition = {
     approval: always(),
     description,
     inputSchema: HARNESS_AGENT_TOOL_INPUT_SCHEMA,
+    sandbox: true as const,
   };
 
   return {
@@ -40,6 +35,6 @@ export function createHarnessAgentTool<TOutputSchema extends OptionalOutputSchem
       : { ...definition, outputSchema: agentSettings.outputSchema }) as Omit<
       ToolDefinition<HarnessAgentToolInput, HarnessAgentToolOutput<TOutputSchema>>,
       "execute"
-    >,
+    > & { readonly sandbox: true },
   };
 }
