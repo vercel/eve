@@ -18,6 +18,15 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 
 import { join } from "node:path";
 
 const roots = ["e2e/fixtures", "apps/fixtures"];
+const requestedFixture = process.env.EVE_E2E_FIXTURE || undefined;
+const requestedModel = process.env.EVE_E2E_MODEL_NAME || undefined;
+const repetitions = Number(process.env.EVE_E2E_REPETITIONS || "1");
+if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 500) {
+  throw new Error("EVE_E2E_REPETITIONS must be an integer from 1 to 500.");
+}
+if (repetitions > 1 && requestedFixture === undefined) {
+  throw new Error("Repeated eval validation requires an explicit fixture.");
+}
 
 const registry = JSON.parse(readFileSync("e2e/matrix.json", "utf8"));
 const models = validateNamedEntries(registry.models, "models", ["id"]);
@@ -27,6 +36,7 @@ const fixtures = [];
 for (const root of roots) {
   if (!existsSync(root)) continue;
   for (const entry of readdirSync(root).sort()) {
+    if (requestedFixture !== undefined && entry !== requestedFixture) continue;
     const dir = join(root, entry);
     if (!statSync(dir).isDirectory() || !existsSync(join(dir, "evals"))) continue;
 
@@ -52,21 +62,26 @@ for (const root of roots) {
 }
 
 if (fixtures.length === 0) {
-  console.error("No e2e fixtures with an evals/ directory were found.");
+  console.error(`No e2e fixtures matched ${requestedFixture ?? "the fixture roots"}.`);
   process.exit(1);
 }
 
-const modelMatrix = fixtures.flatMap(({ name, dir, modelMatrix, additionalModels }) =>
-  uniqueModels([
-    ...(modelMatrix === "full" ? models : models.slice(0, 1)),
-    ...additionalModels,
-  ]).map((model) => ({
-    name,
-    dir,
-    model_name: model.name,
-    model_id: model.id,
-  })),
-);
+const modelMatrix = fixtures
+  .flatMap(({ name, dir, modelMatrix, additionalModels }) =>
+    uniqueModels([
+      ...(modelMatrix === "full" ? models : models.slice(0, 1)),
+      ...additionalModels,
+    ]).map((model) => ({
+      name,
+      dir,
+      model_name: model.name,
+      model_id: model.id,
+    })),
+  )
+  .filter((leg) => requestedModel === undefined || leg.model_name === requestedModel);
+if (modelMatrix.length === 0) {
+  throw new Error(`No model-suite jobs matched model ${requestedModel}.`);
+}
 
 const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
 for (const world of worlds) {

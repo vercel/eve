@@ -94,6 +94,9 @@ catalogs:
       specifier: 4.5.4
       version: 4.5.4
 
+patchedDependencies:
+  '@workflow/world-local@5.0.0-beta.42': 593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8
+
 importers:
 
   .:
@@ -1432,7 +1435,7 @@ importers:
         version: 5.0.0-beta.33
       '@workflow/world-local':
         specifier: 5.0.0-beta.42
-        version: 5.0.0-beta.42(@opentelemetry/api@1.9.1)
+        version: 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
         specifier: 5.0.0-beta.44
         version: 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
@@ -23441,7 +23444,7 @@ snapshots:
       '@workflow/serde': 5.0.0-beta.2
       '@workflow/utils': 5.0.0-beta.10
       '@workflow/world': 5.0.0-beta.33
-      '@workflow/world-local': 5.0.0-beta.42(@opentelemetry/api@1.9.1)
+      '@workflow/world-local': 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel': 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       debug: 4.4.3(supports-color@10.2.2)
       devalue: 5.9.0
@@ -23479,7 +23482,7 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  '@workflow/world-local@5.0.0-beta.42(@opentelemetry/api@1.9.1)':
+  '@workflow/world-local@5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.0-beta.20
@@ -23499,7 +23502,7 @@ snapshots:
       '@workflow/errors': 5.0.0-beta.20
       '@workflow/utils': 5.0.0-beta.10
       '@workflow/world': 5.0.0-beta.33
-      '@workflow/world-local': 5.0.0-beta.42(@opentelemetry/api@1.9.1)
+      '@workflow/world-local': 5.0.0-beta.42(patch_hash=593f7971cdce38c1a7e69dd1a613ba7eaec158484c8bf2519ec2d20e297deba8)(@opentelemetry/api@1.9.1)
       cbor-x: 1.6.0
       dotenv: 17.3.1
       drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.1)

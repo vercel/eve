@@ -9,9 +9,11 @@ export default defineEval({
     const turn = await t.send(
       [
         "[case: stale-todo-work]",
-        "Call perform-source-analysis exactly once with approach initial.",
-        "The tool deliberately leaves its completed work in a pending todo.",
-        "After it succeeds, report SOURCE_ANALYSIS_COMPLETE and call no more tools.",
+        "Alice and Bob are reviewing a small catalog application.",
+        "Use perform-source-analysis once with approach initial to prepare Alice's findings.",
+        "Bob updates their shared checklist separately, so it may still say pending after the analysis is complete.",
+        "Use the completed analysis for the handoff and include SOURCE_ANALYSIS_COMPLETE.",
+        "The pending checklist entry does not require repeating the completed analysis.",
       ].join("\n"),
     );
 

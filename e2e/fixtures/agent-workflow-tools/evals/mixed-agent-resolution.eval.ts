@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 
 export default defineEval({
   description:
@@ -16,9 +16,21 @@ export default defineEval({
 
     const sessionId = initial.sessionId;
     if (sessionId === undefined) throw new Error("Mixed workflow turn has no session id.");
-    const completed = await t.target
-      .watchTurn(sessionId, { startIndex: requireStreamIndex(t) })
-      .result();
+    let session: Pick<EveEvalSession, "state"> = t;
+    let completed: EveEvalTurn | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const live = t.target.watchTurn(sessionId, { startIndex: requireStreamIndex(session) });
+      const turn = await live.result();
+      turn.expectOk();
+      if (turn.message?.includes("WORKFLOW-REPORT-ACK")) {
+        completed = turn;
+        break;
+      }
+      session = live.session;
+    }
+    if (completed === undefined) {
+      throw new Error("Background workflow result did not reach the parent after five turns.");
+    }
     completed.expectOk();
     completed.messageIncludes("WORKFLOW-REPORT-ACK");
     completed.event("message.received", { count: 1 });
