@@ -16,7 +16,8 @@ not a platform implementation or new published APIs.
 - [contracts.ts](./contracts.ts) is the complete interface reference, including
   values, errors, delivery origins, effects, waits, IPC, deployment manifests,
   the turn driver, programs, and migration bundles.
-- [schema.sql](./schema.sql) is the target v1 DDL, including secondary indexes,
+- [0001_baseline.sql](../../packages/eve/src/compute/storage/migrations/0001_baseline.sql)
+  is the target v1 DDL, including secondary indexes,
   foreign keys, deduplication constraints, and ownership tuples.
 - [schema.test.sql](./schema.test.sql) exercises selected database constraints
   and transaction rollback. It is not a concurrency or failover test.

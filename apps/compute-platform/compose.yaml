@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: eve_compute
+      POSTGRES_PASSWORD: eve_compute_admin
+      POSTGRES_USER: eve_compute_admin
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eve_compute_admin -d eve_compute"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "127.0.0.1:${EVE_COMPUTE_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - compute-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-compute-roles.sql:ro
+
+volumes:
+  compute-postgres-data:

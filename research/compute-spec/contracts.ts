@@ -1,198 +1,31 @@
 /**
- * Proposed, standalone contracts for the two implementation plans.
- * This file specifies interfaces; it is not a production runtime.
+ * Reference contracts for the two implementation plans.
+ *
+ * A1-owned cell, effect, value, receipt, and error contracts are re-exported
+ * from their production owner. Resumable-task and later-milestone contracts
+ * remain reference-only until their implementation milestones.
  */
-export type Id = string;
-export type Counter = `${bigint}`;
-export type Digest = `sha256:${string}`;
-export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-export type DefinitionId = string;
-export type PayloadRef = Id;
+export { ComputeError, defineCell, defineEffect } from "../../packages/eve/src/compute/index.js";
+export type * from "../../packages/eve/src/compute/protocol.js";
 
-export interface WireValue {
-  codec: "eve-value-v1";
-  data: string;
-}
-
-export interface VersionedValue {
-  version: number;
-  value: WireValue;
-}
-
-export interface ValueSchema<T> {
-  parse(value: unknown): T;
-}
-
-export type ErrorCode =
-  | "INVALID_INPUT"
-  | "UNAUTHORIZED"
-  | "FORBIDDEN"
-  | "NOT_FOUND"
-  | "IDEMPOTENCY_CONFLICT"
-  | "REVISION_CONFLICT"
-  | "STALE_EXECUTION"
-  | "CONCURRENT_MUTATION"
-  | "PAYLOAD_TOO_LARGE"
-  | "QUOTA_EXCEEDED"
-  | "TRANSIENT_FAILURE"
-  | "EFFECT_FAILED"
-  | "INDETERMINATE_EFFECT"
-  | "MIGRATION_REQUIRED"
-  | "UNSUPPORTED_EXPORT"
-  | "DEPLOYMENT_UNAVAILABLE"
-  | "CANCELLED"
-  | "INTERNAL";
-
-export interface Failure {
-  code: ErrorCode;
-  message: string;
-  incidentId?: Id;
-}
-
-export declare class ComputeError extends Error {
-  readonly code: ErrorCode;
-  constructor(code: ErrorCode, message: string);
-}
-
-export type Result<T> =
-  | { status: "succeeded"; value: T }
-  | { status: "failed"; error: Failure }
-  | { status: "cancelled" };
-
-export interface CellAddress {
-  namespaceId: Id;
-  definition: DefinitionId;
-  key: string;
-}
-
-export interface DeliveryContext {
-  cellId: Id;
-  deliveryId: string;
-  sequence: Counter;
-  acceptedAt: string;
-  origin:
-    | { kind: "external"; principalId: string }
-    | { kind: "cell"; sourceCellId: Id }
-    | { kind: "effect"; effectId: Id; generation: Counter }
-    | { kind: "timer"; timerKey: string; generation: Counter }
-    | { kind: "child"; resumableTaskId: Id; generation: Counter };
-}
-
-export type RetryPolicy =
-  | { mode: "manual"; timeoutMs: number }
-  | { mode: "idempotent"; maxAttempts: number; timeoutMs: number };
-
-export interface EffectRequest {
-  key: string;
-  definition: DefinitionId;
-  inputVersion: number;
-  input: unknown;
-}
-
-export interface EffectContext {
-  effectId: Id;
-  attemptId: Id;
-  idempotencyKey: string;
-  signal: AbortSignal;
-  emit(event: { key: string; value: unknown }): Promise<void>;
-}
-
-export interface EffectDefinition<I, O> {
-  inputVersion: number;
-  outputVersion: number;
-  inputSchema: ValueSchema<I>;
-  outputSchema: ValueSchema<O>;
-  retry: RetryPolicy;
-  execute(input: I, context: EffectContext): Promise<O>;
-  migrateOutput(fromVersion: number, value: unknown): O;
-}
-
-export interface CellMessage {
-  key: string;
-  destination: CellAddress;
-  messageVersion: number;
-  message: unknown;
-}
-
-export type TimerRequest =
-  | { action: "cancel"; key: string }
-  | {
-      action: "set";
-      key: string;
-      deadline: string;
-      messageVersion: number;
-      message: unknown;
-    };
-
-export interface DurableEvent {
-  key: string;
-  value: unknown;
-}
-
-export interface ChildStart {
-  key: string;
-  definition: DefinitionId;
-  inputVersion: number;
-  input: unknown;
-  detached?: boolean;
-}
-
-export type SystemMessage =
-  | { kind: "effect_result"; key: string; effectId: Id; result: Result<unknown> }
-  | { kind: "child_result"; key: string; resumableTaskId: Id; result: Result<unknown> };
-
-export interface Transition<S> {
-  state: S;
-  effects?: EffectRequest[];
-  sends?: CellMessage[];
-  timers?: TimerRequest[];
-  children?: ChildStart[];
-  events?: DurableEvent[];
-  terminal?: boolean;
-}
-
-export interface CellDefinition<S, M> {
-  stateVersion: number;
-  messageVersion: number;
-  stateSchema: ValueSchema<S>;
-  messageSchema: ValueSchema<M>;
-  initial(): S;
-  receive(
-    state: Readonly<S>,
-    message: Readonly<M> | SystemMessage,
-    context: DeliveryContext,
-  ): Transition<S>;
-  migrateState(fromVersion: number, value: unknown): S;
-  migrateMessage(fromVersion: number, value: unknown): M;
-}
-
-export interface SendRequest {
-  address: Omit<CellAddress, "namespaceId">;
-  message: VersionedValue;
-  idempotencyKey: string;
-}
-
-export interface MessageReceipt {
-  cellId: Id;
-  messageId: Id;
-  sequence: Counter;
-  status: "pending" | "applied" | "rejected" | "cancelled";
-}
-
-export interface CellView {
-  cellId: Id;
-  status: "active" | "quarantined" | "terminal";
-  revision: Counter;
-  deployment: Digest;
-  state: VersionedValue | null;
-}
-
-export interface EventRecord {
-  id: Id;
-  sequence: Counter;
-  value: WireValue;
-  source: { operationId: Id; attemptId: Id | null };
-}
+import type {
+  CellMessage,
+  ChildStart,
+  Counter,
+  DefinitionId,
+  DeliveryContext,
+  Digest,
+  DurableEvent,
+  EffectRequest,
+  Id,
+  Json,
+  PayloadRef,
+  Result,
+  RetryPolicy,
+  ValueSchema,
+  VersionedValue,
+  WireValue,
+} from "../../packages/eve/src/compute/protocol.js";
 
 export interface StartRequest {
   definition: DefinitionId;
@@ -286,10 +119,6 @@ export interface ResumableTaskDefinition<I, C, O> {
   migrateCheckpoint(fromVersion: number, value: unknown): C;
 }
 
-export declare function defineCell<S, M>(definition: CellDefinition<S, M>): CellDefinition<S, M>;
-export declare function defineEffect<I, O>(
-  definition: EffectDefinition<I, O>,
-): EffectDefinition<I, O>;
 export declare function defineResumableTask<I, C, O>(
   definition: ResumableTaskDefinition<I, C, O>,
 ): ResumableTaskDefinition<I, C, O>;

@@ -38,7 +38,7 @@ These are proposed APIs and implementation requirements. Nothing in this
 document describes an already-shipped eve feature.
 
 This plan includes the shared [implementation appendix](./compute-spec/README.md),
-[contracts](./compute-spec/contracts.ts), and [database DDL](./compute-spec/schema.sql).
+[contracts](./compute-spec/contracts.ts), and [database DDL](../packages/eve/src/compute/storage/migrations/0001_baseline.sql).
 Use those files as the reference for exact interfaces and storage, and the
 execution rules below for concurrent calls, lifecycle transitions, and recovery.
 

@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "customConditions": ["eve-source"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}

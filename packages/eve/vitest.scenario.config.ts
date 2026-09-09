@@ -36,7 +36,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    exclude: ["**/node_modules/**", "test/vercel/**"],
+    exclude: ["**/node_modules/**", "test/scenarios/compute-*.scenario.test.ts", "test/vercel/**"],
     globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
     include: ["src/**/*.scenario.test.ts", "test/scenarios/**/*.scenario.test.ts"],
     // Subprocess-heavy files (dev servers, real builds, installs) fan out

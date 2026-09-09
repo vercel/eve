@@ -24,7 +24,7 @@ tracking context, not approval of this architecture.
 
 Read the [implementation appendix](./compute-spec/README.md) as part of this
 plan. Its [TypeScript contracts](./compute-spec/contracts.ts) and
-[PostgreSQL DDL](./compute-spec/schema.sql) are the concrete reference for names,
+[PostgreSQL DDL](../packages/eve/src/compute/storage/migrations/0001_baseline.sql) are the concrete reference for names,
 types, tables, and constraints. The appendix also specifies HTTP/IPC, transactional
 algorithms, exact eve refactor boundaries, and the migration capture procedure.
 

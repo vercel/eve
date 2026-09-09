@@ -1,0 +1,20 @@
+{
+  "name": "@eve-internal/compute-platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "benchmark": "node --conditions=eve-source src/benchmark.ts",
+    "dev": "node --conditions=eve-source src/dev.ts",
+    "migrate": "node --conditions=eve-source src/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "worker": "node --conditions=eve-source src/worker.ts"
+  },
+  "dependencies": {
+    "eve": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

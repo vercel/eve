@@ -66,6 +66,11 @@
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
     },
+    "./compute": {
+      "types": "./dist/src/compute/index.d.ts",
+      "import": "./dist/src/compute/index.js",
+      "default": "./dist/src/compute/index.js"
+    },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
       "import": "./dist/src/react/index.js",
@@ -300,6 +305,12 @@
       "import": "./dist/src/internal/programmatic-source-loader.js",
       "default": "./dist/src/internal/programmatic-source-loader.js"
     },
+    "./internal/compute-platform": {
+      "eve-source": "./src/compute/platform.ts",
+      "types": "./dist/src/compute/platform.d.ts",
+      "import": "./dist/src/compute/platform.js",
+      "default": "./dist/src/compute/platform.js"
+    },
     "./local-dev": {
       "types": "./dist/src/public/local-dev.d.ts",
       "import": "./dist/src/public/local-dev.js",
@@ -446,6 +457,7 @@
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:compute-scenario": "pnpm run build:compiled && vitest run --config vitest.compute-scenario.config.ts",
     "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
     "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
@@ -510,6 +522,7 @@
     "chokidar": "5.0.0",
     "commander": "14.0.3",
     "dd-trace": "6.13.0",
+    "devalue": "5.9.0",
     "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
@@ -521,6 +534,7 @@
     "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",
+    "pg": "8.20.0",
     "picocolors": "catalog:",
     "react": "catalog:",
     "react-test-renderer": "19.2.6",

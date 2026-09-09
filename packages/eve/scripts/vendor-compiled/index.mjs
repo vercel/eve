@@ -42,6 +42,7 @@ import clackCore from "./@clack/core.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
+import devalue from "./devalue.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
 import grayMatter from "./gray-matter.mjs";
@@ -49,6 +50,7 @@ import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
 import marked from "./marked.mjs";
+import pg from "./pg.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
 import shadcnRegistry from "./shadcn-registry.mjs";
@@ -67,6 +69,7 @@ export const MODULES = [
   clackCore,
   chokidar,
   commander,
+  devalue,
   eventsourceParserStream,
   envRunner,
   eveCatalog,
@@ -84,6 +87,7 @@ export const MODULES = [
   otel,
   photonChatAdapterIMessage,
   linqChatSdkAdapter,
+  pg,
   picocolors,
   provider,
   providerUtils,

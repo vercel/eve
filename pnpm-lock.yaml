@@ -151,6 +151,19 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  apps/compute-platform:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../../packages/eve
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   apps/docs:
     dependencies:
       '@eve/catalog':
@@ -1476,6 +1489,9 @@ importers:
       dd-trace:
         specifier: 6.13.0
         version: 6.13.0
+      devalue:
+        specifier: 5.9.0
+        version: 5.9.0
       emulate:
         specifier: 0.6.0
         version: 0.6.0
@@ -1509,6 +1525,9 @@ importers:
       next:
         specifier: 'catalog:'
         version: 16.3.4(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      pg:
+        specifier: 8.20.0
+        version: 8.20.0
       picocolors:
         specifier: 'catalog:'
         version: 1.1.1

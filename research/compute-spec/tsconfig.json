@@ -3,6 +3,9 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "paths": {
+      "#*.js": ["../../packages/eve/src/*.ts"]
+    },
     "strict": true,
     "noEmit": true,
     "types": [],

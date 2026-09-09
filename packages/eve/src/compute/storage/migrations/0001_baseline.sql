@@ -1,6 +1,4 @@
--- Proposed v1 baseline. Apply only to a new database for specification tests.
--- Runtime transactions and upgrade rules are specified in the two plans.
-BEGIN;
+-- v1 baseline. Apply only through the compute migration runner on a new database.
 CREATE SCHEMA compute;
 SET LOCAL search_path = compute, public;
 
@@ -488,5 +486,3 @@ CREATE TABLE audit_events (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (namespace_id, audit_id)
 );
-
-COMMIT;
