@@ -10,7 +10,7 @@ import {
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
@@ -169,7 +169,7 @@ async function waitForNextSessionAction(input: {
     return {
       delivery: takeBufferedTurnDelivery(
         input.bufferedDeliveries,
-        getSessionTaskIndex(input.stateCursor.sessionState.snapshot?.session.state),
+        getSessionTaskCohorts(input.stateCursor.sessionState.snapshot?.session.state),
       ),
       kind: "delivery",
     };
@@ -273,7 +273,7 @@ function isCancelledTaskDeliveryId(
 
 function takeBufferedTurnDelivery(
   bufferedDeliveries: DeliverHookPayload[],
-  tasks: readonly SessionTaskIndexEntry[],
+  cohorts: ReadonlyMap<string, string>,
 ): DeliverHookPayload {
   const first = bufferedDeliveries.shift();
   if (first === undefined) {
@@ -282,13 +282,13 @@ function takeBufferedTurnDelivery(
 
   const turnDeliveries = [first];
   let caller = first.caller;
-  const cohort = completionCohort(first, tasks);
+  const cohort = completionCohort(first, cohorts);
   while (bufferedDeliveries.length > 0) {
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
       ((first.taskDeliveryId !== undefined || next.taskDeliveryId !== undefined) &&
-        (cohort === undefined || completionCohort(next, tasks) !== cohort)) ||
+        (cohort === undefined || completionCohort(next, cohorts) !== cohort)) ||
       (caller !== undefined && next.caller !== undefined)
     ) {
       break;
@@ -308,9 +308,9 @@ function takeBufferedTurnDelivery(
 /** Only successful sibling notifications can share their existing cohort context. */
 function completionCohort(
   delivery: DeliverHookPayload,
-  tasks: readonly SessionTaskIndexEntry[],
+  cohorts: ReadonlyMap<string, string>,
 ): string | undefined {
-  if (delivery.caller !== undefined) return undefined;
-  return tasks.find((task) => delivery.taskDeliveryId === `${task.taskId}:ready:completed`)
-    ?.createdByTurnId;
+  const suffix = ":ready:completed";
+  if (delivery.caller !== undefined || !delivery.taskDeliveryId?.endsWith(suffix)) return undefined;
+  return cohorts.get(delivery.taskDeliveryId.slice(0, -suffix.length));
 }
