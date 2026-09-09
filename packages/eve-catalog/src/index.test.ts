@@ -107,6 +107,19 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
+  it("catalogs Sent as a registry-only OAuth-backed MCP connection", () => {
+    expect(getIntegrationEntry("sent")).toMatchObject({
+      name: "Sent",
+      kind: "connection",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+      connection: {
+        description:
+          "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+        mcp: { url: "https://mcp.sent.dm/mcp" },
+      },
+    });
+  });
+
   it("exposes Kernel as an extension", () => {
     expect(getIntegrationEntry("kernel")?.kind).toBe("extension");
     expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();

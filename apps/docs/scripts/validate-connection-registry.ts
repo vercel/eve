@@ -47,6 +47,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
   linear: "mcp.linear.app",
+  sent: "mcp.sent.dm",
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
@@ -64,6 +65,41 @@ const CONNECT_PRINCIPAL_TYPES: Readonly<Record<string, "app" | "user">> = {
   neon: "app",
   tinybird: "app",
 };
+const SENT_PUBLIC_TOOLS = [
+  "account.get",
+  "balance.get",
+  "contacts.create_many",
+  "contacts.delete",
+  "contacts.get",
+  "contacts.list",
+  "contacts.message_summary",
+  "dashboard.contacts",
+  "dashboard.deliverability",
+  "dashboard.messages_sent",
+  "messages.activities.list",
+  "messages.get",
+  "messages.send",
+  "numbers.lookup",
+  "onboarding.status",
+  "templates.delete",
+  "templates.get",
+  "templates.get_by_name",
+  "templates.list",
+];
+const SENT_APPROVAL_REQUIRED = [
+  "messages.send",
+  "contacts.create_many",
+  "contacts.delete",
+  "templates.delete",
+];
+
+function stringLiteralsIn(source: string, pattern: RegExp, label: string): string[] {
+  const body = source.match(pattern)?.[1];
+  if (body === undefined) {
+    throw new Error(`Sent registry connection is missing its ${label}.`);
+  }
+  return [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+}
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
@@ -138,7 +174,35 @@ for (const item of items) {
       `Registry item "${item.name}" must write ${expectedPath} to ${expectedTarget}.`,
     );
   }
-  await access(join(docsRoot, expectedPath));
+  const sourcePath = join(docsRoot, expectedPath);
+  await access(sourcePath);
+
+  if (slug === "sent") {
+    const source = await readFile(sourcePath, "utf8");
+    const tools = stringLiteralsIn(source, /allow:\s*\[([\s\S]*?)\]/, "tool allow-list");
+    const approvals = stringLiteralsIn(
+      source,
+      /APPROVAL_REQUIRED\s*=\s*new Set\(\[([\s\S]*?)\]\)/,
+      "approval allow-list",
+    );
+    if (JSON.stringify(tools) !== JSON.stringify(SENT_PUBLIC_TOOLS)) {
+      throw new Error("Sent registry connection must allow exactly the 19 reviewed public tools.");
+    }
+    if (JSON.stringify(approvals) !== JSON.stringify(SENT_APPROVAL_REQUIRED)) {
+      throw new Error("Sent registry connection must gate exactly the four reviewed mutations.");
+    }
+    for (const required of [
+      'url: "https://mcp.sent.dm/mcp"',
+      'auth: connect("sent")',
+      "toolName.endsWith(`__${name}`)",
+      '? "user-approval"',
+      ': "not-applicable"',
+    ]) {
+      if (!source.includes(required)) {
+        throw new Error(`Sent registry connection is missing required contract: ${required}`);
+      }
+    }
+  }
 
   switch (slug) {
     case "browser-use": {

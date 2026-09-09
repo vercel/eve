@@ -401,6 +401,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "sent",
+    name: "Sent",
+    kind: "connection",
+    tagline: "Send and track SMS, WhatsApp, and RCS through Sent's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+      mcp: { url: "https://mcp.sent.dm/mcp" },
+    },
+  },
+  {
     slug: "notion",
     name: "Notion",
     kind: "connection",

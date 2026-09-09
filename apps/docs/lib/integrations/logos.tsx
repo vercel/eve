@@ -48,6 +48,16 @@ export const eveLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const sentLogo = (props: LogoProps) => (
+  <svg viewBox="0 0 188 188" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect fill="#030712" height="188" rx="32" width="188" />
+    <g fill="#fff" transform="translate(0 6)">
+      <path d="M76.9 46.17c-3.09-1.17-4.65-4.62-3.48-7.71L84.97 7.87c1.17-3.09 4.62-4.65 7.7-3.48l89.46 33.83c3.09 1.17 4.65 4.62 3.48 7.71L151.8 135.46c-1.17 3.09-4.62 4.65-7.7 3.48l-30.56-11.56c-3.09-1.17-4.65-4.62-3.48-7.71l18.03-47.75c1.17-3.09-.39-6.55-3.48-7.72L76.9 46.17z" />
+      <path d="M3.87 78.84C.78 77.67-.78 74.22.39 71.13L11.94 40.54c1.17-3.09 4.62-4.65 7.7-3.48l89.46 33.84c3.09 1.17 4.65 4.62 3.48 7.71l-33.81 89.52c-1.17 3.09-4.62 4.65-7.7 3.48L40.5 160.05c-3.09-1.17-4.65-4.62-3.48-7.71l18.03-47.75c1.17-3.09-.39-6.54-3.48-7.71L3.87 78.84z" />
+    </g>
+  </svg>
+);
+
 export const webLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
@@ -765,6 +775,7 @@ export const logos = {
   agentcard: agentcardLogo,
   vercel: vercelLogo,
   linear: linearLogo,
+  sent: sentLogo,
   context: contextLogo,
   notion: notionLogo,
   datadog: datadogLogo,
