@@ -97,7 +97,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
-import { shouldRunAnotherModelCall } from "#execution/model-call-batching.js";
+import { runModelCallBatch } from "#execution/model-call-batching.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -493,89 +493,74 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // runtime-action wait) must settle before the park-resume stages run,
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
-    let lifecycleSession = initialSession;
-    let lifecycleInput = resolved;
-    let modelCalls = 0;
-
-    while (true) {
-      const firstCall = modelCalls === 0;
-      stepResult = await runBackgroundStep(ctx, lifecycleSession, async (enrichedSession) => {
-        ctx.setVirtualContext(HandleEventKey, handleEvent);
-        let schemaSession = firstCall
-          ? resolveEffectiveOutputSchema({
-              agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
-              input: resolved,
-              mode,
-              session: enrichedSession,
-            })
-          : enrichedSession;
-        await dynamicConnections.rehydrate(
-          getHarnessEmissionState(schemaSession.state),
-          runtimeIdentity,
-          isHarnessBetweenTurns(schemaSession),
-        );
-        if (firstCall && completedAuths) {
-          let emissionState = getHarnessEmissionState(schemaSession.state);
-          if (isHarnessBetweenTurns(schemaSession)) {
-            prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
-            let instructionMessages: readonly import("ai").ModelMessage[] = [];
-            const traceContext = await prepareWorkflowPreambleTrace({
-              emissionState,
-              instrumentation,
-            });
-            try {
-              emissionState = await emitTurnPreamble(
-                handleEvent,
-                {},
+    stepResult = await runModelCallBatch({
+      initialInput: resolved,
+      initialSession,
+      maxModelCallsPerWorkflowStep,
+      runStep: ({ firstCall, session, stepInput }) =>
+        runBackgroundStep(ctx, session, async (enrichedSession) => {
+          ctx.setVirtualContext(HandleEventKey, handleEvent);
+          let schemaSession = firstCall
+            ? resolveEffectiveOutputSchema({
+                agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
+                input: resolved,
+                mode,
+                session: enrichedSession,
+              })
+            : enrichedSession;
+          await dynamicConnections.rehydrate(
+            getHarnessEmissionState(schemaSession.state),
+            runtimeIdentity,
+            isHarnessBetweenTurns(schemaSession),
+          );
+          if (firstCall && completedAuths) {
+            let emissionState = getHarnessEmissionState(schemaSession.state);
+            if (isHarnessBetweenTurns(schemaSession)) {
+              prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
+              let instructionMessages: readonly import("ai").ModelMessage[] = [];
+              const traceContext = await prepareWorkflowPreambleTrace({
                 emissionState,
-                runtimeIdentity,
-                traceContext,
-              );
-            } finally {
-              instructionMessages = drainDynamicInstructionUserMessages(ctx);
-              schemaSession = {
-                ...schemaSession,
-                history: [...schemaSession.history, ...instructionMessages],
-              };
+                instrumentation,
+              });
+              try {
+                emissionState = await emitTurnPreamble(
+                  handleEvent,
+                  {},
+                  emissionState,
+                  runtimeIdentity,
+                  traceContext,
+                );
+              } finally {
+                instructionMessages = drainDynamicInstructionUserMessages(ctx);
+                schemaSession = {
+                  ...schemaSession,
+                  history: [...schemaSession.history, ...instructionMessages],
+                };
+              }
+              schemaSession = setHarnessEmissionState(schemaSession, emissionState);
             }
-            schemaSession = setHarnessEmissionState(schemaSession, emissionState);
+            for (const { authorization, result } of completedAuths) {
+              const candidateId = pendingAuth?.challenges.find(
+                (challenge) => challenge.attemptId === result.attemptId,
+              )?.candidateId;
+              await handleEvent(
+                createAuthorizationCompletedEvent({
+                  attemptId: result.attemptId,
+                  authorization,
+                  candidateId,
+                  name: result.name,
+                  outcome: "authorized",
+                  sequence: emissionState.sequence,
+                  stepIndex: emissionState.stepIndex,
+                  turnId: emissionState.turnId,
+                }),
+              );
+            }
           }
-          for (const { authorization, result } of completedAuths) {
-            const candidateId = pendingAuth?.challenges.find(
-              (challenge) => challenge.attemptId === result.attemptId,
-            )?.candidateId;
-            await handleEvent(
-              createAuthorizationCompletedEvent({
-                attemptId: result.attemptId,
-                authorization,
-                candidateId,
-                name: result.name,
-                outcome: "authorized",
-                sequence: emissionState.sequence,
-                stepIndex: emissionState.stepIndex,
-                turnId: emissionState.turnId,
-              }),
-            );
-          }
-        }
 
-        return runHarnessStep(schemaSession, lifecycleInput);
-      });
-
-      modelCalls++;
-      if (
-        !shouldRunAnotherModelCall({
-          completedModelCalls: modelCalls,
-          maxModelCallsPerWorkflowStep,
-          result: stepResult,
-        })
-      ) {
-        break;
-      }
-
-      lifecycleSession = stepResult.session;
-      lifecycleInput = undefined;
-    }
+          return runHarnessStep(schemaSession, stepInput);
+        }),
+    });
   } catch (error) {
     if (!isTurnCancellation(error) && input.abortSignal?.aborted !== true) {
       await failChannelDeliveries(error);

@@ -1296,7 +1296,7 @@ describe("turnStep", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("checkpoints before acknowledging a background task", async () => {
+  it("checkpoints before persisting a background-task state transition", async () => {
     const bundle = createTurnStepTestBundle(3);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
     const session = createStubSession();
@@ -1304,9 +1304,7 @@ describe("turnStep", () => {
 
     const continueStep: StepFn = async (current) => ({ next: null, session: current });
     const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => ({
-      backgroundTasks: [
-        { taskId: "task-1", taskInboxToken: "task-inbox-1", taskRunId: "task-run-1" },
-      ],
+      backgroundTasks: [],
       backgroundTaskSession: current,
       next: continueStep,
       session: current,
@@ -1322,7 +1320,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "continue",
-      backgroundTasks: [{ taskId: "task-1" }],
+      backgroundTasks: [],
     });
     expect(execute).toHaveBeenCalledOnce();
   });
