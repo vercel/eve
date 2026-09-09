@@ -1854,8 +1854,9 @@
               <code>AbortController</code> out of the claim suspension, generalize the SDK: when a
               suspension posts several guarded events from the same base cursor, the longest event
               suffix any of them returns contains every event the suspension wrote, so the runtime
-              can continue inline replay from it with no read. A pull request against
-              vercel/workflow is in progress. eve keeps two hooks per turn.
+              can continue inline replay from it with no read. See
+              <a href="https://github.com/vercel/workflow/pull/4048">vercel/workflow#4048</a>. eve
+              keeps two hooks per turn.
             </li>
           </ol>
         </div>
