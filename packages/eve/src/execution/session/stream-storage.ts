@@ -1,5 +1,4 @@
 import { forgetStreamRun, getStreamRun } from "#internal/workflow/stream-run.js";
-import { getRunWritable } from "#internal/workflow/run-writable.js";
 import { decodeStreamLocation } from "#execution/session/stream-location.js";
 
 const READ_TIMEOUT_MS = 10_000;
@@ -51,7 +50,7 @@ export async function withStreamWriter<T, Result>(
 ): Promise<Result> {
   const { runId, namespace } = decodeStreamLocation(id);
   const ops: Promise<unknown>[] = [];
-  const writable = await getRunWritable<T>(runId, { namespace, ops });
+  const writable = (await getStreamRun(runId)).getWritable<T>({ namespace, ops });
   let outcome: { kind: "returned"; value: Result } | { kind: "threw"; error: unknown };
   try {
     outcome = { kind: "returned", value: await run(writable) };
@@ -72,6 +71,7 @@ export async function withStreamWriter<T, Result>(
   const failures = (await Promise.allSettled(ops)).flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
   );
+  if (failures.length > 0) await forgetStreamRun(runId);
   if (outcome.kind === "threw") {
     if (failures.length > 0)
       throw new AggregateError(

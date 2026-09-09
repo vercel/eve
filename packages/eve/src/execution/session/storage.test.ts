@@ -8,7 +8,6 @@ import {
 import { sessionEvents } from "#execution/session/events.js";
 import { createSessionResources } from "#execution/session/resources.js";
 import { sessionSnapshots } from "#execution/session/snapshots.js";
-import { getRunWritable } from "#internal/workflow/run-writable.js";
 import { createSessionStartedEvent, stampMessageStreamEvent } from "#protocol/message.js";
 
 const runtime = vi.hoisted(() => ({ getRun: vi.fn(), getWorld: vi.fn() }));
@@ -75,7 +74,7 @@ beforeEach(() => {
         },
       });
     },
-    getWritable: async (options: { namespace?: string; ops: Promise<unknown>[] }) => {
+    getWritable: (options: { namespace?: string; ops: Promise<unknown>[] }) => {
       const key = streamKey(runId, options.namespace);
       const source = stored(key);
       const pending: unknown[] = [];
@@ -247,17 +246,7 @@ describe("session event writes", () => {
     const { events } = createSessionResources("holder", "initial");
     const opened = Promise.withResolvers<void>();
     const produced = Promise.withResolvers<void>();
-    const createRun = runtime.getRun.getMockImplementation()!;
-    runtime.getRun.mockImplementation((id: string) => {
-      const run = createRun(id);
-      return {
-        ...run,
-        getWritable: async (options: unknown) => {
-          await opened.promise;
-          return run.getWritable(options);
-        },
-      };
-    });
+    pauseFlush = opened.promise;
     let complete = false;
     const work = sessionEvents
       .withWriter(events, async (writable) => {
@@ -334,10 +323,5 @@ describe("session event writes", () => {
     await expect(pending).rejects.toMatchObject({
       errors: [failure, expect.objectContaining({ message: "Storage unavailable" })],
     });
-  });
-
-  it("fails explicitly when the installed SDK lacks the new public API", async () => {
-    runtime.getRun.mockReturnValue({});
-    await expect(getRunWritable("holder", {})).rejects.toThrow("Run#getWritable");
   });
 });
