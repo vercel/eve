@@ -1,30 +1,20 @@
 import { HarnessAgent, type HarnessAgentAdapter } from "@ai-sdk/harness/agent";
-import { type FlexibleSchema, Output } from "ai";
-import type { SandboxSession } from "eve/sandbox";
+import { type FlexibleSchema, Output, type ToolSet } from "ai";
 
 import { adaptHarnessNetworkSandboxSession } from "./sandbox-session";
-import type {
-  CreateHarnessAgentToolSettings,
-  HarnessBridgeSettings,
-  HarnessAgentToolOutput,
-  OptionalOutputSchema,
-} from "./types";
+import type { HarnessAgentToolOutput, OptionalOutputSchema, RunHarnessAgentArgs } from "./types";
 
-type RunHarnessAgentSettings<TOutputSchema extends OptionalOutputSchema = undefined> = Omit<
-  CreateHarnessAgentToolSettings<TOutputSchema>,
-  "description"
-> & {
-  readonly abortSignal?: AbortSignal;
-  readonly harness: (settings: HarnessBridgeSettings) => HarnessAgentAdapter;
-  readonly sandbox: SandboxSession;
-  readonly task: string;
-};
-
-export async function runHarnessAgent<TOutputSchema extends OptionalOutputSchema = undefined>(
-  input: RunHarnessAgentSettings<TOutputSchema>,
+export async function runHarnessAgent<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+>(
+  args: RunHarnessAgentArgs<THarness, TUserTools, RuntimeContext, TOutputSchema, CallOptions>,
 ): Promise<HarnessAgentToolOutput<TOutputSchema>> {
   const sandboxSession = await adaptHarnessNetworkSandboxSession({
-    sandbox: input.sandbox,
+    sandbox: await args.ctx.getSandbox(),
   });
   let session: Awaited<ReturnType<HarnessAgent["createSession"]>> | undefined;
   let resultOutput: HarnessAgentToolOutput<TOutputSchema>;
@@ -38,32 +28,37 @@ export async function runHarnessAgent<TOutputSchema extends OptionalOutputSchema
       port,
       protocol: "ws",
     });
+    const { harness, outputSchema, sandboxConfig, ...settings } = args.settings;
+    const workDir = args.input.workDir ?? sandboxConfig?.workDir;
     const agent = new HarnessAgent({
-      harness: input.harness({ port, portEndpoint }),
-      id: input.id,
-      instructions: input.instructions,
-      model: input.model,
+      ...settings,
+      harness: harness({ port, portEndpoint }),
       output:
-        input.outputSchema === undefined
+        outputSchema === undefined
           ? undefined
           : Output.object({
-              schema: input.outputSchema as FlexibleSchema<HarnessAgentToolOutput<TOutputSchema>>,
+              schema: outputSchema as FlexibleSchema<HarnessAgentToolOutput<TOutputSchema>>,
             }),
-      permissionMode: "allow-all",
-      ...(input.workDir === undefined ? {} : { sandboxConfig: { workDir: input.workDir } }),
-      skills: input.skills,
+      ...(sandboxConfig === undefined && workDir === undefined
+        ? {}
+        : {
+            sandboxConfig: {
+              ...sandboxConfig,
+              ...(workDir === undefined ? {} : { workDir }),
+            },
+          }),
     });
     session = await agent.createSession({
-      abortSignal: input.abortSignal,
+      abortSignal: args.ctx.abortSignal,
       sandboxSession,
     });
     const result = await agent.generate({
-      abortSignal: input.abortSignal,
-      prompt: input.task,
+      abortSignal: args.ctx.abortSignal,
+      prompt: args.input.task,
       session,
     });
     resultOutput = (
-      input.outputSchema === undefined ? result.text : result.output
+      outputSchema === undefined ? result.text : result.output
     ) as HarnessAgentToolOutput<TOutputSchema>;
   } catch (error) {
     const failures = await cleanupHarnessInvocation({

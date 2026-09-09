@@ -1,7 +1,18 @@
 import { posix } from "node:path";
 
+import type {
+  HarnessAgentAdapter,
+  HarnessAgentSettings as NativeHarnessAgentSettings,
+} from "@ai-sdk/harness/agent";
+import type { HarnessWorkflowState } from "@ai-sdk/workflow-harness";
 import type { StandardJSONSchemaV1 } from "@standard-schema/spec";
+import type { DeepPartial, OutputInterface, ToolSet } from "ai";
+import type { ToolContext, WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
+
+type DistributiveOmit<TValue, TKey extends PropertyKey> = TValue extends unknown
+  ? Omit<TValue, TKey>
+  : never;
 
 export type OptionalOutputSchema = StandardJSONSchemaV1<unknown, unknown> | undefined;
 
@@ -10,29 +21,36 @@ export type HarnessAgentToolOutput<TOutputSchema extends OptionalOutputSchema = 
     ? StandardJSONSchemaV1.InferOutput<TOutputSchema>
     : string;
 
-export interface HarnessAgentSkillFile {
-  readonly content: string;
-  readonly path: string;
-}
+type HarnessAgentOutputSpecification<TOutputSchema extends OptionalOutputSchema> = OutputInterface<
+  HarnessAgentToolOutput<TOutputSchema>,
+  DeepPartial<HarnessAgentToolOutput<TOutputSchema>>,
+  never
+>;
 
-export interface HarnessAgentSkill {
-  readonly content: string;
-  readonly description: string;
-  readonly files?: readonly HarnessAgentSkillFile[];
-  readonly name: string;
-}
-
-export interface HarnessAgentSettings {
-  readonly id?: string;
-  readonly instructions?: string;
-  readonly skills?: readonly HarnessAgentSkill[];
-  readonly workDir?: string;
-}
-
-export interface HarnessBridgeSettings {
+interface HarnessBridgeSettings {
   readonly port: number;
   readonly portEndpoint: { readonly url: string };
 }
+
+export type HarnessAgentToolSettings<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+> = DistributiveOmit<
+  NativeHarnessAgentSettings<
+    THarness,
+    TUserTools,
+    RuntimeContext,
+    HarnessAgentOutputSpecification<TOutputSchema>,
+    CallOptions
+  >,
+  "harness" | "output" | "stopWhen"
+> & {
+  readonly harness: (settings: HarnessBridgeSettings) => THarness;
+  readonly outputSchema?: TOutputSchema;
+};
 
 export const HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
   task: z.string().describe("Task for the coding harness to complete."),
@@ -57,13 +75,84 @@ export const HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
 
 export type HarnessAgentToolInput = z.infer<typeof HARNESS_AGENT_TOOL_INPUT_SCHEMA>;
 
-export interface CreateHarnessAgentToolSettings<
+export type CreateHarnessAgentToolDefinitionArgs<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
   TOutputSchema extends OptionalOutputSchema = undefined,
-> extends HarnessAgentSettings {
-  /** Model-facing description for this HarnessAgent tool. */
+  CallOptions = never,
+> = {
   readonly description: string;
-  /** Optional model override for the harness. Otherwise it'll use its default model. */
-  readonly model?: string;
-  /** Structured result required from the harness and returned by this eve tool. */
-  readonly outputSchema?: TOutputSchema;
-}
+  readonly settings: HarnessAgentToolSettings<
+    THarness,
+    TUserTools,
+    RuntimeContext,
+    TOutputSchema,
+    CallOptions
+  >;
+};
+
+export type CreateHarnessAgentWorkflowToolDefinitionArgs<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+> = CreateHarnessAgentToolDefinitionArgs<
+  THarness,
+  TUserTools,
+  RuntimeContext,
+  TOutputSchema,
+  CallOptions
+>;
+
+type RunHarnessAgentBaseArgs<
+  TContext,
+  THarness extends HarnessAgentAdapter<any>,
+  TUserTools extends ToolSet,
+  RuntimeContext extends Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema,
+  CallOptions,
+> = {
+  readonly ctx: TContext;
+  readonly input: HarnessAgentToolInput;
+  readonly settings: HarnessAgentToolSettings<
+    THarness,
+    TUserTools,
+    RuntimeContext,
+    TOutputSchema,
+    CallOptions
+  >;
+};
+
+export type RunHarnessAgentArgs<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+> = RunHarnessAgentBaseArgs<
+  ToolContext,
+  THarness,
+  TUserTools,
+  RuntimeContext,
+  TOutputSchema,
+  CallOptions
+>;
+
+export type RunHarnessAgentStepArgs<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+> = RunHarnessAgentBaseArgs<
+  WorkflowToolContext,
+  THarness,
+  TUserTools,
+  RuntimeContext,
+  TOutputSchema,
+  CallOptions
+> & {
+  readonly state: HarnessWorkflowState;
+};

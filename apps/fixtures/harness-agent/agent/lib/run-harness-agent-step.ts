@@ -9,16 +9,14 @@ import type {
   HarnessWorkflowStreamResult,
 } from "@ai-sdk/workflow-harness";
 import { runHarnessAgentStep as runWorkflowHarnessAgentStep } from "@ai-sdk/workflow-harness";
-import type { FlexibleSchema } from "ai";
+import type { FlexibleSchema, ToolSet } from "ai";
 import { isStepCount, Output } from "ai";
-import type { WorkflowToolContext } from "eve/tools";
 
 import { adaptHarnessNetworkSandboxSession } from "./sandbox-session";
 import type {
-  CreateHarnessAgentToolSettings,
-  HarnessBridgeSettings,
   HarnessAgentToolOutput,
   OptionalOutputSchema,
+  RunHarnessAgentStepArgs,
 } from "./types";
 
 type HarnessAgentWorkflowStepResult<TOutput> =
@@ -30,21 +28,18 @@ type HarnessAgentTerminalResult = HarnessWorkflowStreamResult & {
   readonly text: PromiseLike<string>;
 };
 
-type RunHarnessAgentStepSettings<TOutputSchema extends OptionalOutputSchema = undefined> = Omit<
-  CreateHarnessAgentToolSettings<TOutputSchema>,
-  "description"
-> & {
-  readonly ctx: WorkflowToolContext;
-  readonly harness: (settings: HarnessBridgeSettings) => HarnessAgentAdapter;
-  readonly state: HarnessWorkflowState;
-};
-
-export async function runHarnessAgentStep<TOutputSchema extends OptionalOutputSchema = undefined>(
-  input: RunHarnessAgentStepSettings<TOutputSchema>,
+export async function runHarnessAgentStep<
+  THarness extends HarnessAgentAdapter<any> = HarnessAgentAdapter,
+  TUserTools extends ToolSet = {},
+  RuntimeContext extends Record<string, unknown> = Record<string, unknown>,
+  TOutputSchema extends OptionalOutputSchema = undefined,
+  CallOptions = never,
+>(
+  args: RunHarnessAgentStepArgs<THarness, TUserTools, RuntimeContext, TOutputSchema, CallOptions>,
 ): Promise<HarnessAgentWorkflowStepResult<HarnessAgentToolOutput<TOutputSchema>>> {
   const sandboxSession = await adaptHarnessNetworkSandboxSession({
-    leaseId: input.state.sessionId,
-    sandbox: await input.ctx.getSandbox(),
+    leaseId: args.state.sessionId,
+    sandbox: await args.ctx.getSandbox(),
   });
   let activeSession: HarnessAgentSession | undefined;
   let terminalResult: HarnessAgentTerminalResult | undefined;
@@ -59,43 +54,48 @@ export async function runHarnessAgentStep<TOutputSchema extends OptionalOutputSc
       port,
       protocol: "ws",
     });
+    const { harness, outputSchema, sandboxConfig, ...settings } = args.settings;
+    const workDir = args.input.workDir ?? sandboxConfig?.workDir;
     const agent = new HarnessAgent({
-      harness: input.harness({ port, portEndpoint }),
-      id: input.id,
-      instructions: input.instructions,
-      model: input.model,
+      ...settings,
+      harness: harness({ port, portEndpoint }),
       output:
-        input.outputSchema === undefined
+        outputSchema === undefined
           ? undefined
           : Output.object({
-              schema: input.outputSchema as FlexibleSchema<HarnessAgentToolOutput<TOutputSchema>>,
+              schema: outputSchema as FlexibleSchema<HarnessAgentToolOutput<TOutputSchema>>,
             }),
-      permissionMode: "allow-all",
-      ...(input.workDir === undefined ? {} : { sandboxConfig: { workDir: input.workDir } }),
-      skills: input.skills,
+      ...(sandboxConfig === undefined && workDir === undefined
+        ? {}
+        : {
+            sandboxConfig: {
+              ...sandboxConfig,
+              ...(workDir === undefined ? {} : { workDir }),
+            },
+          }),
       stopWhen: isStepCount(1),
     });
     const workflowAgent: HarnessWorkflowAgent = {
-      async createSession(options) {
+      async createSession(sessionOptions) {
         activeSession = await agent.createSession({
-          ...options,
-          abortSignal: input.ctx.abortSignal,
+          ...sessionOptions,
+          abortSignal: args.ctx.abortSignal,
           sandboxSession,
         });
         return activeSession;
       },
-      async continueStream(options) {
+      async continueStream(streamOptions) {
         const result = await agent.continueStream({
-          ...options,
-          abortSignal: input.ctx.abortSignal,
+          ...streamOptions,
+          abortSignal: args.ctx.abortSignal,
         });
         terminalResult = result;
         return result;
       },
-      async stream(options) {
+      async stream(streamOptions) {
         const result = await agent.stream({
-          ...options,
-          abortSignal: input.ctx.abortSignal,
+          ...streamOptions,
+          abortSignal: args.ctx.abortSignal,
         });
         terminalResult = result;
         return result;
@@ -105,7 +105,7 @@ export async function runHarnessAgentStep<TOutputSchema extends OptionalOutputSc
     nextState = await runWorkflowHarnessAgentStep({
       agent: workflowAgent,
       destroyOnFinish: true,
-      state: input.state,
+      state: args.state,
       writable: new WritableStream(),
     });
 
@@ -116,7 +116,7 @@ export async function runHarnessAgentStep<TOutputSchema extends OptionalOutputSc
         );
       }
       const session = await agent.createSession({
-        abortSignal: input.ctx.abortSignal,
+        abortSignal: args.ctx.abortSignal,
         continueFrom: nextState.continueFrom,
         sandboxSession,
         sessionId: nextState.sessionId,
@@ -134,9 +134,7 @@ export async function runHarnessAgentStep<TOutputSchema extends OptionalOutputSc
       throw new Error("The HarnessAgent workflow finished without a terminal result.");
     }
 
-    const output = await (input.outputSchema === undefined
-      ? terminalResult.text
-      : terminalResult.output);
+    const output = await (outputSchema === undefined ? terminalResult.text : terminalResult.output);
     return {
       output: output as HarnessAgentToolOutput<TOutputSchema>,
       state: nextState,

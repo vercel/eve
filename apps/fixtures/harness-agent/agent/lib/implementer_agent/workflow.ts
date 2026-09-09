@@ -37,17 +37,14 @@ async function implementerStep(input: {
 }) {
   "use step";
 
-  const [{ createClaudeCode }, { runHarnessAgentStep }, { tool }] = await Promise.all([
-    import("@ai-sdk/harness-claude-code"),
+  const [{ runHarnessAgentStep }, { settings }] = await Promise.all([
     import("../run-harness-agent-step"),
-    import("./runtime"),
+    import("./settings"),
   ]);
-  const workDir = input.input.workDir ?? tool.agentSettings.workDir;
   return await runHarnessAgentStep({
-    ...tool.agentSettings,
     ctx: input.ctx,
-    harness: ({ port, portEndpoint }) => createClaudeCode({ port, portEndpoint }),
+    input: input.input,
+    settings,
     state: input.state,
-    ...(workDir === undefined ? {} : { workDir }),
   });
 }

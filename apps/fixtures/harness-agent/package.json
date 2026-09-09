@@ -14,7 +14,7 @@
     "@ai-sdk/workflow-harness": "^1.0.104",
     "@standard-schema/spec": "^1.1.0",
     "@vercel/sandbox-drives": "catalog:",
-    "ai": "^7.0.79",
+    "ai": "^7.0.94",
     "eve": "workspace:*",
     "zod": "catalog:"
   },
