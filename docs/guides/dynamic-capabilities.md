@@ -253,7 +253,7 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve rejects a dynamic tool if a callback lacks durable metadata.
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module. eve rejects a dynamic tool when a behavioral callback such as `execute`, `approval`, `approvalKey`, or `toModelOutput` lacks durable metadata. Labels without durable metadata fall back to the tool name.
 
 ### Create dynamic tools in a package
 
@@ -284,7 +284,7 @@ export function createSearchTool(baseUrl: string) {
 }
 ```
 
-Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+Wrap every behavioral callback property with the helper. This includes approval policies, `approvalKey`, `execute`, and `toModelOutput`. Labels are optional: wrap them when their custom text should survive replay, or leave them unwrapped to fall back to the tool name.
 
 `closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
 
