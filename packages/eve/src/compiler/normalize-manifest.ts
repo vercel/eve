@@ -44,6 +44,8 @@ import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
+import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-subagent.js";
+import { workspaceSubagentPath } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
@@ -75,6 +77,7 @@ import {
   expectSubagentDescription,
   mergeExternalDependencies,
   collectSelectedSourceIds,
+  withDiagnosticsSummary,
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
@@ -143,17 +146,7 @@ export async function compileAgentManifest(
   });
 
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
-  const subagents: CompiledSubagentNode[] = root.descendants.map((subagent) =>
-    subagent.configResolver === undefined
-      ? {
-          ...subagent,
-          agent: { ...subagent.agent, diagnosticsSummary },
-        }
-      : {
-          ...subagent,
-          agent: { ...subagent.agent, diagnosticsSummary },
-        },
-  );
+  const subagents = withDiagnosticsSummary(root.descendants, diagnosticsSummary);
   return createCompiledAgentManifest({
     ...root.manifest,
     diagnosticsSummary,
@@ -254,6 +247,16 @@ class AgentGraphCompiler {
       );
 
       if (normalized.kind === "remote") {
+        const workspacePath = workspaceSubagentPath(phaseOne.selectedConfig.definition);
+        const remoteDefinition =
+          workspacePath === undefined
+            ? normalized
+            : await resolveWorkspaceSubagentDefinition({
+                definition: normalized,
+                path: workspacePath,
+                registries: this.registries,
+                source,
+              });
         assertRemoteAgentDefinitionHasNoLocalPackageEntries(source);
         const sourceId = phaseOne.selectedConfig.source.sourceId;
         phaseOne.evaluation.setBindings({ [sourceId]: phaseOne.selectedConfig.binding });
@@ -265,7 +268,7 @@ class AgentGraphCompiler {
         remoteAgents.push(
           createCompiledRemoteAgent({
             binding,
-            definition: normalized,
+            definition: remoteDefinition,
             nodeId,
             owner: projected.owner,
             parentNodeId: input.nodeId,
