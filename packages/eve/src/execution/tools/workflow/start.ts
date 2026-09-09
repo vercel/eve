@@ -17,6 +17,7 @@ import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
+import type { WorkflowSandboxReferenceData } from "#execution/sandbox/workflow-reference.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
@@ -42,6 +43,7 @@ export async function startWorkflowTask(input: {
   readonly initiatorAuth: SessionAuth["initiator"];
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
+  readonly sandbox?: WorkflowSandboxReferenceData;
   readonly session: RuntimeSession;
   readonly task: RuntimeWorkflowTaskRequest;
 }): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: RuntimeSession }> {
@@ -53,6 +55,7 @@ export async function startWorkflowTask(input: {
       input: task.input,
       owner: input.owner,
       resultKind: task.resultKind,
+      sandbox: input.sandbox,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },
         id: session.sessionId,

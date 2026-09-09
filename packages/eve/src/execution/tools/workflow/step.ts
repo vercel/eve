@@ -1,4 +1,5 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import type { WorkflowSandboxReferenceData } from "#execution/sandbox/workflow-reference.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -20,9 +21,12 @@ import type {
 } from "#execution/tools/workflow/step-context.js";
 
 type IdentifiedAuthorizationChallenge = AuthorizationChallenge & { readonly attemptId: string };
+type WorkflowRuntimeToolContext = ToolContext & {
+  readonly sandbox?: WorkflowSandboxReferenceData;
+};
 
 interface WorkflowContextArgument {
-  readonly ctx: ToolContext;
+  readonly ctx: WorkflowRuntimeToolContext;
   readonly run: WorkflowToolRunContext;
 }
 
@@ -50,7 +54,10 @@ function findWorkflowContextArgument(
   for (const arg of args) {
     const run = findWorkflowToolRunContext(arg);
     if (run !== undefined) {
-      return { ctx: arg as ToolContext, run };
+      return {
+        ctx: arg as WorkflowRuntimeToolContext,
+        run,
+      };
     }
   }
   return undefined;
@@ -118,7 +125,7 @@ async function invokeAuthorizedStep(input: {
   readonly args: unknown[];
   readonly authorizationResults: readonly WorkflowStepAuthorizationResult[];
   readonly callbackToken: string;
-  readonly ctx: ToolContext;
+  readonly ctx: WorkflowRuntimeToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
   readonly run: WorkflowToolRunContext;
@@ -127,6 +134,7 @@ async function invokeAuthorizedStep(input: {
   const context: WorkflowStepContext = {
     authorizationSupported: run.authorizationSupported === true,
     callId: ctx.callId,
+    sandbox: ctx.sandbox,
     toolName: ctx.toolName,
     session: ctx.session,
     abortSignal: ctx.abortSignal,

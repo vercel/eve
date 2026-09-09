@@ -15,9 +15,9 @@ suspend in either execution mode; running in the background does not require a s
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel and `ctx.agent` for durable subagent delegation. Use `yield` to report
-progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
-stay in local variables in the workflow body.
+the session's channel, `ctx.agent` for durable subagent delegation, and opt-in sandbox access from
+steps. Use `yield` to report progress and `await` on a workflow operation to wait durably. Values
+needed after a durable wait stay in local variables in the workflow body.
 
 A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
 as `deploy`.
@@ -79,8 +79,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, and `ask`.
-  `getToken` and `requireAuth` work inside a `"use step"` helper that receives `ctx` as a direct argument;
-  they throw in the workflow body. `getSandbox` and `getSkill` remain unavailable.
+  `getSandbox`, `getToken`, and `requireAuth` work inside a `"use step"` helper that receives
+  `ctx` as a direct argument; they throw in the workflow body. `getSandbox` also requires
+  `sandbox: true` on the tool definition. `getSkill` remains unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -105,6 +106,52 @@ Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workfl
 and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(input)` and `ctx.ask(request)`.
 The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`, `AgentInput`,
 `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
+
+## Use the sandbox from steps
+
+Set `sandbox: true` on a workflow tool that needs the current agent's sandbox. Call
+`ctx.getSandbox()` only inside a `"use step"` function:
+
+```ts title="agent/tools/inspect_workspace.ts"
+import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Write a marker, then inspect it in a later step.",
+  inputSchema: z.object({ marker: z.string() }),
+  sandbox: true,
+  async execute({ marker }, ctx) {
+    "use workflow";
+    await writeMarker(ctx, marker);
+    return await readMarker(ctx);
+  },
+});
+
+async function writeMarker(ctx: WorkflowToolContext, marker: string) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ path: "marker.txt", content: marker });
+}
+
+async function readMarker(ctx: WorkflowToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  return await sandbox.run({ command: "cat /workspace/marker.txt" });
+}
+```
+
+eve opens or reconnects the sandbox before admitting the workflow run. Each step then reconnects
+to that same sandbox when it calls `ctx.getSandbox()`, so completed file writes and commands remain
+visible to later steps. This behavior is the same for default and background workflow tools.
+
+The returned handle is the normal live sandbox API, including file methods, `run`, `spawn`,
+`setNetworkPolicy`, and `stop`. Keep the handle, spawned process handles, and their streams within
+the step that created them. Consume each spawned process and call `wait()` or `kill()` before the
+step returns. `delete()` is not supported from workflow-tool steps.
+
+Sandbox changes are not transactional. A failed, retried, or cancelled workflow does not roll back
+files or completed commands. Without `sandbox: true`, a step that calls `ctx.getSandbox()` throws;
+eve does not provision a sandbox based on runtime use.
 
 ## Wait or run in the background
 

@@ -19,6 +19,20 @@ describe("createWorkflowToolHarnessDefinition", () => {
       }),
     ).toMatchObject({ resultKind: "subagent" });
   });
+
+  it("preserves workflow-tool sandbox opt-in", () => {
+    expect(
+      createWorkflowToolHarnessDefinition({
+        definition: {
+          description: "Inspect files.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "inspect",
+        },
+        sandbox: true,
+        workflowId: "workflow//app//inspect",
+      }),
+    ).toMatchObject({ sandbox: true });
+  });
 });
 
 describe("parseWorkflowToolInput", () => {

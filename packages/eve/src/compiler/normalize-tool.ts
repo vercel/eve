@@ -119,7 +119,15 @@ export async function compileToolEntry(
           ? entry.definition.behavior === undefined
             ? { availability: [], shape }
             : { ...entry.definition.behavior, shape }
-          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
+          : {
+              availability: [],
+              handling: {
+                kind: "workflow-tool",
+                sandbox: entry.definition.sandbox,
+                workflowId,
+              },
+              shape,
+            },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,

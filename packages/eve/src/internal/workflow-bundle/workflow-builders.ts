@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
@@ -162,11 +163,7 @@ export async function findWorkflowPatterns(
 }> {
   const directives = await findWorkflowDirectiveFunctions(filename, source);
   return {
-    hasSerde:
-      source.includes("workflow.serde") ||
-      source.includes("@serde") ||
-      source.includes("workflowSerde") ||
-      source.includes("__workflow_serde"),
+    hasSerde: detectWorkflowPatterns(source).hasSerde,
     hasUseStep: directives.some((fn) => fn.directive === "use step"),
     hasUseWorkflow: directives.some((fn) => fn.directive === "use workflow"),
   };

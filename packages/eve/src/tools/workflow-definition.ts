@@ -25,11 +25,11 @@ export interface AgentInput {
 
 /**
  * Context supplied to a workflow tool. Pass it directly to a step helper for
- * getToken/requireAuth; those capabilities throw in the workflow body itself.
+ * getSandbox/getToken/requireAuth; those capabilities throw in the workflow body itself.
  */
 export type WorkflowToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "abortSignal" | "callId" | "getSandbox" | "getToken" | "requireAuth" | "session" | "toolName"
 > & {
   /** Invoke a visible subagent. The key must be unique within this workflow run. */
   agent(input: AgentInput): Promise<JsonValue>;
@@ -46,6 +46,11 @@ export interface BlockingWorkflowToolDefinition<
 > extends PublicToolDefinition<TInput, TOutput> {
   readonly [WORKFLOW_TOOL_BRAND]: true;
   readonly execution?: never;
+  /**
+   * Eagerly provisions the session sandbox and makes `ctx.getSandbox()`
+   * available inside `"use step"` functions called by this workflow.
+   */
+  readonly sandbox?: true;
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
@@ -56,6 +61,11 @@ type BackgroundWorkflowToolDefinition<TInput, TOutput> = Omit<
   "execute"
 > & {
   readonly [WORKFLOW_TOOL_BRAND]: true;
+  /**
+   * Eagerly provisions the session sandbox and makes `ctx.getSandbox()`
+   * available inside `"use step"` functions called by this workflow.
+   */
+  readonly sandbox?: true;
   execute(
     input: TInput,
     ctx: WorkflowToolContext,

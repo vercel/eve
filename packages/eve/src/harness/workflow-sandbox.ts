@@ -117,6 +117,7 @@ function createWorkflowTaskHostTool(harnessTool: HarnessToolDefinition): ToolSet
           executeInput: harnessTool.executeInput?.(toolInput),
           nodeId: harnessTool.nodeId,
           resultKind: harnessTool.resultKind,
+          sandbox: harnessTool.sandbox,
           workflowId: harnessTool.workflowId,
         },
         toolInput,

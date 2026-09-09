@@ -9,9 +9,33 @@ import {
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 
-import { applyWorkflowTransform } from "./workflow-builders.js";
+import { applyWorkflowTransform, findWorkflowPatterns } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
 import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
+
+describe("findWorkflowPatterns", () => {
+  it("detects custom serde classes that import eve's vendored Workflow symbols", async () => {
+    const patterns = await findWorkflowPatterns(
+      "src/execution/tools/workflow/body.ts",
+      [
+        "import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from",
+        '  "#compiled/@workflow/serde/index.js";',
+        "class WorkflowToolRuntimeContext {",
+        "  static [WORKFLOW_SERIALIZE](instance: WorkflowToolRuntimeContext) {",
+        "    return instance;",
+        "  }",
+        "  static [WORKFLOW_DESERIALIZE](data: unknown) {",
+        "    return data;",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+
+    expect(patterns.hasSerde).toBe(true);
+    expect(patterns.hasUseStep).toBe(false);
+    expect(patterns.hasUseWorkflow).toBe(false);
+  });
+});
 
 describe("applyWorkflowTransform", () => {
   it("preserves native arguments and receivers for Workflow built-in steps", async () => {

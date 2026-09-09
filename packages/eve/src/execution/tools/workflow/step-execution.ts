@@ -13,6 +13,7 @@ import {
 } from "#harness/authorization.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
+import { openWorkflowSandboxStep } from "#execution/sandbox/workflow-session-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { completeWorkflowStepAuthorization } from "#execution/tools/workflow/authorization-completion.js";
 import {
@@ -54,6 +55,17 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
           toolName: input.toolName,
           options: { abortSignal: input.abortSignal, toolCallId: input.callId },
         }),
+        getSandbox: async () => {
+          if (input.sandbox === undefined) {
+            throw new Error(
+              `ctx.getSandbox() requires sandbox: true on defineWorkflowTool() for tool "${input.toolName}".`,
+            );
+          }
+          return await openWorkflowSandboxStep({
+            abortSignal: input.abortSignal,
+            reference: input.sandbox,
+          });
+        },
         getToken: input.authorizationSupported ? auth.getToken : unavailable,
         requireAuth: input.authorizationSupported ? auth.requireAuth : unavailable,
       };

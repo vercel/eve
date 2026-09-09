@@ -219,6 +219,7 @@ describe("compileAgentManifest source graph", () => {
             description: "Runs durably.",
             execute,
             inputSchema: { type: "object" },
+            sandbox: true,
           }),
         }),
       },
@@ -232,9 +233,33 @@ describe("compileAgentManifest source graph", () => {
       availability: [],
       handling: {
         kind: "workflow-tool",
+        sandbox: true,
         workflowId: "workflow//example/tool//execute",
       },
       shape: { lifetime: "step", suspend: "workflow" },
+    });
+
+    const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
+    const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
+    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "durable")).toMatchObject({
+      behavior: {
+        handling: {
+          kind: "dispatch",
+          target: {
+            kind: "workflow-tool-call",
+            sandbox: true,
+            workflowId: "workflow//example/tool//execute",
+          },
+        },
+      },
+      task: {
+        sandbox: true,
+        workflowId: "workflow//example/tool//execute",
+      },
     });
   });
 

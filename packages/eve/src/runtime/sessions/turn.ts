@@ -9,11 +9,13 @@ export type PreparedRuntimeWorkflowTask =
   | {
       readonly nodeId?: never;
       readonly resultKind?: "tool";
+      readonly sandbox?: true;
       readonly workflowId: string;
     }
   | {
       readonly nodeId: string;
       readonly resultKind: "subagent";
+      readonly sandbox?: never;
       readonly workflowId: string;
     };
 
