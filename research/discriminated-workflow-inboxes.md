@@ -1075,7 +1075,7 @@ doing bookkeeping the turn does not need before it can call the model.
    suspension posts several guarded events from the same base cursor, the longest
    event suffix any of them returns contains every event the suspension wrote, so
    the runtime can continue inline replay from it without an `events.list` read.
-   A pull request against `vercel/workflow` is in progress. eve keeps two hooks per
+   See [vercel/workflow#4048](https://github.com/vercel/workflow/pull/4048). eve keeps two hooks per
    turn.
 
 Resulting path: four parallel requests from the handler, one hop, then
