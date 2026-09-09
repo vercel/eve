@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type {
@@ -184,11 +186,13 @@ function createSessionSystemPrompt(input: {
 
 /**
  * Mints a continuation token for a delegated subagent session.
- * Deterministic when `suffix` is provided so retries address the same
- * child hook.
+ * Deterministic and fixed-width when `seed` is provided so retries address
+ * the same child hook without embedding provider-controlled identifiers.
  */
-export function mintSubagentContinuationToken(suffix?: string): string {
-  return `subagent:${suffix ?? crypto.randomUUID()}`;
+export function mintSubagentContinuationToken(seed?: string): string {
+  const tokenSuffix =
+    seed === undefined ? crypto.randomUUID() : createHash("sha256").update(seed).digest("hex");
+  return `subagent:${tokenSuffix}`;
 }
 
 /**

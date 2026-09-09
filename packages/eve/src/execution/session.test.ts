@@ -417,6 +417,18 @@ describe("mintSubagentContinuationToken", () => {
     const b = mintSubagentContinuationToken();
     expect(a).not.toBe(b);
   });
+
+  it("derives a fixed-width deterministic token from a supplied seed", () => {
+    const seed = `parent-session:call_x__thought__${"signature".repeat(1_000)}`;
+
+    const first = mintSubagentContinuationToken(seed);
+    const second = mintSubagentContinuationToken(seed);
+
+    expect(first).toBe(second);
+    expect(first).toMatch(/^subagent:[a-f0-9]{64}$/);
+    expect(Buffer.byteLength(first)).toBe(73);
+    expect(first).not.toContain("signature");
+  });
 });
 
 describe("refreshSessionFromTurnAgent", () => {

@@ -5,6 +5,7 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -63,12 +64,18 @@ export async function startLocalSubagent(input: {
 
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   let childSessionId: string;
+  let startedSessionId: string | undefined;
   try {
-    await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
-      childRuntime.createSession(runInput),
+    const started = await contextStorage.run(
+      new ContextContainer({ localDevRequest: input.localDevRequest }),
+      () => childRuntime.createSession(runInput),
     );
+    startedSessionId = started.sessionId;
     childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
   } catch (error) {
+    if (startedSessionId !== undefined) {
+      await cancelUnownedSubagentSession(startedSessionId, action);
+    }
     logError(log, "local subagent start failed", error, {
       callId: action.callId,
       nodeId: action.nodeId,
@@ -104,4 +111,22 @@ export async function startLocalSubagent(input: {
     session: input.currentSession,
     toolName: action.subagentName,
   };
+}
+
+async function cancelUnownedSubagentSession(
+  sessionId: string,
+  action: RuntimeSubagentDispatchRequest,
+): Promise<void> {
+  try {
+    await cancelRun(await getWorld(), sessionId, {
+      cancelReason: "Local subagent hook registration did not complete",
+    });
+  } catch (error) {
+    logError(log, "failed to cancel local subagent after start failure", error, {
+      callId: action.callId,
+      childSessionId: sessionId,
+      nodeId: action.nodeId,
+      subagentName: action.subagentName,
+    });
+  }
 }
