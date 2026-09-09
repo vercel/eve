@@ -173,6 +173,13 @@ executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`
 wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
 examples.
 
+### Code mode
+
+Set `experimental.codeMode: true` in `agent.ts` to add the framework `code_mode` tool. The model
+writes a JavaScript program that calls eligible tools and subagents, and eve runs it as a durable
+workflow with one step per nested call. See [Code mode](/docs/tools/code-mode) for which tools a
+program can call, how discovery and authorization work inside it, and its current limits.
+
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:
