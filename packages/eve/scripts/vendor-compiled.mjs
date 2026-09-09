@@ -17,12 +17,18 @@ import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
 import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
 import { syncExtensions } from "./sync-extensions.mjs";
+import { workflowWorldLocalStreamReadPlugin } from "./workflow-world-local-stream-reads.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const packageRoot = dirname(here);
 const compiledRoot = join(packageRoot, ".generated", "compiled");
 const vendorCompiledDir = join(here, "vendor-compiled");
+const modules = MODULES.map((module) =>
+  module.packageName === "@workflow/world-local"
+    ? { ...module, plugins: [...(module.plugins ?? []), workflowWorldLocalStreamReadPlugin] }
+    : module,
+);
 
 // The stamp fingerprint covers this entry script plus every `.mjs` and
 // `.d.ts` under `vendor-compiled/`. When any of those change the stamp
@@ -32,6 +38,7 @@ const scriptFiles = [
   join(packageRoot, "package.json"),
   join(here, "nitro-rolldown.mjs"),
   join(packageRoot, "src", "internal", "bundler", "vendored-dependency-log.ts"),
+  join(here, "workflow-world-local-stream-reads.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
 
@@ -40,7 +47,7 @@ await syncExtensions();
 await runVendor({
   packageRoot,
   compiledRoot,
-  modules: MODULES,
+  modules,
   scriptFiles,
   toolVersions: {
     rolldown: resolveNitroRolldownVersion(),
