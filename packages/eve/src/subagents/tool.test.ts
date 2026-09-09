@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
@@ -100,8 +102,36 @@ describe("buildSubagentRunInput", () => {
       turn: { id: "turn-17", sequence: 5 },
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
-    expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
+    expect(childContinuationToken).toMatch(/^subagent:[a-f0-9]{64}$/);
     expect(runInput.mode).toBe("conversation");
+  });
+
+  it("keeps the child hook token bounded when the provider call id is large", () => {
+    const action = {
+      ...makeAction(),
+      callId: `call_x__thought__${randomBytes(4_096).toString("base64url")}`,
+    };
+
+    const first = buildRuntimeSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+    const second = buildRuntimeSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+
+    expect(first.childContinuationToken).toBe(second.childContinuationToken);
+    expect(first.childContinuationToken).toMatch(/^subagent:[a-f0-9]{64}$/);
+    expect(Buffer.byteLength(first.childContinuationToken)).toBe(73);
+    expect(first.runInput.parent?.callId).toBe(action.callId);
+    expect(first.runInput.adapter.state).toMatchObject({ callId: action.callId });
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
