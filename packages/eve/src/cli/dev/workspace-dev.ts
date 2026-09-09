@@ -50,10 +50,13 @@ async function writeGeneratedWorkspaceConfig(workspace: AgentWorkspace): Promise
   );
   const directory = await mkdtemp(join(tmpdir(), "eve-workspace-dev-"));
   const path = join(directory, "vercel.json");
-  await writeFile(
-    path,
-    `${JSON.stringify({ routes: assembled.routes, services: assembled.services }, null, 2)}\n`,
+  const services = Object.fromEntries(
+    Object.entries(assembled.services).map(([name, service]) => {
+      const { routePrefix: _routePrefix, ...config } = service;
+      return [name, config];
+    }),
   );
+  await writeFile(path, `${JSON.stringify({ routes: assembled.routes, services }, null, 2)}\n`);
   return path;
 }
 
