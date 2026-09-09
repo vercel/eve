@@ -539,25 +539,12 @@
           show where a one-second turn actually goes.
         </p>
         <div class="provenance">
-          <div>
-            <b>eve</b> branch <span class="mono">barba/session-holder-runtime</span> at
-            <span class="mono">905545d3c</span>
-          </div>
-          <div>
-            <b>Workflow SDK</b> <span class="mono">@workflow/core</span> 5.0.0-beta.47 +
-            <span class="mono">patches/</span>, compared against upstream beta.48
-          </div>
-          <div>
-            <b>World</b> <span class="mono">@workflow/world-vercel</span> 5.0.0-beta.43 (WebSocket
-            event transport, run long-poll)
-          </div>
-          <div>
-            <b>Hosted sample</b>
-            <a href="https://github.com/vercel/eve/actions/runs/34271267671">CI run 34271267671</a>,
-            agent-workflow-stress, 99 warm turns, mock model
-          </div>
-        </div>
-        <nav class="toc">
+    <div><b>eve</b> branch <span class="mono">barba/session-holder-runtime</span> at <span class="mono">5a95ccb4d</span> (Sep 9 snapshot simplification)</div>
+    <div><b>Workflow SDK</b> <span class="mono">@workflow/*</span> from labs tarballs of workflow <span class="mono">main</span> (9a5660f); no local patches</div>
+    <div><b>World</b> Vercel World (WebSocket event transport, run long-poll)</div>
+    <div><b>Hosted samples</b> <a href="https://github.com/vercel/eve/actions/runs/34381220523">run 34381220523</a> (Sep 9) against <a href="https://github.com/vercel/eve/actions/runs/34271267671">run 34271267671</a> (Sep 8), agent-workflow-stress, 99 warm turns, mock model</div>
+  </div>
+  <nav class="toc">
           <a href="#tldr">Summary</a>
           <a href="#arch">Architecture</a>
           <a href="#wire">What a primitive costs</a>
@@ -571,61 +558,25 @@
       </header>
 
       <section id="tldr">
-        <h2>Summary</h2>
-        <div class="prose">
-          <p>
-            On the hosted stress fixture a warm follow-up turn takes about one second end to end
-            while the mock model takes seven milliseconds. The rest is transport: one queue hop and
-            roughly twenty serial-or-near-serial requests to the workflow server, split across two
-            steps. The eve side of that path is already lean (eight operations on the holder's
-            streams, zero reads at ingress); what remains is the Workflow SDK's per-step and
-            per-hook protocol, plus a second step boundary for finalization.
-          </p>
-        </div>
-        <div class="tiles">
-          <div class="tile">
-            <div class="n">1,035<span class="u">ms</span></div>
-            <div class="l">Client p50, warm follow-up turn. Model bracket inside it: 7 ms.</div>
-          </div>
-          <div class="tile">
-            <div class="n">~20</div>
-            <div class="l">
-              workflow-server requests per warm turn (10 protocol, 8 storage, 1 abort reader, 1
-              client stream).
-            </div>
-          </div>
-          <div class="tile">
-            <div class="n">1<span class="u">hop</span></div>
-            <div class="l">
-              queue hop from ingress to the turn invocation. ~60 ms p50 from run creation to run
-              start.
-            </div>
-          </div>
-          <div class="tile">
-            <div class="n">2</div>
-            <div class="l">
-              steps per turn (execute, finalize). Each costs a step_started and a step_completed
-              round trip.
-            </div>
-          </div>
-          <div class="tile">
-            <div class="n">8<span class="u">/ 10</span></div>
-            <div class="l">
-              holder-stream operations per turn, descriptor cached / cold. Native test budget.
-            </div>
-          </div>
-          <div class="tile">
-            <div class="n">3.3<span class="u">→ 1.0 s</span></div>
-            <div class="l">warm p50 across the PR's nine hosted checkpoints.</div>
-          </div>
-        </div>
-        <div class="legend">
-          <span class="ws">workflow-server request (events, hooks, streams, runs)</span>
-          <span class="vqs">queue service (VQS) publish, hop, or ack</span>
-          <span class="compute">eve compute inside a step</span>
-          <span class="replay">Workflow VM replay in-process</span>
-        </div>
-      </section>
+  <h2>Summary</h2>
+  <div class="prose">
+    <p>A warm follow-up turn on the current branch takes about 1.3 seconds at the client while the mock model takes 7 ms, and every event the turn emits is constructed within a 9 ms window inside the execute step. Everything else is transport: one queue hop, then a chain of workflow-server requests across three steps. The Sep 9 redesign removed the entered-marker writes and the finalize step's snapshot reads, but it added a third step boundary and now ships the full session checkpoint through step inputs and results five times per turn. Against the Sep 8 checkpoint the warm median is about 300 ms slower and grows faster with history.</p>
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="n">1,330<span class="u">ms</span></div><div class="l">Client p50, warm follow-up, Sep 9 tip. Sep 8 checkpoint: 1,035 ms.</div></div>
+    <div class="tile"><div class="n">9<span class="u">ms</span></div><div class="l">from turn.started to session.waiting construction inside the step. The other 99% is the wire.</div></div>
+    <div class="tile"><div class="n">3</div><div class="l">steps per turn: execute, finalize, commit. Each pays step_started and step_completed.</div></div>
+    <div class="tile"><div class="n">5×</div><div class="l">the full SessionCheckpoint crosses the wire per turn: two step results, two step inputs, one snapshot append.</div></div>
+    <div class="tile"><div class="n">5.2<span class="u">ms/turn</span></div><div class="l">client latency slope over 99 turns. Turns 2–11: 1,158 ms. Turns 91–100: 1,618 ms.</div></div>
+    <div class="tile"><div class="n">0</div><div class="l">native phase profiles since Sep 8. The profiler that split that run into phases did not survive the history rewrite.</div></div>
+  </div>
+  <div class="legend">
+    <span class="ws">workflow-server request (events, hooks, streams, runs)</span>
+    <span class="vqs">queue service (VQS) publish, hop, or ack</span>
+    <span class="compute">eve compute inside a step</span>
+    <span class="replay">Workflow VM replay in-process</span>
+  </div>
+</section>
 
       <section id="arch">
         <h2>Architecture</h2>
@@ -983,7 +934,7 @@
           </p>
           <p>
             The table maps every SDK call eve uses to its requests. Counts assume the same
-            deployment (encryption keys derive locally, no key request) and eve's patched beta.47.
+            deployment (encryption keys derive locally, no key request) and the workflow main tarballs the branch installs.
           </p>
         </div>
         <div class="tablewrap">
@@ -1031,10 +982,7 @@
                   event delta) → <span class="k replay"></span>in-process replay
                 </td>
                 <td class="num">2</td>
-                <td>
-                  No events.list per step. The guard flag that gated this with open hooks was
-                  removed in beta.42, so eve's two open hooks do not disable it.
-                </td>
+                <td>No events.list per step. The guard flag that once gated this with open hooks is gone.</td>
               </tr>
               <tr>
                 <td>Parallel steps</td>
@@ -1045,26 +993,10 @@
                 </td>
                 <td class="num">≥4 per step + hop</td>
                 <td>
-                  eve's patch never inlines parallel siblings (lone-step gate) so any fan-out pays
-                  hops. eve's turn path has none.
+                  Upstream inlines up to three lone siblings; larger fan-outs pay hops. eve's turn path has none.
                 </td>
               </tr>
-              <tr>
-                <td><code>createHook</code> + <code>await getConflict()</code></td>
-                <td>
-                  <span class="k ws"></span>POST hook_created (guarded, sinceCursor; conflict
-                  returns in the response) → <span class="k replay"></span>patched: reload
-                  <span class="k ws"></span>GET events.list and cold-replay in process
-                </td>
-                <td class="num">2</td>
-                <td>
-                  Unpatched beta.47 instead re-queued the run: +1 publish, +1 invocation, +1
-                  preload, +1 ack. Upstream beta.48 settles the awaiter on the retained VM with no
-                  cold replay, and with zero reads only when the suspension created exactly one
-                  hook. eve's turn creates two (inbox plus AbortController), so it would still pay
-                  one incremental read there; the holder's single-hook claims would pay none.
-                </td>
-              </tr>
+              <tr><td><code>createHook</code> + <code>await getConflict()</code></td><td><span class="k ws"></span>POST hook_created (guarded, sinceCursor; a conflict returns in the response) → <span class="k replay"></span>settle on the retained VM in the same invocation</td><td class="num">1 or 2</td><td>Zero reads only when the suspension created exactly one hook and the World returned the delta. eve's turn registers the inbox hook and the AbortController hook in one suspension, so it pays one incremental <span class="k ws"></span>GET events.list. <a href="https://github.com/vercel/workflow/pull/4048">workflow#4048</a> would remove it.</td></tr>
               <tr>
                 <td><code>new AbortController()</code> in a workflow</td>
                 <td>
@@ -1072,11 +1004,7 @@
                   <code>abort()</code>: hook_received + PUT abort packet to the run's abort stream
                 </td>
                 <td class="num">1 (+2 on abort)</td>
-                <td>
-                  Every step that receives the signal opens a real-time
-                  <span class="k ws"></span>GET on that abort stream for the step's duration. eve
-                  passes it into every execute step.
-                </td>
+                <td>Every step that receives the signal opens a real-time <span class="k ws"></span>GET on that abort stream for the step's duration. eve passes it into every execute step. The post-success abort was removed on Sep 9.</td>
               </tr>
               <tr>
                 <td><code>resumeHook(token, payload)</code></td>
@@ -1095,10 +1023,7 @@
                 <td><code>getRun(id).getReadable().read()</code></td>
                 <td><span class="k ws"></span>GET /v3/runs/:id/stream/:name?startIndex</td>
                 <td class="num">1</td>
-                <td>
-                  Chunked, long-lived. Ordinary Run readers also GET /v2/runs/:id once for the key;
-                  <code>Run.fromStreamReference</code> (patch) skips that.
-                </td>
+                <td>Chunked, long-lived. eve resolves stream runs with <code>getRun()</code> cached per process (256 handles), so the first read or write on a cold process also does one GET /v2/runs/:id for the key; warm processes do none.</td>
               </tr>
               <tr>
                 <td><code>getWritable()</code> write / writeMulti</td>
@@ -1107,10 +1032,7 @@
                   X-Stream-Multi PUT per group)
                 </td>
                 <td class="num">1 per group</td>
-                <td>
-                  Patch sets a 1 ms group-commit window so adjacent events share a PUT. eve's
-                  <code>contribute()</code> awaits durability before returning.
-                </td>
+                <td>Group-commit window is the upstream default (0 ms): the first chunk goes immediately, chunks arriving while a PUT is in flight share the next one. eve's event writer hands the SDK one chunk per event in batches, so a short turn lands in roughly three to six PUTs.</td>
               </tr>
               <tr>
                 <td><code>getTailIndex()</code> / <code>close()</code></td>
@@ -1122,9 +1044,7 @@
                 <td><code>getStreamReference()</code> / <code>run.status</code></td>
                 <td><span class="k ws"></span>GET /v2/runs/:id</td>
                 <td class="num">1</td>
-                <td>
-                  Holder resolves its own reference once at bootstrap; the descriptor embeds it.
-                </td>
+                <td>Not on the warm path; the process-level run-handle cache covers it.</td>
               </tr>
               <tr>
                 <td><code>await run.returnValue</code></td>
@@ -1173,165 +1093,48 @@
           </p>
         </div>
 
-        <div class="path-head">
-          <span class="letter">A</span>
-          <h3>New session over HTTP</h3>
-        </div>
-        <div class="prose">
-          <p>
-            The handler starts the holder and returns 202 without waiting. The holder claims its
-            control hook, then runs one bootstrap step that performs six serial storage requests,
-            then a second step that starts the first turn. The turn arrives with resources inlined,
-            so it skips descriptor discovery, but its head read returns the seed and it must also
-            start the session-timeout workflow before the first model call. Two queue hops sit on
-            the critical path.
-          </p>
-        </div>
-        <figure class="wide">
-          <div id="fig-a"></div>
-          <figcaption>
-            <b>Path A.</b> The hosted cold first turn took 1,928 ms at the client while the turn run
-            itself took 1,233 ms, so the handler plus holder bootstrap costs about 700 ms: one hop,
-            one hook claim, two steps, and six serial storage writes before the turn even exists.
-          </figcaption>
-        </figure>
-        <div class="budget">
-          <div>
-            <div class="n">2</div>
-            <div class="l">
-              queue hops before the model (handler→holder, holder→turn), plus one for the timeout
-              run off-path
-            </div>
-          </div>
-          <div>
-            <div class="n">~20</div>
-            <div class="l">serial workflow-server RTs before the model call</div>
-          </div>
-          <div>
-            <div class="n">4</div>
-            <div class="l">steps (holder 2, turn 2)</div>
-          </div>
-          <div>
-            <div class="n">3</div>
-            <div class="l">hooks created (holder control, turn inbox, turn abort)</div>
-          </div>
-          <div>
-            <div class="n">~37</div>
-            <div class="l">workflow-server RTs total across handler, holder, and turn</div>
-          </div>
-          <div>
-            <div class="n">6</div>
-            <div class="l">VQS requests (3 publishes, 3 acks)</div>
-          </div>
-        </div>
+        <div class="path-head"><span class="letter">A</span><h3>New session over HTTP</h3></div>
+  <div class="prose">
+    <p>The handler starts the holder inside <code>waitUntil</code> and returns 202. The holder claims its control hook, runs one bootstrap step that writes the null sentinel into a fresh snapshot stream, then a second step that starts the first turn. The first turn arrives with resources inlined. Its tail read returns the sentinel, so it builds the initial checkpoint locally, and it publishes the descriptor and starts the session-timeout workflow in parallel with the model call. The client's stream GET blocks until that descriptor lands, up to ten seconds. Two queue hops still sit on the critical path.</p>
+  </div>
+  <figure class="wide"><div id="fig-a"></div>
+    <figcaption><b>Path A at 5a95ccb4d.</b> The holder is down to two small steps, and the first-turn extras now overlap the model instead of preceding it. The cold first turn measured 2,897 ms in the newest run and 1,726 to 1,733 ms in the two runs before it, so the sample is noisy; the Sep 8 design measured 1,928 ms.</figcaption>
+  </figure>
+  <div class="budget">
+    <div><div class="n">2</div><div class="l">queue hops before the model (handler→holder, holder→turn)</div></div>
+    <div><div class="n">~12</div><div class="l">serial workflow-server RTs before the model call</div></div>
+    <div><div class="n">5</div><div class="l">steps (holder 2, turn 3)</div></div>
+    <div><div class="n">3</div><div class="l">hooks created (holder control; turn inbox and abort in one suspension)</div></div>
+    <div><div class="n">≤10 s</div><div class="l">client stream GET waits on the descriptor the first turn publishes mid-step</div></div>
+  </div>
 
-        <div class="path-head">
-          <span class="letter">B</span>
-          <h3>Follow-up on an idle session over HTTP</h3>
-        </div>
-        <div class="prose">
-          <p>
-            This is the path the stress fixture measures. The handler mints an event id and starts a
-            candidate with only the session id: no descriptor, owner, or snapshot read. The
-            candidate claims the turn hook, hydrates inside its first step, runs the model, commits,
-            then finalizes in a second step. The client sees completion when finalize's event batch
-            lands, which is why client latency (1,035 ms) runs below the native run duration (1,177
-            ms).
-          </p>
-        </div>
-        <figure class="wide">
-          <div id="fig-b"></div>
-          <figcaption>
-            <b>Path B, descriptor cached.</b> Twenty workflow-server requests in total. About seven
-            serial requests and one hop precede the model call; four serial storage requests follow
-            it before the client sees <code>session.waiting</code>. A cold descriptor adds GET
-            /v2/runs/:holder and one descriptor stream read before the head read.
-          </figcaption>
-        </figure>
-        <div class="tablewrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Phase (hosted p50)</th>
-                <th>Requests on the path</th>
-                <th class="num">ms</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Handler: run created → run started</td>
-                <td>
-                  <span class="k ws"></span>run_created ∥ <span class="k vqs"></span>publish, VQS
-                  delivery, function start
-                </td>
-                <td class="num">60</td>
-              </tr>
-              <tr>
-                <td>Run started → execute step started</td>
-                <td>
-                  <span class="k ws"></span>run_started (bg), hook_created ×2,
-                  <span class="k ws"></span>GET events.list (patch reload),
-                  <span class="k replay"></span>cold replay, <span class="k ws"></span>step_started,
-                  abort-reader GET opens
-                </td>
-                <td class="num">200</td>
-              </tr>
-              <tr>
-                <td>Execute started → model start</td>
-                <td>
-                  <span class="k ws"></span>GET snapshot head,
-                  <span class="k compute"></span>hydrate, <span class="k ws"></span>PUT entered
-                  marker
-                </td>
-                <td class="num">141</td>
-              </tr>
-              <tr>
-                <td>Model</td>
-                <td><span class="k compute"></span>mock model</td>
-                <td class="num">7</td>
-              </tr>
-              <tr>
-                <td>Model end → execute completed</td>
-                <td>
-                  <span class="k ws"></span>PUT event batch, <span class="k ws"></span>PUT commit
-                  checkpoint, durability await, <span class="k compute"></span>dehydrate result
-                </td>
-                <td class="num">190</td>
-              </tr>
-              <tr>
-                <td>Execute completed → finalize started</td>
-                <td>
-                  <span class="k ws"></span>step_completed (delta),
-                  <span class="k replay"></span>replay, <span class="k ws"></span>step_started
-                </td>
-                <td class="num">73</td>
-              </tr>
-              <tr>
-                <td>Finalize body</td>
-                <td>
-                  <span class="k ws"></span>GET head, PUT entered, PUT events (client sees
-                  session.waiting here), PUT commit
-                </td>
-                <td class="num">312</td>
-              </tr>
-              <tr>
-                <td>Finalize completed → run completed</td>
-                <td>
-                  <span class="k ws"></span>step_completed, <span class="k replay"></span>replay,
-                  <span class="k ws"></span>run_completed, <span class="k vqs"></span>ack
-                </td>
-                <td class="num">153</td>
-              </tr>
-              <tr class="total">
-                <td>Native run (sum of medians / measured)</td>
-                <td></td>
-                <td class="num">1,136 / 1,177</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+<div class="path-head"><span class="letter">B</span><h3>Follow-up on an idle session over HTTP</h3></div>
+  <div class="prose">
+    <p>This is the path the stress fixture measures. The handler mints an event id and starts a candidate with the session locator inside <code>waitUntil</code>; the 202 goes out before the start resolves, and nothing is read. The candidate registers two hooks in one suspension, claims, and reads the snapshot tail inside its execute step. Events are enqueued locally during the model call and drained to the event stream in the background; the drain is awaited before the step returns. The execute step returns the whole updated checkpoint as its result. The finalize step receives it as input, decides the settlement, writes <code>turn.completed</code> and <code>session.waiting</code>, and returns the checkpoint again. The commit step receives it a third time and appends it to the snapshot stream. Then the run completes.</p>
+    <p>The client sees completion when finalize's event PUT lands. The commit step and run completion are off the client path, but they hold the function and delay the release of the turn hook.</p>
+  </div>
+  <figure class="wide"><div id="fig-b"></div>
+    <figcaption><b>Path B at 5a95ccb4d, warm process.</b> About six serial requests and one hop before the model. After the model: the event drain, then two step boundaries carrying the checkpoint before the client-visible write. A cold process adds one GET /v2/runs/:holder for the stream key. Hover a row for the request inside it.</figcaption>
+  </figure>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Per warm turn</th><th class="num">Sep 8 (d78e52197)</th><th class="num">Sep 9 (5a95ccb4d)</th><th>What changed</th></tr></thead>
+    <tbody>
+      <tr><td>Steps</td><td class="num">2</td><td class="num">3</td><td>commitTurnStep split out of finalize</td></tr>
+      <tr><td>hook_created writes</td><td class="num">2</td><td class="num">2</td><td>same suspension both times; one events.list read follows in both</td></tr>
+      <tr><td>Snapshot stream GETs</td><td class="num">2</td><td class="num">1</td><td>finalize no longer re-reads the head</td></tr>
+      <tr><td>Snapshot stream PUTs</td><td class="num">4</td><td class="num">1</td><td>entered markers and the execute commit are gone; one append in commit</td></tr>
+      <tr><td>Event PUT groups</td><td class="num">2</td><td class="num">4–8</td><td>1 ms batching window gone; writer hands one chunk per event</td></tr>
+      <tr><td>Checkpoint copies on step payloads</td><td class="num">0</td><td class="num">4</td><td>execute result, finalize input and result, commit input</td></tr>
+      <tr><td>Serial RTs before model (warm)</td><td class="num">7</td><td class="num">6</td><td>no entered marker</td></tr>
+      <tr><td>Serial RTs model → client sees waiting</td><td class="num">7</td><td class="num">4</td><td>drain, step_completed, step_started, event PUT</td></tr>
+      <tr class="total"><td>Client p50 / slope</td><td class="num">1,035 ms / 3.2 ms per turn</td><td class="num">1,330 ms / 5.2 ms per turn</td><td>fewer requests, more bytes per request</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout"><b>Why fewer requests got slower is not settled.</b> The request count fell but the median rose and the per-turn slope rose. The only per-turn quantity that grew is the checkpoint payload, which now rides four step events plus one append and scales with conversation history. The native profiler that would confirm this by splitting created→execute, execute body, and the step gaps was lost in the history rewrite; the <a href="#levers">first lever</a> is to put it back.</div>
 
-        <div class="path-head">
+<div class="path-head">
           <span class="letter">C</span>
           <h3>Steer or interrupt while a turn is active</h3>
         </div>
@@ -1373,8 +1176,7 @@
             </div>
           </div>
           <div>
-            <div class="n">+6</div>
-            <div class="l">owner RTs for the extra execute step (2 protocol, 1 read, 3 writes)</div>
+            <div class="n">+3</div><div class="l">owner RTs for the extra execute step (2 protocol, 1 event PUT group), plus the checkpoint riding both</div>
           </div>
           <div>
             <div class="n">2</div>
@@ -1497,8 +1299,7 @@
             <span
               ><span class="where">owner</span>each inbound envelope costs one more
               <code>executeTurnStep</code>: <span class="tag ws">step_started</span
-              ><span class="tag ws">GET head</span><span class="tag ws">PUT entered</span
-              ><span class="tag ws">PUT events</span><span class="tag ws">PUT commit</span
+              ><span class="tag ws">PUT events</span><span class="tag ws">checkpoint in step input and result</span
               ><span class="tag ws">step_completed</span></span
             >
           </li>
@@ -1565,182 +1366,48 @@
       </section>
 
       <section id="time">
-        <h2>Where the time goes</h2>
-        <div class="prose">
-          <p>
-            The hosted profile splits a warm Path B turn into phases using the Workflow API's run
-            and step timestamps. With a seven-millisecond model, the chart below is almost entirely
-            the protocol from the table above. Two things stand out: the finalize step is as
-            expensive as the execute step, and the pre-model phase (hook claim, reload, step start,
-            head read, entered marker) is a third of the total.
-          </p>
-        </div>
-        <figure class="wide">
-          <div id="fig-waterfall"></div>
-          <figcaption>
-            <b>Warm turn, hosted p50 by phase.</b> Client latency ends inside the finalize body when
-            the <code>session.waiting</code> event lands (about 1,035 ms), so the last two phases
-            are invisible to the user but still occupy the function. Hover a segment for the
-            requests inside it.
-          </figcaption>
-        </figure>
-        <div class="two">
-          <figure>
-            <div id="fig-checkpoints"></div>
-            <figcaption>
-              <b>Warm p50 across the PR's hosted checkpoints.</b> The single snapshot log removed
-              the dominant storage cost; each later step removed one or two serial requests.
-              Separate observations, not paired trials.
-            </figcaption>
-          </figure>
-          <figure>
-            <div id="fig-variants"></div>
-            <figcaption>
-              <b>Three variants of the same fixture.</b> Cold session creation and contested
-              (forwarded) turns each add roughly one hop plus several serial requests to the
-              uncontested warm path.
-            </figcaption>
-          </figure>
-        </div>
-      </section>
+  <h2>Where the time goes</h2>
+  <div class="prose">
+    <p>Two kinds of evidence. The client-side stress numbers exist for every run. The native phase split, which reads run and step timestamps from the Workflow API, exists only for the Sep 8 run, because the profiler script and its report hook were dropped when the branch was rewritten. What survives in every run is the event log: event construction timestamps show that the whole model bracket, from <code>turn.started</code> to <code>session.waiting</code>, is about ten milliseconds in every design. So the phase chart below is a Sep 8 split of costs that are all still present in some form, and the benchmark chart shows how the client total moved since.</p>
+  </div>
+  <figure class="wide"><div id="fig-bench"></div>
+    <figcaption><b>Warm-turn client latency across the last four hosted runs.</b> Median of turns 2–100, then the first ten and last ten warm turns to show growth with history. The 6166ed00a run is the first commit on the new design and the main tarballs; the two later runs are the author's follow-up fixes. Concurrent second turns held near 1.3 s throughout.</figcaption>
+  </figure>
+  <figure class="wide"><div id="fig-waterfall"></div>
+    <figcaption><b>Sep 8 warm turn, native p50 by phase.</b> The last phase split available. Under the Sep 9 design the entered marker inside execute→model and the head read and marker inside the finalize body are gone, the finalize body carries only the event write, and a commit step with one append sits between finalize and run completion. What is not visible here, because it did not exist then, is the checkpoint payload riding each step boundary.</figcaption>
+  </figure>
+  <div class="two">
+    <figure><div id="fig-checkpoints"></div>
+      <figcaption><b>Warm p50 across the PR's hosted checkpoints, Sep 8 series.</b> Separate observations, not paired trials. The Sep 9 series continues in the benchmark chart above.</figcaption>
+    </figure>
+    <figure><div id="fig-variants"></div>
+      <figcaption><b>Sep 8 variants of the same fixture.</b> Cold creation and contested turns each added roughly one hop plus several serial requests to the uncontested path; the same structure holds on Sep 9.</figcaption>
+    </figure>
+  </div>
+</section>
 
       <section id="levers">
-        <h2>Levers</h2>
-        <div class="prose">
-          <p>
-            Ranked by expected effect on the warm Path B critical path, using the hosted phase
-            medians as the yardstick. Savings are the phases or requests removed, not promises; each
-            needs a paired hosted run.
-          </p>
-        </div>
-        <div class="tablewrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Lever</th>
-                <th>What it removes</th>
-                <th>Where</th>
-                <th class="num">Est. saving</th>
-                <th>Risk / condition</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  <b>Settle in the execute step</b> when the drained inbox is empty and the proposal
-                  is a natural completion
-                </td>
-                <td>
-                  step_completed→step_started gap (73 ms), finalize's head GET and entered PUT, and
-                  lets <code>session.waiting</code> ride the execute event batch. Finalize survives
-                  only for interrupted, steered, terminal, or lifecycle-hook turns.
-                </td>
-                <td>eve <code>turn/workflow.ts</code>, <code>turn/finalize.ts</code></td>
-                <td class="num">300–400 ms client</td>
-                <td>
-                  The settlement decision moves inside a step; a steer arriving during that step is
-                  applied to the next turn instead of this one. The research doc already defines
-                  that boundary as the finalize step's immutable input, so semantics hold if the
-                  drain happens before the merged commit.
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Skip the first-turn rekey</b> when the holder already claimed the initial alias
-                </td>
-                <td>
-                  2 steps, 2 resumes, 2 hops, ~10 RTs on every Slack or operation-id session's first
-                  turn
-                </td>
-                <td>eve: seed <code>claimedContinuationToken</code> from bootstrap resources</td>
-                <td class="num">~400 ms once per session</td>
-                <td>
-                  Low. The holder returns <code>claimed</code> for a token it already holds; the
-                  exchange proves nothing new.
-                </td>
-              </tr>
-              <tr>
-                <td><b>Adopt upstream beta.48's in-process hook settle</b></td>
-                <td>
-                  the cold replay after hook_created everywhere, and the GET events.list reload
-                  wherever a suspension creates one hook (holder claims). The turn claim creates two
-                  hooks, so its read survives unless the AbortController is created after the claim
-                  or replaced by inbox-carried cancellation.
-                </td>
-                <td>SDK pin, then eve <code>turn/workflow.ts</code></td>
-                <td class="num">40–80 ms</td>
-                <td>
-                  Requires re-basing the other four amendments onto beta.48. Zero reads also depend
-                  on the server returning the hook_created delta (workflow-server #913).
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Make the descriptor derivable</b> from the public session id (encode deployment
-                  id and public key), or ship it in the start input for HTTP follow-ups
-                </td>
-                <td>
-                  the cold path's GET /v2/runs/:holder and descriptor GET; the per-process cache
-                  stops mattering under Fluid scale-out
-                </td>
-                <td>eve <code>session/directory.ts</code>, id format</td>
-                <td class="num">2 RTs on cold instances</td>
-                <td>
-                  Public id grows; the descriptor becomes redundant except as a compatibility
-                  record.
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Drop the separate AbortController hook</b> and carry interrupt through the
-                  inbox hook
-                </td>
-                <td>one hook_created per turn and one abort-reader GET per execute step</td>
-                <td>
-                  eve <code>turn/workflow.ts</code>; needs an SDK way to abort a live step from the
-                  inbox
-                </td>
-                <td class="num">1–2 RTs</td>
-                <td>
-                  The abort stream is what makes interrupt reach an in-flight step. Without it,
-                  interrupt would wait for the step boundary like steer does.
-                </td>
-              </tr>
-              <tr>
-                <td><b>Wake forwarding candidates by hook</b> instead of long-polling the owner</td>
-                <td>
-                  a step held open for the owner's lifetime and ≥2 poll GETs; the owner would resume
-                  the candidate's inbox with the receipt
-                </td>
-                <td>eve <code>turn/admission.ts</code>, finalize</td>
-                <td class="num">function time, not latency</td>
-                <td>
-                  Adds one resume (3 RTs + hop) per forwarded event. Worth it only if held step
-                  slots become a cost.
-                </td>
-              </tr>
-              <tr>
-                <td><b>Overlap the entered marker</b> with hydration</td>
-                <td>one serial PUT before the model (part of the 141 ms pre-model phase)</td>
-                <td>eve <code>turn/execute.ts</code></td>
-                <td class="num">~50 ms</td>
-                <td>
-                  The marker is the fence that says effects began. It must be durable before the
-                  first external effect, but hydration and model-request assembly do not need to
-                  wait on it.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="callout">
-          <b>What is not a lever.</b> The queue hop itself is about 60 ms p50 and there is only one
-          on the warm path. Removing more storage operations is near its floor: eight per turn
-          against a minimum of four (one read, one commit, plus events) if the entered marker and
-          finalize commit stayed. The remaining budget is the SDK's per-step protocol and the second
-          step boundary.
-        </div>
-      </section>
+  <h2>Levers</h2>
+  <div class="prose">
+    <p>Ranked for the warm Path B path at 5a95ccb4d. The first is measurement, because the current numbers cannot be attributed without it.</p>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Lever</th><th>What it removes</th><th>Where</th><th class="num">Est. saving</th><th>Risk / condition</th></tr></thead>
+    <tbody>
+      <tr><td><b>Restore the native turn profiler</b> in the stress job</td><td>guessing. Re-adds created→started, started→execute, per-step bodies, and step gaps from the Workflow API, using the VERCEL_TOKEN, ORG, and PROJECT secrets the job already has.</td><td><code>scripts/workflow-turn-profile.mjs</code>, <code>workflow-stress-report.mjs --native-vercel</code>, <code>e2e-vercel.yml</code></td><td class="num">n/a</td><td>Low. Existed at 905545d3c; the report script has since diverged and needs a small re-merge.</td></tr>
+      <tr><td><b>Stop shipping the checkpoint through step payloads</b></td><td>four copies of the session checkpoint per turn on step_completed and step_started, growing with history. Execute writes the checkpoint once and returns a small reference; finalize and commit read by reference only when they must.</td><td><code>turn/execute.ts</code>, <code>turn/workflow.ts</code>, <code>turn/finalize.ts</code></td><td class="num">likely the 5 ms/turn slope, plus fixed serialization cost</td><td>This is the immutable-record design the Sep 9 simplification deliberately replaced. The middle ground is one append at execute end and references afterward, which is two snapshot PUTs per turn instead of one.</td></tr>
+      <tr><td><b>Fold finalize and commit into one step</b> for the natural-completion case</td><td>one step_completed and one step_started with a replay between them, and one checkpoint round trip</td><td><code>turn/workflow.ts</code></td><td class="num">~70–100 ms</td><td>The commit was split out so a retry of the append cannot rerun lifecycle effects. A merged step needs the append to be idempotent on retry, which the write id already gives it.</td></tr>
+      <tr><td><b>Settle in execute when the drained inbox is empty</b></td><td>the finalize boundary too, so session.waiting rides the execute event drain and the client sees completion two boundaries earlier</td><td><code>turn/workflow.ts</code>, <code>turn/finalize.ts</code></td><td class="num">~150–250 ms client</td><td>Steering that arrives during the merged step lands on the next turn, which is already the documented step-boundary semantics.</td></tr>
+      <tr><td><b>Batch event chunks before the SDK</b></td><td>most of the four to eight event PUTs; one group per drain pass instead of one chunk per event with the SDK's 0 ms window</td><td><code>session/event-writer.ts</code> or an upstream group-commit default</td><td class="num">2–5 RTs, overlapped with the model, so mostly tail</td><td>Cursor compatibility requires one SDK chunk per event; batching chunks into one PUT keeps that.</td></tr>
+      <tr><td><b>Land <a href="https://github.com/vercel/workflow/pull/4048">workflow#4048</a></b></td><td>the GET events.list after the two-hook claim suspension</td><td>SDK</td><td class="num">40–80 ms</td><td>Draft is open; eve is now a direct consumer since the AbortController registers before the claim again.</td></tr>
+      <tr><td><b>Resolve stream runs from references</b> instead of <code>getRun()</code></td><td>the GET /v2/runs/:holder key lookup a cold process pays before its first stream read</td><td><code>internal/workflow/stream-run.ts</code></td><td class="num">1 RT on cold instances</td><td>The upstream <code>Run.fromStreamReference</code> amendment did not ship; needs the routing embedded in the descriptor.</td></tr>
+      <tr><td><b>Parallel holder and turn start</b> for new sessions</td><td>the second hop and the holder's chain from Path A's critical path</td><td>handler, <code>session/dispatch.ts</code></td><td class="num">~500 ms on creation</td><td>See Recommendations. Token-bearing sessions keep the serial path.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout"><b>What is not a lever.</b> The queue hop is about 60 ms and there is one on the warm path. The model bracket is ten milliseconds. Storage operations are at four to nine per turn against a floor of about three. The remaining budget is step boundaries and the bytes they carry.</div>
+</section>
 
       <section id="sound">
         <h2>Soundness</h2>
@@ -1753,12 +1420,7 @@
               step after the hook claim succeeds. Ingress never preflights. The stale-revision race
               in the research doc cannot occur.
             </li>
-            <li>
-              <b>Two hooks share one activation.</b> The inbox hook and the abort hook are created
-              in the same suspension and the first step_started lands in the same invocation (native
-              test asserts both). The patch's in-process replay is what makes this one hop instead
-              of two.
-            </li>
+            <li><b>Two hooks share one activation.</b> The inbox hook and the abort hook register in the same suspension by design, so the claim costs one hook write plus one incremental log read, not two serial hook phases. The first step_started lands in the same invocation.</li>
             <li>
               <b>Steer is step-boundary steering.</b> A second owner invocation cannot touch a step
               owned by a live lease; it arms a backstop and exits. The envelope is applied when the
@@ -1778,11 +1440,7 @@
           </ul>
           <h3>Open</h3>
           <ul>
-            <li>
-              <b>Second owner invocations are pure overhead.</b> Each steer, cancel, tool report, or
-              ask wakes the owner run with a full log preload only to buffer an envelope. Long
-              tool-heavy turns will see the owner's event log grow and every wake pays to read it.
-            </li>
+            <li><b>Second owner invocations are pure overhead.</b> Each steer, cancel, tool report, or ask wakes the owner run with a full log preload only to buffer an envelope. With the checkpoint now in step results, that preload also carries every checkpoint the turn has produced.</li>
             <li>
               <b>Backstop wakes.</b> When the second invocation finds a live lease it arms a delayed
               publish. If the first invocation's step completes normally, that delayed message is a
@@ -1798,11 +1456,7 @@
               recovery of a failed candidate without new input, and the Slack post-to-rekey race are
               implementation gates, not properties this trace can establish.
             </li>
-            <li>
-              <b>Patch drift.</b> Five local SDK amendments carry the round-trip savings. Upstream
-              beta.48 has its own in-process hook settle but none of the stream-reference,
-              metadata-cache, or lone-step scheduler changes.
-            </li>
+            <li><b>SDK pin is a moving target.</b> The branch installs tarballs of workflow <code>main</code>, so the runtime changes under the branch without a commit. Any paired measurement must record the tarball build sha.</li>
           </ul>
         </div>
       </section>
@@ -1835,20 +1489,9 @@
               the initial event's candidate through the existing predecessor mechanism. This changes
               the first-input-precedence contract and must be written down with it.
             </li>
-            <li>
-              <b>Move the session-timeout start off the path.</b> From the holder's bootstrap step,
-              or after the model call.
-            </li>
-            <li>
-              <b>Overlap the entered marker with model request assembly.</b> Issue the PUT, build
-              the request, await the PUT before the first external effect.
-            </li>
-            <li>
-              <b>Trim holder bootstrap.</b> Derive the stream reference locally, drop tail probes on
-              fresh streams, fold the descriptor close into its write, merge the two bootstrap
-              steps. Fourteen requests become about eight. This is what the fifty-session concurrent
-              scenario is paying for.
-            </li>
+            <li><b>Move the session-timeout start off the path.</b> Done on Sep 9: it starts in parallel with the model inside the first execute step.</li>
+            <li><b>Overlap the entered marker with model request assembly.</b> Moot on Sep 9: the marker no longer exists, so there is no pre-model write left; the pre-model read is the snapshot tail.</li>
+            <li><b>Trim holder bootstrap.</b> Largely done on Sep 9: the holder writes one sentinel and starts the turn; descriptor publication moved into the first turn. What remains is merging its two steps.</li>
             <li>
               <b>Hook-claim reads belong upstream.</b> Rather than moving the turn's
               <code>AbortController</code> out of the claim suspension, generalize the SDK: when a
@@ -1923,31 +1566,13 @@
       </section>
 
       <section id="method">
-        <h2>Method</h2>
-        <div class="prose">
-          <p>
-            Request counts come from reading the SDK sources in the workflow monorepo (core, world,
-            world-vercel) at beta.48 and diffing against eve's pinned beta.47 patch, then walking
-            eve's session, turn, inbox, and channel modules on this branch. Where a native test
-            fixes a count (the holder storage budget of 10 cold / 8 cached, the two-hook
-            single-activation claim, the 2-read 4-write snapshot transaction), the static count was
-            checked against it and agrees. Path A's holder bootstrap and the rekey exchange have no
-            native counter and are static counts only.
-          </p>
-          <p>
-            Timings come from the CI artifact <code>workflow-stress-performance</code> of run
-            34271267671: client durations from the eval, native phases from
-            <code>scripts/workflow-turn-profile.mjs</code> reading run and step timestamps through
-            the Workflow API. Medians of phases do not sum exactly to the median run. Checkpoint
-            history is from the research document's hosted table.
-          </p>
-          <p>
-            Not counted: Slack API calls, OpenTelemetry attribute writes (backgrounded via
-            <code>waitUntil</code>), model provider requests, and VQS lease extensions on bodies
-            over 60 seconds.
-          </p>
-        </div>
-      </section>
+  <h2>Method</h2>
+  <div class="prose">
+    <p>Request counts come from reading eve at 5a95ccb4d (turn workflow, execute, finalize, session storage, inbox, channel handlers) and the Workflow SDK sources at workflow <code>main</code>, with the vendored bundle checked for the in-process hook settle. The Sep 8 columns come from the same trace done against d78e52197 with the then-pinned patch. No native test fixes the current storage budget; the earlier 8/10 test was removed with the redesign.</p>
+    <p>Client timings come from the <code>workflow-stress-performance</code> artifacts of runs 34271267671, 34372229316, 34376073850, and 34381220523. The in-step event span is the difference between <code>turn.started</code> and <code>session.waiting</code> construction timestamps in each run's event log. The Sep 8 native phases come from that run's report, produced by a profiler that no longer exists on the branch.</p>
+    <p>Not counted: Slack API calls, OpenTelemetry attribute writes, model provider requests, VQS lease extensions on bodies over 60 seconds.</p>
+  </div>
+</section>
     </div>
     <div class="tt" id="tt"></div>
 
@@ -2277,139 +1902,38 @@
         });
 
         // Path A
-        seq("fig-a", {
-          aria: "New session: handler starts holder, holder bootstraps in two steps and starts the turn, turn hydrates from seed and runs the model.",
-          lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
-          events: [
-            { t: "msg", from: 0, to: 4, label: "run_created (holder)", kind: "ws", par: true },
-            { t: "msg", from: 0, to: 1, label: "publish holder", kind: "vqs", par: true },
-            {
-              t: "self",
-              lane: 0,
-              label: "202 to client; client GETs event stream (blocks ≤10 s on descriptor)",
-              kind: "compute",
-            },
-            { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
-            { t: "msg", from: 2, to: 4, label: "run_started", kind: "ws", bg: true },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "hook_created eve:holder:<runId>",
-              kind: "ws",
-              rt: "control inbox claim",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "GET events.list (patch: in-process claim replay)",
-              kind: "ws",
-            },
-            { t: "self", lane: 2, label: "cold replay → initializeHolderStep", kind: "replay" },
-            { t: "msg", from: 2, to: 4, label: "step_started initializeHolderStep", kind: "ws" },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "GET /v2/runs/:self (getStreamReference)",
-              kind: "ws",
-              rt: "owner routing for opaque stream ids",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "GET streams/snapshots/info · PUT seed record (index 0)",
-              kind: "ws",
-              rt: "2 serial",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "GET streams/resources/info · PUT descriptor · PUT close",
-              kind: "ws",
-              rt: "3 serial",
-            },
-            { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
-            { t: "self", lane: 2, label: "inline replay → startTurnStep", kind: "replay" },
-            { t: "msg", from: 2, to: 4, label: "step_started startTurnStep", kind: "ws" },
-            {
-              t: "msg",
-              from: 2,
-              to: 4,
-              label: "run_created (turn, resources inlined)",
-              kind: "ws",
-              par: true,
-            },
-            { t: "msg", from: 2, to: 1, label: "publish turn", kind: "vqs", par: true },
-            { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
-            {
-              t: "self",
-              lane: 2,
-              label: "control.next() → suspend on hook; ack; parked",
-              kind: "replay",
-            },
-            { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
-            { t: "msg", from: 3, to: 4, label: "run_started", kind: "ws", bg: true },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "hook_created ×2 (turn inbox, AbortController)",
-              kind: "ws",
-            },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "GET events.list (patch reload) → claim owned",
-              kind: "ws",
-            },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "step_started executeTurnStep · opens abort-reader GET",
-              kind: "ws",
-            },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "GET snapshot head (startIndex −1) → seed",
-              kind: "ws",
-              rt: "Run.fromStreamReference: no metadata read",
-            },
-            {
-              t: "self",
-              lane: 3,
-              label: "createSessionState from seed (bundle compile)",
-              kind: "compute",
-            },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "run_created (sessionTimeoutWorkflow)",
-              kind: "ws",
-              par: true,
-            },
-            { t: "msg", from: 3, to: 1, label: "publish timeout run", kind: "vqs", par: true },
-            {
-              t: "msg",
-              from: 3,
-              to: 4,
-              label: "PUT entered marker (embeds initial state)",
-              kind: "ws",
-            },
-            { t: "self", lane: 3, label: "model call", kind: "compute" },
-            { t: "phase", label: "continues as Path B from the model call onward" },
-          ],
-        });
+  seq("fig-a", {
+    aria: "New session at 5a95ccb4d: handler starts holder; holder writes a sentinel and starts the turn; the turn builds the initial checkpoint and overlaps descriptor publication and timeout start with the model.",
+    lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
+    events: [
+      { t: "msg", from: 0, to: 4, label: "run_created (holder)", kind: "ws", par: true },
+      { t: "msg", from: 0, to: 1, label: "publish holder", kind: "vqs", par: true },
+      { t: "self", lane: 0, label: "202 (inside waitUntil); client GETs stream, blocks on descriptor ≤10 s", kind: "compute" },
+      { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 2, to: 4, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 2, to: 4, label: "hook_created eve:holder:<runId>", kind: "ws", rt: "single hook: settles in-process, delta permitting" },
+      { t: "msg", from: 2, to: 4, label: "step_started initializeHolderStep", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "GET /v2/runs/:self (first stream handle) · PUT null sentinel to snapshots", kind: "ws", rt: "2 serial" },
+      { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "step_started startTurnStep", kind: "ws" },
+      { t: "msg", from: 2, to: 4, label: "run_created (turn, resources inlined)", kind: "ws", par: true },
+      { t: "msg", from: 2, to: 1, label: "publish turn", kind: "vqs", par: true },
+      { t: "msg", from: 2, to: 4, label: "step_completed (delta)", kind: "ws" },
+      { t: "self", lane: 2, label: "control.next() → suspend on hook; ack; parked", kind: "replay" },
+      { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 3, to: 4, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 3, to: 4, label: "hook_created ×2 (inbox + AbortController, one suspension)", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "GET events.list (two hooks → no delta) → claim owned", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "step_started executeTurnStep · abort-reader GET opens", kind: "ws" },
+      { t: "msg", from: 3, to: 4, label: "GET snapshot tail → null sentinel", kind: "ws" },
+      { t: "self", lane: 3, label: "initializeCheckpoint from the submission's seed (bundle compile)", kind: "compute" },
+      { t: "msg", from: 3, to: 4, label: "PUT descriptor + done  ∥  run_created + publish (timeout)  ∥  model", kind: "ws", rt: "overlapped with the model call" },
+      { t: "self", lane: 3, label: "model call · events enqueued locally, drained in background", kind: "compute" },
+      { t: "phase", label: "continues as Path B from the drain onward" },
+    ],
+  });
 
-        // Path A after the recommendations
+// Path A after the recommendations
         seq("fig-a2", {
           aria: "Proposed new session: handler starts holder and turn in parallel; both hop at once; turn reaches the model after one hook write, one step start, and one marker write.",
           lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
@@ -2479,131 +2003,41 @@
         });
 
         // Path B
-        seq("fig-b", {
-          aria: "Follow-up on idle session: handler starts a candidate, candidate claims the hook, executes, finalizes.",
-          lanes: [L.handler, L.vqs, L.turn, L.ws],
-          events: [
-            {
-              t: "self",
-              lane: 0,
-              label: "acceptSubmission: mint eventId, no reads",
-              kind: "compute",
-            },
-            { t: "msg", from: 0, to: 3, label: "run_created", kind: "ws", par: true },
-            { t: "msg", from: 0, to: 1, label: "publish", kind: "vqs", par: true },
-            {
-              t: "self",
-              lane: 0,
-              label: "202; client reads event stream (cached descriptor)",
-              kind: "compute",
-            },
-            { t: "phase", label: "run created → run started", ms: "60 ms p50" },
-            { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
-            { t: "msg", from: 2, to: 3, label: "run_started", kind: "ws", bg: true },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "hook_created eve:turn:<sid> + abrt_ (same suspension)",
-              kind: "ws",
-              rt: "conflict would return in this response",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "GET events.list (patch reload)",
-              kind: "ws",
-              rt: "upstream beta.48: none",
-            },
-            {
-              t: "self",
-              lane: 2,
-              label: "cold replay → claim owned → executeTurnStep",
-              kind: "replay",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "step_started (lazy, carries input) · abort-reader GET opens",
-              kind: "ws",
-            },
-            { t: "phase", label: "run started → execute started", ms: "200 ms p50" },
-            {
-              t: "self",
-              lane: 2,
-              label: "descriptor: cache hit (cold: GET /v2/runs/:holder + GET descriptor)",
-              kind: "compute",
-            },
-            { t: "msg", from: 2, to: 3, label: "GET snapshot head (startIndex −1)", kind: "ws" },
-            {
-              t: "self",
-              lane: 2,
-              label: "hydrate checkpoint, admit input, bind caller",
-              kind: "compute",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "PUT entered marker",
-              kind: "ws",
-              rt: "fence: effects begin",
-            },
-            { t: "phase", label: "execute started → model start", ms: "141 ms p50" },
-            {
-              t: "self",
-              lane: 2,
-              label: "model call (mock 7 ms) · events stream to writer",
-              kind: "compute",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "PUT writeMulti event batch (1 ms window)",
-              kind: "ws",
-            },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "PUT commit checkpoint",
-              kind: "ws",
-              rt: "contribute() awaits durability",
-            },
-            { t: "phase", label: "model end → execute completed", ms: "190 ms p50" },
-            { t: "msg", from: 2, to: 3, label: "step_completed (sinceCursor → delta)", kind: "ws" },
-            {
-              t: "self",
-              lane: 2,
-              label: "inline replay · drain inbox · reduceTurnBoundary → finalize",
-              kind: "replay",
-            },
-            { t: "msg", from: 2, to: 3, label: "step_started finalizeTurnStep", kind: "ws" },
-            { t: "phase", label: "execute completed → finalize started", ms: "73 ms p50" },
-            { t: "msg", from: 2, to: 3, label: "GET snapshot head", kind: "ws" },
-            { t: "msg", from: 2, to: 3, label: "PUT entered marker", kind: "ws" },
-            {
-              t: "msg",
-              from: 2,
-              to: 3,
-              label: "PUT events: turn.completed, session.waiting",
-              kind: "ws",
-              rt: "client latency ends here (≈1,035 ms)",
-            },
-            { t: "msg", from: 2, to: 3, label: "PUT commit checkpoint", kind: "ws" },
-            { t: "phase", label: "finalize body", ms: "312 ms p50" },
-            { t: "msg", from: 2, to: 3, label: "step_completed (delta)", kind: "ws" },
-            { t: "self", lane: 2, label: "inline replay → return receipt", kind: "replay" },
-            { t: "msg", from: 2, to: 3, label: "run_completed", kind: "ws" },
-            { t: "msg", from: 2, to: 1, label: "DELETE lease (ack)", kind: "vqs" },
-            { t: "phase", label: "finalize completed → run completed", ms: "153 ms p50" },
-          ],
-        });
+  seq("fig-b", {
+    aria: "Follow-up on idle session at 5a95ccb4d: start inside waitUntil, one hop, two-hook claim with one log read, execute with tail read and background event drain, finalize writes session.waiting, commit appends the checkpoint.",
+    lanes: [L.handler, L.vqs, L.turn, L.ws],
+    events: [
+      { t: "self", lane: 0, label: "acceptSubmission: mint eventId, no reads · 202 returned", kind: "compute" },
+      { t: "msg", from: 0, to: 3, label: "run_created", kind: "ws", par: true, note: "Runs inside waitUntil after the 202 has been sent." },
+      { t: "msg", from: 0, to: 1, label: "publish", kind: "vqs", par: true },
+      { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+      { t: "msg", from: 2, to: 3, label: "run_started", kind: "ws", bg: true },
+      { t: "msg", from: 2, to: 3, label: "hook_created ×2: eve:turn:<sid> + abrt_ (one suspension)", kind: "ws", rt: "conflict would return in this response" },
+      { t: "msg", from: 2, to: 3, label: "GET events.list (two hooks → no carried delta)", kind: "ws", rt: "workflow#4048 removes this" },
+      { t: "self", lane: 2, label: "settle on retained VM → claim owned → executeTurnStep", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started (lazy, carries input) · abort-reader GET opens", kind: "ws" },
+      { t: "self", lane: 2, label: "cold process only: GET /v2/runs/:holder for the stream key", kind: "compute" },
+      { t: "msg", from: 2, to: 3, label: "GET snapshot tail (startIndex −1) → full checkpoint", kind: "ws" },
+      { t: "self", lane: 2, label: "hydrate, admit input, bind caller", kind: "compute" },
+      { t: "phase", label: "≈6 serial requests + 1 hop before the model" },
+      { t: "self", lane: 2, label: "model call (mock 7 ms) · events enqueued to the step-local writer", kind: "compute" },
+      { t: "msg", from: 2, to: 3, label: "PUT event chunks, one per event, grouped only while a PUT is in flight (≈3–6 PUTs)", kind: "ws", rt: "drain runs in background; finish() awaited before the step returns" },
+      { t: "msg", from: 2, to: 3, label: "step_completed · result = full SessionCheckpoint (copy 1)", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay · drain inbox · reduceTurnBoundary → finalize", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started finalizeTurnStep · input = full checkpoint (copy 2)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "PUT events: turn.completed, session.waiting", kind: "ws", rt: "client latency ends here (≈1,330 ms)" },
+      { t: "msg", from: 2, to: 3, label: "step_completed · result = full checkpoint (copy 3)", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay → commitTurnStep", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "step_started commitTurnStep · input = full checkpoint (copy 4)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "PUT snapshot append (copy 5)", kind: "ws" },
+      { t: "msg", from: 2, to: 3, label: "step_completed", kind: "ws" },
+      { t: "self", lane: 2, label: "inline replay → return receipt", kind: "replay" },
+      { t: "msg", from: 2, to: 3, label: "run_completed", kind: "ws" },
+      { t: "msg", from: 2, to: 1, label: "DELETE lease (ack)", kind: "vqs" },
+    ],
+  });
 
-        // Path C
+// Path C
         seq("fig-c", {
           aria: "Steer on an active turn: candidate loses claim, resumes the owner hook, a second owner invocation buffers the envelope, the live step applies it at its boundary.",
           lanes: [L.handler, L.vqs, L.cand, L.turn2, L.turn, L.ws],
@@ -2727,9 +2161,7 @@
               t: "msg",
               from: 4,
               to: 5,
-              label: "GET head · PUT entered · model · PUT events · PUT commit",
-              kind: "ws",
-              rt: "4 storage RTs",
+              label: "checkpoint arrives as step input · model · PUT events · result = checkpoint", kind: "ws", rt: "no snapshot I/O in a mid-turn execute",
             },
             {
               t: "msg",
@@ -3185,33 +2617,28 @@
           },
         );
 
-        // ---------- Grouped bars: critical path per path ----------
+        hbars("fig-bench", [
+    { label: "Sep 8 d78e52197 · warm p50", v: 1035, em: true },
+    { label: "Sep 8 · turns 2–11", v: 994 },
+    { label: "Sep 8 · turns 91–100", v: 1065 },
+    { label: "Sep 9 6166ed00a · warm p50", v: 2805, em: true, k: "vqs", note: "first run on the snapshot simplification and main tarballs" },
+    { label: "Sep 9 6166ed00a · turns 2–11", v: 2829, k: "vqs" },
+    { label: "Sep 9 6166ed00a · turns 91–100", v: 2748, k: "vqs" },
+    { label: "Sep 9 b41a00bd2 · warm p50", v: 1696, em: true, k: "replay" },
+    { label: "Sep 9 b41a00bd2 · turns 2–11", v: 1659, k: "replay" },
+    { label: "Sep 9 b41a00bd2 · turns 91–100", v: 1939, k: "replay" },
+    { label: "Sep 9 5a95ccb4d · warm p50", v: 1330, em: true, k: "compute", note: "AbortController before the claim, success abort removed" },
+    { label: "Sep 9 5a95ccb4d · turns 2–11", v: 1158, k: "compute" },
+    { label: "Sep 9 5a95ccb4d · turns 91–100", v: 1618, k: "compute" },
+  ], { aria: "Warm-turn client latency for four hosted runs: overall median, first ten, and last ten warm turns.", max: 3000, ticks: [0, 1000, 2000, 3000], labelW: 260 });
+
+// ---------- Grouped bars: critical path per path ----------
         (function () {
           var rows = [
-            {
-              label: "B  follow-up, cached",
-              ws: 7,
-              hops: 1,
-              note: "run_created, hook_created ×2, events.list, step_started, GET head, PUT entered",
-            },
-            {
-              label: "B  follow-up, cold descriptor",
-              ws: 9,
-              hops: 1,
-              note: "+ GET /v2/runs/:holder, GET descriptor",
-            },
-            {
-              label: "D  Slack existing thread",
-              ws: 8,
-              hops: 1,
-              note: "B cached + GET hooks/by-token",
-            },
-            {
-              label: "A  new session (HTTP)",
-              ws: 20,
-              hops: 2,
-              note: "handler 1; holder 12 incl. 6 storage; turn 7 incl. timeout start",
-            },
+            { label: "B  follow-up, warm process", ws: 6, hops: 1, note: "run_created, hook_created ×2, events.list, step_started, GET snapshot tail" },
+            { label: "B  follow-up, cold process", ws: 7, hops: 1, note: "+ GET /v2/runs/:holder for the stream key" },
+            { label: "D  Slack existing thread", ws: 7, hops: 1, note: "B warm + GET hooks/by-token" },
+            { label: "A  new session (HTTP)", ws: 12, hops: 2, note: "handler 1; holder 7 incl. 2 storage; turn 5 (descriptor and timeout overlap the model)" },
             {
               label: "C  steer on active owner",
               ws: 17,
