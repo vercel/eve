@@ -1028,9 +1028,10 @@ describe("EveAgentStore background tasks", () => {
     ]);
   });
 
-  it("only reconciles an optimistic submission with its matching server message", async () => {
+  it("does not reconcile a task-delivery event with an optimistic user message", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({
+        kind: "execution.background_task",
         message: "Framework-authored task state",
         sequence: 0,
         turnId: "turn_internal",
@@ -1046,12 +1047,10 @@ describe("EveAgentStore background tasks", () => {
     await store.send({ message: "Hello" });
 
     const userMessages = store.snapshot.data.messages.filter((message) => message.role === "user");
-    expect(userMessages).toHaveLength(2);
-    expect(userMessages.map((message) => message.parts[0])).toEqual([
-      { state: "done", text: "Hello", type: "text" },
-      { state: "done", text: "Framework-authored task state", type: "text" },
-    ]);
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.parts).toEqual([{ state: "done", text: "Hello", type: "text" }]);
     expect(userMessages[0]?.metadata?.optimistic).toBeUndefined();
+    expect(store.snapshot.events).toEqual(events);
   });
 });
 

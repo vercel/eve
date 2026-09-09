@@ -14,8 +14,7 @@ import {
   getTurnClientContextState,
   setTurnClientContextState,
 } from "#harness/turn-client-context.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { TurnTaskDeliveryKey } from "#context/keys.js";
+import { markFrameworkStepInput } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
@@ -153,40 +152,44 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitTurnPreamble", () => {
-  it.each(["pending", "settled"] as const)(
-    "does not expose a %s task-delivery prompt as a received user message",
-    async (phase) => {
-      const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, phase);
-
-      await contextStorage.run(ctx, () =>
-        emitTurnPreamble(
-          async (event) => {
-            events.push(event);
-          },
-          { message: "Framework-authored task state" },
-          { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
-        ),
-      );
-
-      expect(events).toEqual([{ data: { sequence: 1, turnId: "turn_1" }, type: "turn.started" }]);
-    },
-  );
-
-  it("keeps the initiating human message visible", async () => {
+  it("marks a task-delivery prompt without removing it from the stream", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-    const ctx = new ContextContainer();
-    ctx.set(TurnTaskDeliveryKey, "initiating");
 
-    await contextStorage.run(ctx, () =>
-      emitTurnPreamble(
-        async (event) => {
-          events.push(event);
-        },
-        { message: "Start background work" },
-        { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      markFrameworkStepInput(
+        { message: "Framework-authored task state" },
+        "execution.background_task",
       ),
+      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+    );
+
+    expect(events).toEqual([
+      { data: { sequence: 1, turnId: "turn_1" }, type: "turn.started" },
+      {
+        data: {
+          kind: "execution.background_task",
+          message: "Framework-authored task state",
+          parts: [{ text: "Framework-authored task state", type: "text" }],
+          sequence: 1,
+          turnId: "turn_1",
+        },
+        type: "message.received",
+      },
+    ]);
+  });
+
+  it("keeps an unmarked message visible", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "Start background work" },
+      { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
     );
 
     expect(events.map((event) => event.type)).toEqual(["turn.started", "message.received"]);
