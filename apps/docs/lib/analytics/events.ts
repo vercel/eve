@@ -8,6 +8,7 @@ export const analyticsEvents = {
   integrationDocsOpened: "Opened integration docs",
   integrationFilterSelected: "Selected integration filter",
   integrationOpened: "Opened integration",
+  integrationRelatedResourceOpened: "Opened integration related resource",
   integrationSetupOptionSelected: "Selected integration setup option",
   integrationsSearched: "Searched integrations",
   smartMarkdownNotFound: "Served smart Markdown 404",

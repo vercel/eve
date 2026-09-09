@@ -1,4 +1,4 @@
-import { isCancel, Prompt, settings, type State, TextPrompt } from "@clack/core";
+import { isCancel, Prompt, settings, type State, TextPrompt } from "#compiled/@clack/core/index.js";
 import {
   cornerFor,
   formatPromptCancellation,

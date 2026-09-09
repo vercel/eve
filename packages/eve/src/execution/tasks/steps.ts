@@ -1,5 +1,7 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type { SessionAuthContext, SessionCommand } from "#channel/types.js";
+import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
+import { submitActivity } from "#execution/submit-activity.js";
+import type { ActivityEventV1 } from "#protocol/activity.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
@@ -14,6 +16,9 @@ import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   TASK_VIEW_STREAM_NAMESPACE,
+  TASK_PROGRESS_STREAM_NAMESPACE,
+  type TaskProgress,
+  type TaskInboundMessage,
   taskAuthorizationRequestId,
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
@@ -30,7 +35,10 @@ const log = createLogger("execution.tasks.run");
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
+export async function appendTaskViewStep(input: {
+  readonly view: TaskView;
+  readonly activityObserver?: ActivityObserverConfig;
+}): Promise<void> {
   "use step";
 
   const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
@@ -41,6 +49,64 @@ export async function appendTaskViewStep(input: { readonly view: TaskView }): Pr
   } finally {
     writer.releaseLock();
   }
+  void submitActivity({
+    events: projectTaskActivity({
+      activityObserver: input.activityObserver,
+      view: input.view,
+      settledAt: new Date().toISOString(),
+    }),
+    sink: input.activityObserver?.sink,
+  });
+}
+
+export function projectTaskActivity(input: {
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly view: TaskView;
+  readonly settledAt: string;
+}): readonly ActivityEventV1[] {
+  const work = input.activityObserver?.workIdentity;
+  if (work === undefined) return [];
+  if (input.view.status === "working")
+    return [
+      { eventId: `${work.id}:started`, kind: "work.started", startedAt: input.settledAt, work },
+    ];
+  if (!isTerminalTaskStatus(input.view.status)) return [];
+  return [
+    {
+      eventId: `${work.id}:settled:${input.view.status}`,
+      kind: "work.settled",
+      outcome: input.view.status as "completed" | "failed" | "cancelled",
+      settledAt: input.settledAt,
+      workId: work.id,
+    },
+  ];
+}
+
+export async function appendTaskProgressStep(input: {
+  readonly progress: TaskProgress;
+}): Promise<void> {
+  "use step";
+  const writer = getWritable<TaskProgress>({
+    namespace: TASK_PROGRESS_STREAM_NAMESPACE,
+  }).getWriter();
+  try {
+    await writer.write(input.progress);
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+export async function wakeTaskMessageParentStep(input: {
+  readonly message: TaskInboundMessage;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+  await dispatchSessionCommandByToken(input.token, {
+    kind: "send",
+    payload: { message: input.message.message },
+    taskDeliveryId: `${input.taskId}:message:${input.message.messageEpoch}:${input.message.messageIndex}:${input.message.callId}`,
+  });
 }
 
 /**

@@ -1,4 +1,7 @@
-import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import {
+  defineWorkflowTool,
+  type BlockingWorkflowToolDefinition,
+} from "#tools/workflow-definition.js";
 import {
   executeSleepTool,
   SLEEP_INPUT_SCHEMA,
@@ -21,11 +24,11 @@ export type { SleepToolInput, SleepToolOutput };
  * export default sleep();
  * ```
  *
- * Calls pause the durable turn workflow rather than holding an application
- * runtime open with an in-process timer.
+ * Each call runs as a durable workflow, so the wait does not hold an
+ * application runtime open.
  */
-export function sleep(): ToolDefinition<SleepToolInput, SleepToolOutput> {
-  return defineTool({
+export function sleep(): BlockingWorkflowToolDefinition<SleepToolInput, SleepToolOutput> {
+  return defineWorkflowTool({
     description: SLEEP_TOOL_DESCRIPTION,
     execute: executeSleepTool,
     inputSchema: SLEEP_INPUT_SCHEMA,

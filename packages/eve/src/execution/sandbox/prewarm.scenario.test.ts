@@ -348,6 +348,44 @@ describe("prewarmAppSandboxes", () => {
     expect(firstEvents.bootstrapCommands).toEqual(["echo bootstrap-revalidation-key"]);
   });
 
+  it("keeps unseeded bootstrap templates stable across deploy roots and instruction changes", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap_templates");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_empty_one");
+
+    const firstAppRoot = await createBootstrapRevalidationKeyAppRoot({
+      revalidationKeyExpression: undefined,
+    });
+    const firstEvents = createPrewarmEvents();
+    const first = await compileAgent({ startPath: firstAppRoot });
+    await prewarmAppSandboxes({
+      appRoot: firstAppRoot,
+      dispatch: createRecordingDispatch(firstEvents),
+    });
+
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_empty_two");
+    const secondAppRoot = await createBootstrapRevalidationKeyAppRoot({
+      revalidationKeyExpression: undefined,
+    });
+    await writeFile(join(secondAppRoot, "agent", "instructions.md"), "Changed system prompt.\n");
+    const secondEvents = createPrewarmEvents();
+    const second = await compileAgent({ startPath: secondAppRoot });
+    await prewarmAppSandboxes({
+      appRoot: secondAppRoot,
+      dispatch: createRecordingDispatch(secondEvents),
+    });
+
+    expect(first.manifest.workspaceResourceRoot.contentHash).toBeUndefined();
+    expect(second.manifest.workspaceResourceRoot.contentHash).toBeUndefined();
+    expect(second.metadata.discovery.sourceGraphHash).not.toBe(
+      first.metadata.discovery.sourceGraphHash,
+    );
+    expect(firstEvents.templateKeys).toHaveLength(1);
+    expect(secondEvents.templateKeys).toEqual(firstEvents.templateKeys);
+    expect(firstEvents.seededFilePaths).toEqual([]);
+    expect(secondEvents.seededFilePaths).toEqual([]);
+  });
+
   it("uses authored sandbox source when bootstrap omits revalidationKey", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap_templates");
@@ -752,15 +790,12 @@ async function createSkillOnlyAppRoot(input: { readonly skillBody: string }): Pr
 async function createBootstrapRevalidationKeyAppRoot(input: {
   readonly bootstrapCommand?: string;
   readonly revalidationKeyExpression: string | undefined;
-  readonly skillBody: string;
+  readonly skillBody?: string;
 }): Promise<string> {
   const appRoot = await createScratchDirectory("eve-prewarm-bootstrap-revalidation-key-");
   const agentRoot = join(appRoot, "agent");
 
   await mkdir(join(agentRoot, "sandbox"), {
-    recursive: true,
-  });
-  await mkdir(join(agentRoot, "skills"), {
     recursive: true,
   });
   await writeFile(
@@ -776,10 +811,13 @@ async function createBootstrapRevalidationKeyAppRoot(input: {
   );
   await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
   await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
-  await writeFile(
-    join(agentRoot, "skills", "route-weather.md"),
-    ["---", "description: Route weather requests.", "---", input.skillBody].join("\n"),
-  );
+  if (input.skillBody !== undefined) {
+    await mkdir(join(agentRoot, "skills"), { recursive: true });
+    await writeFile(
+      join(agentRoot, "skills", "route-weather.md"),
+      ["---", "description: Route weather requests.", "---", input.skillBody].join("\n"),
+    );
+  }
   await writeBootstrapRevalidationKeySandbox({
     appRoot,
     bootstrapCommand: input.bootstrapCommand,

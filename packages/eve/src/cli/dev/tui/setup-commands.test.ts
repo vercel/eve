@@ -81,6 +81,7 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  agentRoot?: string;
   useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
@@ -95,6 +96,7 @@ function run(input: {
     renderer: input.renderer ?? fakePanelRenderer(),
     flows: input.flows,
   };
+  if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
   if (input.useDefaultPrompter !== true) commandInput.createPrompter = () => fake.prompter;
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
@@ -203,6 +205,23 @@ describe("runTuiSetupCommand", () => {
       expect.objectContaining({
         appRoot: APP_ROOT,
         deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
+      }),
+    );
+  });
+
+  it("edits the selected workspace agent while configuring project-level provider access", async () => {
+    const flows = fakeFlows();
+
+    await run({
+      command: "model",
+      flows,
+      agentRoot: "/tmp/project/agents/researcher",
+    });
+
+    expect(flows.runModelFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: "/tmp/project/agents/researcher",
+        environmentRoot: APP_ROOT,
       }),
     );
   });

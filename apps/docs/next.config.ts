@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import { createGeistdocs } from "@vercel/geistdocs/next";
 import type { NextConfig } from "next";
 import {
@@ -17,6 +18,7 @@ const localSiteHost = "localhost:3000";
 const config: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  outputFileTracingRoot: path.resolve(import.meta.dirname, "../.."),
 
   env: {
     NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL:
@@ -55,6 +57,11 @@ const config: NextConfig = {
 
   async redirects() {
     return [
+      {
+        source: "/nights",
+        destination: "/eves",
+        permanent: true,
+      },
       {
         source: "/docs",
         destination: "/docs/getting-started",

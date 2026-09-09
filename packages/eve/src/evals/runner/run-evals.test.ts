@@ -339,6 +339,49 @@ describe("runEvals", () => {
     ]);
   });
 
+  it("streams every captured workflow run id through verbose output", async () => {
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockResolvedValue({
+      ...createTaskResult("done"),
+      result: {
+        ...createTaskResult("done").result,
+        sessions: [
+          {
+            derived: createEmptyDerivedFacts(),
+            events: [],
+            primary: true,
+            sessionId: "wrun_primary",
+            state: undefined,
+            traceContexts: [],
+          },
+          {
+            derived: createEmptyDerivedFacts(),
+            events: [],
+            primary: false,
+            sessionId: "wrun_secondary",
+            state: undefined,
+            traceContexts: [],
+          },
+        ],
+      },
+    });
+    const onEvalLog = vi.fn();
+
+    await run({
+      evaluations: [createEval("delegation")],
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      onEvalLog,
+    });
+
+    expect(onEvalLog.mock.calls).toEqual([
+      ["delegation", "workflow run id (primary session): wrun_primary"],
+      ["delegation", "workflow run id (secondary session): wrun_secondary"],
+    ]);
+  });
+
   it("scopes eval-defined reporters to the evals referencing them", async () => {
     mockArtifacts();
     mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));

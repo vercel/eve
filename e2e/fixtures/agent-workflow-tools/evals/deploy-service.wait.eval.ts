@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "A workflow tool parks the turn through a step and a sleep, then its return value settles the call.",
+    "An imported workflow executor parks the turn through a step and a sleep, then its return value settles the call.",
   async test(t) {
     const turn = await t.send("WORKFLOW-DEPLOY-START");
     turn.expectOk();

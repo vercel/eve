@@ -4,6 +4,7 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
+import { withDeliveryId } from "#internal/delivery-identity.js";
 import {
   handleWorkflowWebhookRequest,
   WORKFLOW_WEBHOOK_ROUTE_PATTERN,
@@ -299,6 +300,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
+        const deliveryId = crypto.randomUUID();
         waitUntil(
           (async () => {
             const session = attachSession(sessionId);
@@ -315,7 +317,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             );
             const result =
               body.inputResponses === undefined
-                ? await session.send(body.message!, options)
+                ? await session.send(body.message!, withDeliveryId(options, deliveryId))
                 : await session.respond(body.inputResponses, options);
             if (result.status === "session_not_active")
               throw new Error("The session is no longer active.");
@@ -323,7 +325,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
 
         return Response.json(
-          { ok: true, sessionId, status: "accepted" },
+          { ok: true, sessionId, status: "accepted", deliveryId },
           {
             headers: {
               "cache-control": "no-store",
@@ -344,6 +346,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         waitUntil(
           attachSession(sessionId).cancel({
             taskId: body.taskId,
+            tasks: body.tasks,
             turnId: body.turnId,
           }),
         );

@@ -200,7 +200,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`"linear/myagent"` is the UID you chose when registering the Connect client. `connect("linear/myagent")` is shorthand for a user-scoped interactive OAuth connection: eve resolves a token for the active user before each tool call, emits `authorization.required` when that user has not authorized yet, and resumes the parked turn after the callback completes.
+Use the connector UID returned by `vercel connect create`; the display name passed to `--name` is not the UID. `connect("linear/myagent")` is shorthand for a user-scoped interactive OAuth connection: eve resolves a token for the active user before each tool call, emits `authorization.required` when that user has not authorized yet, and resumes the parked turn after the callback completes.
 
 When a local subagent needs interactive authorization, eve surfaces the authorization lifecycle on the root session's channel, including through nested subagent chains. The challenge still points to the child session's callback, so completing it resumes the child directly while the parent continues waiting for its result.
 

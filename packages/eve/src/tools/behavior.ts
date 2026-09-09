@@ -14,10 +14,16 @@ export type CompiledToolHandling =
   | { readonly kind: "workflow-tool"; readonly workflowId: string };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
+export interface ToolExecutionShape {
+  readonly lifetime: "step" | "task";
+  readonly suspend: "none" | "workflow";
+}
+
 export interface CompiledToolBehavior {
   readonly availability: readonly ToolAvailabilityCondition[];
   readonly handling?: CompiledToolHandling;
   readonly presentation?: "load-skill";
+  readonly shape?: ToolExecutionShape;
 }
 
 /** Concrete dispatch identity prepared before a tool reaches the harness. */

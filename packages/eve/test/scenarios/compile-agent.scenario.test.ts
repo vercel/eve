@@ -156,6 +156,39 @@ describe("compiler artifacts", () => {
     );
   });
 
+  it("compiles the provided sleep definition as a workflow tool", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-workflow-sleep-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "tools"), { recursive: true });
+    await writeFile(join(agentRoot, "instructions.md"), "Wait when requested.");
+    await writeFile(
+      join(agentRoot, "tools", "sleep.mjs"),
+      'import { sleep } from "eve/tools/sleep";\nexport default sleep();\n',
+    );
+
+    const result = await compileAgent({ startPath: appRoot });
+    const packageInfo = resolveInstalledPackageInfo();
+
+    expect(result.manifest.tools).toContainEqual(
+      expect.objectContaining({
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "workflow-tool",
+            workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
+          },
+          shape: { lifetime: "step", suspend: "workflow" },
+        },
+        logicalPath: "tools/sleep.mjs",
+        name: "sleep",
+        sourceId: "tools/sleep.mjs",
+        sourceKind: "module",
+      }),
+    );
+  });
+
   it("writes stable discovery artifacts under .eve", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compiler-artifacts-", APP_ROOT_OPTIONS);
 

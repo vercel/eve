@@ -1,7 +1,10 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { attachWorkflowToolRunContext } from "#execution/workflow-tool/ask.js";
+import { ask, attachWorkflowToolRunContext } from "#execution/workflow-tool/ask.js";
+import { agent } from "#execution/tools/subagent/invoke-agent.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import { createTaskMessage } from "#tools/task.js";
 import {
   type WorkflowToolRunOutcome,
   type WorkflowToolRunRef,
@@ -15,6 +18,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
+  readonly taskId?: string;
   readonly callId: string;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
@@ -32,6 +36,7 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
 type WorkflowToolExecute = (
   input: unknown,
   ctx: ToolContext,
+  task?: unknown,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
 /** Executes one registered workflow body and reports progress to its owner. */
@@ -45,11 +50,22 @@ export async function executeWorkflowBody(
 ): Promise<WorkflowToolRunOutcome> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
-  attachWorkflowToolRunContext(ctx, { from, inbox, owner: input.owner });
+  attachWorkflowToolRunContext(ctx, {
+    from,
+    inbox,
+    owner: input.owner,
+    authorizationSupported: true,
+  });
 
   try {
     const execute = resolveWorkflowToolExecute(input);
-    const result = execute(input.executeInput ?? input.input, ctx);
+    const result = execute(
+      input.executeInput ?? input.input,
+      ctx,
+      input.execution === "background"
+        ? { taskId: input.taskId, postMessage: createTaskMessage }
+        : undefined,
+    );
     let output: JsonValue;
     if (!isAsyncIterable(result)) {
       output = await result;
@@ -64,7 +80,10 @@ export async function executeWorkflowBody(
           signal.throwIfAborted();
           if (next.done === true) {
             completed = true;
-            output = (next.value as JsonValue | undefined) ?? last ?? null;
+            output =
+              (next.value as JsonValue | undefined) ??
+              (input.execution === "blocking" ? last : undefined) ??
+              null;
             break;
           }
           last = next.value;
@@ -122,13 +141,16 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
   return execute as WorkflowToolExecute;
 }
 
-function createWorkflowBodyContext(input: WorkflowBodyInput, signal: AbortSignal): ToolContext {
+function createWorkflowBodyContext(
+  input: WorkflowBodyInput,
+  signal: AbortSignal,
+): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  return {
+  const ctx: ToolContext & WorkflowToolContext = {
     abortSignal: signal,
     callId: input.callId,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
@@ -138,7 +160,10 @@ function createWorkflowBodyContext(input: WorkflowBodyInput, signal: AbortSignal
     requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
     session: input.session,
     toolName: input.toolName,
+    ask: (request) => ask(ctx, request),
+    agent: (request) => agent(ctx, request),
   };
+  return ctx;
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {

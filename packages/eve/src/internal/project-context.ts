@@ -45,15 +45,24 @@ async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<bo
   );
 }
 
+async function isWorkspaceOwnedAgentRoot(appRoot: string, source: ProjectSource): Promise<boolean> {
+  if ((await source.stat(join(appRoot, "package.json"))) === "file") return false;
+  if ((await source.stat(join(appRoot, "agent"))) === "directory") return true;
+  return hasFlatAgentRoot(appRoot, source);
+}
+
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
   const agentsRoot = join(root, "agents");
   const entries = (await source.readDirectory(agentsRoot))
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .sort((left, right) => left.name.localeCompare(right.name));
-  const members = entries.map((entry) => {
+  const members: AgentWorkspaceMember[] = [];
+  for (const entry of entries) {
+    const appRoot = join(agentsRoot, entry.name);
+    if (!(await isWorkspaceOwnedAgentRoot(appRoot, source))) continue;
     assertValidPublicAgentName(entry.name, "Agent workspace member");
-    return { appRoot: join(agentsRoot, entry.name), name: entry.name };
-  });
+    members.push({ appRoot, name: entry.name });
+  }
   return { members, root };
 }
 
@@ -77,27 +86,36 @@ export async function findEveProjectContext(
     return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
   }
 
-  if (!hasAgents) {
-    if (await hasFlatAgentRoot(projectRoot, source)) {
-      return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+  if (hasAgents) {
+    const workspace = await resolveWorkspace(projectRoot, source);
+    if (workspace.members.length > 0) {
+      const member = workspace.members.find((candidate) =>
+        containsPath(candidate.appRoot, searchDirectory),
+      );
+      if (member !== undefined) {
+        return {
+          workspace,
+          environmentRoot: workspace.root,
+          kind: "workspace-member",
+          member,
+        };
+      }
+
+      return { workspace, environmentRoot: workspace.root, kind: "workspace" };
     }
-    throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
   }
 
-  const workspace = await resolveWorkspace(projectRoot, source);
-  const member = workspace.members.find((candidate) =>
-    containsPath(candidate.appRoot, searchDirectory),
-  );
-  if (member !== undefined) {
+  if (await hasFlatAgentRoot(projectRoot, source)) {
+    return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+  }
+  if (hasAgents) {
     return {
-      workspace,
-      environmentRoot: workspace.root,
-      kind: "workspace-member",
-      member,
+      workspace: { members: [], root: projectRoot },
+      environmentRoot: projectRoot,
+      kind: "workspace",
     };
   }
-
-  return { workspace, environmentRoot: workspace.root, kind: "workspace" };
+  throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
 }
 
 /** Resolve the owning eve project, throwing when the path has no eve package owner. */

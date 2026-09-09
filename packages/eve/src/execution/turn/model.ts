@@ -23,6 +23,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
+  TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -102,6 +103,12 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  if (rawInput.input?.kind === "deliver") {
+    const ids = rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
+    if (!getHarnessEmissionState(durableSession.state).turnId) ctx.set(TurnDeliveryIdsKey, ids);
+    else if (ids.length > 0)
+      ctx.set(TurnDeliveryIdsKey, [...new Set([...(ctx.get(TurnDeliveryIdsKey) ?? []), ...ids])]);
+  }
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
     ctx.delete(TurnTaskStateKey);
@@ -356,7 +363,9 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
     if (settlement !== undefined)
       throw new Error("A model step proposed more than one settlement.");
     settlement = {
-      events: proposal.events.map(stampMessageStreamEvent),
+      events: proposal.events.map((event) =>
+        stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey)),
+      ),
       emissionAfter: proposal.emissionAfter,
     };
   };
@@ -479,9 +488,8 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
       // again after this cancellation settles.
       const interrupted = serializeContext(ctx);
       const retained = readRetainedBackgroundToolResult(ctx);
-      const cancelledSession = await preserveCancelledTurnMessage(
-        retained?.backgroundTaskSession ?? initialSession,
-        resolved,
+      const cancelledSession = await contextStorage.run(ctx, () =>
+        preserveCancelledTurnMessage(retained?.backgroundTaskSession ?? initialSession, resolved),
       );
       return {
         action: "cancelled",
@@ -499,9 +507,8 @@ export async function runModel(rawInput: ModelInput): Promise<ModelResult> {
     const nextState = createDurableSessionState({ session: stepResult.session });
     const retained = readRetainedBackgroundToolResult(ctx);
     const cancellationState = createDurableSessionState({
-      session: await preserveCancelledTurnMessage(
-        retained?.backgroundTaskSession ?? initialSession,
-        resolved,
+      session: await contextStorage.run(ctx, () =>
+        preserveCancelledTurnMessage(retained?.backgroundTaskSession ?? initialSession, resolved),
       ),
     });
     const transition = {
@@ -585,6 +592,7 @@ function retainExecutionContext(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
 ): Record<string, unknown> {
+  before = { ...before, [TurnDeliveryIdsKey.name]: after[TurnDeliveryIdsKey.name] };
   return preserveSerializedInstrumentationState(
     preserveSerializedAgentTraceState(
       preserveSerializedSessionDynamicModelSelection(before, after),

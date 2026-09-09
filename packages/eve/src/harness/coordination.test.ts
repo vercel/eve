@@ -4,6 +4,7 @@ import {
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
   createRuntimeActionRequestFromToolCall,
@@ -64,6 +65,109 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       callId: "call-skill",
       input: { skill: "research" },
       kind: "load-skill",
+    });
+  });
+
+  it("uses the tool-authored label start callback without exposing it in event data", () => {
+    const action = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { environment: "production", secret: "hidden" },
+        toolCallId: "call-deploy",
+        toolName: "deploy",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "deploy",
+          {
+            label: {
+              start: (input) =>
+                `Deploy to ${String((input as { environment: unknown }).environment)}`,
+            },
+            description: "Deploy.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "deploy",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      action: {
+        callId: "call-deploy",
+        input: { environment: "production", secret: "hidden" },
+        kind: "tool-call",
+        toolName: "deploy",
+      },
+      presentationLabel: "Deploy to production",
+    });
+  });
+
+  it("does not let the label start callback callback mutate the action input", () => {
+    const result = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { nested: { value: "original" } },
+        toolCallId: "call-mutate",
+        toolName: "mutate",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "mutate",
+          {
+            label: {
+              start: (input) => {
+                const mutable = input as { nested: { value: string }; self?: unknown };
+                mutable.nested.value = "changed";
+                mutable.self = mutable;
+                throw new Error("presentation failed");
+              },
+            },
+            description: "Mutate.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "mutate",
+          },
+        ],
+      ]),
+    });
+
+    expect(result).toEqual({
+      action: {
+        callId: "call-mutate",
+        input: { nested: { value: "original" } },
+        kind: "tool-call",
+        toolName: "mutate",
+      },
+    });
+  });
+
+  it("ignores an label start callback callback that fails", () => {
+    expect(
+      createPresentedRuntimeActionRequestFromToolCall({
+        toolCall: {
+          input: {},
+          toolCallId: "call-deploy",
+          toolName: "deploy",
+          type: "tool-call",
+        },
+        tools: new Map([
+          [
+            "deploy",
+            {
+              label: {
+                start: () => {
+                  throw new Error("presentation failed");
+                },
+              },
+              description: "Deploy.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "deploy",
+            },
+          ],
+        ]),
+      }),
+    ).toEqual({
+      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
     });
   });
 

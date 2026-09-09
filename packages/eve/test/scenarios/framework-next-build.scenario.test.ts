@@ -127,6 +127,18 @@ async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unkn
   return config.routes;
 }
 
+async function runVercelBuild(appRoot: string): Promise<void> {
+  await runPnpmCommand({
+    args: ["exec", "./node_modules/.bin/vercel", "build", "--yes"],
+    cwd: appRoot,
+    env: {
+      ...process.env,
+      NPM_CONFIG_AUDIT: "false",
+      NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+    },
+  });
+}
+
 describe("framework-next build", () => {
   it("builds the Next.js framework fixture against the workspace eve dist", async () => {
     await runPnpmCommand({
@@ -138,10 +150,7 @@ describe("framework-next build", () => {
   it("preserves Next middleware when Vercel assembles the generated eve service", async () => {
     const app = await scenarioApp(NEXT_EVE_MIDDLEWARE_DESCRIPTOR);
 
-    await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
-      cwd: app.appRoot,
-    });
+    await runVercelBuild(app.appRoot);
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const routes = await readVercelOutputRoutes(outputRoot);
@@ -171,10 +180,7 @@ describe("framework-next build", () => {
   it("publishes named eve schedules into the assembled host output", async () => {
     const app = await scenarioApp(NEXT_EVE_NAMED_SCHEDULES_DESCRIPTOR);
 
-    await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
-      cwd: app.appRoot,
-    });
+    await runVercelBuild(app.appRoot);
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = await readVercelOutputConfig(outputRoot);

@@ -8,11 +8,18 @@ import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/de
 // be different bundled copies of this module.
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
-interface WorkflowToolRunContext {
+export interface WorkflowToolRunContext {
   readonly inbox: OwnerInbox;
   answerSeq: number;
   readonly from: WorkflowToolRunRef;
   readonly owner: InboxAddress;
+  readonly authorizationSupported?: boolean;
+}
+
+export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunContext | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as WorkflowToolRunContextCarrier)[WORKFLOW_TOOL_RUN_CONTEXT]
+    : undefined;
 }
 
 type WorkflowToolRunContextCarrier = {

@@ -6,6 +6,7 @@ import type {
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
+  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -48,6 +49,7 @@ export function normalizeAgentDefinition(
     [
       "build",
       "compaction",
+      "defaultTools",
       "description",
       "experimental",
       "limits",
@@ -78,6 +80,10 @@ export function normalizeAgentDefinition(
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
+  }
+
+  if (record.defaultTools !== undefined) {
+    definition.defaultTools = expectBoolean(record.defaultTools, message);
   }
 
   if (record.compaction !== undefined) {

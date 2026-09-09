@@ -1,4 +1,4 @@
-import { normalizeActivityText } from "#execution/activity-text.js";
+import { normalizePresentationText } from "#shared/presentation-text.js";
 import {
   type PendingActivitySettlementV1,
   type ActivityActionPhase,
@@ -66,6 +66,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startAction(snapshot, event);
     case "action.settled":
       return settleAction(snapshot, event);
+    case "action.label.updated":
+      return updateActionLabel(snapshot, event);
     case "blocker.started":
       return startBlocker(snapshot, event);
     case "blocker.settled":
@@ -83,10 +85,14 @@ function startWork(
   const parent = event.work.parentId === undefined ? undefined : snapshot.work[event.work.parentId];
   const phase =
     pending?.outcome ??
-    (parent !== undefined && parent.phase !== "running" ? "cancelled" : "running");
+    (!isBackgroundWorkBoundary(snapshot, event.work) &&
+    parent !== undefined &&
+    parent.phase !== "running"
+      ? "cancelled"
+      : "running");
   const work: ActivityWorkStateV1 = {
     ...event.work,
-    name: event.work.name === undefined ? undefined : normalizeActivityText(event.work.name),
+    name: event.work.name === undefined ? undefined : normalizePresentationText(event.work.name),
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
@@ -133,7 +139,7 @@ function startAction(
     ...snapshot,
     actions: replaceBounded(snapshot.actions, event.action.id, {
       ...event.action,
-      name: normalizeActivityText(event.action.name),
+      name: normalizePresentationText(event.action.name),
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
@@ -142,6 +148,20 @@ function startAction(
       snapshot.pendingSettlements,
       pendingKey("action", event.action.id),
     ),
+  };
+}
+
+function updateActionLabel(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "action.label.updated" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.actions[event.actionId];
+  if (current === undefined) return snapshot;
+  const label = normalizePresentationText(event.label);
+  if (current.label === label) return snapshot;
+  return {
+    ...snapshot,
+    actions: replaceBounded(snapshot.actions, event.actionId, { ...current, label }),
   };
 }
 
@@ -177,7 +197,9 @@ function startBlocker(
     blockers: replaceBounded(snapshot.blockers, event.blocker.id, {
       ...event.blocker,
       label:
-        event.blocker.label === undefined ? undefined : normalizeActivityText(event.blocker.label),
+        event.blocker.label === undefined
+          ? undefined
+          : normalizePresentationText(event.blocker.label),
       phase: phase as ActivityBlockerPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
@@ -250,7 +272,12 @@ function settleWorkTree(
   while (discovered) {
     discovered = false;
     for (const work of Object.values(snapshot.work)) {
-      if (work.parentId === undefined || !subtree.has(work.parentId) || subtree.has(work.id))
+      if (
+        work.parentId === undefined ||
+        !subtree.has(work.parentId) ||
+        subtree.has(work.id) ||
+        isBackgroundWorkBoundary(snapshot, work)
+      )
         continue;
       subtree.add(work.id);
       discovered = true;
@@ -278,6 +305,15 @@ function settleWorkTree(
         : work;
     }),
   };
+}
+
+function isBackgroundWorkBoundary(
+  snapshot: ActivitySnapshotV1,
+  work: ActivityWorkStateV1 | Extract<ActivityEventV1, { readonly kind: "work.started" }>["work"],
+): boolean {
+  if (work.kind === "task") return true;
+  if (work.callId === undefined || work.parentId === undefined) return false;
+  return snapshot.actions[`action:${work.parentId}:${work.callId}`] !== undefined;
 }
 
 function mapActivityStates<T>(

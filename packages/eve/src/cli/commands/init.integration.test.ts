@@ -166,6 +166,13 @@ describe("runInitCommand", () => {
     await expect(readFile(join(projectRoot, "tsconfig.json"), "utf8")).resolves.toContain(
       '"agents/**/*.ts"',
     );
+    expect(deps.selectInitHandoff).toHaveBeenCalledWith({ agentName: "operations" });
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
+      "exec",
+      "eve",
+      "dev",
+      "--onboard",
+    ]);
   });
 
   it("adds only agent files to an existing workspace", async () => {

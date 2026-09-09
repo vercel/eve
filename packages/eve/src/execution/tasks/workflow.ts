@@ -1,4 +1,5 @@
 import { watchAdmissionOwnerStep } from "#execution/inbox/admission.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
 import { createOwnerInbox } from "#execution/inbox/owner.js";
 import { publishOwnerStep } from "#execution/inbox/readiness.js";
 import type { InboxEnvelope, ReplyTarget } from "#execution/inbox/types.js";
@@ -9,11 +10,12 @@ import type {
 } from "#execution/workflow-tool/messages.js";
 import {
   appendTaskViewStep,
+  appendTaskProgressStep,
+  wakeTaskMessageParentStep,
   deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep,
   wakeTaskParentStep,
-  wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/steps.js";
 import {
@@ -24,7 +26,7 @@ import {
 import { type WorkflowToolRunRequestMessage } from "#execution/workflow-tool/messages.js";
 import {
   workflowToolRunOutcomeToTaskCommand,
-  workflowToolRunReportToTaskUpdate,
+  workflowToolRunReportToTaskPayload,
   workflowToolRunRequestToTaskInputRequest,
 } from "#execution/workflow-tool/results.js";
 import type { InboxResponseRoute } from "#harness/proxy-input-requests.js";
@@ -37,11 +39,13 @@ import {
   type TaskInboundAnswerInput,
   type TaskInputRequest,
   type TaskInboundUpdate,
+  type TaskInboundMessage,
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
 
 export interface TaskRunWorkflowInput {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly admissionOwnerRunId: string;
   readonly initialView: TaskView;
   readonly parentContinuationToken: string;
@@ -79,6 +83,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let dispatchRejected = false;
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
+  const pendingMessages: TaskInboundMessage[] = [];
   let updateIndex = 0;
   const pendingTraffic: PendingWorkflowToolTraffic = { ownerRequests: [] };
   const inboxResponses = new Map<string, InboxResponseRoute>();
@@ -111,7 +116,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       () => ({ kind: "watch-complete" as const }),
       (error) => ({ kind: "watch-failed" as const, error }),
     );
-    await appendTaskViewStep({ view });
+    await appendTaskViewStep({ view, activityObserver: input.activityObserver });
     while (!isFinished()) {
       pendingInbox ??= inbox.next().then(
         (envelope) => ({ kind: "inbox" as const, envelope }),
@@ -165,7 +170,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (envelope.kind === "tool.report") {
         await applyPayload(
-          workflowToolRunReportToTaskUpdate(
+          workflowToolRunReportToTaskPayload(
             envelope.payload as WorkflowToolRunReport,
             view.taskId,
             updateIndex++,
@@ -216,7 +221,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
     if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
-      await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
+      await appendTaskProgressStep({
+        progress: {
+          kind: "task-progress",
+          callId: update.callId,
+          taskId: view.taskId,
+          update: update.message,
+          updateIndex: update.updateIndex,
+        },
+      });
     } else {
       pendingUpdates.push(update);
     }
@@ -241,9 +254,26 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         );
       }
       await flushPendingTraffic();
+      if (!dispatchRejected)
+        for (const message of pendingMessages.splice(0))
+          await wakeTaskMessageParentStep({
+            message,
+            taskId: view.taskId,
+            token: input.parentContinuationToken,
+          });
     }
 
     if (payload.kind === "task-input-request") pendingInputRequest = payload;
+    if (payload.kind === "task-message") {
+      if (dispatchAcknowledged && !isTerminalTaskStatus(view.status))
+        await wakeTaskMessageParentStep({
+          message: payload,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      else pendingMessages.push(payload);
+      return;
+    }
     if (payload.kind === "task-update") {
       await handleUpdate(payload);
       return;
@@ -293,7 +323,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       executorSettled = true;
     }
     view = result.view;
-    await appendTaskViewStep({ view });
+    await appendTaskViewStep({ view, activityObserver: input.activityObserver });
     if (!isTerminalTaskStatus(view.status)) await flushUpdates();
     if (
       pendingInputRequest !== undefined &&
@@ -323,7 +353,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   async function flushUpdates(includeTerminal = false): Promise<void> {
     if (!dispatchAcknowledged || (isTerminalTaskStatus(view.status) && !includeTerminal)) return;
     for (const update of pendingUpdates) {
-      await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
+      await appendTaskProgressStep({
+        progress: {
+          kind: "task-progress",
+          callId: update.callId,
+          taskId: view.taskId,
+          update: update.message,
+          updateIndex: update.updateIndex,
+        },
+      });
     }
     pendingUpdates = [];
   }

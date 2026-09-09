@@ -20,6 +20,7 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {
@@ -478,6 +479,83 @@ describe("connection_search", () => {
       },
     ]);
   });
+
+  it.each([false, true])(
+    "completes connection auth through the shared token cache (fresh token refused: %s)",
+    async (refused) => {
+      const getToken = vi.fn(async () => {
+        throw new ConnectionAuthorizationRequiredError("salesforce");
+      });
+      const startAuthorization = vi.fn(async () => ({
+        challenge: { url: "https://idp.example.com/authorize" },
+      }));
+      const completeAuthorization = vi.fn(async () => ({ token: "fresh-token" }));
+      const salesforce: ResolvedConnectionDefinition = {
+        ...connection("salesforce"),
+        instanceId: "salesforce-instance",
+        authorization: {
+          principalType: "user",
+          getToken,
+          startAuthorization,
+          completeAuthorization,
+        },
+      };
+      const connectionRegistry = registry({
+        connections: [salesforce],
+        loadTools: {
+          salesforce: async () => {
+            const headers = await resolveHeaders(salesforce);
+            expect(headers.Authorization).toBe("Bearer fresh-token");
+            if (refused) throw new ConnectionAuthorizationRequiredError("salesforce");
+            return [{ name: "list_accounts", description: "List accounts", inputSchema: {} }];
+          },
+        },
+      });
+      const setup = (ctx: ContextContainer) => {
+        ctx.set(SessionIdKey, "session-auth");
+        ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+        ctx.set(AuthKey, {
+          attributes: {},
+          authenticator: "test-idp",
+          issuer: "test-idp",
+          principalId: "user-1",
+          principalType: "user",
+        });
+      };
+      const input = { connection: "salesforce", keywords: "accounts" };
+      const pending = await executeConnectionSearch(connectionRegistry, input, setup);
+      if (!isAuthorizationSignal(pending)) throw new Error("expected authorization signal");
+      const challenge = pending.challenges[0]!;
+      expect(challenge).toMatchObject({
+        instanceId: "salesforce-instance",
+        principal: { type: "user", id: "user-1", issuer: "test-idp" },
+      });
+      const resumed = executeConnectionSearch(connectionRegistry, input, (ctx) => {
+        setup(ctx);
+        ctx.set(PendingAuthorizationResultKey, [
+          {
+            ...challenge,
+            callback: { method: "GET", params: { code: "approved" } },
+          },
+        ]);
+      });
+      if (refused) {
+        await expect(resumed).rejects.toThrow("rejected the token immediately after authorization");
+      } else {
+        await expect(resumed).resolves.toMatchObject([
+          { qualifiedName: "salesforce__list_accounts" },
+        ]);
+      }
+      expect(getToken).toHaveBeenCalledOnce();
+      expect(startAuthorization).toHaveBeenCalledOnce();
+      expect(completeAuthorization).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          principal: challenge.principal,
+          callback: { method: "GET", params: { code: "approved" } },
+        }),
+      );
+    },
+  );
 
   it("replays authorization from the step-scoped durable execute descriptor", async () => {
     const salesforce: ResolvedConnectionDefinition = {

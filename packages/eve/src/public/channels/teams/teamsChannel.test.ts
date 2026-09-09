@@ -400,8 +400,8 @@ describe("teamsChannel", () => {
           "/v3/conversations/19%3Aconversation%40thread.tacv2/activities/approval-card",
         ) && (init as RequestInit).method === "PUT",
     );
-    expect(updateCall).toBeDefined();
-    const updateBody = JSON.parse(String((updateCall?.[1] as RequestInit).body)) as {
+    if (!updateCall) throw new Error("Expected the approval card update request.");
+    const updateBody = JSON.parse(String((updateCall[1] as RequestInit).body)) as {
       channelData?: unknown;
       conversation?: unknown;
       from?: unknown;

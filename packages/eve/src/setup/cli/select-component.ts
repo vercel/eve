@@ -1,4 +1,4 @@
-import { isCancel, Prompt, type State } from "@clack/core";
+import { isCancel, Prompt, type State } from "#compiled/@clack/core/index.js";
 import pc from "#compiled/picocolors/index.js";
 
 import {

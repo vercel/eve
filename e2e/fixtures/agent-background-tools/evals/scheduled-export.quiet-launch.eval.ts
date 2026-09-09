@@ -7,7 +7,7 @@ const RESULT = "EXPORT-COMPLETE";
  * A schedule-launched turn that dispatches a background task sends no launch
  * acknowledgement even when it runs with a user principal: durable schedule
  * provenance keeps conditional delivery, so the
- * launching turn and the pending update wake both complete with a null
+ * launching turn and the pending message wake both complete with a null
  * message, and only the settled wake delivers a report.
  */
 export default defineEval({
@@ -44,7 +44,7 @@ export default defineEval({
       data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
     });
 
-    // The executor's progress update wakes the parent while the cohort is
+    // The executor's explicit message wakes the parent while the cohort is
     // still pending; that wake stays silent too.
     const updateLive = t.target.watchTurn(sessionId, {
       startIndex: requireStreamIndex(session, "update wait"),
@@ -60,7 +60,7 @@ export default defineEval({
     });
     await t.require(
       updateTurn.message,
-      satisfies((message) => message === undefined, "the pending update wake is silent"),
+      satisfies((message) => message === undefined, "the pending message wake is silent"),
     );
 
     // Only the settled wake produces a user-facing report.

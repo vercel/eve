@@ -42,6 +42,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 
 const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
+export const AuthorizationHookKey = new ContextKey<string>("eve.workflowAuthorizationDestination");
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
 
 // ---------------------------------------------------------------------------
@@ -196,11 +197,12 @@ export function consumeAuthorizationResult(
 export function getHookUrl(name: string, attemptId: string): string | undefined {
   const ctx = loadContext();
   const sessionId = ctx.get(SessionIdKey);
+  const destination = ctx.get(AuthorizationHookKey) ?? sessionId;
   const baseUrl = ctx.get(CallbackBaseUrlKey);
-  if (!sessionId || !baseUrl) return undefined;
+  if (!destination || !baseUrl) return undefined;
   return createWorkflowCallbackUrl(
     baseUrl,
-    createEveConnectionCallbackRoutePath(name, attemptId, sessionId),
+    createEveConnectionCallbackRoutePath(name, attemptId, destination),
   );
 }
 

@@ -20,6 +20,50 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
 }
 
 describe("routeDeliverPayload", () => {
+  it("keeps original child inboxes separate when they share a continuation alias", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "req-a",
+          {
+            childContinuationToken: "eve:session:child-a:inbox",
+            kind: "question",
+          },
+        ],
+        [
+          "req-b",
+          {
+            childContinuationToken: "eve:session:child-b:inbox",
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-alias",
+      session: createSession(),
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { requestId: "req-a", text: "A" },
+          { requestId: "req-b", text: "B" },
+        ],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toMatchObject([
+      {
+        childContinuationToken: "eve:session:child-a:inbox",
+        payload: { inputResponses: [{ requestId: "req-a", text: "A" }] },
+      },
+      {
+        childContinuationToken: "eve:session:child-b:inbox",
+        payload: { inputResponses: [{ requestId: "req-b", text: "B" }] },
+      },
+    ]);
+  });
+
   it("routes responses to matching descendants and keeps unknown ones on forSelf", () => {
     const session = upsertProxyInputRequests({
       entries: [["req-a", { childContinuationToken: "child-a", kind: "tool-approval" }]],

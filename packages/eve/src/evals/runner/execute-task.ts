@@ -18,6 +18,8 @@ import { scopeEvalTargetHandle } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
+const EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS = 5_000;
+
 /**
  * Options for executing one eval's task.
  */
@@ -85,6 +87,19 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
       skipReason = err.reason;
     } else if (!(err instanceof EvalRequirementFailed)) {
       error = toErrorMessage(err);
+    }
+  }
+
+  if (timeoutMs !== undefined && signal.aborted) {
+    const cleanupResults = await manager.cleanup(
+      AbortSignal.timeout(EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS),
+    );
+    const cleanupErrors = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [toErrorMessage(result.reason)] : [],
+    );
+    if (cleanupErrors.length > 0) {
+      const cleanupDetail = `Eval timeout cleanup failed: ${cleanupErrors.join("; ")}`;
+      error = error === undefined ? cleanupDetail : `${error}\n${cleanupDetail}`;
     }
   }
 

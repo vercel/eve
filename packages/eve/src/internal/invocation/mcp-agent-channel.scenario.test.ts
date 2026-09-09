@@ -17,6 +17,10 @@ const MCP_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
 import { mockModel } from "eve/evals";
 
 const model = mockModel((request) => {
+  const prompt = JSON.stringify(request.messages);
+  if (prompt.includes("MCP-FAILURE-PROBE")) {
+    throw new Error("MCP-FAILURE-PROBE: provider rejected the request.");
+  }
   const answered = request.toolResults.some((result) => result.name === "ask_question");
   if (!answered) {
     return {
@@ -107,6 +111,34 @@ describe("MCP agent channel", () => {
         await expect(
           pollInvocation(server.url, "alice", "legacy", legacyInvocationId, ["cancelled"]),
         ).resolves.toMatchObject({ status: "cancelled" });
+
+        const failing = await callTool(server.url, "alice", "modern", "agent_start", {
+          message: "Trigger MCP-FAILURE-PROBE.",
+        });
+        const failingInvocationId = requiredString(failing.invocationId, "invocationId");
+        const failed = await pollInvocation(server.url, "alice", "modern", failingInvocationId, [
+          "failed",
+        ]);
+        const failure = requiredRecord(failed.error, "error");
+        expect(typeof failure.message).toBe("string");
+        expect((failure.message as string).length).toBeGreaterThan(0);
+        expect(requiredRecord(failure.data, "error.data")).toMatchObject({
+          runId: failingInvocationId,
+        });
+        const serialized = JSON.stringify(failed);
+        expect(serialized).not.toMatch(/\n\s+at /);
+        expect(serialized).not.toContain("stack");
+        expect(serialized.length).toBeLessThan(4_096);
+
+        const unknown = await callToolResult(server.url, "alice", "modern", "agent_get", {
+          invocationId: "does-not-exist",
+        });
+        expect(unknown.isError).toBe(true);
+        const notPending = await callToolResult(server.url, "alice", "modern", "agent_update", {
+          invocationId,
+          responses: [{ optionId: "yes", requestId: "stale" }],
+        });
+        expect(notPending.isError).toBe(true);
       } catch (error) {
         throw new Error(
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),

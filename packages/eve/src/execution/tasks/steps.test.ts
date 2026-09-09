@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deliverTaskInputResponsesStep,
   formatTaskNotification,
+  projectTaskActivity,
   wakeTaskAgentRequestParentStep,
 } from "#execution/tasks/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/workflow-tool/answer.js";
@@ -54,6 +55,74 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
   },
 ];
 
+describe("projectTaskActivity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("projects terminal task settlement", () => {
+    expect(
+      projectTaskActivity({
+        activityObserver: {
+          sink: {
+            url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+            version: 1,
+          },
+          workIdentity: {
+            id: "work:task",
+            kind: "task",
+            rootSessionId: "root",
+            rootTurnId: "turn",
+          },
+        },
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: notificationCases[0]!.view,
+      }),
+    ).toEqual([
+      expect.objectContaining({ kind: "work.settled", outcome: "completed", workId: "work:task" }),
+    ]);
+  });
+
+  it("projects task work when its initial view is written", () => {
+    const workIdentity = {
+      id: "work:task",
+      kind: "task" as const,
+      name: "export",
+      parentId: "work:root",
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    expect(
+      projectTaskActivity({
+        activityObserver: {
+          sink: {
+            url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+            version: 1,
+          },
+          workIdentity,
+        },
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: { metadata, status: "working", taskId: "task-1" },
+      }),
+    ).toEqual([
+      {
+        eventId: "work:task:started",
+        kind: "work.started",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        work: workIdentity,
+      },
+    ]);
+  });
+
+  it("does nothing without activity observation", () => {
+    expect(
+      projectTaskActivity({
+        activityObserver: undefined,
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: { metadata, status: "working", taskId: "task-1" },
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("formatTaskNotification", () => {
   it.each(notificationCases)(
     "includes terminal output in the parent notification",
@@ -95,6 +164,21 @@ describe("deliverTaskInputResponsesStep", () => {
       payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
       taskDeliveryId: "task-1:req-1",
     });
+  });
+
+  it("uses the persisted child address after its continuation alias changes", async () => {
+    const childContinuationToken = "eve:session:original-child:inbox";
+    await deliverTaskInputResponsesStep({
+      answer: { ...answer, childContinuationToken },
+      requestIds: ["req-1"],
+    });
+
+    expect(dispatchSessionCommandByToken).toHaveBeenCalledWith(
+      childContinuationToken,
+      expect.objectContaining({
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+      }),
+    );
   });
 
   it("posts a remote child answer to its narrowed task-input route", async () => {

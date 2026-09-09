@@ -38,6 +38,7 @@ import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { createLogger } from "#internal/logging.js";
 import { notifyInitializationFailure } from "#execution/turn/initialization-failure.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 
 const log = createLogger("execution.turn.finalize");
 const FAILURE_MESSAGE = "The turn could not complete safely.";
@@ -60,6 +61,17 @@ export async function finalizeTurnStep(input: FinalizeTurnInput): Promise<Sessio
 async function finalizeTurn(input: FinalizeTurnInput): Promise<SessionCheckpoint> {
   const writeId = getStepMetadata().stepId;
   const original = accountPending(input.checkpoint, input.pending, input.kind);
+  if (
+    input.pending.some((event) => {
+      if (event.kind !== "session.submit") return false;
+      const command = (event.payload as { submission: AcceptedSubmission }).submission.command;
+      return command.kind === "cancel" && command.tasks === true;
+    })
+  )
+    await cancelAllIndexedSessionTasksStep({
+      sessionState: original.state,
+      serializedContext: original.serializedContext,
+    });
   const result = original.result;
   const cancelling =
     input.kind === "cancel" ||

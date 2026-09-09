@@ -27,15 +27,25 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });
-    // Parallel fan-out: both echo-marker subagents are called before either
-    // completes. subagent.completed can be emitted more than once if the
-    // resolution step re-runs before commit (benign duplicate — client state is
-    // built from callId-deduped action.result), so tolerate >=2 here; the exact
-    // distinct count is pinned by calledSubagent below.
-    turn.eventOrder([
-      { type: "subagent.called", data: { name: "echo-marker" }, count: 2 },
-      { type: "subagent.completed", data: { subagentName: "echo-marker" }, count: (n) => n >= 2 },
-    ]);
+    // Workflow delivery can replay either event; count logical calls, not deliveries.
+    turn.eventsSatisfy("both distinct children start before either completes", (events) => {
+      const called = new Map<string, number>();
+      const completed = new Map<string, number>();
+      for (const [index, event] of events.entries()) {
+        if (event.type === "subagent.called" && event.data.name === "echo-marker") {
+          if (!called.has(event.data.callId)) called.set(event.data.callId, index);
+        }
+        if (event.type === "subagent.completed" && event.data.subagentName === "echo-marker") {
+          if (!completed.has(event.data.callId)) completed.set(event.data.callId, index);
+        }
+      }
+      return (
+        called.size === 2 &&
+        completed.size === 2 &&
+        [...completed.keys()].every((callId) => called.has(callId)) &&
+        Math.max(...called.values()) < Math.min(...completed.values())
+      );
+    });
     t.calledSubagent("echo-marker", {
       output: /SUBAGENT_TOKEN=echo-marker-9F2X/,
       count: 2,

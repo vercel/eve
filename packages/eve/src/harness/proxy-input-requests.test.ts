@@ -153,6 +153,31 @@ describe("upsertProxyInputRequests", () => {
 });
 
 describe("toProxyInputRequestEntries", () => {
+  it("persists the original child's inbox through a session snapshot round trip", () => {
+    const entries = toProxyInputRequestEntries({
+      callId: "call-1",
+      childContinuationToken: "eve:session:original-child:inbox",
+      childSessionId: "original-child",
+      event: {
+        requests: [createRequest("req-1", "question")],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t",
+      },
+      kind: "subagent-input-request",
+      subagentName: "delegate",
+    });
+    const session = upsertProxyInputRequests({
+      entries,
+      forChildContinuationToken: "eve:session:original-child:inbox",
+      session: createSession(),
+    });
+
+    expect(getProxyInputRequests(JSON.parse(JSON.stringify(session.state))).get("req-1")).toEqual(
+      expect.objectContaining({ childContinuationToken: "eve:session:original-child:inbox" }),
+    );
+  });
+
   it("records shared batch and approval metadata on every route", () => {
     const requests = [
       createRequest("question-1", "question"),

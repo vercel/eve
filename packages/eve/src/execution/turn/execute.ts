@@ -40,6 +40,7 @@ import { startSessionTimeout } from "#execution/session-timeout-steps.js";
 import { sessionCommandToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { background } from "#internal/workflow/background.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 
 export interface ExecuteTurnInput {
   readonly session: SessionResources;
@@ -279,6 +280,11 @@ export async function executeTurnStep(input: ExecuteTurnInput): Promise<TurnExec
             else if (command.kind === "clear" || command.kind === "compact")
               payload = { kind: command.kind };
             else if (command.kind === "cancel") {
+              if (command.tasks)
+                await cancelAllIndexedSessionTasksStep({
+                  sessionState: state.state,
+                  serializedContext: state.serializedContext,
+                });
               remaining.shift();
               applied[submission.eventId] = "retired";
               return {

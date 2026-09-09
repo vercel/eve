@@ -1,6 +1,6 @@
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { HandleEventKey } from "#context/keys.js";
+import { HandleEventKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createDurableSessionState, type DurableSessionState } from "#execution/session/state.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -60,7 +60,7 @@ export function bindTurnEvents(input: {
       const emitted =
         "meta" in event
           ? ({ ...transformed, meta: event.meta } as MessageStreamEvent)
-          : stampMessageStreamEvent(transformed);
+          : stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
       if (!forwarded) await writer.write(encodeMessageStreamEvent(emitted));
 
       const lifecycleMessages = await dispatchMemoryLifecycleEvent({

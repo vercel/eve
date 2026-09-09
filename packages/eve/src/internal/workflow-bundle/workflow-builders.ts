@@ -5,13 +5,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
-import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
+import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import {
-  createWorkflowId,
   findWorkflowDirectiveFunctions,
   stripJavaScriptExtension,
   transformWorkflowDirectives,
-} from "./workflow-transformer.js";
+} from "#internal/workflow-bundle/workflow-transformer.js";
 
 export type WorkflowManifest = {
   steps?: {
@@ -52,7 +51,7 @@ const projectDepsCache = new Map<string, Set<string>>();
 export async function applyWorkflowTransform(
   filename: string,
   source: string,
-  mode: "workflow" | "step" | "client" | false,
+  mode: "workflow" | "step" | "client" | "metadata" | false,
   absolutePath?: string,
   projectRoot?: string,
   stableWorkflowNames: ReadonlySet<string> = new Set([
@@ -73,6 +72,7 @@ export async function applyWorkflowTransform(
   const { moduleSpecifier, stableModuleSpecifier } = resolveModuleSpecifier(
     absoluteFilename,
     resolvedProjectRoot,
+    mode === "metadata",
   );
 
   if (
@@ -87,6 +87,7 @@ export async function applyWorkflowTransform(
     // package directory) and the server bundle (built from the app) agree.
     return transformWorkflowDirectives({
       authored: true,
+      authorizeSteps: true,
       filename: authoredRelativePath(absolutePath, resolvedProjectRoot),
       mode: prepared?.hasDirectives === true ? mode : false,
       moduleSpecifier: authoredModuleIdBase(absolutePath, resolvedProjectRoot),
@@ -97,6 +98,8 @@ export async function applyWorkflowTransform(
   }
 
   return transformWorkflowDirectives({
+    // The test harness authors workflow tools inside eve's own package.
+    authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
     filename,
     mode,
     moduleSpecifier,
@@ -104,6 +107,10 @@ export async function applyWorkflowTransform(
     stableModuleSpecifier,
     stableWorkflowNames,
   });
+}
+
+function isPackageTestFixtureModule(absolutePath: string): boolean {
+  return absolutePath.replace(/\\/g, "/").includes("/src/internal/testing/");
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
@@ -120,15 +127,6 @@ function authoredRelativePath(absolutePath: string, appRoot: string): string {
 
 function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
   return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
-}
-
-/** The id the transform mints for an authored `"use workflow"` function. */
-export function authoredWorkflowId(
-  absolutePath: string,
-  appRoot: string,
-  functionName: string,
-): string {
-  return createWorkflowId(authoredModuleIdBase(absolutePath, appRoot), functionName);
 }
 
 // Bundlers hand back real paths while configuration carries the spelled
@@ -212,6 +210,7 @@ export function getImportPath(
 function resolveModuleSpecifier(
   filePath: string,
   projectRoot: string,
+  packageBuild: boolean = false,
 ): {
   moduleSpecifier: string | undefined;
   stableModuleSpecifier: string | undefined;
@@ -219,6 +218,13 @@ function resolveModuleSpecifier(
   const inNodeModules = isInNodeModules(filePath);
   const inWorkspace = !inNodeModules && isWorkspacePackage(filePath, projectRoot);
   const pkg = findPackageJson(filePath);
+
+  if (packageBuild && pkg !== null) {
+    return {
+      moduleSpecifier: `${pkg.name}@${pkg.version}`,
+      stableModuleSpecifier: pkg.name,
+    };
+  }
 
   if (!inNodeModules && !inWorkspace) {
     return {

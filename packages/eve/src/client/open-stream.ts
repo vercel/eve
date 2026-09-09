@@ -274,9 +274,19 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
+      let closed = false;
       return {
         body: response.body,
-        close: () => connectionController.abort(),
+        close: () => {
+          if (closed) return;
+          closed = true;
+          // Aborting a fetch after its response has resolved does not reliably
+          // propagate cancellation through every local HTTP transport. Cancel
+          // the body as well so its server-side Workflow stream releases its
+          // live chunk and close listeners before a reconnect opens another.
+          response.body?.cancel().catch(() => {});
+          connectionController.abort();
+        },
         streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };

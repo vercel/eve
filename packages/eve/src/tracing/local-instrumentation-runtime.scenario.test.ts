@@ -206,6 +206,25 @@ describe("local instrumentation runtime", () => {
       "      chat model-1",
       "        user.model-work",
     ]);
+    for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
+      expect(exported.attributes).toEqual(
+        expect.arrayContaining([
+          { key: "resource.name", value: { stringValue: exported.name } },
+          {
+            key: "operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : exported.name,
+            },
+          },
+        ]),
+      );
+    }
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -251,6 +270,7 @@ describe("local instrumentation runtime", () => {
 });
 
 interface OtlpSpan {
+  readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
   readonly links?: ReadonlyArray<{
     readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
     readonly spanId: string;

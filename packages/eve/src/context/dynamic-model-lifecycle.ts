@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
+import { isMockModel } from "#internal/mock-model-identity.js";
 import {
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
@@ -134,9 +135,12 @@ function setSelectionForEvent(
   selection: ResolvedRuntimeModelSelection | null,
 ): void {
   if (eventType === "step.started") {
-    // In mock mode drop the live instance so the mock adapter keeps precedence.
+    // Replace real providers in mock mode, but keep explicitly scripted responders.
     const stored =
-      selection !== null && selection.model !== undefined && shouldMockAuthoredRuntimeModels()
+      selection !== null &&
+      selection.model !== undefined &&
+      !isMockModel(selection.model) &&
+      shouldMockAuthoredRuntimeModels()
         ? { reference: selection.reference }
         : selection;
     ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, stored);

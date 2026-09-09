@@ -41,7 +41,6 @@ export const SETUP_FLOW_CONFIG = {
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
 } satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
-/** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<
     SetupFlowRenderer,
@@ -51,10 +50,23 @@ export type TuiSetupCommandRenderer = TuiPrompterRenderer &
 type MuteableSetupRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "setNavigation">;
 
+export type OnboardingScreenEvent = {
+  screen:
+    | "model_provider"
+    | "model_settings"
+    | "registry_channels"
+    | "registry_integrations"
+    | "registry_review"
+    | "registry_install";
+  registrySelectedCount?: number;
+};
+
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
-  /** The local project the in-process dev server is running. */
+  /** Project root for setup that changes shared dependencies, links, or environment files. */
   appRoot: string;
+  /** Selected agent root whose authored settings are changed by `/model`. */
+  agentRoot?: string;
   /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
@@ -63,17 +75,16 @@ export interface TuiSetupCommandInput {
   initialRegistryAddress?: string;
   /** Presentation and navigation supplied by an enclosing setup journey. */
   registryPlannerContext?: RegistryPlannerContext;
+  onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
-  /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
   flows?: Partial<TuiSetupFlows>;
 }
 
-/** The flow entry points the commands dispatch to, injectable for tests. */
 export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
   runLoginFlow: typeof runLoginFlow;
@@ -256,7 +267,8 @@ async function executeSetupCommand(
       case "model": {
         const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
-          appRoot,
+          appRoot: input.agentRoot ?? appRoot,
+          environmentRoot: appRoot,
           prompter,
           signal,
           chatGptAccountLabel: input.chatGptAccountLabel,
@@ -277,6 +289,9 @@ async function executeSetupCommand(
         };
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
+        }
+        if (input.onOnboardingScreen !== undefined) {
+          modelInput.onScreen = (screen) => input.onOnboardingScreen?.({ screen });
         }
         modelInput.withExclusiveTerminal = (task) =>
           renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
@@ -317,6 +332,7 @@ async function executeSetupCommand(
           signal,
           initialAddress: input.initialRegistryAddress,
           plannerContext: input.registryPlannerContext,
+          onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
         });

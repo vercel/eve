@@ -1,6 +1,5 @@
 import type { Command } from "#compiled/commander/index.js";
 import type { AgentWorkspace } from "#internal/project-context.js";
-import { createPrompter } from "#setup/prompter.js";
 
 import type { CliApplicationContext } from "./application-command.js";
 
@@ -26,6 +25,7 @@ async function selectWorkspaceAgent(
       `This command requires a specific agent. Pass --agent <name>. Available agents: ${names.join(", ")}.`,
     );
   }
+  const { createPrompter } = await import("#setup/prompter.js");
   const name = await createPrompter().select({
     message: "Select an agent",
     options: workspace.members.map((member) => ({ label: member.name, value: member.name })),

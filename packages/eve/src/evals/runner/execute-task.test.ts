@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
+import { ClientSession } from "#client/session.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
@@ -56,6 +57,75 @@ describe("executeTask", () => {
     });
 
     expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
+  it("resets each distinct known session after a configured timeout", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "ignored-by-runner",
+      status: "reset",
+    });
+    let evalSignal: AbortSignal | undefined;
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("other-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(
+      reset.mock.contexts.map((session) => (session as ClientSession).state.sessionId),
+    ).toEqual(["shared-root", "other-root"]);
+    for (const [options] of reset.mock.calls) {
+      expect(options).toMatchObject({ reason: "Eval timed out", signal: expect.any(AbortSignal) });
+      expect(options?.signal).not.toBe(evalSignal);
+      expect(options?.signal?.aborted).toBe(false);
+    }
+  });
+
+  it("does not run timeout cleanup for an ordinary eval failure", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "known-root",
+      status: "reset",
+    });
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.target.watchTurn("known-root");
+        throw new Error("eval failed");
+      }, "failure-with-timeout-configured"),
+      timeoutMs: 1_000,
+    });
+
+    expect(outcome.error).toBe("eval failed");
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("preserves the timeout verdict and appends cleanup failures", async () => {
+    vi.spyOn(ClientSession.prototype, "reset").mockRejectedValue(new Error("cleanup exploded"));
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        t.target.watchTurn("known-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup-failure"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(outcome.error).toContain("Eval timeout cleanup failed: cleanup exploded");
   });
 
   it("exposes a sleep helper with a one-second default", async () => {
@@ -732,13 +802,16 @@ function createScriptedServer(
   } = {},
 ) {
   const pendingTurns = [...turns];
-  const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
+  const streamQueues = new Map<
+    string,
+    { events: readonly UnstampedMessageStreamEvent[]; deliveryId?: string }[]
+  >();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
-    queue.push([...stream.events]);
+    queue.push({ events: stream.events });
     streamQueues.set(stream.sessionId, queue);
   }
 
@@ -770,36 +843,42 @@ function createScriptedServer(
         }
 
         posts.push({ body: JSON.parse(String(init?.body)), method, url });
+        const deliveryId = `delivery_${posts.length}`;
         const queue = streamQueues.get(next.sessionId) ?? [];
-        queue.push([...next.events]);
+        queue.push({ events: next.events, deliveryId });
         streamQueues.set(next.sessionId, queue);
 
         return Response.json(
           {
             ok: true,
             sessionId: next.sessionId,
+            deliveryId,
           },
           { status: posts.length === 1 ? 202 : 200 },
         );
       }
 
       const sessionId = decodeURIComponent(new URL(url).pathname.split("/").at(-2) ?? "");
-      const events = streamQueues.get(sessionId)?.shift();
-      if (events === undefined) {
+      const stream = streamQueues.get(sessionId)?.shift();
+      if (stream === undefined) {
         return Response.json({ error: "No stream.", ok: false }, { status: 404 });
       }
 
-      return streamResponse(events);
+      return streamResponse(stream.events, stream.deliveryId);
     },
   };
 }
 
-function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function streamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  deliveryId?: string,
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of stampTestEvents(events)) {
+          if (deliveryId !== undefined) Object.assign(event.meta, { deliveryIds: [deliveryId] });
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();

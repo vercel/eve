@@ -364,7 +364,7 @@ describe("compiled vendor assets", () => {
   it("copies the complete Drives-capable @vercel/sandbox declaration tree", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
       readdir(VERCEL_SANDBOX_DRIVES_DIST_ROOT, { recursive: true }),
-      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
+      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-drives"), { recursive: true }),
     ]);
     const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
     const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
@@ -376,9 +376,12 @@ describe("compiled vendor assets", () => {
 
     const [upstreamIndex, vendoredIndex, vendoredSandbox, vendoredBaseClient] = await Promise.all([
       readFile(join(VERCEL_SANDBOX_DRIVES_DIST_ROOT, "index.d.ts"), "utf8"),
-      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/index.d.ts"), "utf8"),
-      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/sandbox.d.ts"), "utf8"),
-      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/api-client/base-client.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-drives/index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-drives/sandbox.d.ts"), "utf8"),
+      readFile(
+        join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-drives/api-client/base-client.d.ts"),
+        "utf8",
+      ),
     ]);
 
     expect(vendoredIndex).toBe(upstreamIndex);
@@ -387,10 +390,10 @@ describe("compiled vendor assets", () => {
     expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
   });
 
-  it("copies stable @vercel/sandbox declarations without a second runtime bundle", async () => {
+  it("vendors stable @vercel/sandbox for lifecycle operations", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
       readdir(VERCEL_SANDBOX_STABLE_DIST_ROOT, { recursive: true }),
-      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable"), { recursive: true }),
+      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
     ]);
     const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
     const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
@@ -400,9 +403,6 @@ describe("compiled vendor assets", () => {
 
     expect(vendoredDeclarations).toEqual(upstreamDeclarations);
     expect(vendoredEntries.filter((entry) => entry.endsWith(".js"))).toEqual(["index.js"]);
-    await expect(
-      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable/index.js"), "utf8"),
-    ).resolves.toBe("export {};\n");
   });
 
   it("copies AI SDK declarations from the installed packages without authored stubs", async () => {
@@ -420,6 +420,7 @@ describe("compiled vendor assets", () => {
         rewrites: {
           "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
           "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
         },
       },
       {

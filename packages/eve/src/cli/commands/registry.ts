@@ -39,10 +39,11 @@ import {
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
-  addRegistryMappings,
+  assertCanInstallWebChat,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
+export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
 export interface AddCommandOptions {
   skipInstall?: boolean;
@@ -149,12 +150,10 @@ const CATALOG_PAGE_SIZE = 100;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
 
-function isRegistryAddress(value: string): boolean {
-  return value.startsWith("@") || /^https?:\/\//.test(value);
-}
-
 function itemAddress(item: string): string {
-  return isRegistryAddress(item) ? item : `${OFFICIAL_REGISTRY}/${item}.json`;
+  return item.startsWith("@") || /^https?:\/\//.test(item)
+    ? item
+    : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
 /** Installs an official registry item without running its declared setup command. */
@@ -203,7 +202,7 @@ function configuredRegistrySources(config: RegistryConfig): string[] {
 }
 
 function validateRegistrySource(source: string | undefined): void {
-  if (source !== undefined && !isRegistryAddress(source)) {
+  if (source !== undefined && !source.startsWith("@") && !/^https?:\/\//.test(source)) {
     throw new Error(`Registry sources must be a namespace or URL: ${source}`);
   }
 }
@@ -334,6 +333,14 @@ async function searchRegistryCatalog(
     : new Map<string, RegistrySearchMetadata>();
   const official = resultsBySource.get(OFFICIAL_CATALOG);
   if (official !== undefined) {
+    const visibleItems = official.items.filter(
+      (item) => metadataByAddress.get(searchItemAddress(item))?.hidden !== true,
+    );
+    official.items = visibleItems;
+    official.pagination = {
+      ...official.pagination,
+      total: visibleItems.length,
+    };
     official.items.sort((left, right) => {
       const rank = (item: RegistrySearchItem) =>
         metadataByAddress.get(searchItemAddress(item))?.implementation === "native" ? 0 : 1;
@@ -462,8 +469,9 @@ export async function runAddCommand(
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
-    const config = await readEveRegistryConfig(appRoot);
     const address = itemAddress(item);
+    if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
+    const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
         throw new Error("--overwrite cannot be used with --skip-install.");
@@ -637,25 +645,6 @@ export async function runAddCommand(
       resumeCommand: setupResumeCommand(item),
     });
     return reportCompletion(logger, item, completion, options);
-  });
-}
-/** Adds registry namespace mappings to the project's package.json. */
-export async function runRegistryAddCommand(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  mappings: readonly string[],
-): Promise<void> {
-  await runRegistryAction(logger, appRoot, async () => {
-    const result = await addRegistryMappings(appRoot, mappings);
-    for (const namespace of result.skippedBuiltIn) {
-      logger.log(`Skipped ${namespace} because it is built in.`);
-    }
-    for (const namespace of result.skippedExisting) {
-      logger.log(`Skipped ${namespace} because it is already configured.`);
-    }
-    if (result.added.length > 0) {
-      logger.log(`Added ${result.added.join(", ")} to package.json.`);
-    }
   });
 }
 /** Lists registry items from every configured source or one selected source. */

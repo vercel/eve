@@ -2,6 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { dispatchSessionCommand } from "#execution/session/ingress.js";
+import { readCallbackCapability } from "#subagents/callback-capability.js";
+import { sendInbox } from "#execution/inbox/send.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -32,6 +34,18 @@ export async function handleConnectionCallbackRequest(
   const eventId = createHash("sha256")
     .update(JSON.stringify(authorizationCallback))
     .digest("base64url");
+  const target = readCallbackCapability(sessionId);
+  if (target !== undefined) {
+    ctx.waitUntil(
+      sendInbox(target.address, {
+        eventId: `authorization:${eventId}`,
+        kind: "authorization.response",
+        requestId: target.requestId,
+        payload: { payloads: [{ authorizationCallback }] },
+      }),
+    );
+    return buildAuthorizationCompletePage();
+  }
   ctx.waitUntil(
     dispatchSessionCommand(
       sessionId,

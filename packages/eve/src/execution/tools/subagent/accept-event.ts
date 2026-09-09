@@ -12,6 +12,12 @@ export async function acceptTaskAuthorizationEvent(input: {
   const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, taskId);
   if (entry === undefined || entry.terminalView !== undefined) return false;
+  if (
+    hookPayload.childSessionId === entry.taskRunId &&
+    hookPayload.subagentName === entry.metadata.name &&
+    hookPayload.event.data.turnId === entry.createdByTurnId
+  )
+    return true;
 
   const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
   const claimed = handles.find(

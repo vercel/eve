@@ -44,8 +44,45 @@ describe("Codex direct transport", () => {
       ),
     });
 
+    const body = {
+      stream: true,
+      store: false,
+      input: [
+        {
+          type: "reasoning",
+          id: "rs_1",
+          encrypted_content: "encrypted",
+          summary: [{ type: "summary_text", text: "Checking." }],
+        },
+        {
+          type: "message",
+          id: "msg_1",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Checking." }],
+        },
+        {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_1",
+          name: "read",
+          arguments: '{"id":"invoice-1","providerOptions":{"openai":{"itemId":"user-data"}}}',
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_1",
+          output: [
+            {
+              type: "input_image",
+              image_url: "https://example.com/invoice.png",
+              detail: "auto",
+              id: "nested-id",
+            },
+          ],
+        },
+      ],
+    };
     const response = await codexFetch("https://api.openai.com/v1/responses", {
-      body: '{"stream":true}',
+      body: JSON.stringify(body),
       method: "POST",
     });
 
@@ -56,7 +93,15 @@ describe("Codex direct transport", () => {
       "Bearer stale-token",
       "Bearer fresh-token",
     ]);
-    expect(requests.map((request) => request.body)).toEqual(['{"stream":true}', '{"stream":true}']);
+    const expectedBody = {
+      ...body,
+      input: body.input.map(({ id: _id, ...item }) => item),
+    };
+    expect(requests.map((request) => JSON.parse(request.body ?? "{}"))).toEqual([
+      expectedBody,
+      expectedBody,
+    ]);
+    expect(requests[0]?.body).toBe(requests[1]?.body);
   });
 
   it("does not replay a Request body after 401", async () => {

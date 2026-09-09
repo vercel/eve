@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
@@ -59,17 +60,6 @@ const WORKFLOW_ALIAS_SPECIFIERS = [
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
-/**
- * Packages eve itself pulls into hosted application output that must stay
- * external so Nitro/rolldown does not try to inline platform-specific
- * `.node` binaries (which would fail with a UTF-8 decode error).
- *
- * `@napi-rs/keyring` reaches the hosted bundle transitively through
- * `@vercel/oidc` → `@vercel/cli-auth` and ships native `keyring.<platform>.node`
- * binaries. App authors should not have to know about this; the framework
- * traces it into `server/node_modules` automatically.
- */
-const FRAMEWORK_HOSTED_EXTERNAL_PACKAGES: readonly string[] = ["@napi-rs/keyring"];
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
   ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
@@ -116,7 +106,6 @@ function collectHostedTraceDependencies(
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES,
     // Optional engine packages (just-bash, microsandbox) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
@@ -649,7 +638,10 @@ function createApplicationNitroBundlerConfiguration(
     createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
-  const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
+  const nitroRolldownConfig = {
+    ...createNitroBundlerConfig(nitroBundlerPlugins),
+    tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
+  };
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,

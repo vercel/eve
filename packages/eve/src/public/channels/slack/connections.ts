@@ -6,7 +6,7 @@
  * challenge is a credential: anyone in a shared thread could complete a
  * posted sign-in link and bind their own identity to the session. The
  * default handler therefore posts a link-free public status while
- * delivering the actual challenge as an ephemeral "Sign in with X"
+ * delivering the actual challenge as an ephemeral "Sign in"
  * message visible only to the triggering user.
  *
  * When no user can be targeted (no triggering user id, no challenge
@@ -66,7 +66,7 @@ export function buildAuthCompletedText(input: {
 }
 
 /**
- * Block Kit blocks for the ephemeral "Sign in with X" link button.
+ * Block Kit blocks for the ephemeral "Sign in" link button.
  * Device-code flows carry a `userCode` the user must enter after
  * following the link, so it is rendered alongside the button. Slack
  * ephemerals accept the same block list shape as regular messages so the
@@ -89,7 +89,7 @@ export function buildAuthEphemeralBlocks(input: {
     elements: [
       {
         type: "button",
-        text: { type: "plain_text", text: `Sign in with ${input.displayName}` },
+        text: { type: "plain_text", text: "Sign in" },
         url: input.url,
         style: "primary",
       },

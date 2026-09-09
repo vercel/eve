@@ -1,4 +1,1 @@
-{
-  "title": "Reference",
-  "pages": ["typescript-api", "cli"]
-}
+{ "title": "Reference", "pages": ["typescript-api", "cli", "telemetry"] }

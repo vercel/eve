@@ -30,6 +30,7 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { readDeliveryId } from "#internal/delivery-identity.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -44,8 +45,12 @@ export interface Session {
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn or one owned task. */
-  cancel(options?: { taskId?: string; turnId?: string }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn and optionally its owned tasks. */
+  cancel(options?: {
+    taskId?: string;
+    tasks?: boolean;
+    turnId?: string;
+  }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -96,6 +101,9 @@ export function createSession(
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
+      const deliveryId = readDeliveryId(options);
+      if (delivery !== undefined && deliveryId !== undefined)
+        Object.assign(delivery, { deliveryId });
       const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const payload = attachClientContext<{
         context?: readonly string[];
@@ -143,11 +151,14 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { taskId?: string; turnId?: string }) {
-      return await runtime.dispatchSession({
-        command: { kind: "cancel", taskId: options?.taskId, turnId: options?.turnId },
-        sessionId: id,
-      });
+    async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
+      const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
+        kind: "cancel",
+      };
+      if (options?.taskId !== undefined) command.taskId = options.taskId;
+      if (options?.tasks !== undefined) command.tasks = options.tasks;
+      if (options?.turnId !== undefined) command.turnId = options.turnId;
+      return await runtime.dispatchSession({ command, sessionId: id });
     },
     async compact() {
       return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });

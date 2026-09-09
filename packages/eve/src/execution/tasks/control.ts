@@ -119,7 +119,7 @@ export async function cancelOwnedTask(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {
-  const delivery = await sendTaskCommand({
+  await sendTaskCommand({
     command: { kind: "cancel" },
     taskInboxToken: input.entry.taskInboxToken,
   });
@@ -127,7 +127,7 @@ export async function cancelOwnedTask(input: {
   const view = isTerminalTaskStatus(current.status)
     ? current
     : await awaitTerminalTaskView(input.entry.taskRunId);
-  if (view.status !== "cancelled" || delivery !== "delivered") return view;
+  if (view.status !== "cancelled") return view;
 
   await input.cancelOwnedWork?.({
     entry: input.entry,

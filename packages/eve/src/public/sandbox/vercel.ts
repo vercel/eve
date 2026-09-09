@@ -1,5 +1,5 @@
 export { vercel } from "#public/sandbox/backends/vercel.js";
-export { Drive } from "#compiled/@vercel/sandbox/index.js";
+export { Drive } from "#compiled/@vercel/sandbox-drives/index.js";
 export type {
   VercelSandboxBootstrapUseOptions,
   VercelSandboxCreateOptions,

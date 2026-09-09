@@ -63,11 +63,13 @@ export async function dispatchCoordination(
 
   for (const entry of prepared.plan) {
     if (entry.kind === "workflow-task") {
+      if (input.parentContinuationToken === undefined)
+        throw new Error("Workflow tool dispatch requires the turn inbox.");
       const started = await startWorkflowTask({
         auth: prepared.auth,
         batchEvent: batch.event,
         initiatorAuth: prepared.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+        parentContinuationToken: input.parentContinuationToken,
         parentSession: prepared.parentSession,
         session: nextSession,
         task: entry.task,

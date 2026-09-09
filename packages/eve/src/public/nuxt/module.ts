@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
+import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
@@ -91,7 +92,7 @@ async function resolveEveProxyTarget(input: {
  * production. Requires Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
-export default defineNuxtModule<EveNuxtModuleOptions>({
+const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {
     name: "eve",
     configKey: "eve",
@@ -159,3 +160,5 @@ export default defineNuxtModule<EveNuxtModuleOptions>({
     }
   },
 });
+
+export default eveNuxtModule;

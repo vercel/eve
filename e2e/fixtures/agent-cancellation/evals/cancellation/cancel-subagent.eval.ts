@@ -1,7 +1,8 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-const RECOVERY_TOKEN = "CANCELLED-SUBAGENT-RECOVERED";
+const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
+const RECOVERY_RESULT = "CANCELLED-SUBAGENT-RECOVERED";
 
 export default defineEval({
   description:
@@ -71,12 +72,12 @@ export default defineEval({
     const resumed = await t.send(
       [
         "Use the Workflow tool exactly once.",
-        `In its JavaScript, call sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_TOKEN)}.`,
+        `In its JavaScript, call sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
         "Return the inline result and reply with it verbatim. Do not call sleeper outside Workflow.",
       ].join(" "),
     );
     resumed.expectOk();
-    resumed.messageIncludes(RECOVERY_TOKEN);
+    resumed.messageIncludes(RECOVERY_RESULT);
     resumed.event("subagent.called", {
       count: 1,
       data: {

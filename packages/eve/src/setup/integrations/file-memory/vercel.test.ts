@@ -28,7 +28,7 @@ const privateStore: BlobStore = {
 };
 const exactConnection: BlobStoreConnection = {
   envVarEnvironments: [...FILE_MEMORY_BLOB_ENVIRONMENTS],
-  envVarPrefix: FILE_MEMORY_BLOB_PREFIX,
+  envVarPrefix: "EVE_MEMORY_BLOB",
   projectId: project.projectId,
 };
 
@@ -156,15 +156,18 @@ describe("file-memory Blob reconciliation", () => {
     await expect(prepareWith(storageClient)).resolves.toMatchObject({ action: "create" });
   });
 
-  it("rejects an incompatible eve-prefixed binding", async () => {
-    const storageClient = client({
-      getConnections: vi.fn(async () => [
-        { ...exactConnection, envVarPrefix: "EVE_MEMORY_LEGACY_" },
-      ]),
-      listStores: vi.fn(async () => [reference(privateStore)]),
-    });
-    await expect(prepareWith(storageClient)).rejects.toThrow("incompatible eve file-memory prefix");
-  });
+  it.each(["EVE_MEMORY_", "EVE_MEMORY_BLOB_", "EVE_MEMORY_LEGACY_"])(
+    "rejects an incompatible eve-prefixed binding: %s",
+    async (envVarPrefix) => {
+      const storageClient = client({
+        getConnections: vi.fn(async () => [{ ...exactConnection, envVarPrefix }]),
+        listStores: vi.fn(async () => [reference(privateStore)]),
+      });
+      await expect(prepareWith(storageClient)).rejects.toThrow(
+        "incompatible eve file-memory prefix",
+      );
+    },
+  );
 
   it("rejects a public store connected as eve memory", async () => {
     const storageClient = client({
@@ -228,7 +231,7 @@ describe("file-memory Blob apply", () => {
       environments: FILE_MEMORY_BLOB_ENVIRONMENTS,
       prefix: FILE_MEMORY_BLOB_PREFIX,
       projectId: project.projectId,
-      storeName,
+      storeId: privateStore.id,
     });
     expect(storageClient.pullEnvironment).toHaveBeenCalledOnce();
   });

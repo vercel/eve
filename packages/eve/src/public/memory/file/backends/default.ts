@@ -5,7 +5,6 @@ import { lazyBackend } from "#public/memory/file/backends/lazy.js";
 import { vercelBlob } from "#public/memory/file/backends/vercel-blob.js";
 
 interface VercelBlobCredentials {
-  readonly oidcToken?: string;
   readonly storeId?: string;
   readonly token?: string;
 }
@@ -41,7 +40,7 @@ function selectDefaultFileMemoryBackend(
     const credentials = probes.vercelBlobCredentials();
     if (credentials !== undefined) return vercelBlob(credentials);
     throw new Error(
-      "fileMemory() requires Vercel Blob storage. Run `/add memory/file` in eve dev or `eve integration setup file-memory`, or pass fileMemory({ backend }).",
+      "fileMemory() requires Vercel Blob storage. Set up EVE_MEMORY_BLOB_STORE_ID with `/add memory/file` in eve dev or `eve integration setup file-memory`, then redeploy. Alternatively, pass fileMemory({ backend }).",
     );
   }
   if (probes.isEveDevelopment()) return DEVELOPMENT_BACKEND;
@@ -57,14 +56,12 @@ function hasEnvironmentValue(name: string): boolean {
 function credentialsFromEnvironment(
   prefix: "BLOB" | "EVE_MEMORY_BLOB",
 ): VercelBlobCredentials | undefined {
-  const token = environmentValue(`${prefix}_READ_WRITE_TOKEN`);
-  if (token !== undefined) return { token };
-
   const storeId = environmentValue(`${prefix}_STORE_ID`);
-  if (storeId === undefined) return undefined;
+  // Let the Blob SDK resolve and refresh the current environment or request-scoped OIDC token.
+  if (storeId !== undefined) return { storeId };
 
-  // The OIDC token may be request-scoped on Vercel; the store ID is the stable attachment signal.
-  return { oidcToken: environmentValue("VERCEL_OIDC_TOKEN"), storeId };
+  const token = environmentValue(`${prefix}_READ_WRITE_TOKEN`);
+  return token === undefined ? undefined : { token };
 }
 
 function environmentValue(name: string): string | undefined {

@@ -65,6 +65,12 @@ describe("initAgentReadySummary", () => {
       "✓ Model openai/gpt-5.5\n",
     );
   });
+
+  it("reports the agents directory for a workspace", () => {
+    expect(stripAnsi(initAgentReadySummary(undefined, "/app", { workspace: true }))).toBe(
+      "✓ Model openai/gpt-5.6-luna-fast (eve default)\n✓ Agents /app/agents",
+    );
+  });
 });
 
 describe("initAgentDevHandoff", () => {

@@ -123,7 +123,7 @@ export interface ModelFlowDeps {
   readProviderSelection: typeof readProviderSelection;
   /** The provider sub-flow behind the menu's provider row. */
   runProviderFlow: typeof runProviderFlow;
-  /** Ensures Codex owns a usable login before selecting ChatGPT. */
+  /** Ensures eve has a usable ChatGPT login before selecting the subscription. */
   ensureChatGptAuth: typeof ensureChatGptAuth;
   writeProviderSelection: typeof writeProviderSelection;
 }
@@ -282,18 +282,23 @@ function modelMenuRows(
  * external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
+  /** Selected agent root whose authored model settings are edited. */
   appRoot: string;
+  /** Project root for shared provider configuration and Vercel credentials. */
+  environmentRoot?: string;
   prompter: Prompter;
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
+  onScreen?: (screen: "model_provider" | "model_settings") => void;
   signal?: AbortSignal;
-  /** Gives Codex uncontested inherited stdio while it performs login. */
+  /** Gives ChatGPT sign-in exclusive terminal ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Live ChatGPT identity shown in this configuration flow only. */
   chatGptAccountLabel?: string;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
   const { appRoot, prompter, signal } = input;
+  const environmentRoot = input.environmentRoot ?? appRoot;
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applySettings: changeAgentModelSettings,
@@ -316,10 +321,10 @@ export async function runModelFlow(input: {
       Promise.all([
         deps.readCurrentModel(appRoot),
         deps.resolveAvailableProviders(
-          appRoot,
+          environmentRoot,
           signal === undefined ? { env: process.env } : { signal, env: process.env },
         ),
-        deps.readProviderSelection(appRoot),
+        deps.readProviderSelection(environmentRoot),
         fetchCatalog(signal).catch((): GatewayCatalogModel[] | undefined => undefined),
       ]),
   );
@@ -410,6 +415,7 @@ export async function runModelFlow(input: {
     }
 
     if (pick === "model") {
+      input.onScreen?.("model_settings");
       const pickModelSettings = deps.pickModelSettings;
       if (pickModelSettings === undefined) {
         throw new Error("runModelFlow requires a pickModelSettings dep to open the model screen.");
@@ -456,8 +462,9 @@ export async function runModelFlow(input: {
       continue;
     }
 
+    input.onScreen?.("model_provider");
     const result = await deps.runProviderFlow({
-      appRoot,
+      appRoot: environmentRoot,
       prompter,
       signal,
       availableProviders,
@@ -499,14 +506,14 @@ export async function runModelFlow(input: {
     shouldAuthenticateChatGpt = true;
   }
   if (commitDraft && shouldAuthenticateChatGpt) {
-    await authenticateChatGpt(deps, input.withExclusiveTerminal);
+    await authenticateChatGpt(deps, input.withExclusiveTerminal, signal);
   }
 
   if (commitDraft && hasModelSettingsChanges(patch)) {
     lastApply = await deps.applySettings({ appRoot, patch });
   }
   if (commitDraft && nextProviderSelection !== undefined && lastApply?.kind !== "rejected") {
-    await deps.writeProviderSelection(appRoot, nextProviderSelection);
+    await deps.writeProviderSelection(environmentRoot, nextProviderSelection);
     committedProviderSelection = nextProviderSelection;
   }
   if (lastApply !== undefined && committedProviderSelection === undefined) {
@@ -545,8 +552,9 @@ function routingForModelSelection(selection: string): ModelRouting {
 async function authenticateChatGpt(
   deps: ModelFlowDeps,
   withExclusiveTerminal: (<T>(task: () => Promise<T>) => Promise<T>) | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
-  const authenticate = (): Promise<void> => deps.ensureChatGptAuth();
+  const authenticate = (): Promise<void> => deps.ensureChatGptAuth({ signal });
   await (withExclusiveTerminal === undefined
     ? authenticate()
     : withExclusiveTerminal(authenticate));

@@ -37,6 +37,8 @@ export interface CancelTurnInput {
   readonly sessionId: string;
   /** Framework task whose queued child deliveries should be discarded. */
   readonly taskId?: string;
+  /** Cancels every nonterminal task owned by the session. */
+  readonly tasks?: boolean;
   /** Limits the request to the turn the caller observed. */
   readonly turnId?: string;
 }
@@ -215,14 +217,19 @@ export type SessionCommand =
       readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
-  | { readonly kind: "cancel"; readonly taskId?: string; readonly turnId?: string }
+  | {
+      readonly kind: "cancel";
+      readonly taskId?: string;
+      readonly tasks?: boolean;
+      readonly turnId?: string;
+    }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
 
 /** Acceptance confirms a durable candidate; terminal settlement may retire its input. */
 export type SessionSendCommandResult =
-  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
   | { readonly status: "session_not_active" };
 
 /** Result of terminally resetting a session. */

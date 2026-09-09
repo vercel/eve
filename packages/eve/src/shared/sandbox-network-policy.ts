@@ -1,4 +1,4 @@
-import type * as Vercel from "#compiled/@vercel/sandbox-stable/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
 /**
  * Firewall network policy applied to a live sandbox session.

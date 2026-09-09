@@ -734,6 +734,70 @@ describe("OpenApiConnectionClient", () => {
     expect(props.mix?.type).toEqual(["string", "null"]);
   });
 
+  it("drops default and example values that contradict their schema type", async () => {
+    const spec: Record<string, unknown> = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      default: { type: "boolean", default: "false" },
+                      example: { type: "boolean", example: "false" },
+                      hasAttachments: {
+                        type: "boolean",
+                        default: "false",
+                        example: "false",
+                      },
+                      sendCopy: { type: "boolean", default: true, example: false },
+                      note: { type: "string", nullable: true, default: null, example: null },
+                      metadata: {
+                        type: "object",
+                        default: { type: "invoice", nullable: true },
+                        example: { type: "credit-note", nullable: false },
+                      },
+                      untyped: { default: "false", example: "false" },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const client = new OpenApiConnectionClient(makeConnection({ spec }));
+    const createThing = (await client.getToolMetadata()).find((m) => m.name === "createThing");
+    const properties = (
+      createThing!.inputSchema as {
+        properties: { body: { properties: Record<string, Record<string, unknown>> } };
+      }
+    ).properties.body.properties;
+
+    expect(properties.default).toEqual({ type: "boolean" });
+    expect(properties.example).toEqual({ type: "boolean" });
+    expect(properties.hasAttachments).toEqual({ type: "boolean" });
+    expect(properties.sendCopy).toEqual({ type: "boolean", default: true, example: false });
+    expect(properties.note).toEqual({
+      type: ["string", "null"],
+      default: null,
+      example: null,
+    });
+    expect(properties.metadata).toEqual({
+      type: "object",
+      default: { type: "invoice", nullable: true },
+      example: { type: "credit-note", nullable: false },
+    });
+    expect(properties.untyped).toEqual({ default: "false", example: "false" });
+  });
+
   it("keeps operations whose input schemas cannot be locally validated", async () => {
     const spec: Record<string, unknown> = {
       openapi: "3.0.3",

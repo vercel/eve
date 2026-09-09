@@ -220,6 +220,29 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards owned-task cancellation without changing the response", async () => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
+      new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
+        body: JSON.stringify({ tasks: true, turnId: "turn_1" }),
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(session.cancel).toHaveBeenCalledWith({
+      taskId: undefined,
+      tasks: true,
+      turnId: "turn_1",
+    });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "wrun_A",
+      status: "accepted",
+    });
+  });
+
   it("returns a synchronous inactive cancellation result without a session id", async () => {
     const session = createFixedSession({
       cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),

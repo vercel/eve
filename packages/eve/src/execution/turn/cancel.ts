@@ -38,7 +38,7 @@ export function cancellationSettlement(
         ? createTurnInterruptedEvent(identity)
         : createTurnCancelledEvent(identity),
       ...(kind === "cancel" ? [createSessionWaitingEvent()] : []),
-    ].map(stampMessageStreamEvent),
+    ].map((event) => stampMessageStreamEvent(event)),
     emissionAfter: {
       sessionStarted: true,
       sequence: emission.sequence + 1,

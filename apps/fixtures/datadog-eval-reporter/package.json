@@ -1,0 +1,15 @@
+{
+  "name": "datadog-eval-reporter-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "eval": "eve eval --strict"
+  },
+  "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
+    "dd-trace": "6.13.0",
+    "eve": "workspace:*"
+  }
+}

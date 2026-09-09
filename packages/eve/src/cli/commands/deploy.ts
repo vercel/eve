@@ -83,7 +83,7 @@ export async function runDeployCommand(
     }
     if (result.kind === "local-model") {
       logger.error(
-        "ChatGPT subscription models use local Codex credentials and cannot be deployed. Switch to an AI Gateway or server-authenticated model before running `eve deploy`.",
+        "ChatGPT subscription models use local ChatGPT credentials and cannot be deployed. Switch to an AI Gateway or server-authenticated model before running `eve deploy`.",
       );
       process.exitCode = 1;
       return;

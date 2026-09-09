@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import { generateText, type LanguageModel } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -14,6 +14,7 @@ import {
   TurnDynamicModelReferenceKey,
 } from "#context/keys.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { mockModel } from "#evals/mock-model.js";
 import {
   createSessionStartedEvent,
   createStepStartedEvent,
@@ -197,6 +198,58 @@ describe("dynamic model lifecycle", () => {
       },
     });
   });
+
+  it.each([
+    { nodeEnv: "test", mockAuthored: "" },
+    { nodeEnv: "production", mockAuthored: "1" },
+  ])(
+    "keeps explicit mock responders in $nodeEnv with override $mockAuthored",
+    async ({ nodeEnv, mockAuthored }) => {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", mockAuthored);
+      const ctx = new ContextContainer();
+      const stepModel = mockModel({
+        modelId: "scripted-dispatcher",
+        provider: "custom-fixture",
+        respond: "Use the explicitly authored response.",
+      });
+      const moduleMap = createModuleMap({
+        default: {
+          model: defineDynamic({
+            events: {
+              "step.started": () => ({
+                model: stepModel,
+                modelContextWindowTokens: 64_000,
+              }),
+            },
+          }),
+        },
+      });
+
+      await dispatchDynamicModelEvent({
+        ctx,
+        dynamicModel: DYNAMIC_MODEL_SOURCE,
+        event: createStepStartedEvent({
+          modelId: "unresolved",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        }),
+        messages: [],
+        scope: { moduleMap, nodeId: undefined },
+      });
+
+      const selected = getActiveDynamicModelSelection(ctx);
+      expect(selected?.model).toBe(stepModel);
+      expect(selected?.reference.id).toBe("custom-fixture/scripted-dispatcher");
+      if (selected?.model === undefined) throw new Error("Expected the explicit mock model.");
+      const response = await generateText({
+        model: selected.model,
+        prompt: "Use the configured fixture response.",
+      });
+      expect(response.text).toBe("Use the explicitly authored response.");
+    },
+  );
 
   it("rejects live provider instances at durable scopes", async () => {
     const ctx = new ContextContainer();

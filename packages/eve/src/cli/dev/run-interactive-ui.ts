@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 import {
   resumeDevelopmentRuntimeArtifacts,
   suspendDevelopmentRuntimeArtifacts,
 } from "#services/dev-client/runtime-artifacts.js";
+
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 
 import type { DevelopmentCliOptions } from "./command-options.js";
 import { resolveTuiDisplayOptions } from "./ui-options.js";
@@ -21,6 +24,8 @@ export async function runInteractiveDevelopmentUi(input: {
   readonly remoteTarget?: DevelopmentUrlTarget;
   readonly report?: DevBootProgressReporter;
   readonly runDevelopmentTui?: (input: RunDevelopmentTuiInput) => Promise<void>;
+  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
+  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   readonly server: { readonly appRoot?: string; readonly serverUrl: string };
   readonly startup?: DevelopmentTuiStartup;
 }): Promise<void> {
@@ -29,18 +34,15 @@ export async function runInteractiveDevelopmentUi(input: {
     async () => input.runDevelopmentTui ?? (await import("#cli/dev/tui/tui.js")).runDevelopmentTui,
     input.report,
   );
+  const applicationRoot = input.server.appRoot ?? input.applicationRoot;
+  const projectContext = await findEveProjectContext(applicationRoot);
+  const workspaceRoot = projectContext?.environmentRoot ?? applicationRoot;
+  const agentRoot =
+    projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined;
   const target =
     input.remoteTarget === undefined || input.existingLocalServer
-      ? {
-          kind: "local" as const,
-          serverUrl: input.server.serverUrl,
-          workspaceRoot: input.server.appRoot ?? input.applicationRoot,
-        }
-      : {
-          kind: "remote" as const,
-          serverUrl: input.server.serverUrl,
-          workspaceRoot: input.applicationRoot,
-        };
+      ? { kind: "local" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot }
+      : { kind: "remote" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot };
   const display = resolveTuiDisplayOptions(input.options);
   const name = resolveTuiTitle({ name: input.options.name, target });
   if (name !== undefined) display.name = name;
@@ -50,6 +52,8 @@ export async function runInteractiveDevelopmentUi(input: {
     initialInput: input.options.input,
     onboard: input.options.onboard,
     onBootProgress: input.report,
+    onOnboardingStep: input.onOnboardingStep,
+    onOnboardingTerminal: input.onOnboardingTerminal,
     lifecycle: input.lifecycle,
     ...display,
   };

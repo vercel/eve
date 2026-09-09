@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -15,7 +15,6 @@ import { prepareFixtures, resetExperiments, writeExperiment } from "./lib/experi
 import { canarySubject } from "./lib/source.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = resolve(appRoot, "../..");
 const evalsRoot = join(appRoot, "evals");
 const experimentsRoot = join(appRoot, "experiments");
 const { values, positionals } = parseArgs({

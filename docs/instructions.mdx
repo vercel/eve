@@ -86,7 +86,7 @@ See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failu
 
 [Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-reset) treats user-role instructions like ordinary conversation history, so a summary may replace their original text. Clear removes them with the rest of model-message history and does not rerun static or dynamic instructions. System-role instructions remain because they are outside history.
 
-Keep system-role content stable and place it before frequently changing context when practical. That gives providers the best opportunity to reuse a prompt prefix, but cache behavior and billing remain provider-specific. User-role instructions preserve the normal append-only message prefix; eve does not promise a cache hit.
+Keep system-role content stable and place it before frequently changing context when practical. That gives providers the best opportunity to reuse a prompt prefix, but cache behavior and billing remain provider-specific. User-role instructions preserve the normal append-only message prefix. Framework context such as dynamic skill announcements also keeps its position before the current request across tool steps, including when a durable step resumes. eve does not promise a cache hit.
 
 ## Disclaimer
 

@@ -52,7 +52,7 @@ export function createPromptCommandHandler(
               "/model needs eve dev running the local server (it is not available with --url).",
           };
         }
-        const appRoot = target.workspaceRoot;
+        const appRoot = target.agentRoot ?? target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
@@ -120,11 +120,15 @@ export function createPromptCommandHandler(
           withExclusiveTerminal: context.withExclusiveTerminal,
           chatGptAccountLabel: context.chatGptAccountLabel,
         };
+        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
         if (context.registryPlannerContext !== undefined) {
           commandInput.registryPlannerContext = context.registryPlannerContext;
+        }
+        if (context.onOnboardingScreen !== undefined) {
+          commandInput.onOnboardingScreen = context.onOnboardingScreen;
         }
         // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
         if (command.name === "add" && command.argument.length > 0) {

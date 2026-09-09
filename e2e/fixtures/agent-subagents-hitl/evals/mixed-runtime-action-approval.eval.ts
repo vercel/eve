@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalContext, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
 
@@ -33,7 +33,10 @@ export default defineEval({
 
     const resumed = await t.respondAll("approve");
     resumed.expectOk();
-    resumed.messageIncludes(COLLISION_MARKER);
+    const completed = resumed.message?.includes(COLLISION_MARKER)
+      ? resumed
+      : await waitForMessage(t, t, COLLISION_MARKER);
+    completed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();
     t.noFailedActions();
@@ -41,3 +44,24 @@ export default defineEval({
     t.calledSubagent("collision-child", { count: 1, status: "completed" });
   },
 });
+
+type SessionCursor = Pick<EveEvalSession, "sessionId" | "state">;
+
+async function waitForMessage(
+  t: EveEvalContext,
+  initialSession: SessionCursor,
+  marker: string,
+): Promise<EveEvalTurn> {
+  let session = initialSession;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (session.sessionId === undefined || session.state === undefined) {
+      throw new Error("Mixed approval completion wait has no parent session cursor.");
+    }
+    const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+    const turn = await live.result();
+    turn.noFailedActions();
+    if (turn.message?.includes(marker) === true) return turn;
+    session = live.session;
+  }
+  throw new Error("Mixed approval result did not reach the parent after five turns.");
+}

@@ -8,11 +8,13 @@
     "dev": "eve dev",
     "start": "eve start",
     "typecheck": "eve build && tsc",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "eve eval --strict",
+    "test:unit": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
     "@workflow/world-postgres": "catalog:",
+    "ai": "catalog:",
     "eve": "workspace:*",
     "just-bash": "3.1.0",
     "zod": "catalog:"

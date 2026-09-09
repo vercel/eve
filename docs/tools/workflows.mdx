@@ -108,7 +108,7 @@ const answer = await ask(ctx, {
 }); // { optionId?: string; text?: string }
 ```
 
-`ask` publishes an `input.requested` event on the session — rendered the way channels render
+`ctx.ask` (or the `ask` helper from `eve/workflow`) publishes an `input.requested` event on the session — rendered the way channels render
 `ask_question` and tool approvals — and returns a `Promise<ToolInputResponse>`. Awaiting it suspends
 the run until a response arrives. Each question has its own request identity, so several questions
 can share the run's inbox. Race the promise against a deadline:

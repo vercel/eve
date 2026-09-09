@@ -52,6 +52,7 @@ function createAcceptedResponse() {
     {
       ok: true,
       sessionId: "session_1",
+      deliveryId: "delivery_1",
     },
     { status: 202 },
   );
@@ -74,7 +75,11 @@ function createStreamResponse(events: readonly unknown[]) {
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of events) {
-          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ ...(event as object), meta: { deliveryIds: ["delivery_1"] } })}\n`,
+            ),
+          );
         }
         controller.close();
       },
@@ -132,6 +137,25 @@ describe("ClientSession", () => {
     expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/session_1/cancel");
     expect(requests[1]!.method).toBe("POST");
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
+  });
+
+  it("sends tasks in the cancel body and uses signal only for fetch", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json({ ok: true, sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      );
+    const session = createSession();
+
+    await expect(
+      session.cancel({ signal: controller.signal, tasks: true, turnId: "turn_1" }),
+    ).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.signal).toBe(controller.signal);
+    expect(JSON.parse(String(init?.body))).toEqual({ tasks: true, turnId: "turn_1" });
   });
 
   it("snapshots the session from the start through one pinned durable tail", async () => {
@@ -452,7 +476,13 @@ describe("ClientSession", () => {
 
   it("resets the exact session while keeping the handle pinned to its ID", async () => {
     let headerResolution = 0;
-    const requests: Array<{ headers: Headers; method: string; url: string; body?: string }> = [];
+    const requests: Array<{
+      body?: string;
+      headers: Headers;
+      method: string;
+      signal?: AbortSignal | null;
+      url: string;
+    }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
@@ -460,6 +490,7 @@ describe("ClientSession", () => {
         body: typeof init?.body === "string" ? init.body : undefined,
         headers: new Headers(init?.headers),
         method: init?.method ?? "GET",
+        signal: init?.signal,
         url,
       });
       return Response.json({
@@ -479,7 +510,8 @@ describe("ClientSession", () => {
       },
     );
 
-    await expect(session.reset()).resolves.toEqual({
+    const signal = AbortSignal.timeout(1_000);
+    await expect(session.reset({ signal })).resolves.toEqual({
       previousSessionId: "session_1",
       status: "reset",
     });
@@ -489,6 +521,7 @@ describe("ClientSession", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/reset");
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
+    expect(requests[0]!.signal).toBe(signal);
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
@@ -614,6 +647,7 @@ describe("ClientSession", () => {
           encoder.encode(
             `${JSON.stringify({
               type: "session.waiting",
+              meta: { deliveryIds: ["delivery_1"] },
               data: { continuationToken: "session-id", wait: "next-user-message" },
             })}\n`,
           ),
@@ -804,11 +838,13 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send("first", {
-      streamReconnectPolicy: { reconnect: false },
-    })) {
-      eventTypes.push(event.type);
-    }
+    await expect(async () => {
+      for await (const event of await session.send("first", {
+        streamReconnectPolicy: { reconnect: false },
+      })) {
+        eventTypes.push(event.type);
+      }
+    }).rejects.toThrow("before the accepted message");
 
     expect(eventTypes).toEqual(["turn.started"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -856,6 +892,107 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not reconnect after an invalid stream event raises a TypeError", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        createStreamResponse([{ type: "message.appended", data: { messageDelta: 42 } }]),
+      );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(async () => {
+      for await (const _event of session.stream()) {
+        // Invalid events fail before delivery.
+      }
+    }).rejects.toThrow("Invalid message append delta for stream version 25.");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["Load failed", "network error"])(
+    "does not retry an unrecognized TypeError while opening a stream: %s",
+    async (message) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError(message));
+      const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+      await expect(async () => {
+        for await (const _event of session.stream({
+          streamReconnectPolicy: {
+            streamOpenReconnectPolicy: { baseDelayMs: 1, maxAttempts: 2 },
+          },
+        })) {
+          // The stream fails before producing an event.
+        }
+      }).rejects.toThrow(message);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["Load failed", "network error"])(
+    "reconnects after a mid-stream TypeError regardless of its message: %s",
+    async (message) => {
+      const encoder = new TextEncoder();
+      const streamUrls: string[] = [];
+      let streamRequest = 0;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+        if ((init?.method ?? "GET") === "POST") {
+          return createAcceptedResponse();
+        }
+
+        const url =
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.href
+              : request.url;
+        streamUrls.push(url);
+        streamRequest += 1;
+
+        if (streamRequest === 1) {
+          let emitted = false;
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                if (!emitted) {
+                  emitted = true;
+                  controller.enqueue(
+                    encoder.encode(
+                      `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                    ),
+                  );
+                  return;
+                }
+                controller.error(new TypeError(message));
+              },
+            }),
+            { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+          );
+        }
+
+        return createStreamResponse([
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ]);
+      });
+      const session = createSession();
+
+      vi.useFakeTimers();
+      try {
+        const eventTypes = await collectEventTypes(await session.send("first"));
+        expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
+        null,
+        "1",
+      ]);
+    },
+  );
+
   it("retries a transient fetch failure while reopening an active turn stream", async () => {
     const encoder = new TextEncoder();
     const streamUrls: string[] = [];
@@ -878,7 +1015,9 @@ describe("ClientSession", () => {
               if (!emitted) {
                 emitted = true;
                 controller.enqueue(
-                  encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                  encoder.encode(
+                    `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                  ),
                 );
                 return;
               }
@@ -1009,14 +1148,14 @@ describe("ClientSession", () => {
 
     vi.useFakeTimers();
     try {
-      const eventTypes = await collectEventTypes(
-        await session.send("first", {
-          streamReconnectPolicy: {
-            streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
-          },
-        }),
-      );
-      expect(eventTypes).toEqual([]);
+      const response = await session.send("first", {
+        streamReconnectPolicy: {
+          streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+        },
+      });
+      const assertion = expect(response.result()).rejects.toThrow("before the accepted message");
+      await vi.runAllTimersAsync();
+      await assertion;
     } finally {
       vi.useRealTimers();
     }
@@ -1037,7 +1176,9 @@ describe("ClientSession", () => {
         new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(
-              encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+              encoder.encode(
+                `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+              ),
             );
             signal?.addEventListener("abort", () => {
               controller.error(new DOMException("The operation was aborted.", "AbortError"));
