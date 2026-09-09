@@ -11,6 +11,7 @@ import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { agentCommand } from "#cli/agent-command.js";
 import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
+import { DiscoveryProjectResolutionError } from "#discover/project.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -669,11 +670,18 @@ export async function runCli(
   const applicationContext: CliApplicationContext = {
     root: resolveApplicationRoot(),
     async resolve() {
-      const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
-        applicationContext.root,
-      );
-      applicationContext.project = project;
-      applicationContext.root = project.appRoot;
+      try {
+        const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
+          applicationContext.root,
+        );
+        applicationContext.project = project;
+        applicationContext.root = project.appRoot;
+      } catch (error) {
+        if (!(error instanceof DiscoveryProjectResolutionError)) throw error;
+        const projectContext = await resolveEveProjectContext(applicationContext.root);
+        if (projectContext.kind !== "workspace") throw error;
+        applicationContext.root = projectContext.workspace.root;
+      }
     },
     async resolveAgent() {
       return resolveEveProjectContext(applicationContext.root);
