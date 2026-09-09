@@ -11,16 +11,14 @@ const executeTool =
   vi.fn<
     (
       ...args: any[]
-    ) => ReturnType<typeof import("#execution/code-mode/authorization.js").executeCodeModeTool>
+    ) => ReturnType<typeof import("#execution/code-mode/program-step.js").executeCodeModeToolStep>
   >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
   CODE_MODE_CALL_INTERRUPT_KIND: "eve.code-mode-call",
+  executeCodeModeToolStep: (_ctx: unknown, ...args: unknown[]) => executeTool(...args),
   runCodeModeProgramStep: (...args: unknown[]) => runProgram(...args),
-}));
-vi.mock("#execution/code-mode/authorization.js", () => ({
-  executeCodeModeTool: (_ctx: unknown, ...args: unknown[]) => executeTool(...args),
 }));
 vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({
   invokeAgent: (...args: unknown[]) => invokeAgent(...args),

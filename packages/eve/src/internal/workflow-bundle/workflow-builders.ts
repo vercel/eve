@@ -100,8 +100,10 @@ export async function applyWorkflowTransform(
   }
 
   return transformWorkflowDirectives({
-    // The test harness authors workflow tools inside eve's own package.
-    authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
+    // The test harness authors workflow tools inside eve's own package, and
+    // the code_mode body authorizes nested tool calls like an authored tool.
+    authorizeSteps:
+      isPackageTestFixtureModule(absoluteFilename) || isCodeModeProgramStepModule(absoluteFilename),
     filename,
     mode,
     moduleSpecifier,
@@ -113,6 +115,12 @@ export async function applyWorkflowTransform(
 
 function isPackageTestFixtureModule(absolutePath: string): boolean {
   return absolutePath.replace(/\\/g, "/").includes("/src/internal/testing/");
+}
+
+function isCodeModeProgramStepModule(absolutePath: string): boolean {
+  return /\/src\/execution\/code-mode\/program-step\.[cm]?[jt]s$/.test(
+    absolutePath.replace(/\\/g, "/"),
+  );
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {

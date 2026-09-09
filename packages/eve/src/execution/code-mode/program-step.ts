@@ -2,6 +2,7 @@ import { jsonSchema, type ToolSet } from "ai";
 
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { diffCodeModeState, type CodeModeStateChange } from "#execution/code-mode/state.js";
+import { contextStorage } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
@@ -33,12 +34,10 @@ import type {
   CodeModeToolCatalogEntry,
   CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
-import type { MatchedAuthorizationCallback } from "#execution/authorization-callback-match.js";
 import {
   AuthorizationHookKey,
   PendingAuthorizationResultKey,
-  resolveActiveAuthorizationChallenges,
-  type AuthorizationChallenge,
+  type AuthorizationSignal,
 } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import {
@@ -65,7 +64,7 @@ import {
   unwrapWorkflowSandboxResult,
   type WorkflowSandboxInterrupt,
 } from "#shared/workflow-sandbox.js";
-import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { ToolContext, ToolExecuteOptions } from "#tools/definition.js";
 
 /** Interrupt payload raised by every claimed tool the generated program calls. */
 export const CODE_MODE_CALL_INTERRUPT_KIND = "eve.code-mode-call";
@@ -89,13 +88,9 @@ export type CodeModeProgramOutcome =
   | { readonly status: "failed"; readonly error: string }
   | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
 
-export type CodeModeToolOutcome = (
-  | CodeModeCallResolution
-  | {
-      readonly status: "authorization-required";
-      readonly challenges: readonly AuthorizationChallenge[];
-    }
-) & { readonly stateChanges?: readonly CodeModeStateChange[] };
+export type CodeModeToolOutcome = CodeModeCallResolution & {
+  readonly stateChanges?: readonly CodeModeStateChange[];
+};
 
 /**
  * Starts the generated program, or resumes it once every parked call settled.
@@ -203,20 +198,25 @@ export interface CodeModeToolCall {
  * providers a turn step uses, so `bash`, `read_file`, connection tools, and
  * authored tools all run unchanged; the parent materialized the sandbox before
  * dispatching, so this step only reconnects to it.
+ *
+ * Authorization rides the workflow-tool step mechanism: passing the run's
+ * `ctx` routes the call through `workflowToolStep`, whose twin seeds the hook
+ * token and pending results on the ambient context, publishes challenges to
+ * the owner, and retries this step once the callbacks land. This step only
+ * mirrors those keys into the hydrated turn context and returns the tool's
+ * `AuthorizationSignal` unchanged.
  */
 export async function executeCodeModeToolStep(
-  input: CodeModeToolCall & {
-    readonly authorizationHookToken: string;
-    readonly authorizationResults?: readonly MatchedAuthorizationCallback["result"][];
-  },
-): Promise<CodeModeToolOutcome> {
+  _ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  input: CodeModeToolCall,
+): Promise<CodeModeToolOutcome | AuthorizationSignal> {
   "use step";
 
+  const ambient = contextStorage.getStore();
   const { ctx, harnessTools, session, rehydrateConnections } = await hydrateTurnTools(input);
-  ctx.set(AuthorizationHookKey, input.authorizationHookToken);
-  if (input.authorizationResults !== undefined) {
-    ctx.set(PendingAuthorizationResultKey, input.authorizationResults);
-  }
+  const hookToken = ambient?.get(AuthorizationHookKey);
+  if (hookToken !== undefined) ctx.set(AuthorizationHookKey, hookToken);
+  ctx.set(PendingAuthorizationResultKey, ambient?.get(PendingAuthorizationResultKey) ?? []);
   const definition = harnessTools.get(input.toolName);
   if (
     definition === undefined ||
@@ -256,16 +256,17 @@ export async function executeCodeModeToolStep(
       const output = isAsyncIterable(result) ? await lastOf(result) : result;
       return { result: output, session: enriched };
     });
+    // The tool consumed results from the hydrated context; the twin reads the
+    // remainder from the ambient one to report which attempts completed.
+    ambient?.setVirtualContext(
+      PendingAuthorizationResultKey,
+      ctx.get(PendingAuthorizationResultKey) ?? [],
+    );
     updatedSession = scoped.session;
     const authorization = readToolInterrupt(ctx, input.toolCallId);
-    if (authorization !== undefined) {
-      outcome = {
-        status: "authorization-required",
-        challenges: resolveActiveAuthorizationChallenges(authorization.challenges),
-      };
-    } else {
-      outcome = { status: "completed", output: parseJsonValue(scoped.result ?? null) };
-    }
+    // State captured before a sign-in is re-derived when the twin retries.
+    if (authorization !== undefined) return authorization;
+    outcome = { status: "completed", output: parseJsonValue(scoped.result ?? null) };
   } catch (error) {
     outcome = { status: "failed", error: toErrorMessage(error) };
   }

@@ -3,8 +3,8 @@ import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import { readCodeModeRunContext, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
-import { executeCodeModeTool } from "#execution/code-mode/authorization.js";
 import {
+  executeCodeModeToolStep,
   runCodeModeProgramStep,
   type CodeModePendingCall,
   type CodeModeProgramOutcome,
@@ -106,7 +106,9 @@ async function settleNestedCall(
       );
       return { interrupt, resolution: { status: "completed", output } };
     }
-    const { stateChanges, ...resolution } = await executeCodeModeTool(ctx, {
+    // Passing `ctx` opts this step into the workflow-tool authorization twin,
+    // which parks on sign-in and retries the step; the body only sees results.
+    const settled = await executeCodeModeToolStep(ctx, {
       event: { sequence, stepIndex, turnId },
       serializedContext: run.serializedContext,
       sessionState: run.sessionState,
@@ -114,6 +116,13 @@ async function settleNestedCall(
       toolInput: call.toolInput,
       toolName: call.toolName,
     });
+    // The authorization twin never lets a signal reach the body; a bare signal
+    // means this step ran without its twin. (Structural check: the harness
+    // module is not importable from the workflow driver body.)
+    if (!("status" in settled)) {
+      throw new Error(`Tool "${call.toolName}" requested authorization outside a workflow step.`);
+    }
+    const { stateChanges, ...resolution } = settled;
     return { interrupt, resolution, stateChanges };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();

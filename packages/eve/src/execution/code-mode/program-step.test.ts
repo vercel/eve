@@ -19,11 +19,16 @@ import {
 import type { CurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import {
+  AuthorizationHookKey,
   CallbackBaseUrlKey,
+  consumeAuthorizationResult,
   getAuthorizationResults,
   getHookUrl,
+  isAuthorizationSignal,
+  PendingAuthorizationResultKey,
   requestAuthorization,
 } from "#harness/authorization.js";
+import type { CodeModeToolOutcome } from "#execution/code-mode/program-step.js";
 import { buildToolSet } from "#harness/tools.js";
 import { applyCodeModeTool, claimsForCodeMode } from "#harness/code-mode.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -106,20 +111,50 @@ function definition(
   };
 }
 
-function nested(
-  name: string,
-  authorizationResults?: Parameters<typeof executeCodeModeToolStep>[0]["authorizationResults"],
-) {
-  return executeCodeModeToolStep({
-    authorizationHookToken: "nested-auth",
-    authorizationResults,
+type StepInput = Parameters<typeof executeCodeModeToolStep>[1];
+type AuthorizationResults = NonNullable<ReturnType<typeof getAuthorizationResults>>;
+
+const runCtx = {
+  abortSignal: new AbortController().signal,
+  callId: "outer",
+  toolName: "code_mode",
+};
+
+/**
+ * Mirrors what `withWorkflowStepAuthorization` seeds on the ambient context
+ * before the twin invokes this step, and exposes it for assertions.
+ */
+function runStep(input: StepInput, authorizationResults: AuthorizationResults = []) {
+  const ambient = new ContextContainer();
+  ambient.setVirtualContext(AuthorizationHookKey, "nested-auth");
+  ambient.setVirtualContext(PendingAuthorizationResultKey, authorizationResults);
+  return {
+    ambient,
+    result: contextStorage.run(ambient, () => executeCodeModeToolStep(runCtx, input)),
+  };
+}
+
+function nestedInput(name: string, overrides: Partial<StepInput> = {}): StepInput {
+  return {
     event: { sequence: 1, stepIndex: 2, turnId: "turn" },
     serializedContext: {},
     sessionState: {} as never,
     toolCallId: "inner",
     toolName: name,
     toolInput: {},
-  });
+    ...overrides,
+  };
+}
+
+function nested(name: string, authorizationResults?: AuthorizationResults) {
+  return runStep(nestedInput(name), authorizationResults).result;
+}
+
+/** Settles a nested call the way the body sees it: a signal here is a test failure. */
+async function settled(input: StepInput): Promise<CodeModeToolOutcome> {
+  const outcome = await runStep(input).result;
+  if (isAuthorizationSignal(outcome)) throw new Error("unexpected authorization signal");
+  return outcome;
 }
 
 function registerLookupCallbacks(): void {
@@ -300,33 +335,34 @@ describe("executeCodeModeToolStep", () => {
       definition("authorize", {
         execute: async () => {
           expect(getHookUrl("service", "attempt")).toContain("nested-auth");
-          const result = getAuthorizationResults()[0];
+          // Connection tools consume their result through scoped authorization.
+          const result = consumeAuthorizationResult("service");
           return result === undefined
             ? requestAuthorization([challenge])
             : { resume: result.resume, callback: result.callback, principal: result.principal };
         },
       }),
     );
-    await expect(nested("authorize")).resolves.toEqual({
-      status: "authorization-required",
-      challenges: [challenge],
-    });
+    const first = await nested("authorize");
+    expect(isAuthorizationSignal(first)).toBe(true);
+    expect(first).toMatchObject({ challenges: [challenge] });
     const callback = { method: "GET", params: { code: "accepted" } };
-    await expect(
-      nested("authorize", [
-        {
-          name: "service",
-          attemptId: "attempt",
-          hookUrl: challenge.hookUrl,
-          callback,
-          principal: challenge.principal,
-          resume: challenge.resume,
-        },
-      ]),
-    ).resolves.toEqual({
+    const retry = runStep(nestedInput("authorize"), [
+      {
+        name: "service",
+        attemptId: "attempt",
+        hookUrl: challenge.hookUrl,
+        callback,
+        principal: challenge.principal,
+        resume: challenge.resume,
+      },
+    ]);
+    await expect(retry.result).resolves.toEqual({
       status: "completed",
       output: { resume: challenge.resume, callback, principal: challenge.principal },
     });
+    // The twin learns which attempts completed from the ambient remainder.
+    expect(retry.ambient.get(PendingAuthorizationResultKey)).toEqual([]);
   });
 
   it("uses the advertised step override ahead of turn, session, and authored definitions", async () => {
@@ -575,14 +611,7 @@ describe("nested tool state across fresh contexts", () => {
       sessionState: {} as never,
     };
     async function invoke(name: string) {
-      const outcome = await executeCodeModeToolStep({
-        ...current,
-        authorizationHookToken: "nested-auth",
-        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
-        toolCallId: name,
-        toolInput: {},
-        toolName: name,
-      });
+      const outcome = await settled(nestedInput(name, { ...current, toolCallId: name }));
       current = adoptCodeModeStateChanges(current, outcome.stateChanges ?? []) as typeof current;
       return outcome;
     }
@@ -624,7 +653,7 @@ describe("nested tool state across fresh contexts", () => {
       });
       expect(fs.writeTextFile).toHaveBeenCalledOnce();
     }
-    expect(current.serializedContext).not.toHaveProperty("eve.authorizationHookToken");
+    expect(current.serializedContext).not.toHaveProperty(AuthorizationHookKey.name);
   });
 
   it("merges parallel calls from one snapshot in pending order without conflicts", async () => {
@@ -662,15 +691,7 @@ describe("nested tool state across fresh contexts", () => {
       sessionState: {} as never,
     };
     const snapshot = current;
-    const invoke = (name: string) =>
-      executeCodeModeToolStep({
-        ...snapshot,
-        authorizationHookToken: "nested-auth",
-        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
-        toolCallId: name,
-        toolInput: {},
-        toolName: name,
-      });
+    const invoke = (name: string) => settled(nestedInput(name, { ...snapshot, toolCallId: name }));
 
     const batch = await Promise.all(["todo", "read_file", "noop_a", "noop_b"].map(invoke));
     expect(batch.map((outcome) => outcome.status)).toEqual([
@@ -687,14 +708,7 @@ describe("nested tool state across fresh contexts", () => {
     }
 
     state.tools.set("todo", definition("todo", { execute: async () => executeTodoTool({}) }));
-    const later = await executeCodeModeToolStep({
-      ...current,
-      authorizationHookToken: "nested-auth",
-      event: { sequence: 1, stepIndex: 2, turnId: "turn" },
-      toolCallId: "later",
-      toolInput: {},
-      toolName: "todo",
-    });
+    const later = await settled(nestedInput("todo", { ...current, toolCallId: "later" }));
     expect(later).toMatchObject({ status: "completed", output: { todos } });
     expect(JSON.stringify(current.serializedContext)).toContain("/workspace/probe.txt");
   });
