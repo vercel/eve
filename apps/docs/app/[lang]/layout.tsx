@@ -8,6 +8,7 @@ import { mono, sans } from "@/lib/geistdocs/fonts";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { supportedLanguages } from "@/lib/geistdocs/languages";
 import { rootTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { organizationSchemaJson } from "@/lib/geistdocs/organization-schema";
 import { getRootLang } from "@/lib/geistdocs/root-params";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,11 @@ const Layout = async ({ children }: LayoutProps<"/[lang]">) => {
       suppressHydrationWarning
     >
       <body>
+        <script
+          dangerouslySetInnerHTML={{ __html: organizationSchemaJson }}
+          id="organization-structured-data"
+          type="application/ld+json"
+        />
         <GeistdocsProvider basePath={config.basePath} lang={lang}>
           <Navbar config={config} />
           {children}
