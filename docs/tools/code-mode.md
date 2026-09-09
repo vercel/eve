@@ -59,10 +59,9 @@ A program can call a tool when all of the following hold:
 - The tool has an executor and is not a framework control such as
   `connection_search` or a task-control action.
 - The tool has no approval policy, or its policy is `never()`.
-- The tool is not an authored workflow tool.
-- The tool is not an ordinary `execution: "background"` tool. Subagent tools are
-  the exception: inside a program they run to completion and return the child's
-  final result instead of a task receipt.
+- The tool is not an ordinary `execution: "background"` tool. Subagent tools
+  and authored workflow tools are the exceptions: inside a program they run to
+  completion and return their final result instead of a task receipt.
 
 The framework `ask_question` tool is the exception to the executor rule. A
 nested `tools.ask_question({ prompt, options })` parks the program until the
@@ -79,7 +78,7 @@ Everything else remains callable only directly. Discovery marks those tools with
 | Declared subagents and the built-in `agent` tool    | yes         | yes, awaited result |
 | Discovered connection tools without approval        | no          | yes                 |
 | Any tool with an approval policy other than `never` | yes         | no                  |
-| Authored workflow tools (`defineWorkflowTool`)      | yes         | no                  |
+| Authored workflow tools (`defineWorkflowTool`)      | yes         | yes, awaited result |
 | Ordinary background tools                           | yes         | no                  |
 | `ask_question`                                      | yes         | yes, awaited answer |
 | `connection_search`, task controls                  | yes         | no                  |
@@ -147,6 +146,20 @@ Each program can invoke at most 100 subagents. Sequential calls, parallel calls,
 retries, and continuations of an existing child all count. Excess calls reject
 with `CODE_MODE_SUBAGENT_LIMIT_REACHED` before a child starts, and the program
 can catch that rejection. Ordinary tool calls do not consume this budget.
+
+## Workflow tools inside a program
+
+Calling an authored [workflow tool](./workflows) from a program runs its body
+inside the program's own workflow run, so the body's steps nest into that run
+and replay with it. The call resolves to the body's return value. Both blocking
+and background workflow tools are awaited; a background tool does not return a
+task receipt inside a program.
+
+Anything the body does through its context is attributed to the `code_mode`
+call rather than to a separate run: `ctx.ask` parks the program until the
+person answers, `ctx.agent` runs through the parent's agent channel, sign-in
+requests from `"use step"` helpers pause and retry the step, and `yield`ed
+progress reports appear as `code_mode` progress.
 
 ## Authorization inside a program
 

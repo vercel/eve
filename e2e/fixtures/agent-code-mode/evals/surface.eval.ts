@@ -16,6 +16,7 @@ export default defineEval({
       "marker",
       "gated",
       "background",
+      "plan_deploy",
       "connection_search",
     ]) {
       turn.messageIncludes(new RegExp(`(?:\\[|,)${name}(?:,|\\])`, "u"));

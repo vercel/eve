@@ -6,12 +6,16 @@ export type CodeModeCallResolution =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: string };
 
+export type CodeModeCallTarget = "agent" | "tool" | "workflow" | "direct";
+
 export interface CodeModeToolCatalogEntry {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: JsonObject;
   readonly outputSchema: JsonObject | null;
-  readonly target: "agent" | "tool" | "direct";
+  readonly target: CodeModeCallTarget;
+  /** Registered workflow body of an authored workflow tool; present exactly when `target` is `"workflow"`. */
+  readonly workflowId?: string;
 }
 
 /**
@@ -29,7 +33,9 @@ export function serializeCodeModeWorkflowInput(input: CodeModeWorkflowInput): Js
   return {
     js: input.js,
     maxSubagents: input.maxSubagents,
-    toolCatalog: input.toolCatalog.map((entry) => ({ ...entry })),
+    toolCatalog: input.toolCatalog.map(({ workflowId, ...entry }) =>
+      workflowId === undefined ? { ...entry } : { ...entry, workflowId },
+    ),
   };
 }
 
@@ -56,21 +62,39 @@ export function parseCodeModeWorkflowInput(value: unknown): CodeModeWorkflowInpu
     if (
       typeof entry.name !== "string" ||
       typeof entry.description !== "string" ||
-      (entry.target !== "agent" && entry.target !== "tool" && entry.target !== "direct")
+      !isCodeModeCallTarget(entry.target)
     ) {
       throw new TypeError("code_mode tool catalog entry is invalid.");
     }
-    return {
+    const parsed: CodeModeToolCatalogEntry = {
       name: entry.name,
       description: entry.description,
       inputSchema: parseJsonObject(entry.inputSchema),
       outputSchema: entry.outputSchema === null ? null : parseJsonObject(entry.outputSchema),
       target: entry.target,
     };
+    if (entry.target === "workflow") {
+      if (typeof entry.workflowId !== "string" || entry.workflowId.length === 0) {
+        throw new TypeError(
+          `code_mode tool catalog entry "${entry.name}" targets a workflow without a workflowId.`,
+        );
+      }
+      return { ...parsed, workflowId: entry.workflowId };
+    }
+    if (entry.workflowId !== undefined) {
+      throw new TypeError(
+        `code_mode tool catalog entry "${entry.name}" carries a workflowId for a non-workflow target.`,
+      );
+    }
+    return parsed;
   });
   return {
     js: record.js,
     maxSubagents: record.maxSubagents,
     toolCatalog,
   };
+}
+
+function isCodeModeCallTarget(value: unknown): value is CodeModeCallTarget {
+  return value === "agent" || value === "tool" || value === "workflow" || value === "direct";
 }

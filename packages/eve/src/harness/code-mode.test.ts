@@ -42,6 +42,25 @@ function codeModeDefinition(): HarnessToolDefinition {
   };
 }
 
+/** Authored `defineWorkflowTool` as the node step registers it: no direct executor. */
+function workflowTool(
+  name: string,
+  extra: Partial<HarnessToolDefinition> = {},
+): HarnessToolDefinition {
+  return tool(name, {
+    behavior: {
+      availability: [],
+      handling: {
+        kind: "dispatch",
+        target: { kind: "workflow-tool-call", workflowId: `workflow//app//${name}` },
+      },
+    },
+    execute: undefined,
+    workflowId: `workflow//app//${name}`,
+    ...extra,
+  });
+}
+
 function subagent(name: string): HarnessToolDefinition {
   return {
     behavior: {
@@ -72,13 +91,16 @@ describe("claimsForCodeMode", () => {
       ["background", tool("background", { execution: "background" })],
       ["researcher", subagent("researcher")],
       ["agent", { ...subagent("agent"), execution: "background" }],
-      ["authored_wf", tool("authored_wf", { workflowId: "workflow//app//authored" })],
+      ["authored_wf", workflowTool("authored_wf")],
+      ["background_wf", workflowTool("background_wf", { execution: "background" })],
+      ["gated_wf", workflowTool("gated_wf", { approval: always() })],
+      ["pinned_wf", workflowTool("pinned_wf", { executeInput: () => ({ pinned: true }) })],
       ["task_cancel", tool("task_cancel", { runtimeAction: { kind: "task-control" } })],
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
 
     const claimed = [...tools.keys()].filter((name) => claimsForCodeMode(name, tools));
-    expect(claimed).toEqual(["add", "researcher", "agent"]);
+    expect(claimed).toEqual(["add", "researcher", "agent", "authored_wf", "background_wf"]);
   });
 
   it("claims the framework question tool while other handled tools stay direct", () => {
@@ -320,6 +342,37 @@ describe("applyCodeModeTool", () => {
     );
     expect(description).toContain(
       'describe_tools: (input: { names: string[]; }) => Promise<Array<{ name: string; description: string; requiresDirectCall: boolean; inputSchema: Record<string, unknown>; } | { name: string; error: "unknown tool"; }>>;',
+    );
+  });
+
+  it("pins authored workflow tools as workflow targets while keeping them direct", async () => {
+    const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      ["plan", workflowTool("plan", { outputSchema: jsonSchema({ type: "string" }) })],
+      ["pinned", workflowTool("pinned", { executeInput: () => ({ pinned: true }) })],
+      [CODE_MODE_TOOL_NAME, codeModeDefinition()],
+    ]);
+    const tools = buildToolSet({ tools: harnessTools });
+    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+
+    expect(Object.keys(applied.modelTools)).toEqual(["plan", "pinned", CODE_MODE_TOOL_NAME]);
+    expect(applied.modelTools.plan).toBe(tools.plan);
+    const serialized = applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({
+      js: "return 1;",
+    });
+    const input = parseCodeModeWorkflowInput(JSON.parse(JSON.stringify(serialized)));
+    expect(input.toolCatalog.find((entry) => entry.name === "plan")).toEqual({
+      name: "plan",
+      description: "Tool plan.",
+      inputSchema: { type: "object", properties: { q: { type: "string" } } },
+      outputSchema: { type: "string" },
+      target: "workflow",
+      workflowId: "workflow//app//plan",
+    });
+    expect(input.toolCatalog.find((entry) => entry.name === "pinned")).toEqual(
+      expect.objectContaining({ target: "direct" }),
+    );
+    expect(input.toolCatalog.find((entry) => entry.name === "pinned")).not.toHaveProperty(
+      "workflowId",
     );
   });
 

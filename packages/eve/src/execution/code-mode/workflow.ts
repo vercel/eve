@@ -5,17 +5,21 @@ import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import {
   ask,
   readCodeModeRunContext,
+  readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/ask.js";
+import { executeWorkflowBody } from "#execution/tools/workflow/body.js";
 import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
-import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
+import type { CodeModeCallResolution, CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
   executeCodeModeToolStep,
   runCodeModeProgramStep,
+  type CodeModeCallInterrupt,
   type CodeModePendingCall,
   type CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/code-mode/state.js";
 
@@ -26,11 +30,12 @@ import { adoptCodeModeStateChanges, type CodeModeStateChange } from "#execution/
  * Ordinary tools execute in a child-owned step over the turn's serialized
  * context; subagents go through the owner's `agent-invoke` channel like any
  * workflow tool, so the parent keeps sole ownership of agent handles and
- * session state. Each nested call therefore has its own replay boundary.
+ * session state; authored workflow tools run their body inline, nesting its
+ * steps into this run. Each nested call therefore has its own replay boundary.
  */
 export async function codeModeWorkflow(
   rawInput: unknown,
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
 ): Promise<JsonValue> {
   "use workflow";
 
@@ -62,7 +67,7 @@ export async function codeModeWorkflow(
         });
       }
       const invocationId = `${ctx.callId}:${String(nested++)}`;
-      return settleNestedCall(ctx, run, pending, invocationId);
+      return settleNestedCall(ctx, run, program, pending, invocationId);
     });
     const settled = await Promise.all(settling);
     // Adopt state in pending order once the batch settles, so replay applies
@@ -95,14 +100,19 @@ interface SettledNestedCall {
 }
 
 async function settleNestedCall(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
   run: ReturnType<typeof readCodeModeRunContext>,
+  program: CodeModeWorkflowInput,
   pending: CodeModePendingCall,
   invocationId: string,
 ): Promise<SettledNestedCall> {
   const { call, interrupt, toolCallId } = pending;
-  const { sequence, stepIndex, turnId } = readWorkflowToolRunRef(ctx);
+  const from = readWorkflowToolRunRef(ctx);
+  const { sequence, stepIndex, turnId } = from;
   try {
+    if (call.target === "workflow") {
+      return { interrupt, resolution: await runNestedWorkflowTool(ctx, from, program, call) };
+    }
     if (call.target === "agent") {
       const agentInput = readAgentInput(call.toolInput);
       const output = await invokeAgent(
@@ -142,6 +152,51 @@ async function settleNestedCall(
   } catch (error) {
     ctx.abortSignal.throwIfAborted();
     return { interrupt, resolution: { status: "failed", error: toErrorMessage(error) } };
+  }
+}
+
+/**
+ * Runs an authored workflow tool's body inline, so its steps nest into this
+ * run. The nested body reports under this run's own `callId`/`runId`: the
+ * owner routes `ask`, `agent-invoke`, authorization, and progress messages
+ * by that pair, so they are attributed to the `code_mode` call.
+ */
+async function runNestedWorkflowTool(
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
+  from: WorkflowToolRunRef,
+  program: CodeModeWorkflowInput,
+  call: CodeModeCallInterrupt,
+): Promise<CodeModeCallResolution> {
+  const entry = program.toolCatalog.find((candidate) => candidate.name === call.toolName);
+  if (entry?.target !== "workflow" || entry.workflowId === undefined) {
+    throw new Error(`Tool "${call.toolName}" is not a workflow tool in this program's catalog.`);
+  }
+  const { outcome } = await executeWorkflowBody(
+    {
+      authorizationSupported: true,
+      callId: from.callId,
+      execution: "blocking",
+      input: readWorkflowToolInput(call),
+      owner: readWorkflowToolRunOwner(ctx),
+      session: ctx.session,
+      stepIndex: from.stepIndex,
+      toolName: call.toolName,
+      workflowId: entry.workflowId,
+    },
+    ctx.abortSignal,
+  );
+  if (outcome.status === "completed") return { status: "completed", output: outcome.output };
+  if (outcome.status === "failed")
+    return { status: "failed", error: toErrorMessage(outcome.error) };
+  ctx.abortSignal.throwIfAborted();
+  throw new Error(outcome.reason || `Workflow tool "${call.toolName}" was cancelled.`);
+}
+
+function readWorkflowToolInput(call: CodeModeCallInterrupt): JsonObject {
+  try {
+    return parseJsonObject(call.toolInput);
+  } catch {
+    throw new TypeError(`Workflow tool "${call.toolName}" requires a JSON object input.`);
   }
 }
 

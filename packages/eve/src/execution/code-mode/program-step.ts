@@ -31,6 +31,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import type {
   CodeModeCallResolution,
+  CodeModeCallTarget,
   CodeModeToolCatalogEntry,
   CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
@@ -71,7 +72,7 @@ export const CODE_MODE_CALL_INTERRUPT_KIND = "eve.code-mode-call";
 
 export interface CodeModeCallInterrupt {
   readonly kind: typeof CODE_MODE_CALL_INTERRUPT_KIND;
-  readonly target: "agent" | "tool";
+  readonly target: Exclude<CodeModeCallTarget, "direct">;
   readonly toolInput: unknown;
   readonly toolName: string;
 }
@@ -228,6 +229,14 @@ export async function executeCodeModeToolStep(
       error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
     };
   }
+  // The body runs authored workflow tools inline; their `execute` is a
+  // workflow function, not something this step can call directly.
+  if (definition.workflowId !== undefined) {
+    return {
+      status: "failed",
+      error: `Tool "${input.toolName}" is a workflow tool and cannot run as a code_mode tool step.`,
+    };
+  }
   const execute = wrapToolExecute(definition);
   if (execute === undefined) {
     return { status: "failed", error: `Tool "${input.toolName}" has no executor.` };
@@ -290,7 +299,7 @@ export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet
       if (resolution?.status === "completed") return resolution.output;
       return requestWorkflowSandboxInterrupt({
         kind: CODE_MODE_CALL_INTERRUPT_KIND,
-        target: entry.target === "agent" ? "agent" : "tool",
+        target: entry.target === "direct" ? "tool" : entry.target,
         toolInput,
         toolName: entry.name,
       } satisfies CodeModeCallInterrupt);
@@ -366,7 +375,7 @@ function readCallInterrupt(interrupt: WorkflowSandboxInterrupt): CodeModeCallInt
   const payload = interrupt.payload as Partial<CodeModeCallInterrupt>;
   if (
     payload.kind !== CODE_MODE_CALL_INTERRUPT_KIND ||
-    (payload.target !== "agent" && payload.target !== "tool") ||
+    (payload.target !== "agent" && payload.target !== "tool" && payload.target !== "workflow") ||
     typeof payload.toolName !== "string"
   ) {
     throw new Error(`Unsupported code_mode interrupt kind "${String(payload.kind)}".`);

@@ -15,6 +15,13 @@ const executeTool =
   >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 const ask = vi.fn<(...args: any[]) => Promise<unknown>>();
+const executeWorkflowBody =
+  vi.fn<
+    (
+      ...args: any[]
+    ) => ReturnType<typeof import("#execution/tools/workflow/body.js").executeWorkflowBody>
+  >();
+const owner = { inbox: "owner-inbox" };
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
   CODE_MODE_CALL_INTERRUPT_KIND: "eve.code-mode-call",
@@ -26,16 +33,30 @@ vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({
 }));
 vi.mock("#execution/tools/workflow/ask.js", () => ({
   ask: (_ctx: unknown, ...args: unknown[]) => ask(...args),
-  readWorkflowToolRunRef: () => ({ sequence: 1, stepIndex: 2, turnId: "turn" }),
+  readWorkflowToolRunRef: () => ({
+    callId: "outer",
+    runId: "outer-run",
+    sequence: 1,
+    stepIndex: 2,
+    turnId: "turn",
+  }),
+  readWorkflowToolRunOwner: () => owner,
   readCodeModeRunContext: () => ({
     serializedContext: { ctx: true },
     sessionState: { sessionId: "s1" },
   }),
 }));
+vi.mock("#execution/tools/workflow/body.js", () => ({
+  executeWorkflowBody: (...args: unknown[]) => executeWorkflowBody(...args),
+}));
 
 const { codeModeWorkflow } = await import("#execution/code-mode/workflow.js");
 
-function call(target: "agent" | "tool", toolName: string, toolInput: unknown): CodeModePendingCall {
+function call(
+  target: CodeModePendingCall["call"]["target"],
+  toolName: string,
+  toolInput: unknown,
+): CodeModePendingCall {
   return {
     call: { kind: "eve.code-mode-call", target, toolInput, toolName },
     interrupt: { marker: toolName } as never,
@@ -52,17 +73,33 @@ const completed = (output: unknown): CodeModeProgramOutcome => ({
   status: "completed",
 });
 
+const session = { id: "s1", auth: {}, turn: { id: "turn", sequence: 1 } } as ToolContext["session"];
+
 function context(aborted = false): ToolContext {
   const controller = new AbortController();
   if (aborted) controller.abort(new Error("stop"));
-  return { abortSignal: controller.signal, callId: "outer", toolName: "code_mode" } as ToolContext;
+  return {
+    abortSignal: controller.signal,
+    callId: "outer",
+    session,
+    toolName: "code_mode",
+  } as ToolContext;
 }
+
+const planEntry = {
+  name: "plan_deploy",
+  description: "Plan a deploy.",
+  inputSchema: { type: "object" },
+  outputSchema: null,
+  target: "workflow" as const,
+  workflowId: "workflow//app//plan_deploy",
+};
 
 const program = {
   js: "return 1;",
 
   maxSubagents: 100,
-  toolCatalog: [],
+  toolCatalog: [planEntry],
 };
 
 beforeEach(() => {
@@ -70,6 +107,7 @@ beforeEach(() => {
   executeTool.mockReset();
   invokeAgent.mockReset();
   ask.mockReset();
+  executeWorkflowBody.mockReset();
 });
 
 describe("codeModeWorkflow", () => {
@@ -407,6 +445,94 @@ describe("codeModeWorkflow", () => {
     ).rejects.toThrow("cancelled");
     expect(runProgram).toHaveBeenCalledOnce();
   });
+
+  it("runs authored workflow tools inline under the run's own ref and resumes with the body result", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })))
+      .mockResolvedValueOnce(completed("planned"));
+    executeWorkflowBody.mockResolvedValueOnce({
+      outcome: { status: "completed", output: { plan: "PLAN:api" } },
+      reportCount: 1,
+    });
+
+    const ctx = context();
+    await expect(codeModeWorkflow(program, ctx)).resolves.toBe("planned");
+    expect(executeWorkflowBody).toHaveBeenCalledWith(
+      {
+        authorizationSupported: true,
+        callId: "outer",
+        execution: "blocking",
+        input: { service: "api" },
+        owner,
+        session,
+        stepIndex: 2,
+        toolName: "plan_deploy",
+        workflowId: "workflow//app//plan_deploy",
+      },
+      ctx.abortSignal,
+    );
+    expect(executeWorkflowBody.mock.calls[0]?.[0]).not.toHaveProperty("codeMode");
+    expect(executeWorkflowBody.mock.calls[0]?.[0]).not.toHaveProperty("runId");
+    expect(runProgram.mock.calls[1]?.[0]).toEqual({
+      callId: "outer",
+      program,
+      sessionState: { sessionId: "s1" },
+      resume: [
+        {
+          interrupt: { marker: "plan_deploy" },
+          resolution: { status: "completed", output: { plan: "PLAN:api" } },
+        },
+      ],
+    });
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it("feeds a failed workflow body back into the program as a message", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })))
+      .mockResolvedValueOnce(completed("recovered"));
+    executeWorkflowBody.mockResolvedValueOnce({
+      outcome: { status: "failed", error: { message: "plan rejected", name: "Error" } },
+      reportCount: 0,
+    });
+
+    await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+    expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+      resume: [{ resolution: { status: "failed", error: "plan rejected" } }],
+    });
+  });
+
+  it("propagates a cancelled workflow body as run cancellation", async () => {
+    const controller = new AbortController();
+    runProgram.mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })));
+    executeWorkflowBody.mockImplementationOnce(async () => {
+      controller.abort(new Error("cancelled"));
+      return { outcome: { status: "cancelled", reason: "cancelled" }, reportCount: 0 };
+    });
+
+    await expect(
+      codeModeWorkflow(program, { ...context(), abortSignal: controller.signal }),
+    ).rejects.toThrow("cancelled");
+    expect(runProgram).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["unknown", "missing", { service: "api" }, "not a workflow tool"],
+    ["non-object input", "plan_deploy", "api", "requires a JSON object input"],
+  ])(
+    "fails a workflow call it cannot start instead of running a body (%s)",
+    async (_label, toolName, toolInput, message) => {
+      runProgram
+        .mockResolvedValueOnce(parked(call("workflow", toolName, toolInput)))
+        .mockResolvedValueOnce(completed("recovered"));
+
+      await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+      expect(executeWorkflowBody).not.toHaveBeenCalled();
+      expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+        resume: [{ resolution: { status: "failed", error: expect.stringContaining(message) } }],
+      });
+    },
+  );
 
   it("rejects malformed durable input before touching the sandbox", async () => {
     await expect(codeModeWorkflow({ js: 1 }, context())).rejects.toThrow('"js" string');

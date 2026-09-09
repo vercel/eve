@@ -63,8 +63,17 @@ export async function applyCodeModeTool(input: {
   for (const [name, tool] of Object.entries(input.tools)) {
     let description = typeof tool.description === "string" ? tool.description : "";
     let target: CodeModeToolCatalogEntry["target"] = "direct";
+    let workflowId: string | undefined;
     if (claimsForCodeMode(name, input.harnessTools)) {
-      target = isCodeModeAgentTool(input.harnessTools.get(name)!) ? "agent" : "tool";
+      const definition = input.harnessTools.get(name)!;
+      if (isCodeModeAgentTool(definition)) {
+        target = "agent";
+      } else if (definition.workflowId !== undefined) {
+        target = "workflow";
+        workflowId = definition.workflowId;
+      } else {
+        target = "tool";
+      }
     }
     if (target === "agent") {
       description = description.replace(AGENT_TASK_RECEIPT_DESCRIPTION, "").trim();
@@ -77,16 +86,19 @@ export async function applyCodeModeTool(input: {
     ) {
       modelTools[name] = tool;
     }
-    toolCatalog.push({
-      name,
-      description,
-      inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
-      outputSchema:
-        target === "agent" || tool.outputSchema === undefined
-          ? null
-          : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
-      target,
-    });
+    const entry: { -readonly [K in keyof CodeModeToolCatalogEntry]: CodeModeToolCatalogEntry[K] } =
+      {
+        name,
+        description,
+        inputSchema: parseJsonObject(asSchema(tool.inputSchema).jsonSchema),
+        outputSchema:
+          target === "agent" || tool.outputSchema === undefined
+            ? null
+            : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
+        target,
+      };
+    if (workflowId !== undefined) entry.workflowId = workflowId;
+    toolCatalog.push(entry);
   }
 
   toolCatalog.sort((left, right) => (left.name < right.name ? -1 : 1));
@@ -122,8 +134,9 @@ export async function applyCodeModeTool(input: {
 }
 
 /**
- * Subagents are awaited through the owner; other background tools, approval
- * gates, framework controls, and authored workflow tools stay direct.
+ * Subagents are awaited through the owner and authored workflow tools run
+ * inline inside the program's run; other background tools, approval gates,
+ * and framework controls stay direct.
  */
 export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean {
   if (name === CODE_MODE_TOOL_NAME) return false;
@@ -139,11 +152,20 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   if (name === ASK_QUESTION_TOOL_NAME) {
     return definition.behavior?.handling?.kind === "request-input";
   }
+  if (definition.runtimeAction !== undefined) return false;
+  if (definition.behavior?.presentation === "load-skill") return false;
+  if (definition.workflowId !== undefined) {
+    // The catalog carries only the workflow id, so a body that depends on a
+    // pinned `executeInput` cannot be started from a program.
+    return definition.executeInput === undefined && isUngated(definition);
+  }
   if (definition.execution === "background") return false;
   if (definition.execute === undefined) return false;
-  if (definition.behavior?.presentation === "load-skill") return false;
-  if (definition.workflowId !== undefined || definition.runtimeAction !== undefined) return false;
   if (definition.behavior?.handling !== undefined) return false;
+  return isUngated(definition);
+}
+
+function isUngated(definition: HarnessToolDefinition): boolean {
   return definition.approval === undefined || isNeverApproval(definition.approval);
 }
 

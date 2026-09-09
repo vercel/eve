@@ -321,6 +321,20 @@ describe("executeCodeModeToolStep", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("refuses to run an authored workflow tool as a plain step even though programs claim it", async () => {
+    const execute = vi.fn(async () => "done");
+    state.tools.set(
+      "plan_deploy",
+      definition("plan_deploy", { execute, workflowId: "workflow//app//plan_deploy" }),
+    );
+    expect(claimsForCodeMode("plan_deploy", state.tools)).toBe(true);
+    await expect(nested("plan_deploy")).resolves.toEqual({
+      status: "failed",
+      error: 'Tool "plan_deploy" is a workflow tool and cannot run as a code_mode tool step.',
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("returns the full authorization challenge and resumes with its matched callback", async () => {
     const challenge = {
       attemptId: "attempt",
@@ -477,6 +491,14 @@ describe("runCodeModeProgramStep", () => {
           outputSchema: null,
           target: "direct" as const,
         },
+        {
+          name: "plan_deploy",
+          description: "Pinned workflow tool",
+          inputSchema: { type: "object" },
+          outputSchema: null,
+          target: "workflow" as const,
+          workflowId: "workflow//app//plan_deploy",
+        },
       ];
       await expect(
         runCodeModeProgramStep({
@@ -501,13 +523,15 @@ describe("runCodeModeProgramStep", () => {
       expect(Object.keys(tools).sort()).toEqual([
         "describe_tools",
         "lookup",
+        "plan_deploy",
         "researcher",
         "search_tools",
       ]);
       expect(tools.lookup!.description).toBe("Pinned lookup");
       expect(asSchema(tools.lookup!.inputSchema).jsonSchema).toEqual({ type: "object" });
       expect(asSchema(tools.lookup!.outputSchema!).jsonSchema).toEqual({ type: "string" });
-      for (const name of ["lookup", "researcher"]) {
+      const targets = { lookup: "tool", researcher: "agent", plan_deploy: "workflow" } as const;
+      for (const [name, target] of Object.entries(targets)) {
         await tools[name]!.execute!({ query: "hello" } as never, {
           toolCallId: name,
           messages: [],
@@ -515,13 +539,51 @@ describe("runCodeModeProgramStep", () => {
         });
         expect(interrupt).toHaveBeenLastCalledWith({
           kind: "eve.code-mode-call",
-          target: name === "lookup" ? "tool" : "agent",
+          target,
           toolName: name,
           toolInput: { query: "hello" },
         });
       }
     },
   );
+
+  it.each(["agent", "tool", "workflow"] as const)(
+    "reads a parked %s call from the continuation",
+    async (target) => {
+      const payload = { kind: "eve.code-mode-call", target, toolInput: { q: 1 }, toolName: "t" };
+      const interrupt = { payload, toolCallId: "t-call" } as never;
+      vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({
+        execute: vi.fn().mockResolvedValue("raw"),
+      } as never);
+      vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
+        status: "interrupted",
+        interrupt,
+      });
+      vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockReturnValue([interrupt]);
+
+      await expect(runCodeModeProgramStep(input)).resolves.toEqual({
+        status: "interrupted",
+        pending: [{ call: payload, interrupt, toolCallId: "t-call" }],
+      });
+    },
+  );
+
+  it("rejects a parked call with an unknown target", async () => {
+    const interrupt = {
+      payload: { kind: "eve.code-mode-call", target: "remote", toolName: "t" },
+      toolCallId: "t-call",
+    } as never;
+    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({
+      execute: vi.fn().mockResolvedValue("raw"),
+    } as never);
+    vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
+      status: "interrupted",
+      interrupt,
+    });
+    vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockReturnValue([interrupt]);
+
+    await expect(runCodeModeProgramStep(input)).rejects.toThrow("Unsupported code_mode interrupt");
+  });
 
   it("applies every batch resolution to the updated continuation in order", async () => {
     const interrupts = [0, 1, 2].map((revision) => ({ revision }) as never);

@@ -171,6 +171,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       'const echo = await tools.echo({ value: "after-ask:" + answer.optionId });',
       "return { answer, echo };",
     ].join("\n");
+  } else if (message.includes("CODEMODE-WORKFLOW-START")) {
+    directive = "CODEMODE-WORKFLOW";
+    js = [
+      'const planned = await tools.plan_deploy({ service: "CODEMODE-WF" });',
+      "const echo = await tools.echo({ value: planned.plan });",
+      "return { planned, echo };",
+    ].join("\n");
   } else if (message.includes("CODEMODE-AUTH-START")) {
     directive = "CODEMODE-AUTH";
     js =
