@@ -223,7 +223,6 @@ export async function dispatchAgentInvocation(input: {
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
       activityObserver: prepared.activityObserver,
-      parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       serializedContext: prepared.serializedContext,
       session,
