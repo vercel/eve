@@ -1,5 +1,19 @@
 # eve
 
+## 0.52.5
+
+### Patch Changes
+
+- 1a9556c: Preserve framework announcements in conversation history so changing task and skill snapshots append to earlier model requests instead of replacing their context. Unchanged announcements are skipped until history is cleared or compacted, and completed compaction is retained if the next model request fails.
+- a24b68c: Export `defineDurableCallback` so provider packages can create replayable dynamic tools outside eve's authored-source transform.
+- d630b21: Retry transient Windows file-sharing errors when reading local workflow state while still surfacing persistent access errors and malformed state. Preserve pending tasks that fit the compaction budget and keep explicitly configured `mockModel()` responders during step-scoped dynamic model selection when authored-model mocking is enabled.
+- cf1510f: Redact BYOK credentials and credential-shaped provider options from `/eve/v1/info` responses while preserving non-secret provider settings.
+- 1a9556c: Remove the instruction that forced silence while background tasks were pending. This prevents that instruction from carrying into later user turns and suppressing their answers.
+- 3bbf8e5: Only batch adjacent queued deliveries when their full auth contexts match, preventing one sender's input from running under another sender's auth. Anonymous deliveries stay separate; matching authenticated follow-ups still batch with their attachments and context in order.
+- 71fbdb8: Classify CLI setup and onboarding failures into bounded, privacy-preserving categories, including package-manager startup and pnpm workspace-probe failures. Telemetry continues to exclude error messages and command output.
+- ee02527: Print each eval session's workflow run ID when `eve eval --verbose` runs, including primary and secondary sessions.
+- 51c4719: Keep experimental channel activity grouped with the user request that originated it across background task reporting, human approval and question resumes, and authorization callbacks.
+
 ## 0.52.4
 
 ### Patch Changes
