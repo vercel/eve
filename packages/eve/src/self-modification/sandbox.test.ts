@@ -12,6 +12,7 @@ const connectConfig: SelfModificationConfig = {
     credentials: { vercelConnect: { connector: "github/selfmod-acme-agent" } },
     source: { git: { directory: ".", repository: "github.com/acme/agent" } },
     target: { branch: "main" },
+    authorize: () => true,
   },
 };
 

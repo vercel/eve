@@ -22,6 +22,7 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('target: { branch: "release/production" }');
     expect(source).toContain('connector: "github/selfmod-acme-agents"');
+    expect(source).toContain("authorize: () => false");
     expect(source).not.toContain("EVE_SELF_MODIFICATION_GITHUB_TOKEN");
     expect(classifySelfModificationConfig(source)).toBe("generated");
   });

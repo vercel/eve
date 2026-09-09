@@ -52,6 +52,8 @@ export default defineSelfModificationConfig({
     credentials: {
       vercelConnect: { connector: ${JSON.stringify(values.connector)} },
     },
+    // Allow only principals from channels you trust to propose source changes.
+    authorize: () => false,
   },
 });
 `;

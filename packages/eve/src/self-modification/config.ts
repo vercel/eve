@@ -1,4 +1,21 @@
+import type { SessionAuthContext } from "#channel/types.js";
+
 import { assertGitRef, assertRepositoryPart } from "./identifiers.js";
+
+/** Principal and channel that requested a deployed source modification. */
+export interface SelfModificationAuthorizationContext {
+  readonly channel: {
+    /** Channel adapter family, such as `"slack"` or `"http"`. */
+    readonly kind?: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  };
+  readonly principal: SessionAuthContext | null;
+}
+
+/** Decides whether a principal may use deployed self-modification. */
+export type SelfModificationAuthorization = (
+  context: SelfModificationAuthorizationContext,
+) => boolean | Promise<boolean>;
 
 export interface SelfModificationConfig {
   readonly local?: { readonly enabled?: boolean };
@@ -12,6 +29,8 @@ export interface SelfModificationConfig {
       };
     };
     readonly target: { readonly branch: string };
+    /** Fail-closed policy for principals that may create draft proposals. */
+    readonly authorize: SelfModificationAuthorization;
     readonly credentials?: {
       /** Ephemeral, repository-scoped GitHub App credentials from Vercel Connect. */
       readonly vercelConnect?: { readonly connector: string };
@@ -30,6 +49,7 @@ export interface ResolvedSelfModificationConfig {
 }
 
 export interface ResolvedDeployedSelfModificationConfig {
+  readonly authorize: SelfModificationAuthorization;
   readonly credentials: ResolvedGitHubCredentials;
   readonly directory: string;
   readonly repository: GitHubRepository;
@@ -70,15 +90,20 @@ export function resolveSelfModificationConfig(
   const deployed = config.deployed;
   if (deployed === undefined) return { localEnabled };
   if (!isRecord(deployed)) throw new Error("Self-modification deployed must be an object.");
-  const { source, target, credentials } = deployed;
-  if (source === undefined || target === undefined) {
-    throw new Error("Self-modification deployed requires both source and target configuration.");
+  const { source, target, authorize, credentials } = deployed;
+  if (source === undefined || target === undefined || authorize === undefined) {
+    throw new Error(
+      "Self-modification deployed requires source, target, and authorization configuration.",
+    );
   }
   if (!isRecord(source)) throw new Error("Self-modification deployed.source must be an object.");
   if (!isRecord(source.git)) {
     throw new Error("Self-modification deployed.source.git must be an object.");
   }
   if (!isRecord(target)) throw new Error("Self-modification deployed.target must be an object.");
+  if (typeof authorize !== "function") {
+    throw new Error("Self-modification deployed.authorize must be a function.");
+  }
 
   const { git } = source;
   if (typeof git.repository !== "string" || typeof git.directory !== "string") {
@@ -91,6 +116,7 @@ export function resolveSelfModificationConfig(
   }
   return {
     deployed: {
+      authorize: authorize as SelfModificationAuthorization,
       credentials: parseCredentials(credentials),
       directory: parseDirectory(git.directory),
       repository: parseGitHubRepository(git.repository),
