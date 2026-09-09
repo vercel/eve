@@ -26,6 +26,26 @@ export function isVercelSandboxMissingError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * True when a request failed because the target sandbox is mid-snapshot
+ * (HTTP 422, `code: "sandbox_snapshotting"`) — a transient race the caller
+ * can wait out.
+ */
+export function isVercelSnapshottingError(error: unknown): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    const status =
+      (candidate as { response?: { status?: number } }).response?.status ??
+      (candidate as { status?: number }).status ??
+      (candidate as { statusCode?: number }).statusCode;
+    const code = (candidate as { json?: { error?: { code?: string } } }).json?.error?.code;
+    if (status === 422 && code === "sandbox_snapshotting") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function* walkErrorChain(error: unknown): Generator<unknown> {
   let current = error;
   const seen = new Set<unknown>();
