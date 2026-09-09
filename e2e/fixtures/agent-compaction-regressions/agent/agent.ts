@@ -15,6 +15,9 @@ import {
 } from "../constants";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
+// Scripted usage supplies pressure without starving the real summarizer's transcript.
+const TEST_COMPACTION_THRESHOLD_TOKENS = 2_048;
+const COMPACTION_PRESSURE_USAGE = { inputTokens: 4_096 };
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase =
@@ -186,6 +189,7 @@ const taskModel = mockModel({
 
       checkpointAdvanceCallCounts.set(regressionCase, advanceCalls + 1);
       return {
+        usage: COMPACTION_PRESSURE_USAGE,
         toolCalls: [
           {
             id: `advance-checkpoint-${advanceCalls + 1}`,
@@ -206,6 +210,7 @@ const taskModel = mockModel({
 
     return regressionCase === "redundant-tool-calls"
       ? {
+          usage: COMPACTION_PRESSURE_USAGE,
           toolCalls: [
             {
               id: `inspect-repository-${attempt}`,
@@ -215,6 +220,7 @@ const taskModel = mockModel({
           ],
         }
       : {
+          usage: COMPACTION_PRESSURE_USAGE,
           toolCalls: [
             {
               id: `perform-source-analysis-${attempt}`,
@@ -235,7 +241,7 @@ export default defineAgent({
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent: 0.02,
+    thresholdPercent: TEST_COMPACTION_THRESHOLD_TOKENS / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     maxInputTokensPerSession: 100_000,

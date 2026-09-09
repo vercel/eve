@@ -1,4 +1,5 @@
 import { defineChannel, POST, type Session } from "eve/channels";
+import evePackage from "eve/package.json" with { type: "json" };
 
 import { checkDeploymentRevision } from "../lib/deployment-revision";
 
@@ -57,7 +58,7 @@ export default defineChannel({
         throw new Error("Expected the route context to expose from() or send().");
       }
 
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: session.id, eveVersion: evePackage.version });
     }),
   ],
 });

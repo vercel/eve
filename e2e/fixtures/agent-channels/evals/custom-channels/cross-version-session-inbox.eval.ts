@@ -29,7 +29,7 @@ const TOOL_NAME = "wait-for-cancellation";
 const execFileAsync = promisify(execFile);
 const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
-type MessageResponse = { ok: boolean; sessionId?: string };
+type MessageResponse = { ok: boolean; sessionId?: string; eveVersion: string };
 
 /**
  * Proves the complete mixed-version codec boundary through the real Workflow
@@ -79,7 +79,7 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${OLD_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, "eve@0.30.8", oldRevision);
+      await deployToAlias(t, alias, "eve@0.30.8", oldRevision, oldEvePackage);
       await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
 
       const sessionRef = crypto.randomUUID();
@@ -90,7 +90,10 @@ export default defineEval({
       await t.require(
         started,
         satisfies(
-          (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+          (value: MessageResponse) =>
+            value.ok === true &&
+            typeof value.sessionId === "string" &&
+            value.eveVersion === OLD_EVE_VERSION,
           "eve@0.30.8 starts the durable session",
         ),
       );
@@ -109,7 +112,7 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${CURRENT_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, `eve@${currentEveVersion}`, currentRevision);
+      await deployToAlias(t, alias, `eve@${currentEveVersion}`, currentRevision, currentEvePackage);
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
       const replacement = await postToDeployment(t, currentRevision, {
@@ -120,7 +123,10 @@ export default defineEval({
       await t.require(
         replacement,
         satisfies(
-          (value: MessageResponse) => value.ok === true && value.sessionId === sessionId,
+          (value: MessageResponse) =>
+            value.ok === true &&
+            value.sessionId === sessionId &&
+            value.eveVersion === currentEveVersion,
           "the current producer targets the existing eve@0.30.8 session",
         ),
       );
@@ -198,8 +204,10 @@ async function deployToAlias(
   alias: string,
   phase: string,
   revision: string,
+  evePackagePath: string,
 ): Promise<void> {
-  await execFileAsync("pnpm", ["exec", "eve", "build"], {
+  // pnpm's dependency synchronization can repair the intentionally replaced links.
+  await execFileAsync(process.execPath, [resolve(evePackagePath, "bin", "eve.js"), "build"], {
     ...EXEC_OPTIONS,
     env: {
       ...process.env,
