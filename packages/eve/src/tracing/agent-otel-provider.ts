@@ -76,19 +76,12 @@ import {
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
-interface SpanState {
-  readonly context: Context;
-  readonly span: Span;
-}
+type SpanState = { readonly context: Context; readonly span: Span };
 
 export interface AgentOtelInstrumentationInput {
-  /**
-   * Whether to write model prompts and tool call inputs onto spans at all.
-   * This is the union across destinations, not one destination's policy: a
-   * destination that declined drops these on its way out instead.
-   */
+  /** Whether any destination records model and tool inputs. */
   readonly recordInputs?: boolean;
-  /** The same, for model responses and tool call outputs. */
+  /** Whether any destination records model and tool outputs. */
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
@@ -118,9 +111,7 @@ export function createAgentOtelInstrumentation(
   const recordOutputs = input.recordOutputs ?? false;
   const executionContexts = new WeakMap<InstrumentationAttemptScope, Map<string, Context>>();
   const attemptScopes = new Map<string, InstrumentationAttemptScope>();
-  // A serverless turn runs inside one `turnStep` "use step" invocation. If
-  // that worker is lost, Workflow retries the whole step from entry rather
-  // than resuming this callback sequence in a replacement process.
+  // A lost serverless worker retries the whole turn step from entry.
   const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
   const modelSpans = new WeakMap<InstrumentationAttemptScope, Map<string, SpanState>>();
   const actions = createAgentActionInstrumentation({

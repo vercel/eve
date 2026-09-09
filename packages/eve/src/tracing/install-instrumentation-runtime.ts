@@ -120,6 +120,7 @@ function sessionReleaseProvider(
   const release = async (event: { readonly sessionId: string }): Promise<void> => {
     const conversationId =
       readConversationId(contextStorage.getStore()?.get(ConversationIdKey)) ?? event.sessionId;
+    if (conversationId !== event.sessionId) return;
     await Promise.all(processors.map((processor) => processor.releaseConversation(conversationId)));
   };
   return {

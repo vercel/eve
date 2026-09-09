@@ -102,9 +102,14 @@ describe("installInstrumentationRuntime", () => {
     expect(forceFlush).not.toHaveBeenCalled();
   });
 
-  it.each(["session.completed", "session.failed"] as const)(
-    "releases local trace liveness after %s",
-    async (type) => {
+  it.each([
+    ["session.completed", "conversation-1", true],
+    ["session.failed", "conversation-1", true],
+    ["session.completed", "child-1", false],
+    ["session.failed", "child-1", false],
+  ] as const)(
+    "releases conversation traces after %s for %s",
+    async (type, sessionId, expectedRelease) => {
       const releaseConversation = vi.fn(async () => true);
       const processor = {
         forceFlush: vi.fn(async () => undefined),
@@ -121,8 +126,8 @@ describe("installInstrumentationRuntime", () => {
       });
       const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
       const event = {
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        sessionId: "session-1",
+        idempotencyKey: sessionIdempotencyKey(sessionId),
+        sessionId,
         type,
         ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
       };
@@ -131,7 +136,7 @@ describe("installInstrumentationRuntime", () => {
       context.set(ConversationIdKey, "conversation-1");
       await contextStorage.run(context, () => hooks.publish(event));
 
-      expect(releaseConversation).toHaveBeenCalledExactlyOnceWith("conversation-1");
+      expect(releaseConversation.mock.calls).toEqual(expectedRelease ? [["conversation-1"]] : []);
     },
   );
 

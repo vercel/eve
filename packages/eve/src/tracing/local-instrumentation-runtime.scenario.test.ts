@@ -238,7 +238,7 @@ describe("local instrumentation runtime", () => {
     ]);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
+    expect(listed[0]).toMatchObject({ conversationId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {
