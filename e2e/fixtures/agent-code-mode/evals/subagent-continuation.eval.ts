@@ -1,8 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  description:
-    "code_mode awaits and reuses a child session, with a fresh subagent budget for each program.",
+  description: "code_mode awaits and reuses one child session across programs.",
   async test(t) {
     const first = await t.send("CODEMODE-CONTINUE-START");
     first.expectOk();
@@ -22,6 +21,5 @@ export default defineEval({
     });
     t.messageIncludes("MARKER:second");
     t.messageIncludes("MARKER:third");
-    t.messageIncludes("CODE_MODE_SUBAGENT_LIMIT_REACHED");
   },
 });

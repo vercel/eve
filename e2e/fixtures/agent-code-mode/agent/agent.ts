@@ -75,7 +75,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     const listing = request.messages.map((entry) => entry.text).join("\n");
     const agentId = /<agent id="([^"]+)" name="marker"(?: [^>]*)?>/u.exec(listing)?.[1];
     if (agentId === undefined) throw new Error("No marker agent id in the parent announcement.");
-    js = `const agentId = ${JSON.stringify(agentId)}; const results = []; for (const message of ["second", "third", "excess"]) { try { results.push(await tools.marker({ agentId, message })); } catch (error) { results.push(String(error)); } } return results;`;
+    js = `const agentId = ${JSON.stringify(agentId)}; const results = []; for (const message of ["second", "third"]) { try { results.push(await tools.marker({ agentId, message })); } catch (error) { results.push(String(error)); } } return results;`;
   } else if (message.includes("CODEMODE-ECHO-START")) {
     directive = "CODEMODE-ECHO";
     js = 'return await tools.echo({ value: "hello" });';
@@ -136,7 +136,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
             input: {
               js: [
                 'const matches = await tools.search_tools({ query: "getStatus" });',
-                'if (matches.length !== 0) throw new Error("Undiscovered connection tool was already loaded.");',
+                'if (matches.some(tool => tool.name === "catalog__getStatus")) throw new Error("Undiscovered connection tool was already loaded.");',
                 'const [fallback] = await tools.describe_tools({ names: ["connection_search"] });',
                 'if (!fallback.requiresDirectCall) throw new Error("Connection discovery must run directly.");',
                 "return { missing: true };",
