@@ -14,6 +14,7 @@ import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
+import type { WorkflowHistory } from "#shared/history-message.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
@@ -22,6 +23,7 @@ import type { TaskInboundUpdate } from "#tasks/types.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
+  readonly history?: WorkflowHistory;
   readonly message: string;
   readonly outputSchema?: JsonObject;
   readonly target: string;
@@ -66,6 +68,7 @@ export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonVa
     ctx,
     {
       agentId: input.agentId,
+      history: input.history,
       message: input.message,
       outputSchema: input.outputSchema,
       target: input.target,
@@ -206,6 +209,9 @@ export function validateAgentInput(
     (typeof (input as AgentInput).key !== "string" || (input as AgentInput).key.trim() === "")
   ) {
     throw new TypeError("agent() requires a non-empty `key`.");
+  }
+  if (input.agentId !== undefined && input.history !== undefined) {
+    throw new TypeError("agent() cannot combine `agentId` with `history`.");
   }
   if (typeof input.target !== "string" || input.target.trim() === "") {
     throw new TypeError("agent() requires a non-empty `target`.");

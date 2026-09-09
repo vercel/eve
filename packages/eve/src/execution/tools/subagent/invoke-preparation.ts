@@ -80,6 +80,7 @@ export async function prepareOwnerAgentInvocation(input: {
         action,
         bundle,
         ctx: planContext,
+        history: input.invocation.history,
         knownAgentIds: input.knownAgentIds,
         session,
       }),
@@ -93,6 +94,7 @@ export function planAgentDispatch(input: {
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;
   readonly ctx: ContextReader;
+  readonly history?: AgentInvocationRequest["input"]["history"];
   readonly knownAgentIds?: readonly string[];
   readonly session: RuntimeSession;
 }): OwnerAgentDispatchPlanEntry {
@@ -105,6 +107,9 @@ export function planAgentDispatch(input: {
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
     if (knownAgentIds.has(agentId)) {
+      if (input.history !== undefined) {
+        throw new TypeError("agent() history can preload only a newly created local subagent.");
+      }
       const dynamicSubagentSelection =
         input.bundle.subagentRegistry.dynamicNodeIds?.has(input.action.nodeId) === true
           ? getDynamicSubagentSelection(input.ctx, input.action.nodeId)
@@ -128,6 +133,7 @@ export function planAgentDispatch(input: {
 }
 
 function classifyFreshStart(input: {
+  readonly history?: AgentInvocationRequest["input"]["history"];
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;
   readonly ctx: ContextReader;
@@ -163,6 +169,9 @@ function classifyFreshStart(input: {
     return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
   }
   if (action.kind === "remote-agent-call") {
+    if (input.history !== undefined) {
+      throw new TypeError("agent() history can preload only a new local subagent.");
+    }
     return {
       kind: "start",
       target: {
@@ -195,7 +204,13 @@ function classifyFreshStart(input: {
         };
   return {
     kind: "start",
-    target: { action, dynamicSubagentAgentConfig: dynamicAgentConfig, kind: "local", source },
+    target: {
+      action,
+      dynamicSubagentAgentConfig: dynamicAgentConfig,
+      history: input.history,
+      kind: "local",
+      source,
+    },
   };
 }
 

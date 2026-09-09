@@ -262,6 +262,21 @@ stable across replay, so use a fixed key for each logical call site. Parallel ca
 keys. `target` is the model-visible subagent name; pass `agentId` to continue an existing child and
 `outputSchema` to require structured output.
 
+Pass `history` to preload a new local subagent before its first message. For example, a workflow can
+seed a private research session with the completed conversation prefix it received:
+
+```ts
+const result = await ctx.agent({
+  key: "private-research-session",
+  target: "research",
+  history: ctx.history,
+  message: task,
+});
+```
+
+`history` applies only when creating a local subagent. It cannot be combined with `agentId` or used
+with a remote agent.
+
 ## Report progress: `yield`
 
 A workflow body may be an async generator. Ordinary yields report progress in both execution

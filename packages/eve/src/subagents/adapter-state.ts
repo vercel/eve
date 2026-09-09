@@ -27,6 +27,8 @@ export const SUBAGENT_ADAPTER_KIND = "subagent";
  */
 export interface SubagentAdapterState extends Record<string, unknown> {
   readonly callId: string;
+  /** Internal conversation prefix used while creating this child session. */
+  readonly history?: import("#shared/history-message.js").WorkflowHistory;
   readonly parentContinuationToken: string;
   readonly parentSessionId: string;
   readonly subagentName: string;

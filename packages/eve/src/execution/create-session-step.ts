@@ -10,6 +10,8 @@ import {
 import { createSession } from "#execution/session.js";
 import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
+import type { WorkflowHistory } from "#shared/history-message.js";
+import { toModelMessages } from "#execution/tools/workflow/history.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -35,6 +37,7 @@ export async function createSessionStep(input: {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+  readonly history?: WorkflowHistory;
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
@@ -69,6 +72,7 @@ export async function createSessionStep(input: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
     continuationToken: input.continuationToken,
+    history: input.history === undefined ? undefined : toModelMessages(input.history),
     limits: {
       // Inherited token limits are the parent's remaining quota share at
       // dispatch time; an authored `false` uncaps only when there is nothing
