@@ -71,7 +71,7 @@ export default defineEval({
     cancelled.event("turn.interrupted", { count: 1 });
     cancelled.eventOrder([
       { type: "turn.interrupted" },
-      { type: "turn.started" },
+      { type: "turn.started", data: { sequence: 1 } },
       { type: "session.waiting" },
     ]);
     cancelled.notEvent("turn.failed");

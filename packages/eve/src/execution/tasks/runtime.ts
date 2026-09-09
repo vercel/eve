@@ -1,7 +1,7 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { createHash } from "node:crypto";
 import type { TaskRunWorkflowInput } from "#execution/tasks/workflow.js";
-import { readStartedOwner } from "#execution/inbox/readiness.js";
+import { readClaimedOwner } from "#execution/inbox/readiness.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
 import { taskRunWorkflowReference } from "#execution/workflow-references.js";
@@ -23,11 +23,11 @@ export async function startTaskRun(
     {
       ...input,
       admissionOwnerRunId: getWorkflowMetadata().workflowRunId,
-      publishOwner: !firstAttempt,
+      publishOwner: false,
     } satisfies TaskRunWorkflowInput,
   ]);
   if (firstAttempt) return { runId: started.runId };
-  const owner = await readStartedOwner(started.runId);
+  const owner = await readClaimedOwner(input.taskInboxToken);
   return { runId: owner.ownerRunId };
 }
 

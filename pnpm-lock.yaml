@@ -8563,11 +8563,11 @@ packages:
     resolution: {integrity: sha512-mMy8/ODcKhab808co15eW+yN+HgXoQxRQHTiBV9Mrvl1r0ufnid7YOcI+gi4eUWSWl9ezD6TW2KXccrL8HCh2A==}
 
   '@workflow/builders@https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz':
-    resolution: {integrity: sha512-pdDuMlBVf8iboupJW1XY2PZdkrH8G6vQ+ImjI7JNgF+aewdsWTNM8lqi2oH9Dl5uA3pnyFrKzUBiMm6waLEazQ==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-builders.tgz}
+    resolution: {integrity: sha512-pdDuMlBVf8iboupJW1XY2PZdkrH8G6vQ+ImjI7JNgF+aewdsWTNM8lqi2oH9Dl5uA3pnyFrKzUBiMm6waLEazQ==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-builders.tgz}
     version: 5.0.0-beta.48-9a5660f
 
   '@workflow/core@https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz':
-    resolution: {integrity: sha512-ECnqiT5my027LTd5Y0SHWeCQ9BYroC+CPhaGSkDrLnhFcrL1Rj30+A6mUbsEi1yvDbK3Zzz+07DeAw7slAeI3g==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-core.tgz}
+    resolution: {integrity: sha512-ECnqiT5my027LTd5Y0SHWeCQ9BYroC+CPhaGSkDrLnhFcrL1Rj30+A6mUbsEi1yvDbK3Zzz+07DeAw7slAeI3g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-core.tgz}
     version: 5.0.0-beta.48-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
@@ -8576,11 +8576,11 @@ packages:
         optional: true
 
   '@workflow/errors@https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz':
-    resolution: {integrity: sha512-B4hKGVD8DGBMZvAbYonx0nOi+AAjux8zQYyg1/4chSnOMJGaMji2NgF4CXocLF1Ihdb1CxXYy6mspT7vxKOAnw==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-errors.tgz}
+    resolution: {integrity: sha512-B4hKGVD8DGBMZvAbYonx0nOi+AAjux8zQYyg1/4chSnOMJGaMji2NgF4CXocLF1Ihdb1CxXYy6mspT7vxKOAnw==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-errors.tgz}
     version: 5.0.0-beta.20-9a5660f
 
   '@workflow/serde@https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz':
-    resolution: {integrity: sha512-4DgMoVAa3X5P7NR2hVTiH61nXJ1F6kFcQkjgviTEyyxLVm417y4riA4mD6ItAZyLjbxKsqS9JDJ0ybBQHuvULg==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-serde.tgz}
+    resolution: {integrity: sha512-4DgMoVAa3X5P7NR2hVTiH61nXJ1F6kFcQkjgviTEyyxLVm417y4riA4mD6ItAZyLjbxKsqS9JDJ0ybBQHuvULg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-serde.tgz}
     version: 5.0.0-beta.2-9a5660f
 
   '@workflow/swc-plugin@https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-swc-plugin.tgz':
@@ -8590,11 +8590,11 @@ packages:
       '@swc/core': 1.15.3
 
   '@workflow/utils@https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz':
-    resolution: {integrity: sha512-uRQrw0vQ7eVjZxKF/3OTCf88OTcvm7opwlYoL+v6emAmKGlzcof4JqGDH9M7P9xFmDrZ8sEpI4OfuU3kU7s/6g==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-utils.tgz}
+    resolution: {integrity: sha512-uRQrw0vQ7eVjZxKF/3OTCf88OTcvm7opwlYoL+v6emAmKGlzcof4JqGDH9M7P9xFmDrZ8sEpI4OfuU3kU7s/6g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-utils.tgz}
     version: 5.0.0-beta.10-9a5660f
 
   '@workflow/world-local@https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz':
-    resolution: {integrity: sha512-km6Y8adkn3jBOeYXm7sBB1j1RjCAud4u3A7DxkfF7BIi1jhS9OkZ4ua3Az4O4/2w7bunPUDJ5jyUiLKw7tUt9g==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-world-local.tgz}
+    resolution: {integrity: sha512-km6Y8adkn3jBOeYXm7sBB1j1RjCAud4u3A7DxkfF7BIi1jhS9OkZ4ua3Az4O4/2w7bunPUDJ5jyUiLKw7tUt9g==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-local.tgz}
     version: 5.0.0-beta.42-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
@@ -8603,12 +8603,12 @@ packages:
         optional: true
 
   '@workflow/world-postgres@https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz':
-    resolution: {integrity: sha512-97vJykDx06cQRJsvOEAPFo1ebLnjk/+FOUUkrlHfAZxz5xTraTXusYevMe1hDqk4Ohk9eVDMpM0dLK2a3MtVwg==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-world-postgres.tgz}
+    resolution: {integrity: sha512-97vJykDx06cQRJsvOEAPFo1ebLnjk/+FOUUkrlHfAZxz5xTraTXusYevMe1hDqk4Ohk9eVDMpM0dLK2a3MtVwg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-postgres.tgz}
     version: 5.0.0-beta.40-9a5660f
     hasBin: true
 
   '@workflow/world-vercel@https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz':
-    resolution: {integrity: sha512-n+2IQ8+KGQ8LF0Z71S1JwQxq+CPv6fk/LqNi+ugYd8/LJEoapxMkCGpVLWrGtc5BJCCx/yqCfz8yobD+hf/FkA==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-world-vercel.tgz}
+    resolution: {integrity: sha512-n+2IQ8+KGQ8LF0Z71S1JwQxq+CPv6fk/LqNi+ugYd8/LJEoapxMkCGpVLWrGtc5BJCCx/yqCfz8yobD+hf/FkA==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world-vercel.tgz}
     version: 5.0.0-beta.44-9a5660f
     peerDependencies:
       '@opentelemetry/api': '1'
@@ -8617,7 +8617,7 @@ packages:
         optional: true
 
   '@workflow/world@https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz':
-    resolution: {integrity: sha512-GstcjlMTUsi/y93yUdkpV3AjyjEF4QyqfjLF50Reeov710/hYhYHxWyJbp3JkfeSe7AnDOgjETwm6TX0bPQcdg==, tarball: https://workflow-tarballs.labs.vercel.dev/workflow-world.tgz}
+    resolution: {integrity: sha512-GstcjlMTUsi/y93yUdkpV3AjyjEF4QyqfjLF50Reeov710/hYhYHxWyJbp3JkfeSe7AnDOgjETwm6TX0bPQcdg==, tarball: https://workflow-tarballs-a29hayaeo.labs.vercel.dev/workflow-world.tgz}
     version: 5.0.0-beta.33-9a5660f
 
   '@zernio/chat-sdk-adapter@0.5.0':

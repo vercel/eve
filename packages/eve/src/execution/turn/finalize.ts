@@ -120,6 +120,7 @@ async function finalizeTurn(input: FinalizeTurnInput): Promise<SessionCheckpoint
       });
       const settled = await settleCancelledTurn({
         events,
+        ownershipState: original.state,
         sessionState: current.state,
         serializedContext: current.serializedContext,
         settlement: settlement!,

@@ -172,7 +172,9 @@ describe("turn cancellation descendant cascade", () => {
           const localCalled = called.find((event) => event.data.remote === undefined);
           const remoteCalled = called.find((event) => event.data.remote !== undefined);
           if (localCalled === undefined || remoteCalled === undefined) {
-            throw new Error("Expected one local and one remote subagent.called event.");
+            throw new Error(
+              `Expected one local and one remote subagent.called event: ${JSON.stringify(called)}`,
+            );
           }
           expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
 
@@ -274,7 +276,13 @@ async function readSubagentCalls(input: {
       while (events.length < input.count) {
         const next = await input.iterator.next();
         if (next.done) throw new Error(`Stream ended before ${input.label}.`);
-        if (next.value.type === "subagent.called") events.push(next.value);
+        const event = next.value;
+        // A retried step can emit the same invocation again before the other child starts.
+        if (
+          event.type === "subagent.called" &&
+          !events.some((seen) => seen.data.callId === event.data.callId)
+        )
+          events.push(event);
       }
       return events;
     })(),

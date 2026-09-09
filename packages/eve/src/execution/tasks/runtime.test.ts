@@ -18,7 +18,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getStepMetadata: () => step,
 }));
 vi.mock("#execution/workflow-start.js", () => ({ startWorkflowOnCurrentDeployment: start }));
-vi.mock("#execution/inbox/readiness.js", () => ({ readStartedOwner: readOwner }));
+vi.mock("#execution/inbox/readiness.js", () => ({ readClaimedOwner: readOwner }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getRun, resumeHook }));
 beforeEach(() => {
   vi.resetAllMocks();
@@ -80,7 +80,7 @@ describe("task runtime", () => {
         taskInboxToken: "task",
       }),
     ).toEqual({ runId: "winner" });
-    expect(readOwner).toHaveBeenCalledWith("duplicate");
+    expect(readOwner).toHaveBeenCalledWith("task");
   });
   it("waits for native completion before reading the last terminal view once", async () => {
     const completion = Promise.withResolvers<void>();

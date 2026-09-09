@@ -1,8 +1,8 @@
-import type { EveEvalTurn } from "eve/evals";
+import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 import { defineTaskEval } from "./task-transition.js";
-import { requireSessionStreamIndex } from "./shared.js";
+import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 
 const REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 
@@ -36,11 +36,8 @@ export default defineTaskEval({
       ),
     );
 
-    const sessionId = started.sessionId;
-    const firstLive = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(t, "First reviewer wake"),
-    });
-    const firstWake = await firstLive.result();
+    const first = await waitForReviewerWake(t, t);
+    const firstWake = first.turn;
 
     firstWake.expectOk();
     const firstNotification = requireTaskNotification(firstWake);
@@ -65,10 +62,8 @@ export default defineTaskEval({
       satisfies((message) => message === undefined, "the pending cohort wake is silent"),
     );
 
-    const secondLive = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(firstLive.session, "Late reviewer wake"),
-    });
-    const wake = await secondLive.result();
+    const second = await waitForReviewerWake(t, first.session);
+    const wake = second.turn;
 
     wake.expectOk();
     const lateNotification = requireTaskNotification(wake);
@@ -96,6 +91,28 @@ export default defineTaskEval({
 interface TaskNotification {
   readonly message: string;
   readonly taskId: string;
+}
+
+async function waitForReviewerWake(t: EveEvalContext, initial: TaskEvalSessionDriver) {
+  let session = initial;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (session.sessionId === undefined) throw new Error("Reviewer wake has no session id.");
+    const live = t.target.watchTurn(session.sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Reviewer wake"),
+    });
+    const turn = await live.result();
+    turn.expectOk();
+    session = live.session;
+    if (
+      turn.events.some(
+        (event) =>
+          event.type === "message.received" &&
+          /Background task task_[a-z0-9]+/iu.test(event.data.message),
+      )
+    )
+      return { session, turn };
+  }
+  throw new Error("Reviewer wake has no completed-task notification after ten turns.");
 }
 
 function requireTaskNotification(turn: EveEvalTurn): TaskNotification {

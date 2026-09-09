@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import type { InitializedSessionCheckpoint } from "#execution/turn/types.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { getWorld, getHookByToken } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
@@ -582,6 +584,19 @@ describe("turn cancellation integration", () => {
         expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
+        await vi.waitFor(async () => {
+          const snapshot = await sessionSnapshots.latest<InitializedSessionCheckpoint>(
+            run.resources.snapshots,
+          );
+          expect(getAgentHandleStore(snapshot?.state.snapshot.session.state)?.handles).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                phase: "parked",
+                address: expect.objectContaining({ sessionId: childSessionId }),
+              }),
+            ]),
+          );
+        });
         await dispatchSessionCommandByToken(continuationToken, {
           kind: "send",
           payload: { message: "follow up after subagent cancel" },

@@ -15,7 +15,12 @@ import {
   abandonRunningAgentTurns,
 } from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
-import { clearWorkflowToolRuns, getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import {
+  clearWorkflowToolRuns,
+  getWorkflowToolRuns,
+  recordWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
+import { getAgentHandleStore, writeHandles } from "#subagents/handles/store.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -53,6 +58,7 @@ export async function settleCancelledTurn(input: {
   readonly events: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly ownershipState?: DurableSessionState;
   readonly settlement: ModelSettlement;
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
@@ -67,6 +73,12 @@ export async function settleCancelledTurn(input: {
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
   });
   const emissionState = getHarnessEmissionState(session.state);
+  if (input.ownershipState !== undefined) {
+    const owned = input.ownershipState.snapshot.session;
+    session = writeHandles(session, getAgentHandleStore(owned.state)?.handles ?? []);
+    for (const run of getWorkflowToolRuns(owned.state))
+      session = recordWorkflowToolRun(session, run);
+  }
   // Discarded model state may contain an already-answered prompt; the next
   // model gate must issue a fresh prompt if the limit still applies.
   const workflowToolRuns = getWorkflowToolRuns(session.state);

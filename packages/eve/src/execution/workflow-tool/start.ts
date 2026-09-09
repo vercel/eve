@@ -14,7 +14,7 @@ import type { WorkflowToolRunAddress } from "#execution/workflow-tool/types.js";
 import type { WorkflowToolRunInput } from "#execution/workflow-tool/types.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-start.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
-import { readStartedOwner } from "#execution/inbox/readiness.js";
+import { readClaimedOwner } from "#execution/inbox/readiness.js";
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
@@ -45,13 +45,13 @@ export async function startWorkflowToolRun(
   const workflowToolRunInput = {
     ...input,
     hookToken,
-    publishOwner: !firstAttempt,
+    publishOwner: false,
   } as WorkflowToolRunInput;
   const started = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
     workflowToolRunInput,
   ]);
   if (firstAttempt) return { hookToken, runId: started.runId };
-  const owner = await readStartedOwner(started.runId);
+  const owner = await readClaimedOwner(hookToken);
   return { hookToken: owner.token, runId: owner.ownerRunId };
 }
 

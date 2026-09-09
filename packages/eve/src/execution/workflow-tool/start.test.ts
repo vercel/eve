@@ -11,7 +11,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getStepMetadata: () => ({ attempt: mocks.attempt }),
 }));
 vi.mock("#execution/workflow-start.js", () => ({ startWorkflowOnCurrentDeployment: mocks.start }));
-vi.mock("#execution/inbox/readiness.js", () => ({ readStartedOwner: mocks.resolve }));
+vi.mock("#execution/inbox/readiness.js", () => ({ readClaimedOwner: mocks.resolve }));
 
 const input = { hookToken: "tool" } as WorkflowToolRunInput;
 
@@ -33,7 +33,7 @@ describe("workflow tool startup", () => {
     mocks.attempt = 2;
     mocks.resolve.mockResolvedValue({ token: "tool", ownerRunId: "original" });
     expect(await startWorkflowToolRun(input)).toEqual({ hookToken: "tool", runId: "original" });
-    expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith("started");
-    expect(mocks.start.mock.calls[0]?.[1][0].publishOwner).toBe(true);
+    expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith("tool");
+    expect(mocks.start.mock.calls[0]?.[1][0].publishOwner).toBe(false);
   });
 });
