@@ -134,12 +134,12 @@ function expectCacheReuse(t: EveEvalContext, turns: EveEvalTurn[]) {
     assert(previousInput !== undefined, "preceding input token usage is present");
     assert(usage?.cacheReadTokens !== undefined, "provider cache-read usage is present");
     t.log(`Parent request ${index + 1}: ${JSON.stringify({ previousInput, ...usage })}`);
-    // Allow cache block rounding while requiring reuse of the conversation, not just the system prompt.
+    // Allow a small margin for differences in provider token counts.
     t.check(
       usage.cacheReadTokens / previousInput,
       satisfies(
-        (ratio: number) => ratio >= 0.9,
-        `request ${index + 1} reads at least 90% of the preceding input from the provider cache`,
+        (ratio: number) => ratio >= 0.98,
+        `request ${index + 1} reads at least 98% of the preceding input from the provider cache`,
       ),
     );
   }
