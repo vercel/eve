@@ -69,8 +69,12 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { derivePendingState } from "#execution/pending-turn-state.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import {
+  getPendingApprovalCoordinationBatches,
+  getPendingCoordinationBatch,
+} from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
@@ -1739,6 +1743,161 @@ describe("createToolLoopHarness", () => {
       }),
     ]);
     expect(getPendingCoordinationBatch(result.session.state)).toBeUndefined();
+  });
+
+  it("does not coordinate a blocking workflow tool before approval", async () => {
+    const toolCall = {
+      input: { action: "run" },
+      toolCallId: "workflow-1",
+      toolName: "guarded_workflow",
+      type: "tool-call" as const,
+    };
+    setupMockAgent({
+      content: [
+        toolCall,
+        {
+          approvalId: "approval-workflow",
+          toolCallId: toolCall.toolCallId,
+          type: "tool-approval-request",
+        },
+      ],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              toolCall,
+              {
+                approvalId: "approval-workflow",
+                toolCallId: toolCall.toolCallId,
+                type: "tool-approval-request",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      responseMessages: [
+        {
+          content: [
+            toolCall,
+            {
+              approvalId: "approval-workflow",
+              toolCallId: toolCall.toolCallId,
+              type: "tool-approval-request",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map([
+          [
+            "guarded_workflow",
+            {
+              approval: () => "user-approval",
+              description: "Run a guarded workflow.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "guarded_workflow",
+              workflowId: "workflow//./agent/tools/guarded-workflow//execute",
+            },
+          ],
+          [
+            "unguarded_workflow",
+            {
+              description: "Run an unguarded workflow.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "unguarded_workflow",
+              workflowId: "workflow//./agent/tools/unguarded-workflow//execute",
+            },
+          ],
+        ]),
+      }),
+    );
+
+    const pending = await runStep(createTestSession(), { message: "Run the workflow." });
+
+    expect(getPendingApprovalCoordinationBatches(pending.session.state)[0]?.tasks).toMatchObject([
+      { callId: "workflow-1" },
+    ]);
+    expect(getPendingCoordinationBatch(pending.session.state)).toBeUndefined();
+    expect(derivePendingState(pending.session).pendingCoordinationCallIds).toBeUndefined();
+    expect(getPendingInputRequestIds(pending.session.state)).toEqual(
+      new Set(["approval-workflow"]),
+    );
+    expect(events.slice(-3).map((event) => event.type)).toEqual([
+      "input.requested",
+      "turn.completed",
+      "session.waiting",
+    ]);
+
+    const unrelatedToolCall = {
+      input: {},
+      toolCallId: "workflow-2",
+      toolName: "unguarded_workflow",
+      type: "tool-call" as const,
+    };
+    setupMockAgent({
+      content: [unrelatedToolCall],
+      finishReason: "tool-calls",
+      response: {
+        messages: [{ content: [unrelatedToolCall], role: "assistant" }],
+      },
+      responseMessages: [{ content: [unrelatedToolCall], role: "assistant" }],
+      text: "",
+      toolCalls: [unrelatedToolCall],
+      toolResults: [],
+    });
+    const unrelated = await runStep(pending.session, {
+      message: "Run something else while that waits.",
+    });
+
+    expect(getPendingCoordinationBatch(unrelated.session.state)?.tasks).toMatchObject([
+      { callId: "workflow-2" },
+    ]);
+    expect(derivePendingState(unrelated.session).pendingCoordinationCallIds).toEqual([
+      "workflow-2",
+    ]);
+    expect(getPendingApprovalCoordinationBatches(unrelated.session.state)[0]?.tasks).toMatchObject([
+      { callId: "workflow-1" },
+    ]);
+    expect(unrelated.session.history).toContainEqual({
+      content: "Run something else while that waits.",
+      role: "user",
+    });
+
+    const eventCountBeforeApproval = events.length;
+    const approved = await runStep(pending.session, {
+      inputResponses: [{ optionId: "approve", requestId: "approval-workflow" }],
+    });
+
+    expect(hasPendingInputBatch(approved.session.state)).toBe(false);
+    expect(derivePendingState(approved.session).pendingCoordinationCallIds).toEqual(["workflow-1"]);
+    const approvalEvents = events.slice(eventCountBeforeApproval);
+    const approvalTurnStarted = approvalEvents.find((event) => event.type === "turn.started");
+    expect(approvalTurnStarted?.data.turnId).toMatch(/^turn_\d+$/u);
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Cancelled.", role: "assistant" }] },
+      text: "Cancelled.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const denied = await runStep(pending.session, {
+      inputResponses: [{ optionId: "cancel", requestId: "approval-workflow" }],
+    });
+
+    expect(getPendingCoordinationBatch(denied.session.state)).toBeUndefined();
+    expect(getPendingApprovalCoordinationBatches(denied.session.state)).toEqual([]);
+    expect(hasPendingInputBatch(denied.session.state)).toBe(false);
   });
 
   it("parks on both batches when one step carries a workflow task and an approval", async () => {
