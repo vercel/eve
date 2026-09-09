@@ -184,11 +184,12 @@ while a workflow retries the interrupted step and continues the authored body.
 
 The workflow body calls `await readRepository(ctx, repository)`.
 
-> [!WARNING]
-> Do not return the token from the helper: step results enter the workflow's durable history.
-> eve's token cache stays inside the step. The step's input is recorded too, and after sign-in it
-> carries the provider's callback parameters (such as a one-time authorization code), just as an
-> agent turn records the callback it receives. Bearer tokens are never written.
+<Callout type="warning" title="Keep tokens out of step results">
+  Step results enter the workflow's durable history, so do not return the token from the helper.
+  eve's token cache stays inside the step. The step input is recorded too and, after sign-in,
+  carries the provider's callback parameters, such as a one-time authorization code. This matches
+  how agent turns record callbacks. Bearer tokens are never written.
+</Callout>
 
 When sign-in is required, the step attempt ends and the workflow waits on its own callback hook,
 without holding compute. The channel renders the sign-in challenge. After the callback, eve retries
