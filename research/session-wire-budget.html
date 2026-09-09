@@ -564,6 +564,7 @@
           <a href="#paths">Paths A–G</a>
           <a href="#time">Where the time goes</a>
           <a href="#levers">Levers</a>
+          <a href="#addendum">Recommendations</a>
           <a href="#sound">Soundness</a>
           <a href="#method">Method</a>
         </nav>
@@ -1806,6 +1807,120 @@
         </div>
       </section>
 
+      <section id="addendum">
+        <h2>Recommendations</h2>
+        <div class="prose">
+          <p class="eyebrow">Addendum by Pranay Prakash · proposed, not implemented</p>
+          <p>
+            The new-session path is three functions in a chain: handler, holder, turn. Each link is
+            a queue hop, and inside each link every request waits for the previous one. The holder
+            sits in the middle doing bookkeeping the turn does not need before it can call the
+            model. The turn needs three things: the claim on its hook, a durable marker that effects
+            began, and the first message, which is already in its input. So the goal is to run the
+            turn in parallel with the holder rather than after it.
+          </p>
+          <ol>
+            <li>
+              <b>Start the holder and the first turn from the handler, in parallel.</b> The holder
+              run id is generated client-side before <code>start()</code>, the deployment id is in
+              the environment, and same-deployment keys derive locally, so the handler can build the
+              resources without the holder's metadata read and pass them into both starts. The turn
+              hops once and claims while the holder bootstraps; its head read waits, bounded, for
+              the seed. Token-bearing sessions keep the serial path, or wait on the alias outcome,
+              because the turn must not begin effects before the alias claim is known.
+            </li>
+            <li>
+              <b>Let the first turn write index zero.</b> The initial entered marker already embeds
+              full state. An early follow-up that wins the claim and finds an empty log defers to
+              the initial event's candidate through the existing predecessor mechanism. This changes
+              the first-input-precedence contract and must be written down with it.
+            </li>
+            <li>
+              <b>Move the session-timeout start off the path.</b> From the holder's bootstrap step,
+              or after the model call.
+            </li>
+            <li>
+              <b>Overlap the entered marker with model request assembly.</b> Issue the PUT, build
+              the request, await the PUT before the first external effect.
+            </li>
+            <li>
+              <b>Trim holder bootstrap.</b> Derive the stream reference locally, drop tail probes on
+              fresh streams, fold the descriptor close into its write, merge the two bootstrap
+              steps. Fourteen requests become about eight. This is what the fifty-session concurrent
+              scenario is paying for.
+            </li>
+            <li>
+              <b>Hook-claim reads belong upstream.</b> Rather than moving the turn's
+              <code>AbortController</code> out of the claim suspension, generalize the SDK: when a
+              suspension posts several guarded events from the same base cursor, the longest event
+              suffix any of them returns contains every event the suspension wrote, so the runtime
+              can continue inline replay from it with no read. A pull request against
+              vercel/workflow is in progress. eve keeps two hooks per turn.
+            </li>
+          </ol>
+        </div>
+        <figure class="wide">
+          <div id="fig-a2"></div>
+          <figcaption>
+            <b>Path A after the recommendations.</b> The handler issues four requests in one
+            parallel batch and returns. Both hops run concurrently. The turn reaches the model after
+            one hook write, one step start, and one marker write, while the holder finishes its own
+            bootstrap alongside. About four sequential requests and one hop, against twenty-one and
+            two today.
+          </figcaption>
+        </figure>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Recommendation</th>
+                <th class="num">Serial RTs removed</th>
+                <th class="num">Hops removed</th>
+                <th>Where</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Parallel holder and turn start from the handler</td>
+                <td class="num">~13</td>
+                <td class="num">1</td>
+                <td>handler, <code>session/dispatch.ts</code>, <code>holding-workflow.ts</code></td>
+              </tr>
+              <tr>
+                <td>First turn writes index zero</td>
+                <td class="num">1 + seed wait</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code>, <code>checkpoint-log.ts</code></td>
+              </tr>
+              <tr>
+                <td>Timeout start off-path</td>
+                <td class="num">1</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code> or holder</td>
+              </tr>
+              <tr>
+                <td>Overlap entered marker</td>
+                <td class="num">~1</td>
+                <td class="num">0</td>
+                <td><code>turn/execute.ts</code></td>
+              </tr>
+              <tr>
+                <td>Holder trims (off-path after the first item)</td>
+                <td class="num">6</td>
+                <td class="num">0</td>
+                <td><code>holding-steps.ts</code>, <code>stream-storage.ts</code></td>
+              </tr>
+              <tr>
+                <td>Multi-event suspension delta, upstream</td>
+                <td class="num">1 + cold replay</td>
+                <td class="num">0</td>
+                <td>vercel/workflow suspension handler and runtime</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="method">
         <h2>Method</h2>
         <div class="prose">
@@ -2290,6 +2405,75 @@
             },
             { t: "self", lane: 3, label: "model call", kind: "compute" },
             { t: "phase", label: "continues as Path B from the model call onward" },
+          ],
+        });
+
+        // Path A after the recommendations
+        seq("fig-a2", {
+          aria: "Proposed new session: handler starts holder and turn in parallel; both hop at once; turn reaches the model after one hook write, one step start, and one marker write.",
+          lanes: [L.handler, L.vqs, L.holder, L.turn, L.ws],
+          events: [
+            {
+              t: "self",
+              lane: 0,
+              label: "build SessionResources locally: holder runId, deployment id, derived key",
+              kind: "compute",
+            },
+            { t: "msg", from: 0, to: 4, label: "run_created (holder)", kind: "ws", par: true },
+            { t: "msg", from: 0, to: 1, label: "publish holder", kind: "vqs", par: true },
+            {
+              t: "msg",
+              from: 0,
+              to: 4,
+              label: "run_created (turn, resources inlined)",
+              kind: "ws",
+              par: true,
+            },
+            { t: "msg", from: 0, to: 1, label: "publish turn", kind: "vqs", par: true },
+            { t: "self", lane: 0, label: "202 to client", kind: "compute" },
+            { t: "hop", from: 1, to: 2, label: "flow route", kind: "vqs" },
+            { t: "hop", from: 1, to: 3, label: "flow route", kind: "vqs" },
+            { t: "msg", from: 2, to: 4, label: "run_started", kind: "ws", bg: true },
+            { t: "msg", from: 3, to: 4, label: "run_started", kind: "ws", bg: true },
+            {
+              t: "msg",
+              from: 2,
+              to: 4,
+              label: "hook_created eve:holder:<runId>",
+              kind: "ws",
+              rt: "single hook: delta carried, no reload",
+            },
+            {
+              t: "msg",
+              from: 3,
+              to: 4,
+              label: "hook_created ×2 (inbox, AbortController)",
+              kind: "ws",
+              rt: "upstream multi-event delta: no reload",
+            },
+            { t: "msg", from: 2, to: 4, label: "step_started bootstrapStep (merged)", kind: "ws" },
+            { t: "msg", from: 3, to: 4, label: "step_started executeTurnStep", kind: "ws" },
+            {
+              t: "msg",
+              from: 2,
+              to: 4,
+              label: "PUT descriptor (+ done) · run_created ∥ publish timeout",
+              kind: "ws",
+              rt: "no metadata read, no tail probes",
+            },
+            {
+              t: "msg",
+              from: 3,
+              to: 4,
+              label: "PUT initial entered marker (index 0, embeds state)",
+              kind: "ws",
+              rt: "overlapped with model request assembly",
+            },
+            { t: "self", lane: 3, label: "model call", kind: "compute" },
+            {
+              t: "phase",
+              label: "holder finishes off-path: step_completed, park on control.next(), ack",
+            },
           ],
         });
 

@@ -1036,3 +1036,48 @@ Source inventory: [holding workflow](../packages/eve/src/execution/session/holdi
 [turn model execution](../packages/eve/src/execution/turn/model.ts),
 [harness emission](../packages/eve/src/harness/emission.ts), and
 [Slack anchoring](../packages/eve/src/public/channels/slack/slackChannel.ts).
+
+## Addendum: faster new-session start
+
+Recommendations by Pranay Prakash from the wire-budget trace in
+[session-wire-budget.html](./session-wire-budget.html). Status: proposed, not
+implemented. The hosted cold first turn measured 1,928 ms at the client against a
+1,233 ms turn run, with about twenty-one sequential requests and two queue hops
+before the first model call. The holder sits between the handler and the turn
+doing bookkeeping the turn does not need before it can call the model.
+
+1. **Start the holder and the first turn from the handler, in parallel.** The
+   holder run ID is generated client-side before `start()`, the deployment ID is
+   in the environment, and same-deployment encryption keys derive locally, so the
+   handler can build `SessionResources` without the holder's `GET /v2/runs/:self`
+   and pass them into both starts. The turn hops once and claims while the holder
+   bootstraps; its head read waits (bounded) for the seed. This removes the second
+   hop and the holder's request chain from the critical path. Token-bearing
+   sessions keep the serial path, or wait on the alias claim outcome, because the
+   turn must not begin effects before the alias is known.
+2. **Let the first turn initialize index zero.** The initial entered marker already
+   embeds full state because no earlier record exists, so the seed record is
+   redundant for the claiming turn. An early follow-up that wins the claim and
+   finds an empty log defers to the initial event's candidate through the existing
+   `predecessor` mechanism. This changes the first-input-precedence contract above
+   and must be documented with it.
+3. **Move the session-timeout start off the critical path.** Start it from the
+   holder's bootstrap step, or after the model call, instead of before it.
+4. **Overlap the entered marker with model request assembly.** Issue the PUT, build
+   the model request, then await the PUT before the first external effect.
+5. **Trim holder bootstrap.** Derive the stream reference locally, drop tail-index
+   probes on streams the holder just created, fold the descriptor close into its
+   write where the streamer allows, and merge the two bootstrap steps. About
+   fourteen requests become eight. This matters for concurrent creation, where
+   fifty simultaneous holders measured a 5 s p50.
+6. **Hook-claim reads belong upstream.** Rather than moving the turn's
+   `AbortController` out of the claim suspension, generalize the SDK: when a
+   suspension posts several guarded events from the same base cursor, the longest
+   event suffix any of them returns contains every event the suspension wrote, so
+   the runtime can continue inline replay from it without an `events.list` read.
+   A pull request against `vercel/workflow` is in progress. eve keeps two hooks per
+   turn.
+
+Resulting path: four parallel requests from the handler, one hop, then
+`hook_created`, `step_started`, and the initial marker before the model call.
+About four sequential requests and one hop, against twenty-one and two today.
