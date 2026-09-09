@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import { type HarnessAgentAdapter } from "@ai-sdk/harness/agent";
 import type { StandardJSONSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
@@ -25,7 +27,7 @@ export interface HarnessAgentSettings {
   readonly id?: string;
   readonly instructions?: string;
   readonly skills?: readonly HarnessAgentSkill[];
-  readonly workingDirectory?: string;
+  readonly workDir?: string;
 }
 
 export interface HarnessBridgeSettings {
@@ -35,6 +37,23 @@ export interface HarnessBridgeSettings {
 
 export const HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
   task: z.string().describe("Task for the coding harness to complete."),
+  workDir: z
+    .string()
+    .min(1, "workDir must not be empty.")
+    .refine((workDir) => !workDir.includes("\0"), "workDir must not contain NUL.")
+    .refine((workDir) => !workDir.includes("\\"), "workDir must use POSIX path separators.")
+    .refine(
+      (workDir) => !posix.isAbsolute(workDir),
+      "workDir must be relative to the sandbox workspace root.",
+    )
+    .refine((workDir) => {
+      const normalized = posix.normalize(workDir);
+      return normalized !== "." && normalized !== ".." && !normalized.startsWith("../");
+    }, "workDir must identify a directory within the sandbox workspace root.")
+    .optional()
+    .describe(
+      'Optional POSIX directory path relative to the sandbox workspace root (/workspace), such as "ms" or "packages/eve". Absolute paths, ".", parent traversal, and backslashes are not allowed.',
+    ),
 });
 
 export type HarnessAgentToolInput = z.infer<typeof HARNESS_AGENT_TOOL_INPUT_SCHEMA>;

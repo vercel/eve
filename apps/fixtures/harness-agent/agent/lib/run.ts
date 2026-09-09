@@ -21,10 +21,8 @@ type RunHarnessAgentSettings<TOutputSchema extends OptionalOutputSchema = undefi
 export async function runHarnessAgent<TOutputSchema extends OptionalOutputSchema = undefined>(
   input: RunHarnessAgentSettings<TOutputSchema>,
 ): Promise<HarnessAgentToolOutput<TOutputSchema>> {
-  const workDir = resolveHarnessWorkDir(input.workingDirectory);
   const sandboxSession = await adaptHarnessNetworkSandboxSession({
     sandbox: input.sandbox,
-    workingDirectory: input.workingDirectory,
   });
   let session: Awaited<ReturnType<HarnessAgent["createSession"]>> | undefined;
   let resultOutput: HarnessAgentToolOutput<TOutputSchema>;
@@ -49,7 +47,7 @@ export async function runHarnessAgent<TOutputSchema extends OptionalOutputSchema
               schema: input.outputSchema as FlexibleSchema<HarnessAgentToolOutput<TOutputSchema>>,
             }),
       permissionMode: "allow-all",
-      sandboxConfig: { workDir },
+      ...(input.workDir === undefined ? {} : { sandboxConfig: { workDir: input.workDir } }),
       skills: input.skills,
     });
     session = await agent.createSession({
@@ -105,19 +103,4 @@ async function cleanupHarnessInvocation(input: {
     failures.push(error);
   }
   return failures;
-}
-
-const LEADING_DOT_SLASH = /^\.\//;
-
-function resolveHarnessWorkDir(workingDirectory: string | undefined): string {
-  if (workingDirectory === undefined || workingDirectory === ".") {
-    return "workspace";
-  }
-  if (
-    workingDirectory.startsWith("/") ||
-    workingDirectory.split("/").some((segment) => segment === "..")
-  ) {
-    throw new Error("HarnessAgent workingDirectory must stay within the eve workspace.");
-  }
-  return `workspace/${workingDirectory.replace(LEADING_DOT_SLASH, "")}`;
 }

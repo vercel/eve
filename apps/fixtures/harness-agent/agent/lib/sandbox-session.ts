@@ -12,7 +12,6 @@ type VercelSandbox = Awaited<
 
 export async function adaptHarnessNetworkSandboxSession(input: {
   readonly sandbox: SandboxSession;
-  readonly workingDirectory?: string;
 }): Promise<HarnessV1NetworkSandboxSession> {
   const vercelSandbox = await resolveVercelSandbox(input.sandbox);
   const ports = resolveHarnessPorts(vercelSandbox);
@@ -27,7 +26,7 @@ export async function adaptHarnessNetworkSandboxSession(input: {
     await lease.release();
   };
   const session: HarnessV1NetworkSandboxSession = {
-    defaultWorkingDirectory: resolveWorkingDirectory(input.workingDirectory),
+    defaultWorkingDirectory: DEFAULT_WORKING_DIRECTORY,
     destroy: releasePort,
     description: "An eve-orchestrated Vercel sandbox used by a HarnessAgent session.",
     getPortEndpoint: async (options: {
@@ -140,17 +139,4 @@ async function reserveHarnessPort(input: {
       }
     },
   };
-}
-
-function resolveWorkingDirectory(workingDirectory: string | undefined): string {
-  if (workingDirectory === undefined || workingDirectory === ".") {
-    return DEFAULT_WORKING_DIRECTORY;
-  }
-  if (
-    workingDirectory.startsWith("/") ||
-    workingDirectory.split("/").some((segment) => segment === "..")
-  ) {
-    throw new Error("HarnessAgent workingDirectory must stay within the eve workspace.");
-  }
-  return `${DEFAULT_WORKING_DIRECTORY}/${workingDirectory.replace(/^\.\//, "")}`;
 }

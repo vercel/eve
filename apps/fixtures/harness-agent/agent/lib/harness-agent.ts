@@ -12,22 +12,24 @@ import type {
 
 /**
  * Creates an approval-gated HarnessAgent tool definition whose instructions,
- * skills, working directory, and harness are configured in code. The calling
- * model chooses only the task.
+ * skills, default workDir, and harness are configured in code. The calling
+ * model chooses the task and may override workDir for that invocation.
  */
 export function createHarnessAgentTool<TOutputSchema extends OptionalOutputSchema = undefined>(
   settings: CreateHarnessAgentToolSettings<TOutputSchema>,
 ): ToolDefinition<HarnessAgentToolInput, HarnessAgentToolOutput<TOutputSchema>> {
-  const { description, ...runSettings } = settings;
+  const { description, workDir: defaultWorkDir, ...runSettings } = settings;
   const definition: ToolDefinition<HarnessAgentToolInput, HarnessAgentToolOutput<TOutputSchema>> = {
     approval: always(),
     description,
     async execute(input, ctx) {
+      const workDir = input.workDir ?? defaultWorkDir;
       return await runHarnessAgent({
         abortSignal: ctx.abortSignal,
         ...runSettings,
         sandbox: await ctx.getSandbox(),
         task: input.task,
+        ...(workDir === undefined ? {} : { workDir }),
       });
     },
     inputSchema: HARNESS_AGENT_TOOL_INPUT_SCHEMA,

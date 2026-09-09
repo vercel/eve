@@ -8,5 +8,6 @@ export default defineTool(
     description: "Ask a code reviewer agent to explain the current agent's code.",
     harness: ({ port, portEndpoint }) => createClaudeCode({ port, portEndpoint }),
     instructions: "You are a code reviewer agent.",
+    workDir: "ms",
   }),
 );
