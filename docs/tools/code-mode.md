@@ -119,6 +119,68 @@ for each requested name, or `{ name, error: "unknown tool" }` for names that are
 not in the catalog. Subagent tools report `outputSchema: null`; their result is
 the child's final response.
 
+### Example: search, describe, then call
+
+This program finds an issue-listing tool by capability, reads its schemas before
+the first real call, reduces the result inside the program, and writes a report.
+Discovered connection tools are named `<connection>__<tool>`, so the program
+never hardcodes a name it has not seen.
+
+```js
+// Search by capability. "issue list" matches linear__list_issues on two name
+// tokens and outranks linear__create_issue, which matches one.
+const candidates = await tools.search_tools({ query: "issue list" });
+const listTool = candidates.find((t) => !t.requiresDirectCall && /list/.test(t.name));
+if (!listTool) {
+  // Undiscovered connection tools are not in this catalog. Return so the parent
+  // can run connection_search and start a new program.
+  return { status: "missing-tool", searched: candidates.map((t) => t.name) };
+}
+
+// Read the shapes once, before calling anything.
+const [issues, write] = await tools.describe_tools({ names: [listTool.name, "write_file"] });
+if ("error" in issues || "error" in write) {
+  throw new Error(`describe_tools: ${JSON.stringify([issues, write])}`);
+}
+
+// Build the input from the input schema instead of guessing required fields.
+const required = issues.inputSchema.required ?? [];
+const result = await tools[listTool.name](
+  required.includes("teamId") ? { teamId: "ENG", limit: 50 } : { limit: 50 },
+);
+
+// Reduce here so only the summary crosses back to the model. Use the output
+// schema when the tool declares one; fall back to the observed value otherwise.
+const items = issues.outputSchema?.properties?.issues
+  ? result.issues
+  : Array.isArray(result)
+    ? result
+    : (Object.values(result).find(Array.isArray) ?? []);
+const overdue = items
+  .filter((i) => i.dueDate && new Date(i.dueDate) < new Date())
+  .map((i) => ({ id: i.identifier ?? i.id, title: i.title, due: i.dueDate }));
+
+await tools.write_file({
+  filePath: "/tmp/overdue.md",
+  content: overdue.map((i) => `- ${i.id}: ${i.title} (due ${i.due})`).join("\n"),
+});
+
+return { overdueCount: overdue.length };
+```
+
+What the program relies on:
+
+- `requiresDirectCall` separates tools the program can call from tools that
+  exist only on the direct surface. Calling one of the latter from a program
+  fails.
+- `describe_tools` is the only way a program learns a tool's shape. Check
+  `outputSchema` for `null` before reading nested fields from a result.
+- Calls issued together with `Promise.all` park together and settle together; a
+  failed nested call rejects with that tool's error message, which the program
+  can catch per call.
+- An error the program itself throws ends the run and returns to the model as
+  the `code_mode` result. The unchanged program is not retried.
+
 The catalog is fixed when the program is dispatched. It excludes connection
 tools that have not been discovered yet, so an empty search result does not
 mean the connection lacks that API. Call `connection_search` directly with the
