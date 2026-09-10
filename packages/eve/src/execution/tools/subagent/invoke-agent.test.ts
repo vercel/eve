@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invoke-agent.js";
+import {
+  agent,
+  type AgentInvocationReply,
+  validateAgentInput,
+} from "#execution/tools/subagent/invoke-agent.js";
 import type { ToolContext } from "#tools/definition.js";
 
 const mocks = vi.hoisted(() => ({
@@ -32,14 +36,22 @@ describe("workflow helper context errors", () => {
     ["null context", null],
   ])("rejects %s before creating hooks or dispatching work", async (_name, context) => {
     const ctx = context as ToolContext;
-    await expect(
-      agent(ctx, { key: "review", target: "reviewer", message: "Review" }),
-    ).rejects.toThrow("ctx.agent() requires a defineWorkflowTool() executor context.");
+    await expect(agent(ctx, "reviewer", { message: "Review" })).rejects.toThrow(
+      "ctx.agent() requires a defineWorkflowTool() executor context.",
+    );
     expect(() => ask(ctx, { prompt: "Continue?" })).toThrow(
       "ctx.ask() requires a defineWorkflowTool() executor context.",
     );
     expect(mocks.createHook).not.toHaveBeenCalled();
     expect(mocks.resumeHook).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent invocation input", () => {
+  it("requires a non-empty positional agent name", () => {
+    expect(() => validateAgentInput({ message: "Review", target: "" })).toThrow(
+      "agent() requires a non-empty agent name as its first argument.",
+    );
   });
 });
 
@@ -68,7 +80,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    const result = agent(ctx, { key: "research", message: "Find it", target: "research" });
+    const result = agent(ctx, "research", { message: "Find it" });
     await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
     controller.abort(new Error("task cancelled"));
 
@@ -78,12 +90,12 @@ describe("background agent invocation routing", () => {
 
   it("sends the invocation through the task owner after admission", async () => {
     const result = {
-      callId: "call-1:research",
+      callId: "call-1:agent-reply",
       kind: "subagent-result" as const,
       origin: "child" as const,
       outcome: {
         kind: "parked" as const,
-        result: { kind: "succeeded" as const, output: "available" },
+        result: { kind: "succeeded" as const, output: { findings: ["available"] } },
         usageDelta: {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
@@ -91,7 +103,7 @@ describe("background agent invocation routing", () => {
           outputTokens: 0,
         },
       },
-      output: "available",
+      output: { findings: ["available"] },
       subagentName: "research",
     };
     const replies: AgentInvocationReply[] = [{ kind: "runtime-action-result", results: [result] }];
@@ -124,20 +136,83 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("available");
+    const outputSchema = {
+      properties: { findings: { items: { type: "string" }, type: "array" } },
+      required: ["findings"],
+      type: "object",
+    };
+    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
+      findings: ["available"],
+    });
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
-        input: { message: "Find it", target: "research" },
-        invocationId: "call-1:research",
+        input: { message: "Find it", outputSchema, target: "research" },
+        invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
       },
     });
+  });
+
+  it("derives unique invocation ids for repeated parallel calls", async () => {
+    for (const token of ["reply-1", "reply-2"]) {
+      const replies: AgentInvocationReply[] = [
+        {
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: `call-1:${token}`,
+              kind: "subagent-result",
+              origin: "child",
+              output: token,
+              subagentName: "research",
+            } as never,
+          ],
+        },
+      ];
+      mocks.createHook.mockReturnValueOnce({
+        [Symbol.asyncIterator]: () => ({
+          next: async () =>
+            replies.length > 0
+              ? { done: false as const, value: replies.shift()! }
+              : { done: true as const, value: undefined },
+        }),
+        token,
+      });
+    }
+    mocks.resumeHook.mockImplementation(async () => undefined);
+    const ctx = { callId: "call-1" } as ToolContext;
+    attachWorkflowToolRunContext(ctx, {
+      from: {
+        callId: "call-1",
+        execution: "blocking",
+        input: {},
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-1",
+      },
+      owner: { inbox: "owner-inbox" },
+    });
+
+    await expect(
+      Promise.all([
+        agent(ctx, "research", { message: "First" }),
+        agent(ctx, "research", { message: "Second" }),
+      ]),
+    ).resolves.toEqual(["reply-1", "reply-2"]);
+
+    const requests = mocks.resumeHook.mock.calls
+      .map(([, message]) => message.request)
+      .filter((request) => request.kind === "agent-invoke");
+    expect(requests.map((request) => request.invocationId)).toEqual([
+      "call-1:reply-1",
+      "call-1:reply-2",
+    ]);
   });
 
   it("does not send the invocation before the owning task is admitted", async () => {
@@ -147,7 +222,7 @@ describe("background agent invocation routing", () => {
         kind: "runtime-action-result",
         results: [
           {
-            callId: "call-1:research",
+            callId: "call-1:agent-reply",
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -183,7 +258,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    const result = agent(ctx, { key: "research", message: "Find it", target: "research" });
+    const result = agent(ctx, "research", { message: "Find it" });
     await Promise.resolve();
     expect(mocks.createHook).not.toHaveBeenCalled();
     expect(mocks.resumeHook).not.toHaveBeenCalled();
@@ -195,7 +270,7 @@ describe("background agent invocation routing", () => {
 
   it("waits for agent calls inside a blocking workflow tool", async () => {
     const result = {
-      callId: "call-1:research",
+      callId: "call-1:agent-reply",
       kind: "subagent-result" as const,
       origin: "child" as const,
       outcome: {
@@ -240,9 +315,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("inline");
+    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("inline");
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
     expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
       kind: "request",
@@ -250,7 +323,7 @@ describe("background agent invocation routing", () => {
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
-        invocationId: "call-1:research",
+        invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
       },
     });
@@ -258,7 +331,7 @@ describe("background agent invocation routing", () => {
 
   it("rejects dispatch failures without reporting a child settlement", async () => {
     const failure = {
-      callId: "call-1:research",
+      callId: "call-1:agent-reply",
       isError: true as const,
       kind: "subagent-result" as const,
       origin: "dispatch" as const,
@@ -297,9 +370,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).rejects.toEqual(failure.output);
+    await expect(agent(ctx, "research", { message: "Find it" })).rejects.toEqual(failure.output);
     expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHook).not.toHaveBeenCalledWith(
       "owner-inbox",
@@ -346,7 +417,7 @@ describe("background agent invocation routing", () => {
           kind: "runtime-action-result",
           results: [
             {
-              callId: "call-1:research",
+              callId: "call-1:agent-reply",
               kind: "subagent-result",
               origin: "child",
               output: "done",
@@ -384,9 +455,7 @@ describe("background agent invocation routing", () => {
         },
       });
 
-      await expect(
-        agent(ctx, { key: "research", message: "Find it", target: "research" }),
-      ).resolves.toBe("done");
+      await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
 
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
         kind: "request",
@@ -433,7 +502,7 @@ describe("background agent invocation routing", () => {
         kind: "runtime-action-result",
         results: [
           {
-            callId: "call-1:research",
+            callId: "call-1:agent-reply",
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -471,9 +540,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("done");
+    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",
@@ -503,7 +570,7 @@ describe("background agent invocation routing", () => {
         kind: "runtime-action-result",
         results: [
           {
-            callId: "call-1:research",
+            callId: "call-1:agent-reply",
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -541,9 +608,7 @@ describe("background agent invocation routing", () => {
       },
     });
 
-    await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).resolves.toBe("done");
+    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "report",

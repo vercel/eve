@@ -2,7 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/subagent/invoke-agent.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
@@ -141,7 +141,8 @@ function createWorkflowBodyContext(
     );
   };
   const ctx: ToolContext & WorkflowToolContext = {
-    agent: (input) => agent(ctx, input),
+    agent: ((target: string, agentInput: AgentInput) =>
+      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,

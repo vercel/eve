@@ -102,9 +102,9 @@ the build with the missing import in the error.
 ### Migrate an existing workflow tool
 
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
-and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(input)` and `ctx.ask(request)`.
-The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`, `AgentInput`,
-`ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
+and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(target, input)` and
+`ctx.ask(request)`. The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`,
+`AgentInput`, `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
 
 ## Wait or run in the background
 
@@ -250,17 +250,22 @@ and can only show the model's input. Both compose: `approval` before the run, `c
 Workflow tools can call a visible subagent and wait for its result:
 
 ```ts
-const result = await ctx.agent({
-  key: "security-review",
-  target: "reviewer",
+const result = await ctx.agent("reviewer", {
   message: "Review the deployment plan for security risks.",
+  outputSchema: {
+    type: "object",
+    properties: {
+      findings: { type: "array", items: { type: "string" } },
+    },
+    required: ["findings"],
+  },
 });
 ```
 
-`key` is required, non-empty, and unique within the workflow run. It makes the invocation identity
-stable across replay, so use a fixed key for each logical call site. Parallel calls must use distinct
-keys. `target` is the model-visible subagent name; pass `agentId` to continue an existing child and
-`outputSchema` to require structured output.
+The first argument is the model-visible subagent name. eve assigns each call a replay-stable
+invocation identity, including repeated and parallel calls to the same subagent. Pass `agentId` to
+continue an existing child. An inline `outputSchema` requires structured output and determines the
+return type, so `result` in the example is typed as `{ findings: string[] }`.
 
 ## Report progress: `yield`
 
