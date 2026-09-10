@@ -1717,24 +1717,22 @@
       "name": "channel/teams",
       "type": "registry:item",
       "title": "Microsoft Teams",
-      "description": "Bring your agent into Teams chats and channels.",
-      "envVars": {
-        "TEAMS_APP_ID": "",
-        "TEAMS_APP_PASSWORD": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/teams.ts",
-          "type": "registry:file",
-          "target": "agent/channels/teams.ts"
-        }
-      ],
+      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "teams"]
+          },
+          "requires": ">=0.53.0",
           "docs": "/docs/channels/teams",
           "implementation": "native"
         }
-      }
+      },
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/telegram",
