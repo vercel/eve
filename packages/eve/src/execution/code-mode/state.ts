@@ -1,5 +1,8 @@
 import { jsonValuesEqual } from "#shared/json.js";
-import { readApprovedToolKeys, writeApprovedToolKeys } from "#harness/hitl/approved-tools.js";
+import {
+  readApprovedToolKeys,
+  writeApprovedToolKeys,
+} from "#harness/hitl/approval-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
