@@ -141,13 +141,22 @@ describe("seedInstrumentationProviders", () => {
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["backend", "local"]);
   });
 
-  it("seeds Agent Runs only in Vercel production", () => {
+  it.each(["preview", "production"])("seeds Agent Runs in Vercel %s", (environment) => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
-    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", environment);
 
     seedInstrumentationProviders();
 
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["agent-runs"]);
+  });
+
+  it("does not seed Agent Runs in Vercel development", () => {
+    vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
+    vi.stubEnv("VERCEL_ENV", "development");
+
+    seedInstrumentationProviders();
+
+    expect(getInstrumentationProviders()).toEqual([]);
   });
 
   it("lets an authored reserved slot reconfigure or disable its default", async () => {
@@ -160,7 +169,7 @@ describe("seedInstrumentationProviders", () => {
     expect(getInstrumentationProviders()).toEqual([]);
   });
 
-  it("lets an authored Agent Runs slot reconfigure the production default", async () => {
+  it("lets an authored Agent Runs slot reconfigure the hosted default", async () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
     vi.stubEnv("VERCEL_ENV", "production");
     seedInstrumentationProviders();

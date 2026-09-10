@@ -217,7 +217,7 @@ Policies run in declaration order. A later policy sees the filtered span produce
 The provider layout adds two environment-specific defaults:
 
 - `local` records local traces during `eve dev`.
-- `agent-runs` exports to Vercel Agent Runs in production.
+- `agent-runs` exports to Vercel Agent Runs in preview and production deployments.
 
 Omitting these files preserves the defaults. Reconfigure a slot by exporting `localTraces()` or `agentRuns()` from the matching file. Disable one explicitly:
 
