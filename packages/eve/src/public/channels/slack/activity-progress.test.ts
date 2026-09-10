@@ -113,6 +113,30 @@ describe("Slack activity activity", () => {
     expect(selectSlackActivityStatus(completed)).toBe("Found Slack docs");
   });
 
+  it("keeps task-reporting activity in the originating tree", () => {
+    const reportingAction = {
+      action: {
+        id: "action:work:root:turn:report",
+        kind: "tool" as const,
+        name: "compose_result",
+        parentWorkId: root.id,
+        rootTurnId: "turn",
+        stepIndex: 0,
+      },
+      eventId: "report",
+      kind: "action.started" as const,
+      startedAt: "4",
+    };
+    const activity = reduceActivityBatch(snapshot(), {
+      events: [reportingAction],
+      version: 1,
+    });
+
+    expect(activityMessages(activity)).toEqual(
+      new Map([["turn", expect.stringContaining("compose_result")]]),
+    );
+  });
+
   it("renders inherited child tool activity beneath an existing task row", () => {
     const task = {
       id: "work:task",

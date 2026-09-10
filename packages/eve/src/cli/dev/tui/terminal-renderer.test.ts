@@ -1993,6 +1993,44 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("interrupts a pending /cancel on Ctrl+C and arms the next press to exit", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const abort = vi.fn();
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        abort,
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>(),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("/cancel");
+    input.enter();
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(screen.snapshot()).toContain("Cancelling turn…");
+    });
+
+    input.ctrlC();
+    await expect(rendering).resolves.toBeUndefined();
+
+    expect(abort).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(screen.snapshot()).toContain("Interrupted");
+
+    const prompt = renderer.readPrompt();
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow();
+    expect(renderer.exitRequested()).toBe(true);
+    renderer.shutdown();
+  });
+
   it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {

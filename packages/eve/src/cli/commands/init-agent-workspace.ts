@@ -7,6 +7,8 @@ import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
+import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
 import { pathExists } from "#setup/path-exists.js";
 import { createPrompter } from "#setup/prompter.js";
@@ -23,6 +25,15 @@ export interface InitCommandOptions {
 export interface InitCliLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+export function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): string {
+  const target = mutation.kind === "package-json" ? "package.json" : "configuration";
+  const suffix =
+    mutation.nodeEngineOverride === undefined
+      ? ""
+      : ` (${formatNodeEngineOverrideWarning(mutation.nodeEngineOverride)})`;
+  return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
 }
 
 function validateAgentNames(names: readonly string[]): void {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { FrameworkMessageKind } from "#harness/messages.js";
 import {
   CONTENT_ATTRIBUTE_LIMIT,
   genAiInputMessagesAttribute,
@@ -8,11 +9,50 @@ import {
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
 
+const FRAMEWORK_MESSAGE_KINDS = [
+  "context.instruction",
+  "context.state",
+  "context.compaction",
+  "memory.load",
+  "execution.background_task",
+  "execution.continuation",
+  "execution.retry",
+] as const satisfies readonly FrameworkMessageKind[];
+
 describe("GenAI message attributes", () => {
+  it("preserves every user-message kind in the GenAI input attribute", () => {
+    expect(
+      genAiInputMessagesAttribute([
+        { content: "A real user message.", kind: "user", role: "user" },
+        {
+          content: "A background task completed.",
+          kind: "execution.background_task",
+          role: "user",
+        },
+      ]),
+    ).toBe(
+      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.background_task","parts":[{"content":"A background task completed.","type":"text"}],"role":"user"}]',
+    );
+  });
+
+  it.each(FRAMEWORK_MESSAGE_KINDS)("preserves %s in the GenAI input attribute", (kind) => {
+    const attribute = genAiInputMessagesAttribute([
+      { content: "Framework message.", kind, role: "user" },
+    ]);
+
+    expect(JSON.parse(attribute!)).toEqual([
+      {
+        kind,
+        parts: [{ content: "Framework message.", type: "text" }],
+        role: "user",
+      },
+    ]);
+  });
+
   it("formats model input, output, and system instructions for inspectors", () => {
     expect(
       genAiInputMessagesAttribute([
-        { content: "hello", role: "user" },
+        { content: "hello", kind: "user", role: "user" },
         {
           content: [
             {
@@ -26,7 +66,7 @@ describe("GenAI message attributes", () => {
         },
       ]),
     ).toBe(
-      '[{"parts":[{"content":"hello","type":"text"}],"role":"user"},{"parts":[{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
+      '[{"kind":"user","parts":[{"content":"hello","type":"text"}],"role":"user"},{"parts":[{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
     );
     expect(genAiSystemInstructionsAttribute("Be concise.")).toBe(
       '[{"content":"Be concise.","type":"text"}]',

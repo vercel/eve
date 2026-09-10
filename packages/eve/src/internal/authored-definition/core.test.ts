@@ -227,6 +227,41 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.workflow).toEqual({ world: "@workflow/world-postgres" });
   });
 
+  it("accepts a positive model-call batch size", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          workflow: {
+            modelCallsPerStep: 4,
+          },
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.workflow?.modelCallsPerStep).toBe(4);
+  });
+
+  it.each([0, 1.5, -1, Number.POSITIVE_INFINITY, "4"])(
+    "rejects invalid model-call batch size %j",
+    (value) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.5",
+            experimental: {
+              workflow: {
+                modelCallsPerStep: value,
+              },
+            },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(FAILURE_MESSAGE);
+    },
+  );
+
   it("rejects non-string workflow world values", () => {
     expect(() =>
       normalizeAgentDefinition(
@@ -259,6 +294,38 @@ describe("normalizeAgentDefinition", () => {
         FAILURE_MESSAGE,
       ),
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
+  });
+
+  it.each([0, "default"] as const)("accepts workflow retention %j", (value) => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          workflow: {
+            retention: value,
+          },
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.workflow?.retention).toBe(value);
+  });
+
+  it.each(["none", "0", 1, true, null])("rejects invalid workflow retention %j", (value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            workflow: {
+              retention: value,
+            },
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.workflow.retention" must be 0 or "default"');
   });
 
   it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {

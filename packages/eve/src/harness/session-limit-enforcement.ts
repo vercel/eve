@@ -11,8 +11,6 @@
  *    prompt (sessions that can reach a human) or fails it (task-mode sessions
  *    without HITL — nobody can answer the prompt).
  */
-import type { ModelMessage } from "ai";
-
 import { createInputRequestedEvent } from "#protocol/message.js";
 import {
   emitFailedStep,
@@ -21,6 +19,7 @@ import {
   type HarnessEmissionState,
 } from "#harness/emission.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
@@ -102,7 +101,7 @@ export async function applySessionLimitContinuation(
  * `SESSION_TOKEN_LIMIT_REACHED`.
  */
 export async function enforceSessionUsageLimit(
-  input: SessionLimitPolicyInput & { readonly messages: readonly ModelMessage[] },
+  input: SessionLimitPolicyInput & { readonly messages: readonly HarnessModelMessage[] },
 ): Promise<StepResult | null> {
   const violation = getSessionUsageLimitViolation(input.session);
   if (violation === null) {
@@ -134,7 +133,7 @@ async function parkOnSessionUsageLimit(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>;
   readonly emissionState: HarnessEmissionState;
-  readonly messages: readonly ModelMessage[];
+  readonly messages: readonly HarnessModelMessage[];
   readonly session: HarnessSession;
   readonly violation: SessionUsageLimitViolation;
 }): Promise<StepResult> {

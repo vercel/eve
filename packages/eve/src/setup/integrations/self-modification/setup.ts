@@ -48,7 +48,10 @@ export async function prepareSelfModificationSetup(
     return { kind: "authored" };
   }
 
-  const detected = await operations.detectGitRepository();
+  const [detected, channelNames] = await Promise.all([
+    operations.detectGitRepository(),
+    operations.detectChannelNames(),
+  ]);
   const owner = await context.asker.ask(
     text({
       key: "self-modification-repository-owner",
@@ -88,9 +91,13 @@ export async function prepareSelfModificationSetup(
   const name = connectorName(owner, repo);
   const values = {
     branch,
+    channelNames,
     connector: `github/${name}`,
     directory,
     repository: `github.com/${owner}/${repo}`,
+    vercelBackend:
+      context.environment.vercel.kind === "available" &&
+      context.environment.vercel.project.kind !== "unresolved",
   };
   context.presenter.note(
     renderSelfModificationConfig(values),
@@ -124,7 +131,7 @@ export async function applySelfModificationSetup(
     };
   }
   if (plan.kind === "local") {
-    return { facts: [{ label: "Self-modification", value: "local editing" }] };
+    return { facts: [] };
   }
 
   const connector = await operations.findOrCreateConnector(plan.connectorName);
@@ -132,7 +139,10 @@ export async function applySelfModificationSetup(
   await operations.writeConfig(renderSelfModificationConfig({ ...plan.values, connector }));
   context.presenter.log.success(`Updated ${SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([
-    "Install the managed GitHub App for the configured repository, then redeploy.",
+    "Install the managed GitHub App for the configured repository, then deploy or redeploy.",
+    plan.values.vercelBackend
+      ? "After deployment, try self-modification by running `eve dev <deployment-url>` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update `agent/subagents/self-modification/config.ts`."
+      : "Before deployment, configure `deployed.authorize` in `agent/subagents/self-modification/config.ts` to admit a trusted principal for your deployment's channel. After deployment, use that channel to try self-modification.",
   ]);
   return {
     deploymentRequired: true as const,

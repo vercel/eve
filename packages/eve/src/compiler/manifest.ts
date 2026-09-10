@@ -20,12 +20,13 @@ import type {
   SkillPackageSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type {
-  InternalAgentDefinition,
-  InternalAgentModelDefinition,
-  InternalAgentCompactionDefinition,
-  AgentBuildDefinition,
-  ModelRouting,
+import {
+  AGENT_WORKFLOW_RETENTION_VALUES,
+  type InternalAgentDefinition,
+  type InternalAgentModelDefinition,
+  type InternalAgentCompactionDefinition,
+  type AgentBuildDefinition,
+  type ModelRouting,
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
@@ -569,6 +570,8 @@ const compiledAgentWorkflowWorldDefinitionSchema = z.string();
 
 const compiledAgentWorkflowDefinitionSchema = z
   .object({
+    modelCallsPerStep: z.number().int().positive().optional(),
+    retention: z.literal(AGENT_WORKFLOW_RETENTION_VALUES).optional(),
     world: compiledAgentWorkflowWorldDefinitionSchema.optional(),
   })
   .strict();
@@ -1214,6 +1217,8 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
               config.experimental.workflow === undefined
                 ? undefined
                 : {
+                    modelCallsPerStep: config.experimental.workflow.modelCallsPerStep,
+                    retention: config.experimental.workflow.retention,
                     world: config.experimental.workflow.world,
                   },
           },

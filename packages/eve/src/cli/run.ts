@@ -258,8 +258,8 @@ export function createCliProgram(
           (step) => {
             telemetry.trackSetupStep({ flow: "init", step });
           },
-          (step, result) => {
-            telemetry.trackSetupTerminal({ flow: "init", step, result });
+          (step, result, failureCode) => {
+            telemetry.trackSetupTerminal({ flow: "init", step, result, failureCode });
           },
         );
       },

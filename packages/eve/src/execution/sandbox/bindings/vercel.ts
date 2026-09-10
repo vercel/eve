@@ -51,6 +51,7 @@ import {
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
+  deleteUnusableVercelSandbox,
   deleteVercelSandbox,
   stopVercelSandbox,
 } from "#execution/sandbox/bindings/vercel-lifecycle.js";
@@ -116,24 +117,22 @@ export function createVercelSandbox(
             });
 
       const sandboxModule = await loadSandboxModule();
+      const ensureSessionInput: EnsureSessionInput = {
+        createOptions,
+        createSandbox,
+        existingMetadata: createInput.existingMetadata,
+        resolveSessionCreateOptions: input.resolveSessionCreateOptions,
+        sandboxModule,
+        sessionId: createInput.tags?.sessionId ?? createInput.sessionKey,
+        sessionKey: createInput.sessionKey,
+        snapshotId: template?.snapshotId,
+        tags,
+      };
       let session: VercelSandboxSessionCreateResult;
       try {
-        session = await ensureSession({
-          createOptions,
-          createSandbox,
-          existingMetadata: createInput.existingMetadata,
-          resolveSessionCreateOptions: input.resolveSessionCreateOptions,
-          sandboxModule,
-          sessionId: createInput.tags?.sessionId ?? createInput.sessionKey,
-          sessionKey: createInput.sessionKey,
-          snapshotId: template?.snapshotId,
-          tags,
-        });
+        session = await ensureSession(ensureSessionInput);
       } catch (error) {
-        if (
-          template !== null &&
-          (isVercelSnapshotUnavailableError(error) || isVercelSandboxMissingError(error))
-        ) {
+        if (template !== null && isVercelSnapshotUnavailableError(error)) {
           prewarmedTemplates.delete(template.templateKey);
           const staleTemplate = await getNamedVercelSandbox({
             createOptions,
@@ -152,9 +151,20 @@ export function createVercelSandbox(
         );
       }
 
-      await ensureVercelSandboxBaseRuntime(session.sandbox);
-      if (template === null && session.created) {
-        await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
+      try {
+        session = await ensureUsableSession({
+          input: ensureSessionInput,
+          loadDeleteSandboxModule,
+          session,
+        });
+        if (template === null && session.created) {
+          await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
+        }
+      } catch (error) {
+        throw new Error(
+          `Failed to initialize sandbox session "${createInput.sessionKey}": ${errorMessage(error)}`,
+          { cause: error },
+        );
       }
 
       return createHandle({
@@ -306,7 +316,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
       createOptions: withBaseSetupNetworkPolicy({
         ...input.createOptions,
         name: input.templateKey,
-        persistent: false,
+        persistent: true,
         tags: tags,
       }),
     });
@@ -396,6 +406,30 @@ interface EnsureSessionInput {
 interface VercelSandboxSessionCreateResult {
   readonly created: boolean;
   readonly sandbox: VercelSandbox;
+}
+
+async function ensureUsableSession(input: {
+  readonly input: EnsureSessionInput;
+  readonly loadDeleteSandboxModule: () => Promise<VercelDeleteModule>;
+  readonly session: VercelSandboxSessionCreateResult;
+}): Promise<VercelSandboxSessionCreateResult> {
+  try {
+    await ensureVercelSandboxBaseRuntime(input.session.sandbox);
+    return input.session;
+  } catch (error) {
+    if (input.session.created || !isVercelSnapshotUnavailableError(error)) {
+      throw error;
+    }
+  }
+
+  await deleteUnusableVercelSandbox({
+    createOptions: input.input.createOptions,
+    loadDeleteSandboxModule: input.loadDeleteSandboxModule,
+    sandbox: input.session.sandbox,
+  });
+  const replacement = await ensureSession({ ...input.input, existingMetadata: undefined });
+  await ensureVercelSandboxBaseRuntime(replacement.sandbox);
+  return replacement;
 }
 
 async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSessionCreateResult> {

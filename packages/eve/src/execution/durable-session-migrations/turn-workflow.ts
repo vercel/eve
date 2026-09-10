@@ -17,6 +17,7 @@ import type {
 } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
@@ -95,6 +96,12 @@ export interface TurnWorkflowDispatchInput {
   readonly initialStep?: InitialTurnStep;
   readonly initialCancellation?: TurnCancelPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
+  /**
+   * Dispatch-only. `dispatchTurnStep` passes it to `start()`; the turn body
+   * never reads it, so it is deliberately absent from {@link TurnWorkflowInput}
+   * and does not participate in the versioned wire shape.
+   */
+  readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }

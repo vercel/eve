@@ -1,3 +1,5 @@
+import { isUserMessageKind } from "#harness/messages.js";
+
 /**
  * Serializes model and tool payloads into span content attributes for the
  * local trace viewer: prompt messages, the system prompt, responses, and
@@ -61,7 +63,12 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
       return [];
     }
     const parts = semanticParts(message.content);
-    return parts.length === 0 ? [] : [{ parts, role: message.role }];
+    if (parts.length === 0) return [];
+    const kind =
+      message.role === "user" && isUserMessageKind(message.kind) ? message.kind : undefined;
+    return [
+      kind === undefined ? { parts, role: message.role } : { kind, parts, role: message.role },
+    ];
   });
   for (let start = 0; start < formatted.length; start += 1) {
     const json = semanticJsonAttribute(formatted.slice(start));

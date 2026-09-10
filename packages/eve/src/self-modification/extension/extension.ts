@@ -1,6 +1,8 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
+import type { SelfModificationAuthorization } from "../config.js";
+
 export const selfModificationConfigSchema = z.object({
   local: z.object({ enabled: z.boolean().optional() }).optional(),
   deployed: z
@@ -15,6 +17,7 @@ export const selfModificationConfigSchema = z.object({
         git: z.object({ directory: z.string(), repository: z.string() }),
       }),
       target: z.object({ branch: z.string() }),
+      authorize: z.custom<SelfModificationAuthorization>((value) => typeof value === "function"),
     })
     .optional(),
 });

@@ -141,4 +141,97 @@ describe("normalizeProviderToolHistory", () => {
     expect(normalized.messages).toEqual(messages);
     expect(normalized.outcomeEndsResponse).toBe(true);
   });
+
+  it("normalizes provider-owned results when the turn also calls a local tool", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "search-1",
+            toolName: "web_search",
+            input: { query: "Current result" },
+            providerExecuted: true,
+          },
+          {
+            type: "tool-result",
+            toolCallId: "search-1",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
+          },
+          {
+            type: "tool-call",
+            toolCallId: "todo-1",
+            toolName: "todo",
+            input: { todos: [] },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "todo-1",
+            toolName: "todo",
+            output: { type: "json", value: { todos: [] } },
+          },
+        ],
+      },
+    ];
+
+    const normalized = normalizeProviderToolHistory({
+      messages,
+      providerExecutedOutcomeIds: new Set(["search-1"]),
+    });
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "search-1",
+            toolName: "web_search",
+            input: { query: "Current result" },
+            providerExecuted: false,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "search-1",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "todo-1",
+            toolName: "todo",
+            input: { todos: [] },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "todo-1",
+            toolName: "todo",
+            output: { type: "json", value: { todos: [] } },
+          },
+        ],
+      },
+    ]);
+  });
 });

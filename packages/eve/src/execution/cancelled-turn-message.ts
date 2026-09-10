@@ -1,5 +1,10 @@
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
-import { normalizeUserContent } from "#harness/messages.js";
+import {
+  createFrameworkUserMessage,
+  createUserMessage,
+  frameworkMessageKindForStepInput,
+  normalizeUserContent,
+} from "#harness/messages.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 
 export async function preserveCancelledTurnMessage(
@@ -9,5 +14,14 @@ export async function preserveCancelledTurnMessage(
   const message = normalizeUserContent(input?.message);
   if (message === undefined) return session;
   const content = await stageAttachmentsToSandbox(message);
-  return { ...session, history: [...session.history, { content, role: "user" }] };
+  const frameworkMessageKind = frameworkMessageKindForStepInput(input);
+  return {
+    ...session,
+    history: [
+      ...session.history,
+      frameworkMessageKind === undefined
+        ? createUserMessage("user", content)
+        : createFrameworkUserMessage(frameworkMessageKind, content),
+    ],
+  };
 }

@@ -150,6 +150,7 @@ describe("resolveRegistryAddTool", () => {
     const tool = resolveRegistryAddTool({
       localEnabled: true,
       deployed: {
+        authorize: () => true,
         credentials: { kind: "pat" },
         directory: ".",
         repository: { owner: "acme", repo: "agent" },

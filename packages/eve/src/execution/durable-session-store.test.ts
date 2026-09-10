@@ -293,7 +293,7 @@ function buildSession(input: {
       threshold: 180_000,
     },
     continuationToken: input.continuationToken,
-    history: [{ content: "hi", role: "user" }],
+    history: [{ content: "hi", kind: "user", role: "user" }],
     sessionId: input.sessionId,
   };
 }

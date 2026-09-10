@@ -8,15 +8,11 @@ export default defineWorkflowTool({
     "use workflow";
 
     return await Promise.all([
-      ctx.agent({
-        key: "replica-0",
+      ctx.agent("workflow-marker", {
         message: `${service}:replica-0`,
-        target: "workflow-marker",
       }),
-      ctx.agent({
-        key: "replica-1",
+      ctx.agent("workflow-marker", {
         message: `${service}:replica-1`,
-        target: "workflow-marker",
       }),
     ]);
   },

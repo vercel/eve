@@ -3,7 +3,10 @@ import { createRequire, isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  resolvePackageDependencyPath,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -100,7 +103,10 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
-        return { external: true, id: resolveFrameworkRuntimeImport(source) };
+        return {
+          external: true,
+          id: resolveRuntimeLoaderFrameworkImport(source),
+        };
       }
 
       // The published package maps #imports to dist, while the eve-source
@@ -418,6 +424,19 @@ function resolveFrameworkRuntimeImport(source: string): string {
     return source;
   }
   return normalizeEsmImportSpecifier(resolveWorkflowModulePath(source));
+}
+
+/**
+ * Immediate loader bundles live in a cache below the authored package root.
+ * Resolve eve self-references before moving eve-owned authored modules below a
+ * nested node_modules boundary, where Node can no longer see the owning package
+ * scope. Generation bundles remain portable and keep these imports bare.
+ */
+function resolveRuntimeLoaderFrameworkImport(source: string): string {
+  if (source === "eve" || source.startsWith("eve/")) {
+    return normalizeEsmImportSpecifier(resolvePackageDependencyPath(source));
+  }
+  return resolveFrameworkRuntimeImport(source);
 }
 
 export function isNodeModulesPath(path: string): boolean {

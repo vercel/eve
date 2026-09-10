@@ -22,6 +22,7 @@ export async function dispatchTurnStep(
     readAcceptedDeploymentId(input.delivery),
     {
       allowReservedAttributes: true,
+      experimental_retention: input.retention,
       attributes: normalizeEveAttributes(
         buildTurnAttributes({
           parentSessionId: input.sessionState.sessionId,

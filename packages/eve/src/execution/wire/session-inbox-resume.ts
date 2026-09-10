@@ -73,17 +73,16 @@ export async function sessionDriverSupportsWorkflowTaskAuthorization(
   sessionId: string,
 ): Promise<boolean> {
   const driver = await getHookByToken(sessionCommandHookToken(sessionId));
-  return (
-    isObject(driver.metadata) && driver.metadata[WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY] === true
-  );
+  const metadata = await driver.metadata;
+  return isObject(metadata) && metadata[WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY] === true;
 }
 
 /** Selects the encoder understood by a persisted hook's consumer deployment. */
 export async function resolveSessionInboxWireTarget(
   hook: SessionInboxHook,
 ): Promise<SessionInboxWireTarget> {
-  const metadata = isObject(hook.metadata) ? hook.metadata : undefined;
-  if (metadata !== undefined && SESSION_INBOX_WIRE_VERSION_METADATA_KEY in metadata) {
+  const metadata = await hook.metadata;
+  if (isObject(metadata) && SESSION_INBOX_WIRE_VERSION_METADATA_KEY in metadata) {
     const version = metadata[SESSION_INBOX_WIRE_VERSION_METADATA_KEY];
     if (isSessionInboxWireVersion(version)) return { version };
     throw new SessionInboxWireError(

@@ -132,8 +132,8 @@ describe("memory lifecycle", () => {
     expect(seen).toEqual([[history[0]!], [history[0]!]]);
     expect(projected).toEqual([
       history[0],
-      { content: "alpha memory", role: "user" },
-      { content: "bravo memory", role: "user" },
+      { content: "alpha memory", kind: "memory.load", role: "user" },
+      { content: "bravo memory", kind: "memory.load", role: "user" },
       input[0],
     ]);
     expect(JSON.stringify(commit.history)).toContain("eve.memory");
@@ -361,7 +361,7 @@ describe("memory lifecycle", () => {
     expect(phases).toEqual(["compaction.requested", "compaction.completed"]);
     expect(projected).toEqual([
       { content: "ordinary", role: "user" },
-      { content: "new profile", role: "user" },
+      { content: "new profile", kind: "memory.load", role: "user" },
     ]);
     expect(drainMemoryCommit(ctx)?.history).toHaveLength(3);
   });

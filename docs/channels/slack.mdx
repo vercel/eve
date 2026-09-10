@@ -53,7 +53,7 @@ Use this fallback when the agent does not run on Vercel or Vercel Connect is una
 
 This option does not create or install the Slack app. Configure it in [Slack app settings](https://api.slack.com/apps):
 
-1. Add the `app_mentions:read` and `chat:write` bot scopes. Add `im:history` for DMs, `files:read` for inbound attachments, and `files:write` when the agent uploads files.
+1. Add the `app_mentions:read` and `chat:write` bot scopes. Add `im:history` for DMs, `files:read` for inbound attachments, and `files:write` for explicit uploads and automatic long-response snippets.
 2. Install or reinstall the app, copy its Bot User OAuth Token to `SLACK_BOT_TOKEN`, and copy the signing secret from **Basic Information** to `SLACK_SIGNING_SECRET`.
 3. Set both values in `.env.local` for local development or in the target runtime's environment, then start or deploy the agent at a public URL.
 4. Under **Event Subscriptions**, set the Request URL to `https://your-agent.example/eve/v1/slack`. Subscribe to `app_mention`, plus `message.im` for DMs.
@@ -133,6 +133,7 @@ Check the delivery path in order so you can identify where a Slack event stops:
 | Setup says it could not remove an existing trigger destination        | Check the connector's destinations in the Connect dashboard. `vercel connect detach` removes project token access, not trigger destinations.                                           | Edit or remove the stale destination in the dashboard, then register `/eve/v1/slack` with `vercel connect attach`.                                                   |
 | Mentions never reach the deployment                                   | Confirm that the connector trigger destination uses the intended project and branch, enables triggers, and points to `/eve/v1/slack`.                                                  | Edit or remove stale destinations in the Connect dashboard, then register the intended destination with `vercel connect attach`.                                     |
 | Mentions work but DMs or thread replies do not                        | Check the Slack app's Event Subscriptions and OAuth scopes. DMs require `message.im` and `im:history`; channel replies require the matching message event and history scope.           | Add the missing events or scopes, then reinstall the Slack app if Slack requires it.                                                                                 |
+| A long response cannot be uploaded as a snippet                       | Check whether the installed Slack app has the `files:write` bot scope.                                                                                                                 | Add `files:write`, then reinstall the Slack app so the new scope takes effect.                                                                                       |
 | A preview request receives an authentication page or protection error | Check whether the branch domain is exempt or the direct Slack request URL includes `x-vercel-protection-bypass`. Slack cannot complete an interactive Vercel Authentication challenge. | Add a Deployment Protection Exception for the branch domain, or add the automation bypass query parameter to a Slack app that uses environment-variable credentials. |
 | The webhook reaches the deployment but the agent does not reply       | Open the project's Vercel runtime logs, then inspect the session in **Agent Runs** when your team has access.                                                                          | Use the first missing or failed stage to narrow the issue to channel dispatch, the agent run, or outbound Slack delivery.                                            |
 
@@ -414,11 +415,13 @@ when you need the bearer token itself.
 
 The default handlers reply in-thread and show activity. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and an action label on `actions.requested` — the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` when the model requests several actions at once. The model's own pre-tool narration, when present, takes precedence over the derived label. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override an inbound handler or the `events` handlers to customize.
 
+The built-in `message.completed` handler renders responses up to 12,000 characters inline. Longer responses are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope. Upload failures are logged by the channel dispatcher; they do not trigger a model retry. An authored `events["message.completed"]` handler replaces this behavior and owns its own delivery limits.
+
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
-The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
+The example below overrides `onAppMention` to gate on an authored message. The built-in completion handler still posts the reply and uploads long responses as snippets. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
 ```ts
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
@@ -428,12 +431,6 @@ export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   onAppMention: (ctx, message) =>
     message.author ? { auth: defaultSlackAuth(message, ctx) } : null,
-  events: {
-    "message.completed"(eventData, channel, ctx) {
-      if (eventData.finishReason === "tool-calls") return;
-      if (eventData.message) channel.thread.post(eventData.message);
-    },
-  },
 });
 ```
 

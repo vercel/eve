@@ -93,12 +93,9 @@ describe("session command inbox integration", () => {
       ]);
 
       for (const token of [stableToken, channelToken]) {
-        const hook = (await getHookByToken(token)) as {
-          metadata?: { sessionInboxWireVersion?: unknown };
-        };
-        expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(
-          SESSION_INBOX_WIRE_VERSION,
-        );
+        const hook = await getHookByToken(token);
+        const metadata = (await hook.metadata) as { sessionInboxWireVersion?: unknown } | undefined;
+        expect(metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(SESSION_INBOX_WIRE_VERSION);
       }
     } finally {
       const status = await run.status;

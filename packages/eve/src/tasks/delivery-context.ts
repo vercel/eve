@@ -1,4 +1,6 @@
-import type { SessionStateMap } from "#harness/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import { markFrameworkStepInput } from "#harness/messages.js";
+import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
@@ -11,17 +13,43 @@ Continue carrying out the user's request, including starting any remaining backg
 
 export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
 
+type BackgroundTaskDelivery = DeliverHookPayload & {
+  readonly taskDeliveryId: string;
+};
+
+/** Returns task delivery provenance when a child task wakes its parent. */
+export function getBackgroundTaskDelivery(input: unknown): BackgroundTaskDelivery | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const delivery = input as { readonly kind?: unknown; readonly taskDeliveryId?: unknown };
+  return delivery.kind === "deliver" && typeof delivery.taskDeliveryId === "string"
+    ? (input as BackgroundTaskDelivery)
+    : undefined;
+}
+
+/** Marks a task-produced user message before the harness coalesces delivery results. */
+export function markBackgroundTaskStepInput(input: StepInput): StepInput {
+  return input.message === undefined
+    ? input
+    : markFrameworkStepInput(input, "execution.background_task");
+}
+
 /** Returns model context and cohort phase for tasks started by the same parent turn as this delivery. */
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryId: string;
-}): { readonly context: string; readonly phase: "pending" | "settled" } | undefined {
+}):
+  | {
+      readonly context: string;
+      readonly phase: "pending" | "settled";
+      readonly rootTurnId: string;
+    }
+  | undefined {
   const entries = getSessionTaskIndex(input.state);
   const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
   const cohort = entries.filter((entry) => entry.createdByTurnId === delivered.createdByTurnId);
-  return projectTaskCohort(cohort);
+  return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
 }
 
 /** Returns model context for durable tasks launched by the active parent turn. */

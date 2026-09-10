@@ -221,8 +221,7 @@ export interface AgentExperimentalDefinition {
    */
   readonly tasks?: boolean;
   /**
-   * Durable Workflow runtime configuration. Root agents may use this to select
-   * the Workflow world backing sessions and runs.
+   * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
 }
@@ -256,9 +255,56 @@ export interface AgentBuildDefinition {
 export type AgentWorkflowWorldDefinition = string;
 
 /**
+ * Accepted values for `experimental.workflow.retention`.
+ *
+ * Declared as eve's own tuple so the authored type, the manifest schema, and
+ * the authored-definition normalizer share one source of truth. A drift test
+ * keeps it aligned with what the Workflow SDK accepts.
+ */
+export const AGENT_WORKFLOW_RETENTION_VALUES = [0, "default"] as const;
+
+/**
+ * How long the durable runtime keeps a run's data after the run finishes.
+ *
+ * The value is a duration, and zero is currently the only one besides the
+ * world's default.
+ */
+export type AgentWorkflowRetentionDefinition = (typeof AGENT_WORKFLOW_RETENTION_VALUES)[number];
+
+/**
  * Advanced durable-runtime configuration for eve's Workflow SDK integration.
  */
 export interface AgentWorkflowDefinition {
+  /**
+   * Maximum number of turn-model calls eve may run inside one durable Workflow step.
+   *
+   * Values greater than one reduce Workflow checkpoint overhead but widen the
+   * replay unit: if the Workflow step is interrupted, earlier model calls and
+   * inline tool executions in the same step may run again.
+   *
+   * @default 1
+   */
+  readonly modelCallsPerStep?: number;
+  /**
+   * How long the agent's run data is kept after the run finishes.
+   * Applied to both the session run and every turn run.
+   *
+   * - `"default"`: same as omission. The Workflow SDK World decides.
+   *   On Vercel this follows your team's plan.
+   * - `0`: the world deletes run payloads and stream chunks as soon as the run
+   *   completes or fails. Metadata such as run IDs, status, and timestamps may
+   *   persist up to the default period.
+   *
+   * The World you are using with the Workflow SDK might not support every
+   * option. A World that does not recognize the value keeps the data.
+   *
+   * Note that with retention set to `0`, data deletion can race reads of a finished
+   * run, so results and transcripts of completed sessions generally become
+   * unreadable. Persist anything you need to keep from inside a tool.
+   *
+   * @default "default"
+   */
+  readonly retention?: AgentWorkflowRetentionDefinition;
   /**
    * Workflow world module used for durable workflow storage, queueing, hooks,
    * and streaming.

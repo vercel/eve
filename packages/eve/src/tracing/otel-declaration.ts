@@ -222,7 +222,7 @@ function createOtelIntegration(
   };
 }
 
-/** Vercel Agent Runs through the production request-context transport. @internal */
+/** Vercel Agent Runs through the hosted request-context transport. @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
   return {
     [OTEL_INTEGRATION]: true,

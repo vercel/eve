@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 
 import type { LockedMemorySlot } from "#context/keys.js";
+import { createFrameworkUserMessage } from "#harness/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { identityHistoryViewProjector } from "#shared/history-view.js";
 import type {
@@ -342,14 +343,9 @@ function attributeMemoryRecord(
   content: string,
   attribution: MemoryRecordAttribution,
 ): ModelMessage {
-  const message: Extract<ModelMessage, { readonly role: "user" }> & {
-    readonly metadata: Record<string, unknown>;
-  } = {
-    content,
-    metadata: { [MEMORY_MESSAGE_METADATA_KEY]: attribution },
-    role: "user",
-  };
-  return message;
+  return createFrameworkUserMessage("memory.load", content, {
+    [MEMORY_MESSAGE_METADATA_KEY]: attribution,
+  });
 }
 
 function readMemoryRecordAttribution(message: unknown): MemoryRecordAttribution | null {
