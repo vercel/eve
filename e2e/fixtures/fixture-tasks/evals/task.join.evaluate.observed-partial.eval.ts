@@ -1,22 +1,20 @@
-import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
+import type { EveEvalTurn, InputRequest } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
+import { completedTaskIds, completionMetrics } from "./batching.js";
 import { defineTaskEval } from "./task-transition.js";
-import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
+import {
+  requireSessionStreamIndex,
+  waitForChildResult,
+  type TaskEvalSessionDriver,
+} from "./shared.js";
 
-const FAN_IN_SIZE = 2;
-const MAX_WAKE_TURNS = 8;
-const FAN_IN_CALLS = [
-  { callId: "task-fan-in-1", marker: "TASK-FAN-IN-1" },
-  { callId: "task-fan-in-2", marker: "TASK-FAN-IN-2" },
-] as const;
+const STATUS_REQUEST = "TASK-FAN-IN-STATUS";
+const MARKERS = ["TASK-FAN-IN-1", "TASK-FAN-IN-2"] as const;
 
-type FanInMarker = (typeof FAN_IN_CALLS)[number]["marker"];
-
-/** A join remains waiting when its exact task set contains one nonterminal task. */
 export default defineTaskEval({
   description:
-    "A join observes one completed and one input-required task, answers WAITING, and does not answer COMPLETE.",
+    "An independent user turn observes an incomplete join after one child completes while its sibling still awaits input; only the settled cohort triggers a completion turn.",
   transition: {
     primary: "task.join.evaluate.observed-partial",
     setup: [
@@ -24,176 +22,146 @@ export default defineTaskEval({
       "task.input.require.accepted-valid-batch",
       "task.input.answer.accepted-complete",
       "task.lifecycle.complete.accepted-nonterminal",
-      "task.parent.wake.emitted-ready",
+      "task.parent.wake.noop-pending-cohort",
     ],
-    dimensions: { transport: "local", parentPhase: "active" },
+    dimensions: { transport: "local", parentPhase: "parked" },
   },
   async test(t) {
-    const started = await t.send("TASK-FAN-IN");
-    started.expectOk();
+    const started = (await t.send("TASK-FAN-IN")).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { count: FAN_IN_SIZE });
-
-    const tasksByMarker = backgroundTasksByMarker(started);
-    const taskIds = [...tasksByMarker.values()];
-    await requireDistinctTasks(t, taskIds);
-    const blocked = await waitForReleaseRequests(t, t, started);
-
-    const marker2 = "TASK-FAN-IN-2";
-    const marker2TaskId = requireMappedValue(tasksByMarker, marker2, "background task");
-    const marker2Request = requireMappedValue(blocked.requestsByMarker, marker2, "release request");
-
-    const firstReleased = await blocked.session.respond([
-      { optionId: "approve", requestId: marker2Request.requestId },
-    ]);
-    firstReleased.expectOk();
-
-    const waiting = await waitForTurnMessage(
-      t,
-      blocked.session,
-      "TASK-FAN-IN-WAITING",
-      firstReleased,
-    );
-    await t.require(
-      waiting.observedTurns,
-      satisfies(
-        (turns: readonly EveEvalTurn[]) =>
-          turns.some((turn) =>
-            hasCompletedNotification(turn, marker2TaskId, `FANOUT-COMPLETE:${marker2}`),
-          ),
-        "the join receives the completed task's result in its notification",
-      ),
-    );
-    for (const turn of waiting.observedTurns) {
-      await t.require(
-        turn.message ?? "",
-        satisfies(
-          (message) => !String(message).includes("TASK-FAN-IN-COMPLETE"),
-          "no COMPLETE answer while one joined task is nonterminal",
-        ),
+    started.calledSubagent("fanout-worker", { count: MARKERS.length });
+    const children = MARKERS.map((marker) => {
+      const callId = marker.toLowerCase();
+      const called = started.events.find(
+        (event) => event.type === "subagent.called" && event.data.callId === callId,
       );
+      const receipt = started.events.find(
+        (event) => event.type === "subagent.completed" && event.data.callId === callId,
+      );
+      if (
+        called?.type !== "subagent.called" ||
+        receipt?.type !== "subagent.completed" ||
+        receipt.data.backgroundTask === undefined
+      ) {
+        throw new Error(`No child session and task receipt for ${marker}.`);
+      }
+      return {
+        marker,
+        sessionId: called.data.childSessionId,
+        taskId: receipt.data.backgroundTask.taskId,
+        turnId: called.data.turnId,
+      };
+    });
+    const taskIds = children.map((child) => child.taskId);
+    await t.require(
+      {
+        tasks: new Set(taskIds).size,
+        sessions: new Set(children.map((child) => child.sessionId)).size,
+        creatingTurns: new Set(children.map((child) => child.turnId)).size,
+      },
+      equals({ tasks: 2, sessions: 2, creatingTurns: 1 }),
+    );
+
+    let session: TaskEvalSessionDriver = t;
+    const requests = new Map<string, InputRequest>();
+    collectRequests(started);
+    for (let attempt = 0; requests.size < 2 && attempt < 8; attempt += 1)
+      collectRequests(await nextTurn());
+    await t.require([...requests.keys()].sort(), equals([...MARKERS]));
+    await t.require(
+      new Set([...requests.values()].map((request) => request.requestId)).size,
+      equals(2),
+    );
+
+    await release("TASK-FAN-IN-2");
+    await waitForChildResult(t, children[1]!.sessionId, "FANOUT-COMPLETE:TASK-FAN-IN-2");
+    await post({ message: STATUS_REQUEST, turnPolicy: "queue" });
+    const partial: EveEvalTurn[] = [];
+    let answered = false;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const turn = await nextTurn();
+      partial.push(turn);
+      await t.require(completedTaskIds(turn), equals([]));
+      if (
+        turn.events.some(
+          (event) => event.type === "message.received" && event.data.message === STATUS_REQUEST,
+        )
+      ) {
+        await t.require(turn.message, equals("TASK-FAN-IN-WAITING"));
+        turn.usedNoTools();
+        answered = true;
+        break;
+      }
+      turn.notEvent("step.started");
     }
+    await t.require(answered, equals(true));
+    await t.require(completionMetrics(partial).modelSteps, equals(1));
+    const pendingRequestId = requests.get("TASK-FAN-IN-1")!.requestId;
+    t.check(
+      partial
+        .flatMap((turn) => turn.events)
+        .some(
+          (event) =>
+            event.type === "input.resolved" &&
+            event.data.resolutions.some((resolution) => resolution.requestId === pendingRequestId),
+        ),
+      equals(false),
+    ).label("the other sibling still awaits its own approval during the user answer");
+
+    await release("TASK-FAN-IN-1");
+    await waitForChildResult(t, children[0]!.sessionId, "FANOUT-COMPLETE:TASK-FAN-IN-1");
+    let reported = false;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const turn = await nextTurn();
+      if (completedTaskIds(turn).length > 0) {
+        await t.require(completedTaskIds(turn).sort(), equals([...taskIds].sort()));
+        await t.require(turn.message, equals("TASK-FAN-IN-COMPLETE"));
+        turn.event("step.started", { count: 1 });
+        reported = true;
+        break;
+      }
+      turn.notEvent("step.started");
+    }
+    await t.require(reported, equals(true));
+    t.calledSubagent("fanout-worker", { count: 2 });
     t.notCalledTool("task_peek");
     t.noFailedActions();
+
+    function collectRequests(turn: EveEvalTurn) {
+      for (const request of turn.inputRequests) {
+        const marker = request.action.input.marker;
+        if (request.action.toolName === "release" && typeof marker === "string")
+          requests.set(marker, request);
+      }
+    }
+
+    async function release(marker: string) {
+      await post({
+        inputResponses: [{ optionId: "approve", requestId: requests.get(marker)!.requestId }],
+      });
+    }
+
+    async function post(body: unknown) {
+      const response = await t.target.fetch(
+        `/eve/v1/session/${encodeURIComponent(started.sessionId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: t.signal,
+        },
+      );
+      await response.body?.cancel();
+      await t.require(response.status, equals(202));
+    }
+
+    async function nextTurn() {
+      const live = t.target.watchTurn(started.sessionId, {
+        startIndex: requireSessionStreamIndex(session, "Partial join"),
+      });
+      const turn = (await live.result()).expectOk();
+      session = live.session;
+      return turn;
+    }
   },
 });
-
-async function requireDistinctTasks(t: EveEvalContext, taskIds: readonly string[]): Promise<void> {
-  await t.require(
-    taskIds,
-    satisfies(
-      (ids: readonly string[]) => ids.length === FAN_IN_SIZE && new Set(ids).size === FAN_IN_SIZE,
-      `${FAN_IN_SIZE} distinct background task receipts`,
-    ),
-  );
-}
-
-function hasCompletedNotification(turn: EveEvalTurn, taskId: string, result: string): boolean {
-  return turn.events.some(
-    (event) =>
-      event.type === "message.received" &&
-      typeof event.data.message === "string" &&
-      event.data.message.includes(`Background task ${taskId} (`) &&
-      event.data.message.includes(" is completed.") &&
-      event.data.message.includes(result),
-  );
-}
-
-interface BlockedFanIn {
-  readonly requestsByMarker: ReadonlyMap<FanInMarker, InputRequest>;
-  readonly session: TaskEvalSessionDriver;
-}
-
-async function waitForReleaseRequests(
-  t: EveEvalContext,
-  initialSession: TaskEvalSessionDriver,
-  initialTurn: EveEvalTurn,
-): Promise<BlockedFanIn> {
-  const requestsByMarker = new Map<FanInMarker, InputRequest>();
-  let session = initialSession;
-  collectReleaseRequests(initialTurn.inputRequests, requestsByMarker);
-  for (
-    let attempt = 0;
-    attempt < MAX_WAKE_TURNS && requestsByMarker.size < FAN_IN_SIZE;
-    attempt += 1
-  ) {
-    const sessionId = session.sessionId;
-    if (sessionId === undefined) throw new Error("Fan-in has no parent session id.");
-    const live = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(session, "Fan-in release wait"),
-    });
-    const turn = await live.result();
-    collectReleaseRequests(turn.inputRequests, requestsByMarker);
-    session = live.session;
-  }
-  if (requestsByMarker.size !== FAN_IN_SIZE) {
-    throw new Error(
-      `Expected ${FAN_IN_SIZE} marked release requests; received ${requestsByMarker.size}.`,
-    );
-  }
-  return { requestsByMarker, session };
-}
-
-function collectReleaseRequests(
-  inputRequests: readonly InputRequest[],
-  requestsByMarker: Map<FanInMarker, InputRequest>,
-): void {
-  for (const request of inputRequests) {
-    if (request.action.toolName !== "release") continue;
-    const marker = request.action.input.marker;
-    if (isFanInMarker(marker)) requestsByMarker.set(marker, request);
-  }
-}
-
-function isFanInMarker(value: unknown): value is FanInMarker {
-  return FAN_IN_CALLS.some(({ marker }) => marker === value);
-}
-
-interface ObservedTurnMessage {
-  readonly observedTurns: readonly EveEvalTurn[];
-  readonly turn: EveEvalTurn;
-}
-
-async function waitForTurnMessage(
-  t: EveEvalContext,
-  initialSession: TaskEvalSessionDriver,
-  token: string,
-  initialTurn: EveEvalTurn,
-): Promise<ObservedTurnMessage> {
-  const observedTurns: EveEvalTurn[] = [initialTurn];
-  let session = initialSession;
-  if ((initialTurn.message ?? "").includes(token)) return { observedTurns, turn: initialTurn };
-  for (let attempt = 0; attempt < MAX_WAKE_TURNS; attempt += 1) {
-    const sessionId = session.sessionId;
-    if (sessionId === undefined) throw new Error("Fan-in has no parent session id.");
-    const live = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(session, "Fan-in message wait"),
-    });
-    const turn = await live.result();
-    observedTurns.push(turn);
-    session = live.session;
-    if ((turn.message ?? "").includes(token)) return { observedTurns, turn };
-  }
-  throw new Error(`No turn carried "${token}" after ${MAX_WAKE_TURNS} turns.`);
-}
-
-function backgroundTasksByMarker(turn: EveEvalTurn): ReadonlyMap<FanInMarker, string> {
-  const tasksByMarker = new Map<FanInMarker, string>();
-  for (const event of turn.events) {
-    if (event.type !== "subagent.completed" || event.data.backgroundTask === undefined) continue;
-    const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === event.data.callId);
-    if (fanInCall !== undefined)
-      tasksByMarker.set(fanInCall.marker, event.data.backgroundTask.taskId);
-  }
-  return tasksByMarker;
-}
-
-function requireMappedValue<T>(
-  values: ReadonlyMap<FanInMarker, T>,
-  marker: FanInMarker,
-  description: string,
-): T {
-  const value = values.get(marker);
-  if (value === undefined) throw new Error(`Fan-in has no ${description} for ${marker}.`);
-  return value;
-}

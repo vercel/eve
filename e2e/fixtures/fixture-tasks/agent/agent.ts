@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic } from "eve";
 import {
   mockModel,
   type MockModelRequest,
@@ -7,26 +7,19 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
+import { COHORT_SCENARIO } from "./lib/cohort.js";
+
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
-const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
-const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
-const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 const TASK_STATE_LABEL = "[Task state]\n";
 const CHILD_TOOL_SURFACE_SCENARIO =
   "Alice asks Bob to summarize the available tools for a background task.";
 
-function respond(
-  request: MockModelRequest,
-): MockModelResponse | Promise<MockModelResponse | string> | string {
+function respond(request: MockModelRequest): MockModelResponse | string {
   if (request.userMessages.includes(CHILD_TOOL_SURFACE_SCENARIO)) {
     return childToolSurfaceReport(request);
   }
   if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
     return batchingBenchmark(request);
-  }
-  if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
-    const taskState = latestTaskState(request.userMessages);
-    if (taskState !== undefined) return handleRedundantReviewWake(taskState);
   }
 
   // Framework announcements are model context, not scenario turns.
@@ -105,8 +98,8 @@ function respond(
 
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
-  if (message === REDUNDANT_REVIEW_SCENARIO) return startRedundantReviewers(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
+  if (message === "TASK-FAN-IN-STATUS") return fanInNotification(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
     return inspectTerminalTask(
@@ -199,48 +192,6 @@ function childToolSurfaceReport(request: MockModelRequest): MockModelResponse | 
   return "TASK-CHILD-TOOL-SURFACE-STARTED";
 }
 
-function startRedundantReviewers(request: MockModelRequest): MockModelResponse | string {
-  const reviewers = [
-    {
-      id: "task-redundant-review-fast",
-      message: `Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
-    },
-    {
-      id: "task-redundant-review-late",
-      message: `BUSY-WORKER-A Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
-    },
-  ] as const;
-  const pending = reviewers.filter(({ id }) => resultById(request, id) === undefined);
-  if (pending.length > 0) {
-    return {
-      toolCalls: pending.map(({ id, message }) => ({
-        id,
-        input: { message },
-        name: "busy-worker",
-      })),
-    };
-  }
-  return "TASK-REDUNDANT-REVIEWERS-STARTED";
-}
-
-function handleRedundantReviewWake(taskState: TaskState): string {
-  if (taskState.tasks.some((task) => task.status === "pending")) {
-    return EMPTY_DELIVERY_SENTINEL;
-  }
-  const outputs = taskState.tasks.flatMap((task) =>
-    task.output?.type === "result" && typeof task.output.data === "string"
-      ? [task.output.data]
-      : [],
-  );
-  if (
-    outputs.length !== taskState.tasks.length ||
-    !outputs.every((output) => output.includes(REDUNDANT_REVIEW_FINDING))
-  ) {
-    throw new Error("The settled reviewer cohort did not contain every expected finding.");
-  }
-  return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
-}
-
 interface TaskState {
   readonly tasks: readonly {
     readonly output?: { readonly data: unknown; readonly type: string };
@@ -278,7 +229,7 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
   return "TASK-FANOUT-STARTED";
 }
 
-async function batchingBenchmark(request: MockModelRequest): Promise<MockModelResponse | string> {
+function batchingBenchmark(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages]
     .reverse()
     .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
@@ -286,18 +237,11 @@ async function batchingBenchmark(request: MockModelRequest): Promise<MockModelRe
   if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
   if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
 
-  // Keep the first completion's model call active while the burst arrives.
-  // This is fixture inference time, not a runtime debounce or settlement wait.
-  const completionMessages = request.userMessages.filter(
-    (entry) => entry.startsWith("Background task ") && entry.includes(" is completed."),
-  );
-  if (completionMessages.length === 1) {
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
-  }
   const state = latestTaskState(request.userMessages);
   if (state === undefined) return "TASK-FANOUT-STARTED";
-  // Script perfect compliance so the eval measures delivery cost, not model obedience.
-  if (state.tasks.some((task) => task.status === "pending")) return EMPTY_DELIVERY_SENTINEL;
+  if (state.tasks.some((task) => task.status === "pending")) {
+    throw new Error("A completion invoked the parent model before its cohort settled.");
+  }
   const results = state.tasks.flatMap((task) =>
     task.output?.type === "result" && typeof task.output.data === "string"
       ? [task.output.data]
@@ -674,12 +618,26 @@ function findString(value: unknown, prefix: string): string | undefined {
   return undefined;
 }
 
-const base = e2eAgentConfig();
+const { model, modelContextWindowTokens, ...base } = e2eAgentConfig();
+const scriptedModel = mockModel(respond);
 
 export default defineAgent({
   ...base,
-  // These evals target orchestration, not model planning. Keep every suite
-  // deterministic while retaining the workflow-world override from `base`.
-  model: mockModel(respond),
-  modelContextWindowTokens: 1_000_000,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const liveCohort = ctx.messages.some((message) => {
+          if (message.role !== "user") return false;
+          const text =
+            typeof message.content === "string"
+              ? message.content
+              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+          return text.startsWith(COHORT_SCENARIO);
+        });
+        return liveCohort
+          ? { model, modelContextWindowTokens }
+          : { model: scriptedModel, modelContextWindowTokens: 1_000_000 };
+      },
+    },
+  }),
 });

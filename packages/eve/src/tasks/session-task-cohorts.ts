@@ -6,14 +6,14 @@ export const SESSION_TASKS_STATE_KEY = "eve.tasks";
 export const SESSION_TASKS_STATE_VERSION = 2;
 
 /**
- * Reads only the identities needed for workflow-side completion batching.
+ * Reads cohort identities and settlement for workflow-side completion batching.
  * Full task validation stays in getSessionTaskIndex on the step side, so
  * the workflow bundle does not retain the task schemas and their dependencies.
  */
 export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, string> {
-  const cohorts = new Map<string, string>();
+): ReadonlyMap<string, { readonly turnId: string; readonly settled: boolean }> {
+  const cohorts = new Map<string, { readonly turnId: string; readonly settled: boolean }>();
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) return cohorts;
 
@@ -38,7 +38,10 @@ export function getSessionTaskCohorts(
         `Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}": invalid task cohort identity.`,
       );
     }
-    cohorts.set(task.taskId, task.createdByTurnId);
+    cohorts.set(task.taskId, {
+      turnId: task.createdByTurnId,
+      settled: task.terminalView !== undefined,
+    });
   }
   return cohorts;
 }

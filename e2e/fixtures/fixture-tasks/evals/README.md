@@ -1,39 +1,40 @@
 # Task eval transitions
 
-## Completion batching measurement
+## Full-cohort completion barrier
 
-`task.parent.wake.emitted-ready.batching.eval.ts` launches ten children behind
-approval gates. The burst case releases nine together; the staggered case releases
-each child only after the parent has finished responding to the previous one.
-The last child stays blocked while the eval verifies silence and sends a user
-question, then completes to produce a report containing all ten distinct results.
+`task.parent.wake.emitted-ready.conditional-delivery.eval.ts` routes Alice and
+Bob's inventory handoff to the real CI model for both delegation and reporting.
+It is tagged `real-model`, so world suites exclude it. The existing fanout workers
+remain deterministic; each needs a separate approval before returning its marked
+result. No parent responder scripts silence or supplies an empty-delivery sentinel.
 
-Each case logs a JSON `task-batching` record with completion-driven parent turns,
-model steps, silent and visible messages, and completions per turn. Setup wakes
-and the user question are excluded. The scripted model always obeys the silence
-policy, so this measures the runtime cost of perfect compliance; the real-model
-prompt ablation lives in `agent-task-reporting`.
+The eval starts three distinct tasks in one parent turn. It releases two in
+sequence, observes their completed child turns, and asks an unrelated user question
+while the third approval remains pending. It then releases the final child. The
+parent stream is read from the cursor captured before those releases, not from a
+new tail: an intermediate model turn fails even if it produces no visible text.
+The only parent model steps after setup must be the user answer and one cohort
+report. Every known task ID and all three distinct outputs must appear once.
 
-Batching is automatic. Both schedules run against the same runtime.
-The first completion's mock model call takes ten seconds, allowing later burst
-completions to enter the active parent's buffer. This delay belongs to the test
-model; the runtime adds no timer. The cases allow three minutes because the
-Vercel staggered run exceeded the previous two-minute timeout.
+`task.parent.wake.emitted-ready.batching.eval.ts` uses the same driver for ten
+scripted children in burst and staggered release schedules. The driver sends
+approval responses without waiting for a parent model turn and observes child
+completion before advancing. Both schedules require zero intermediate completion
+model steps and one full-cohort report. The mock no longer delays inference or
+returns a silence sentinel; an incomplete-cohort model invocation is an error.
+Each case still logs its `task-batching` metrics.
 
-At `76a18ee1`, the same burst workload with the previous option off/on took
-10/4 parent model steps in the local world. The staggered control took 10/10.
-Those measurements are retained in PR #3144; future runs exercise the default
-behavior and log their actual counts.
+`task.join.evaluate.observed-partial.eval.ts` establishes partial completion on
+one child's stream while the other still awaits approval. An independent user
+status request receives WAITING without a completion-driven model step. Releasing
+the remaining sibling then delivers both task IDs in one COMPLETE turn. The
+transition metadata separates lifecycle readiness from parent admission: successes
+wait for all original siblings, even across unrelated user turns and cohorts;
+input, authorization, failures, and cancellation bypass that hold.
 
-Callback timing still varies across workflow worlds. Compare the observed batch
-sizes and model-step counts, not an assumed ten-to-one gain. The unit test at the
-delivery boundary separately proves that 100 buffered sibling completions become
-one parent turn with every payload and its metadata preserved.
-Counts are measurements, not fixed assertions that would prohibit improvements.
-The staggered case is a control for active-parent coalescing: it intentionally
-leaves no opportunity to merge adjacent completions. A policy that withholds all
-intermediate deliveries until cohort settlement needs a different driver because
-this case waits for each delivery before releasing the next child.
+The separate `agent-task-reporting` fixture uses the same approval-gated approach
+with real models for the parent, children, and a nested warehouse lookup. It covers
+an intervening user answer and compaction without waiting for partial parent wakes.
 
 ## Remote callback routing regression
 

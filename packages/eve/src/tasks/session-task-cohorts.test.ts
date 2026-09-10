@@ -18,7 +18,10 @@ describe("workflow task cohort lookup", () => {
       },
     };
     expect([...getSessionTaskCohorts(state)]).toEqual(
-      getSessionTaskIndex(state).map((task) => [task.taskId, task.createdByTurnId]),
+      getSessionTaskIndex(state).map((task) => [
+        task.taskId,
+        { turnId: task.createdByTurnId, settled: task.terminalView !== undefined },
+      ]),
     );
   });
 
