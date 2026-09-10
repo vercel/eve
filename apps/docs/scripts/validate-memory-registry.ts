@@ -2,6 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { memoryEntries } from "@eve/catalog";
+import { satisfies } from "semver";
 
 interface RegistryFile {
   path: string;
@@ -24,8 +25,17 @@ interface Registry {
   items: RegistryItem[];
 }
 
+interface PackageManifest {
+  name: string;
+  version: string;
+  peerDependencies?: Record<string, string>;
+}
+
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
+const eveManifest = JSON.parse(
+  await readFile(join(docsRoot, "../../packages/eve/package.json"), "utf8"),
+) as PackageManifest;
 const items = registry.items.filter((item) => item.name.startsWith("memory/"));
 const expectedSlugs = memoryEntries()
   .filter((entry) => entry.surfaces.registry)
@@ -50,6 +60,18 @@ for (const item of items) {
     );
   }
   await access(join(docsRoot, expectedPath));
+
+  for (const dependency of item.dependencies ?? []) {
+    const manifest = JSON.parse(
+      await readFile(join(docsRoot, "node_modules", dependency, "package.json"), "utf8"),
+    ) as PackageManifest;
+    const evePeerRange = manifest.peerDependencies?.eve;
+    if (evePeerRange !== undefined && !satisfies(eveManifest.version, evePeerRange)) {
+      throw new Error(
+        `Registry item "${item.name}" depends on ${manifest.name}@${manifest.version}, whose eve peer range ${evePeerRange} excludes current eve ${eveManifest.version}.`,
+      );
+    }
+  }
 
   if (slug === "file") {
     const setup = item.meta?.eve?.setup;

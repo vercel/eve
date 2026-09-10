@@ -325,6 +325,9 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.15)
+      '@types/semver':
+        specifier: 7.7.1
+        version: 7.7.1
       '@types/three':
         specifier: 0.184.1
         version: 0.184.1
@@ -373,6 +376,9 @@ importers:
       postcss:
         specifier: 8.5.15
         version: 8.5.15
+      semver:
+        specifier: 7.8.4
+        version: 7.8.4
       shadcn:
         specifier: 4.16.0
         version: 4.16.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(typescript@6.0.3)
@@ -14320,6 +14326,7 @@ packages:
   semver@7.8.4:
     resolution: {integrity: sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==}
     engines: {node: '>=10'}
+    hasBin: true
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
