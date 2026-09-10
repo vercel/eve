@@ -31,7 +31,9 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
-const workflowStreamClose = vi.hoisted(() => vi.fn());
+const { workflowStreamClose } = vi.hoisted(() => ({
+  workflowStreamClose: vi.fn(),
+}));
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -171,23 +173,6 @@ describe("workflowEntry", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-  });
-
-  it("closes its workflow stream when the session completes", async () => {
-    const sessionState = createBaseSessionState();
-    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
-    installHookMocks({
-      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
-    });
-
-    await expect(
-      workflowEntry({
-        input: { message: "hello" },
-        serializedContext: createSerializedContext(),
-      }),
-    ).resolves.toEqual({ output: "ok" });
-
-    expect(workflowStreamClose).toHaveBeenCalledOnce();
   });
 
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
@@ -486,6 +471,7 @@ describe("workflowEntry", () => {
       continuationToken: "http:test",
       ownerSessionId: "wrun_owner",
     });
+    expect(workflowStreamClose).toHaveBeenCalledOnce();
   });
 
   it("also exits when a legacy world reports the initial continuation conflict", async () => {
@@ -811,6 +797,35 @@ describe("workflowEntry", () => {
     // The caller cell was already populated; the crash path must reuse it
     // instead of resolving a second time.
     expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+  });
+
+  it("emits terminal failure before best-effort child teardown rejects", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(terminateChildSessionsStep).mockRejectedValueOnce(new Error("child teardown failed"));
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "turn failed", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: "turn failed" }),
+        parentWritable: expect.any(WritableStream),
+      }),
+    );
+    expect(terminateChildSessionsStep).toHaveBeenCalledOnce();
   });
 
   it("does not emit session.failed when notification fails after terminal completion", async () => {

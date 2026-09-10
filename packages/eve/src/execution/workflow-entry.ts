@@ -45,6 +45,7 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import { closeWorkflowEntryStreamStep } from "#execution/close-workflow-entry-stream-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   SESSION_INBOX_WIRE_VERSION,
@@ -234,6 +235,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
                   : undefined,
             });
           }
+          await closeWorkflowEntryStreamStep({ parentWritable: driverWritable });
           return { output: "" };
         }
         throw continuationClaim.reason;
@@ -308,12 +310,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // surface as `session.failed` (deserialization, runtime-action
     // throws, adapter `deliver` throws, staging errors, etc.) so the
     // channel still sees a terminal event.
-    if (!crashCleanupState.terminalEmitted && crashCleanupState.lastSessionState !== undefined) {
-      await terminateChildSessionsStep({
-        serializedContext: crashCleanupState.serializedContext,
-        sessionState: crashCleanupState.lastSessionState,
-      });
-    }
     if (!crashCleanupState.terminalEmitted) {
       await emitTerminalSessionFailureStep({
         error: normalizeSerializableError(error),
@@ -322,6 +318,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         turnId: crashCleanupState.turnId,
       });
       crashCleanupState.terminalEmitted = true;
+    }
+    if (!terminalAlreadyEmitted && crashCleanupState.lastSessionState !== undefined) {
+      await Promise.allSettled([
+        terminateChildSessionsStep({
+          serializedContext: crashCleanupState.serializedContext,
+          sessionState: crashCleanupState.lastSessionState,
+        }),
+      ]);
     }
     if (terminalAlreadyEmitted) throw createSafeOuterWorkflowError();
     if (mode === "task") {
