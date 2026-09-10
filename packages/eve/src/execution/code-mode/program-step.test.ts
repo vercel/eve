@@ -8,7 +8,7 @@ import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { createStepStartedEvent } from "#protocol/message.js";
 import { resolveConnectionSearchDynamicTools } from "#execution/tools/connection-search.js";
 import { never, always, once } from "#tools/approval/policies.js";
-import { APPROVED_TOOLS_KEY } from "#harness/hitl/approved-tools.js";
+import { writeApprovedToolKeys } from "#harness/hitl/approved-tools.js";
 import type { ApprovalContext } from "#approval/definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import {
@@ -240,7 +240,7 @@ describe("executeCodeModeToolStep", () => {
         approvalKey: "gated",
       });
       expect(execute).not.toHaveBeenCalled();
-      state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated"] };
+      state.sessionState = { ...writeApprovedToolKeys({}, ["gated"]) };
       await expect(nested("gated")).resolves.toEqual({ status: "completed", output: "ran" });
       expect(execute).toHaveBeenCalledOnce();
     });
@@ -257,7 +257,7 @@ describe("executeCodeModeToolStep", () => {
         }),
       );
       // Fine-grained policies key on input: a different region still prompts.
-      state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated:us"] };
+      state.sessionState = { ...writeApprovedToolKeys({}, ["gated:us"]) };
       await expect(
         runStep(nestedInput("gated", { toolInput: { region: "eu" } })).result,
       ).resolves.toMatchObject({ status: "approval-required", approvalKey: "gated:eu" });

@@ -2,7 +2,7 @@ import type { SessionStateMap } from "#harness/types.js";
 
 // The workflow driver imports this module. Keep approval state separate from
 // request handlers, whose pending-batch bookkeeping reads Node-only context.
-export const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
+const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
 
 export function readApprovedToolKeys(state: SessionStateMap | undefined): readonly string[] {
   const value = state?.[APPROVED_TOOLS_KEY];
