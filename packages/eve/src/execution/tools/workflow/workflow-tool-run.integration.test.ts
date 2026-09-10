@@ -31,6 +31,7 @@ import {
   defineWorkflowTool,
   type BlockingWorkflowToolDefinition,
 } from "#tools/workflow-definition.js";
+import { always } from "#tools/approval/policies.js";
 import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
@@ -73,6 +74,7 @@ function buildSerializedContext(input: {
  */
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
+  readonly approval?: BlockingWorkflowToolDefinition["approval"];
   readonly background?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
@@ -85,6 +87,7 @@ async function createWorkflowToolRuntime(input: {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
           default: defineWorkflowTool({
+            approval: input.approval,
             execution: input.background === true ? "background" : undefined,
             description: `Deploys a service (${input.toolName}).`,
             execute: input.execute as BlockingWorkflowToolDefinition["execute"],
@@ -528,6 +531,68 @@ describe("workflow tools", () => {
     expect(output).toContain('"plan":"plan:api"');
     expect(output).toContain('"callId":"call_deploy_service');
   });
+
+  it("waits for approval before starting a blocking workflow tool", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-approval",
+      approval: always(),
+      execute: deployServiceWorkflow,
+      toolName: "deploy_service",
+    });
+
+    await runtime.run(async () => {
+      const before = await listWorkflowToolRunIds();
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            continuationToken: "http:workflow-tool-approval",
+            mode: "conversation",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const asked = await stream.nextTurn();
+        expect(asked.at(-1)?.type).toBe("session.waiting");
+        const requested = filterEventsByType(asked, "input.requested");
+        expect(requested).toHaveLength(1);
+        const request = (requested[0] as InputRequestedStreamEvent).data.requests[0]!;
+        expect(request).toMatchObject({
+          action: { kind: "tool-call", toolName: "deploy_service" },
+          kind: "tool-approval",
+        });
+        expect(await listWorkflowToolRunIds()).toEqual(before);
+
+        const commandToken = sessionCommandHookToken(run.runId);
+        await waitForHook(run, { token: commandToken });
+        await resumeSessionInbox(commandToken, {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const executorRunId = await waitForNewWorkflowToolRun(before);
+        expect(await waitForWorkflowToolRunTerminal(executorRunId)).toBe("completed");
+        const completed = await stream.nextTurn();
+        expect(filterEventsByType(completed, "turn.failed")).toEqual([]);
+        expect(completed.at(-1)?.type).toBe("session.waiting");
+        expect(JSON.stringify(completed)).toContain("plan:api");
+        const continuedTurns = filterEventsByType(completed, "turn.started");
+        expect(continuedTurns).toHaveLength(1);
+        expect(continuedTurns[0]?.data.turnId).toMatch(/^turn_\d+$/u);
+        expect(filterEventsByType(completed, "turn.completed")[0]?.data.turnId).toBe(
+          continuedTurns[0]?.data.turnId,
+        );
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
   it("settles the call with an error when the workflow body throws", async () => {
     const runtime = await createWorkflowToolRuntime({
