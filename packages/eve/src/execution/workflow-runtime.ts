@@ -67,6 +67,7 @@ import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
@@ -206,6 +207,12 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      if (
+        isSubagentAdapterState(input.adapter.state) &&
+        input.adapter.state.parentHistory !== undefined
+      ) {
+        workflowInput.parentHistory = input.adapter.state.parentHistory;
+      }
       const taskId = input.taskId ?? input.callback?.taskId;
       if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {

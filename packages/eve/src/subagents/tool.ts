@@ -14,6 +14,7 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ModelMessage } from "ai";
 
 /**
  * Pending task batch event metadata needed for child run lineage.
@@ -90,6 +91,8 @@ export function buildSubagentRunInput(input: {
    * dispatching parent's sandbox. Absence means no inheritance.
    */
   readonly graph?: SubagentSandboxGraph;
+  /** Conversation prefix used only when creating this child session. */
+  readonly parentHistory?: readonly ModelMessage[];
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
@@ -135,6 +138,7 @@ export function buildSubagentRunInput(input: {
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
+  if (input.parentHistory !== undefined) adapterState.parentHistory = input.parentHistory;
   if (input.taskId !== undefined) adapterState.taskId = input.taskId;
   const sharesSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition

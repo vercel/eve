@@ -18,6 +18,11 @@ import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
+  /**
+   * Immutable completed parent prefix captured before this tool call. Older
+   * in-flight workflow runs omit it and intentionally receive an empty view.
+   */
+  readonly parentHistory?: readonly import("ai").ModelMessage[];
   /** Advertised by the parent driver; absent on runs started before this capability. */
   readonly authorizationSupported?: boolean;
   readonly callId: string;
@@ -59,6 +64,7 @@ export async function executeWorkflowBody(
   attachWorkflowToolRunContext(ctx, {
     from,
     owner: input.owner,
+    parentHistory: input.parentHistory ?? [],
     authorizationSupported: input.execution === "blocking" || input.authorizationSupported === true,
   });
   let reportCount = 0;

@@ -53,6 +53,17 @@ describe("agent invocation input", () => {
       "agent() requires a non-empty agent name as its first argument.",
     );
   });
+
+  it("rejects inherited history with an existing agent id", () => {
+    expect(() =>
+      validateAgentInput({
+        agentId: "agent-1",
+        inheritHistory: true,
+        message: "Continue",
+        target: "research",
+      }),
+    ).toThrow("cannot combine `agentId` with `inheritHistory`");
+  });
 });
 
 describe("background agent invocation routing", () => {
@@ -128,12 +139,14 @@ describe("background agent invocation routing", () => {
       turnId: "turn-1",
     };
     const ctx = { callId: "call-1" } as ToolContext;
+    const parentHistory = [{ content: "Prior context", role: "user" as const }];
     attachWorkflowToolRunContext(ctx, {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",
       },
+      parentHistory,
     });
 
     const outputSchema = {
@@ -141,16 +154,16 @@ describe("background agent invocation routing", () => {
       required: ["findings"],
       type: "object",
     };
-    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
-      findings: ["available"],
-    });
+    await expect(
+      agent(ctx, "research", { inheritHistory: true, message: "Find it", outputSchema }),
+    ).resolves.toEqual({ findings: ["available"] });
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
-        input: { message: "Find it", outputSchema, target: "research" },
+        input: { parentHistory, message: "Find it", outputSchema, target: "research" },
         invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
       },

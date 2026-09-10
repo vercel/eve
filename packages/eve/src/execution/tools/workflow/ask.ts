@@ -6,6 +6,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { ModelMessage } from "ai";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
@@ -14,6 +15,7 @@ const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 export interface WorkflowToolRunContext {
   readonly authorizationSupported?: boolean;
+  readonly parentHistory?: readonly ModelMessage[];
   /** Compatibility for already-started two-run background workflows. */
   readonly admission?: Promise<
     { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
@@ -65,6 +67,10 @@ export function readWorkflowToolRunAdmission(
   ctx: ToolContext,
 ): WorkflowToolRunContext["admission"] {
   return readWorkflowToolRunContext(ctx, "agent").admission;
+}
+
+export function readWorkflowToolParentHistory(ctx: ToolContext): readonly ModelMessage[] {
+  return readWorkflowToolRunContext(ctx, "agent").parentHistory ?? [];
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */

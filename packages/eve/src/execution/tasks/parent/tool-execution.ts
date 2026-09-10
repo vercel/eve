@@ -466,6 +466,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,
+        parentHistory: [...this.initialSession.history],
         resultKind: workflow.resultKind,
         session: buildCallbackContext().session,
         stepIndex: input.emission.stepIndex,

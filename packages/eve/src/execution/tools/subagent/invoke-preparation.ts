@@ -80,6 +80,7 @@ export async function prepareOwnerAgentInvocation(input: {
         action,
         bundle,
         ctx: planContext,
+        parentHistory: input.invocation.parentHistory,
         knownAgentIds: input.knownAgentIds,
         session,
       }),
@@ -93,6 +94,7 @@ export function planAgentDispatch(input: {
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;
   readonly ctx: ContextReader;
+  readonly parentHistory?: AgentInvocationRequest["input"]["parentHistory"];
   readonly knownAgentIds?: readonly string[];
   readonly session: RuntimeSession;
 }): OwnerAgentDispatchPlanEntry {
@@ -103,6 +105,9 @@ export function planAgentDispatch(input: {
   const rawAgentId = input.action.input.agentId;
   const agentId =
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
+  if (agentId !== undefined && input.parentHistory !== undefined) {
+    throw new TypeError("agent() cannot combine `agentId` with inherited history.");
+  }
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
     if (knownAgentIds.has(agentId)) {
       const dynamicSubagentSelection =
@@ -128,6 +133,7 @@ export function planAgentDispatch(input: {
 }
 
 function classifyFreshStart(input: {
+  readonly parentHistory?: AgentInvocationRequest["input"]["parentHistory"];
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;
   readonly ctx: ContextReader;
@@ -163,6 +169,9 @@ function classifyFreshStart(input: {
     return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
   }
   if (action.kind === "remote-agent-call") {
+    if (input.parentHistory !== undefined) {
+      throw new TypeError("agent() can inherit history only when creating a local subagent.");
+    }
     return {
       kind: "start",
       target: {
@@ -195,7 +204,13 @@ function classifyFreshStart(input: {
         };
   return {
     kind: "start",
-    target: { action, dynamicSubagentAgentConfig: dynamicAgentConfig, kind: "local", source },
+    target: {
+      action,
+      dynamicSubagentAgentConfig: dynamicAgentConfig,
+      parentHistory: input.parentHistory,
+      kind: "local",
+      source,
+    },
   };
 }
 

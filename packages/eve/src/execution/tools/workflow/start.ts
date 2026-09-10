@@ -50,6 +50,7 @@ export async function startWorkflowTask(input: {
     const started = await startWorkflowToolRun({
       callId: task.callId,
       executeInput: task.executeInput,
+      parentHistory: [...session.history],
       input: task.input,
       owner: input.owner,
       resultKind: task.resultKind,

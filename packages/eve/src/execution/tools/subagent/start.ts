@@ -3,6 +3,7 @@ import type { LocalDevRequestProvenance } from "#context/keys.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import type { ModelMessage } from "ai";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeRemoteAgentDispatchRequest,
@@ -24,6 +25,7 @@ export type SubagentStartTarget =
       readonly kind: "local";
       readonly action: RuntimeSubagentDispatchRequest;
       readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+      readonly parentHistory?: readonly ModelMessage[];
       readonly source: SubagentInputSource;
     }
   | {
@@ -90,6 +92,7 @@ export async function startSubagent(input: {
         currentSession: input.currentSession,
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
+        parentHistory: input.target.parentHistory,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
