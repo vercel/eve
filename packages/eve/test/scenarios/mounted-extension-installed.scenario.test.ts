@@ -6,6 +6,7 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
+import { EXTENSION_CAPABILITY_VERSIONS } from "../../src/compiler/extension-compatibility.js";
 import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
@@ -249,7 +250,13 @@ describe("mounted extension installed under node_modules", () => {
     );
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
-    ).toMatchObject({ requires: { channel: 19, schedule: 11, subagent: 11 } });
+    ).toMatchObject({
+      requires: {
+        channel: EXTENSION_CAPABILITY_VERSIONS.channel,
+        schedule: EXTENSION_CAPABILITY_VERSIONS.schedule,
+        subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
+      },
+    });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,
