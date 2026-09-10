@@ -41,10 +41,7 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
-import {
-  preserveSerializedAgentTraceState,
-  pruneAgentTraceState,
-} from "#tracing/agent-trace-context-store.js";
+import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -594,7 +591,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
-  pruneAgentTraceState(ctx, rekeyed.sessionId, rekeyed.state);
+  agentTraceState.pruneAgentTraceState(ctx, rekeyed.sessionId, rekeyed.state);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };
 
