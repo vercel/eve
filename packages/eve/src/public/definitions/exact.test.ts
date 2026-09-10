@@ -245,11 +245,13 @@ function typeOnlyFixtures(): void {
     model: "anthropic/claude-sonnet-5",
   });
 
+  defineAgent({ model: "test/model", experimental: { codeMode: { maxSubagents: 6 } } });
+
   defineAgent({
     model: "test/model",
     experimental: {
-      // @ts-expect-error codeMode must be a boolean.
-      codeMode: { maxSubagents: 6 },
+      // @ts-expect-error codeMode options only take maxSubagents.
+      codeMode: { mode: "eager" },
     },
   });
 

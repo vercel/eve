@@ -200,6 +200,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     directive = "CODEMODE-AUTH";
     js =
       'const first = await tools.echo({ value: "before-auth" }); return { first, auth: await tools.authorize({}) };';
+  } else if (message.includes("CODEMODE-LIMIT-START")) {
+    directive = "CODEMODE-LIMIT";
+    js =
+      'const results = []; for (const message of ["limit-alpha", "limit-beta", "limit-gamma"]) { try { results.push(await tools.marker({ message })); } catch (error) { results.push(String(error)); } } return results;';
   } else if (message.includes("CODEMODE-FAILURE-START")) {
     directive = "CODEMODE-FAILURE";
     js = [
@@ -228,7 +232,7 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  experimental: { ...base.experimental, codeMode: true },
+  experimental: { ...base.experimental, codeMode: { maxSubagents: 2 } },
   // Always author the deterministic script so this fixture never depends on a
   // live model; world suites already set EVE_E2E_MODEL=mock.
   model: mockModel(respond),

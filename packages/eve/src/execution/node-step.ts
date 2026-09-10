@@ -27,6 +27,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
+import { resolveCodeModeOptions } from "#execution/code-mode/schema.js";
 import { CODE_MODE_TOOL_NAME } from "#harness/code-mode.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
@@ -102,7 +103,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    codeMode: input.node.agent.config?.experimental?.codeMode === true,
+    codeMode: resolveCodeModeOptions(input.node.agent.config?.experimental?.codeMode),
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -214,7 +215,7 @@ function resolveHarnessToolDefinition(input: {
 
   if (
     input.tool.name === CODE_MODE_TOOL_NAME &&
-    input.node.agent.config?.experimental?.codeMode !== true
+    resolveCodeModeOptions(input.node.agent.config?.experimental?.codeMode) === undefined
   ) {
     return null;
   }

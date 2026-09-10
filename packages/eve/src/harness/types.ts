@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
+import type { CodeModeOptions } from "#execution/code-mode/schema.js";
 import type { AlsContext } from "#context/container.js";
 import type {
   RuntimeIdentity,
@@ -281,8 +282,8 @@ export interface ToolLoopHarnessConfig {
   readonly capabilities?: SessionCapabilities;
   /** Clears model-message history without running a model turn. */
   readonly clearOnly?: boolean;
-  /** Enables the framework `code_mode` workflow tool. */
-  readonly codeMode?: boolean;
+  /** Enables the framework `code_mode` workflow tool with these options. */
+  readonly codeMode?: CodeModeOptions;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
   readonly handleEvent?: HandleEventFn;

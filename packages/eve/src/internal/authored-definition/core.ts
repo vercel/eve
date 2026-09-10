@@ -295,11 +295,23 @@ function normalizeAgentExperimentalDefinition(
   expectOnlyKnownKeys(record, ["codeMode", "instrumentationProviders", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
 
-  if (record.codeMode !== undefined) {
-    if (typeof record.codeMode !== "boolean") {
-      throw new Error(`${message} "experimental.codeMode" must be a boolean.`);
-    }
+  if (typeof record.codeMode === "boolean") {
     normalizedDefinition.codeMode = record.codeMode;
+  } else if (record.codeMode !== undefined) {
+    const config = expectObjectRecord(
+      record.codeMode,
+      `${message} "experimental.codeMode" must be a boolean or an options object.`,
+    );
+    expectOnlyKnownKeys(config, ["maxSubagents"], message);
+    normalizedDefinition.codeMode =
+      config.maxSubagents === undefined
+        ? {}
+        : {
+            maxSubagents: expectPositiveInteger(
+              config.maxSubagents,
+              `${message} "experimental.codeMode.maxSubagents" must be a positive integer.`,
+            ),
+          };
   }
 
   if (record.instrumentationProviders !== undefined) {

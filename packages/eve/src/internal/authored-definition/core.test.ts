@@ -18,15 +18,23 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.codeMode).toBe(codeMode);
   });
 
-  it.each([{}, { maxSubagents: 2 }, { mode: "lazy" }, "eager", 1])(
-    "rejects non-boolean code mode %j",
+  it.each([{}, { maxSubagents: 2 }])("accepts code mode options %j", (codeMode) => {
+    const definition = normalizeAgentDefinition(
+      { model: "test/model", experimental: { codeMode } },
+      FAILURE_MESSAGE,
+    );
+    expect(definition.experimental?.codeMode).toEqual(codeMode);
+  });
+
+  it.each([{ mode: "lazy" }, { maxSubagents: 0 }, { maxSubagents: "2" }, "eager", 1])(
+    "rejects invalid code mode %j",
     (codeMode) => {
       expect(() =>
         normalizeAgentDefinition(
           { model: "test/model", experimental: { codeMode } },
           FAILURE_MESSAGE,
         ),
-      ).toThrow("codeMode");
+      ).toThrow(FAILURE_MESSAGE);
     },
   );
 

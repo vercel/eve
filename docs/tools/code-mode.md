@@ -28,6 +28,16 @@ export default defineAgent({
 });
 ```
 
+Pass an object instead of `true` to tune the tool. `maxSubagents` caps how many
+subagents one program may invoke (default 100):
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "openai/gpt-5.5",
+  experimental: { codeMode: { maxSubagents: 20 } },
+});
+```
+
 `code_mode` is available only in the root session. Child sessions started by
 declared subagents or the built-in `agent` tool do not receive it.
 
@@ -146,8 +156,9 @@ Calling a declared subagent or the built-in `agent` tool from a program awaits
 the child's final response. Pass `agentId` to continue or steer a child started
 earlier in the same program, the same way the direct tool does.
 
-Each program can invoke at most 100 subagents. Sequential calls, parallel calls,
-retries, and continuations of an existing child all count. Excess calls reject
+Each program can invoke at most `maxSubagents` subagents (default 100).
+Sequential calls, parallel calls, retries, and continuations of an existing
+child all count. Excess calls reject
 with `CODE_MODE_SUBAGENT_LIMIT_REACHED` before a child starts, and the program
 can catch that rejection. Ordinary tool calls do not consume this budget.
 
@@ -222,8 +233,6 @@ workflow step retry policy.
 
 ## Current state and limitations
 
-- The `experimental.codeMode` setting is a boolean. The 100-subagent budget per
-  program is fixed.
 - The program source and every recorded result travel with each resume, so
   programs that accumulate large intermediate results grow the per-step payload.
   Reduce results inside the program instead of returning raw data.

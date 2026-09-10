@@ -1,6 +1,20 @@
+import type { AgentCodeModeDefinition } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
 
 export const DEFAULT_CODE_MODE_MAX_SUBAGENTS = 100;
+
+export interface CodeModeOptions {
+  readonly maxSubagents: number;
+}
+
+/** The effective `code_mode` options for an agent, or `undefined` when the tool is off. */
+export function resolveCodeModeOptions(
+  codeMode: boolean | AgentCodeModeDefinition | undefined,
+): CodeModeOptions | undefined {
+  if (codeMode === undefined || codeMode === false) return undefined;
+  const options = codeMode === true ? {} : codeMode;
+  return { maxSubagents: options.maxSubagents ?? DEFAULT_CODE_MODE_MAX_SUBAGENTS };
+}
 
 /** The resolution a nested call gets when its approval is refused, by the policy or by the person. */
 export function approvalDenied(

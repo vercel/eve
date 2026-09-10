@@ -118,6 +118,7 @@ describe("code-mode sandbox continuation contract", () => {
     const applied = await applyCodeModeTool({
       continuationSecurity: security,
       harnessTools: definitions,
+      maxSubagents: 100,
       tools: buildToolSet({ tools: definitions }),
     });
     const program = parseCodeModeWorkflowInput(

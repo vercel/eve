@@ -8,7 +8,8 @@ last_updated: "2026-09-08"
 
 Code Mode preserves direct access to built-in tools, authored tools, and subagents; eligible dynamic tools use on-demand discovery.
 
-Enable it with `experimental.codeMode: true`. The removed
+Enable it with `experimental.codeMode: true`, or `{ maxSubagents }` to cap
+subagent calls per program. The removed
 `mode` selector is not needed: schema discovery and execution eligibility are
 separate decisions. Dynamic provenance comes from the dynamic tool provider,
 not tool names. Approval-gated tools and framework controls stay direct-only.

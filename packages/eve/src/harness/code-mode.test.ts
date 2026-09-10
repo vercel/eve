@@ -145,7 +145,12 @@ describe("applyCodeModeTool", () => {
         [CODE_MODE_TOOL_NAME, codeModeDefinition()],
       ]);
       const tools = buildToolSet({ tools: harnessTools });
-      const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+      const applied = await applyCodeModeTool({
+        continuationSecurity,
+        harnessTools,
+        maxSubagents: 100,
+        tools,
+      });
       expect(Object.keys(applied.modelTools)).toEqual([
         "bash",
         "read_file",
@@ -176,6 +181,7 @@ describe("applyCodeModeTool", () => {
     const applied = await applyCodeModeTool({
       continuationSecurity,
       harnessTools,
+      maxSubagents: 100,
       tools: buildToolSet({ tools: harnessTools }),
     });
     const input = applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({
@@ -204,7 +210,12 @@ describe("applyCodeModeTool", () => {
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
     const tools = buildToolSet({ tools: harnessTools });
-    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    const applied = await applyCodeModeTool({
+      continuationSecurity,
+      harnessTools,
+      maxSubagents: 100,
+      tools,
+    });
     const input = parseCodeModeWorkflowInput(
       applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return null;" }),
     );
@@ -230,6 +241,8 @@ describe("applyCodeModeTool", () => {
     const applied = await applyCodeModeTool({
       continuationSecurity,
       harnessTools,
+
+      maxSubagents: 100,
 
       tools,
     });
@@ -277,7 +290,12 @@ describe("applyCodeModeTool", () => {
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
     const tools = buildToolSet({ tools: harnessTools });
-    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    const applied = await applyCodeModeTool({
+      continuationSecurity,
+      harnessTools,
+      maxSubagents: 100,
+      tools,
+    });
     expect(Object.keys(applied.modelTools).sort()).toEqual([
       CODE_MODE_TOOL_NAME,
       "gated",
@@ -308,6 +326,8 @@ describe("applyCodeModeTool", () => {
       continuationSecurity,
       harnessTools,
 
+      maxSubagents: 100,
+
       tools: buildToolSet({ tools: harnessTools }),
     });
     const description = applied.modelTools[CODE_MODE_TOOL_NAME]?.description ?? "";
@@ -333,6 +353,8 @@ describe("applyCodeModeTool", () => {
       continuationSecurity,
       harnessTools,
 
+      maxSubagents: 100,
+
       tools: buildToolSet({ tools: harnessTools }),
     });
     expect(applied.harnessTools.has(CODE_MODE_TOOL_NAME)).toBe(true);
@@ -352,7 +374,12 @@ describe("applyCodeModeTool", () => {
     ]);
     const tools = buildToolSet({ tools: harnessTools });
     delete tools.hidden;
-    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    const applied = await applyCodeModeTool({
+      continuationSecurity,
+      harnessTools,
+      maxSubagents: 100,
+      tools,
+    });
     const input = parseCodeModeWorkflowInput(
       applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return 1;" }),
     );
@@ -392,7 +419,12 @@ describe("applyCodeModeTool", () => {
       [CODE_MODE_TOOL_NAME, codeModeDefinition()],
     ]);
     const tools = buildToolSet({ tools: harnessTools });
-    const applied = await applyCodeModeTool({ continuationSecurity, harnessTools, tools });
+    const applied = await applyCodeModeTool({
+      continuationSecurity,
+      harnessTools,
+      maxSubagents: 100,
+      tools,
+    });
 
     expect(Object.keys(applied.modelTools)).toEqual(["plan", "pinned", CODE_MODE_TOOL_NAME]);
     expect(applied.modelTools.plan).toBe(tools.plan);
@@ -422,6 +454,8 @@ describe("applyCodeModeTool", () => {
     const applied = await applyCodeModeTool({
       continuationSecurity,
       harnessTools,
+
+      maxSubagents: 100,
 
       tools,
     });

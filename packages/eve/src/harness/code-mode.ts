@@ -7,7 +7,6 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { AGENT_TASK_RECEIPT_DESCRIPTION } from "#tools/framework/agent-contract.js";
 import {
-  DEFAULT_CODE_MODE_MAX_SUBAGENTS,
   serializeCodeModeWorkflowInput,
   type CodeModeToolCatalogEntry,
   type CodeModeWorkflowInput,
@@ -45,6 +44,7 @@ const DISCOVERY_INSTRUCTION =
 export async function applyCodeModeTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
+  readonly maxSubagents: number;
   readonly tools: ToolSet;
 }): Promise<{
   readonly harnessTools: HarnessToolMap;
@@ -56,7 +56,7 @@ export async function applyCodeModeTool(input: {
     return { harnessTools: input.harnessTools, modelTools: input.tools };
   }
 
-  const maxSubagents = DEFAULT_CODE_MODE_MAX_SUBAGENTS;
+  const { maxSubagents } = input;
   const modelTools: ToolSet = {};
   const toolCatalog: CodeModeToolCatalogEntry[] = [];
   for (const [name, tool] of Object.entries(input.tools)) {

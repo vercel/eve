@@ -1,3 +1,4 @@
+import { resolveCodeModeOptions } from "#execution/code-mode/schema.js";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,7 +84,11 @@ function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   return nodes.some((node) => {
     if (!("config" in node) || typeof node.config !== "object" || node.config === null)
       return false;
-    return (node.config as CompiledAgentManifest["config"]).experimental?.codeMode === true;
+    return (
+      resolveCodeModeOptions(
+        (node.config as CompiledAgentManifest["config"]).experimental?.codeMode,
+      ) !== undefined
+    );
   });
 }
 

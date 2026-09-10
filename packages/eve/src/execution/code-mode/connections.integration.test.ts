@@ -108,6 +108,7 @@ describe("connection tools in code mode", () => {
         return applyCodeModeTool({
           continuationSecurity: { signingKey: "test" },
           harnessTools,
+          maxSubagents: 100,
           tools: buildToolSet({ tools: harnessTools }),
         });
       }

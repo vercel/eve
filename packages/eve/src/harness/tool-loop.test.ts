@@ -1904,7 +1904,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const config = createTestConfig("conversation", undefined, {
-      codeMode: true,
+      codeMode: { maxSubagents: 100 },
       tools: new Map([
         ...createDelegationToolMap(),
         [
@@ -2481,7 +2481,7 @@ describe("createToolLoopHarness", () => {
     const base = createTestConfig();
     const runStep = createToolLoopHarness({
       ...base,
-      codeMode: true,
+      codeMode: { maxSubagents: 100 },
       tools: new Map([
         ...base.tools,
         [

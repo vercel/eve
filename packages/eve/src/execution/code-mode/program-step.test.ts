@@ -560,6 +560,8 @@ describe("executeCodeModeToolStep", () => {
       continuationSecurity: { signingKey: "test" },
       harnessTools: new Map([...effective, ["code_mode", state.tools.get("code_mode")!]]),
 
+      maxSubagents: 100,
+
       tools: {
         ...tools,
         ...buildToolSet({ tools: new Map([["code_mode", state.tools.get("code_mode")!]]) }),
@@ -586,6 +588,8 @@ describe("executeCodeModeToolStep", () => {
     const result = await applyCodeModeTool({
       continuationSecurity: { signingKey: "test" },
       harnessTools,
+
+      maxSubagents: 100,
 
       tools: buildToolSet({ tools: harnessTools }),
     });

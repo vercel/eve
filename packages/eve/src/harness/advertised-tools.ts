@@ -4,6 +4,7 @@ import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
+import type { CodeModeOptions } from "#execution/code-mode/schema.js";
 import { applyCodeModeTool } from "#harness/code-mode.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
@@ -20,7 +21,7 @@ type AdvertisedToolDefinitionsInput = {
 };
 
 type AdvertisedModelToolsInput = {
-  readonly codeMode?: boolean;
+  readonly codeMode?: CodeModeOptions;
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
@@ -65,11 +66,12 @@ async function getAdvertisedModelTools(
   let modelTools = input.modelTools;
   let session = input.session;
 
-  if (input.codeMode === true) {
+  if (input.codeMode !== undefined) {
     session = ensureWorkflowContinuationSecurity(session);
     const applied = await applyCodeModeTool({
       continuationSecurity: getWorkflowContinuationSecurity(session),
       harnessTools,
+      maxSubagents: input.codeMode.maxSubagents,
       tools: modelTools,
     });
     harnessTools = applied.harnessTools;
