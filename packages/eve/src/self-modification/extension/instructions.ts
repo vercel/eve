@@ -52,7 +52,7 @@ For investigation tasks, report the findings and supporting evidence requested b
 
 const localGuidance = `## Local environment
 
-The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, relay the terminal command the tool names.
+The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
 Local eve dev logs are available read-only at /logs.
 Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
