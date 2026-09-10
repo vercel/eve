@@ -303,6 +303,8 @@ export default defineWorkflowTool({
 
 Calling `task.postMessage` constructs a descriptor; yielding it sends the message. It does not
 wait for a reply. Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer.
+If a workflow report is redelivered after a step retry, its background task processes it only
+once. Separate yields remain separate reports, even when their contents are identical.
 Removing `execution: "background"` requires removing the `task` argument and message yield; the
 ordinary progress yield and `await sleep(delay)` still work, but the model waits for the final
 reminder as the tool result. See [yield and return](/docs/tools#yield-and-return) for the different

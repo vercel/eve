@@ -87,6 +87,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
+  const seenReports = new Set<string>();
   const pendingTraffic: PendingWorkflowToolTraffic = { messages: [], ownerRequests: [] };
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
@@ -138,6 +139,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (read.channel === "workflow") {
       const message = read.next.value;
       if (message.kind === "report") {
+        // Hook resumption can be redelivered after a step retry.
+        const identity = JSON.stringify([
+          message.from.runId,
+          message.from.callId,
+          message.reportId,
+        ]);
+        if (seenReports.has(identity)) continue;
+        seenReports.add(identity);
         await applyPayload(workflowToolRunReportToTaskPayload(message, view.taskId, updateIndex++));
         continue;
       }

@@ -76,7 +76,11 @@ export async function executeWorkflowBody(
       let next = await iterator.next();
       while (next.done !== true) {
         last = next.value;
-        const report: WorkflowToolRunReport = { from, update: next.value };
+        const report: WorkflowToolRunReport = {
+          from,
+          reportId: `yield:${reportCount}`,
+          update: next.value,
+        };
         await resumeHookStep(input.owner.inbox, { kind: "report", ...report });
         reportCount += 1;
         next = await iterator.next();

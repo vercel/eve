@@ -7,9 +7,17 @@ import {
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/ask.js";
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), agent: vi.fn(), ask: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  execute: vi.fn(),
+  agent: vi.fn(),
+  ask: vi.fn(),
+  resumeHook: vi.fn(),
+}));
 vi.mock("#execution/workflow-registry.js", () => ({ readRegisteredWorkflow: () => mocks.execute }));
 vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({ agent: mocks.agent }));
+vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
+  resumeHookStep: mocks.resumeHook,
+}));
 vi.mock("#execution/tools/workflow/ask.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ask: mocks.ask,
@@ -83,3 +91,41 @@ it.each([
     ).resolves.toMatchObject({ outcome: { status: "completed", output: "done" } });
   },
 );
+
+it("assigns stable distinct identities to repeated yielded content", async () => {
+  mocks.resumeHook.mockReset();
+  mocks.execute.mockImplementation(async function* () {
+    yield { progress: 0.5 };
+    yield { progress: 0.5 };
+    return "done";
+  });
+  const input = {
+    callId: "call",
+    input: {},
+    session: {
+      id: "session",
+      auth: { current: null, initiator: null },
+      turn: { id: "turn", sequence: 1 },
+    },
+    stepIndex: 0,
+    taskId: "task",
+    toolName: "export",
+    workflowId: "workflow//test//execute",
+    owner: { inbox: "inbox" },
+    execution: "background" as const,
+    runId: "run",
+  };
+  for (let replay = 0; replay < 2; replay += 1) {
+    const result = await executeWorkflowBody(input, new AbortController().signal);
+    expect(result).toEqual({
+      outcome: { status: "completed", output: "done" },
+      reportCount: 2,
+    });
+  }
+  expect(mocks.resumeHook.mock.calls.map(([, report]) => report.reportId)).toEqual([
+    "yield:0",
+    "yield:1",
+    "yield:0",
+    "yield:1",
+  ]);
+});

@@ -157,6 +157,13 @@ export async function invokeAgent(
         await resumeHookStep(owner.inbox, {
           kind: "report",
           from: run,
+          reportId: JSON.stringify([
+            "agent-update",
+            options.invocationId,
+            reply.updateEpoch,
+            reply.updateIndex,
+            reply.callId,
+          ]),
           update: reply.message,
         });
         continue;

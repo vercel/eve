@@ -548,6 +548,7 @@ describe("background agent invocation routing", () => {
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "report",
       from,
+      reportId: '["agent-update","call-1:research","turn-child",0,"task-update-call"]',
       update: "Still working",
     });
   });
