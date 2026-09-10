@@ -59,17 +59,17 @@ The UI installs planner selections in order and offers deployment once after the
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-While a turn is running, `Enter` queues a follow-up message. Press `Esc` or `Ctrl+C` to cancel the turn; when messages are queued, this uses the oldest queued message as the next turn instead. At an idle prompt, press `Ctrl+C` twice to exit.
+While a turn is running, `Enter` queues a follow-up message. Press `Esc` or `Ctrl+C` to cancel the turn; when messages are queued, this uses the oldest queued message as the next turn instead. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
 
-| Key           | Action                                                                              |
-| ------------- | ----------------------------------------------------------------------------------- |
-| `Enter`       | Send the current message or answer.                                                 |
-| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                   |
-| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                     |
-| `Ctrl+C`      | Cancel or steer during a turn; clear input, then exit on a second press, when idle. |
-| `↑` / `↓`     | Move through input lines or sent-message history.                                   |
-| `Ctrl+L`      | Cycle log display modes.                                                            |
-| `Ctrl+R`      | Redraw the screen.                                                                  |
+| Key           | Action                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Send the current message or answer.                                                                                     |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                                       |
+| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                                                         |
+| `Ctrl+C`      | Cancel or steer during a turn; stop a pending cancellation, then exit on the next press; press twice to exit when idle. |
+| `↑` / `↓`     | Move through input lines or sent-message history.                                                                       |
+| `Ctrl+L`      | Cycle log display modes.                                                                                                |
+| `Ctrl+R`      | Redraw the screen.                                                                                                      |
 
 ## Logs and traces
 
