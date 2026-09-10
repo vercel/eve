@@ -14,6 +14,35 @@ import { teamsChannel } from "eve/channels/teams";
 export default teamsChannel();
 ```
 
+### Vercel Connect
+
+For a managed Teams bot on Vercel, run:
+
+```bash
+eve add channel/teams
+```
+
+The guided flow creates a managed Microsoft Teams bot through Vercel Connect,
+opens the administrator sign-in and consent step, attaches verified Activities
+to `/eve/v1/teams`, and writes:
+
+```ts title="agent/channels/teams.ts"
+import { connectTeamsCredentials } from "@vercel/connect/eve";
+import { teamsChannel } from "eve/channels/teams";
+
+export default teamsChannel({
+  credentials: connectTeamsCredentials("microsoft-teams/my-agent"),
+});
+```
+
+It requires an Azure subscription ID. Optionally provide an existing Azure
+resource group; otherwise Vercel Connect creates one. After deployment, add the
+managed app from Vercel Connect to the Teams team or chat where it will run.
+
+### Portable credentials
+
+To manage the bot registration and credentials yourself, configure:
+
 ```bash
 MICROSOFT_APP_ID=...
 MICROSOFT_APP_PASSWORD=...
