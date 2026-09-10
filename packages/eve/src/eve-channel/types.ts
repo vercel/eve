@@ -4,6 +4,7 @@ import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import type {
   Channel,
   ChannelContinuationOps,
@@ -61,6 +62,13 @@ export interface EveMessageContext {
   readonly eve: EveHandle;
 }
 
+/** Context passed to `eveChannel({ audience })` when a new session is created. */
+export interface EveAudienceContext {
+  /** Verified route-auth caller, or the accepted forwarded caller. */
+  readonly caller: SessionAuthContext | null;
+  readonly request: Request;
+}
+
 /**
  * Result of `eveChannel({ onMessage })`. The object dispatches the inbound message,
  * optionally prepending `context` strings as user messages.
@@ -85,7 +93,8 @@ export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | nul
 
 /**
  * Configuration for {@link eveChannel}. Only {@link auth} is required;
- * `uploadPolicy`, `onMessage`, and `events` refine the default HTTP behavior.
+ * `audience`, `uploadPolicy`, `onMessage`, and `events` refine the default HTTP
+ * behavior.
  */
 export interface EveChannelInput {
   /**
@@ -94,6 +103,13 @@ export interface EveChannelInput {
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
+  /**
+   * Sets the audience classification exposed to tracing for a newly created
+   * HTTP session. Runs after route authentication with the verified caller and
+   * request; the returned audience is pinned to the session. This is
+   * observability metadata and does not change HTTP authorization.
+   */
+  readonly audience?: (ctx: EveAudienceContext) => ChannelAudience | Promise<ChannelAudience>;
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal or callback-marked public trace audience. The predicate

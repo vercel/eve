@@ -77,6 +77,7 @@ import {
   findRemoteSubagentBinding,
   healthResponse,
   normalizeEveCors,
+  resolveEveAudience,
   resolveOnMessage,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
@@ -236,6 +237,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           request: req,
         });
         if (messageResult instanceof Response) return messageResult;
+        const audience = await resolveEveAudience({
+          auth: forwarded.auth,
+          config: input,
+          request: req,
+        });
+        if (audience instanceof Response) return audience;
         const createSession = readRouteSessionCreator(args);
         if (createSession === undefined) {
           return Response.json(
@@ -252,6 +259,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
+            channelAudience: audience,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(

@@ -1,14 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-09-01"
+last_updated: "2026-09-10"
 ---
 
 # Audience-aware trace content policy
 
 ## Summary
 
-Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private conversations should not produce traces unless an author explicitly admits them. Zero-config local tracing additionally retains unclassified HTTP/TUI sessions for debugging.
+Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private and unknown conversations remain metadata-only unless an author explicitly admits their content. Zero-config local tracing retains metadata for every audience.
 
 This proposal adds a fail-closed audience classification to channel instrumentation metadata, classifies built-in messaging channels from durable platform state, and separates the process-wide trace gate from each destination's ordered export pipeline.
 
@@ -20,7 +20,7 @@ Channels may project one of three values from their existing synchronous `metada
 type ChannelAudience = "public" | "private" | "unknown";
 ```
 
-The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests. Proactive Slack `receive` / `ctx.send` targets may optionally supply `audience` when the caller already knows channel visibility, for example a webhook that classified the Slack destination before handoff.
+The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests. The eve HTTP channel may set the tracing audience for each new session with an asynchronous `audience(ctx)` resolver that runs after route authentication. Its flat context contains the verified caller and request; the result is persisted with the session, and omission remains `unknown`. A parent-attested local TUI sets the tracing audience to `private` and bypasses the authored resolver. Proactive Slack `receive` / `ctx.send` targets may optionally supply `audience` when the caller already knows channel visibility, for example a webhook that classified the Slack destination before handoff.
 
 The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. A remote agent with principal forwarding propagates the immutable origin audience and the current hop's effective directional ceiling through one `eve.audience` W3C Baggage member. The receiver accepts it only with the same `trustedForwarders` decision that admitted the principal, then intersects it with its own process policy. Every later hop forwards that intersection; malformed and mixed-version assertions become metadata-only.
 
@@ -168,10 +168,14 @@ policy remains subject to its process-wide audience ceiling.
 The default policy for local tracing for `eve dev` is equivalent to:
 
 ```ts
-({ audience }) => audience === "public" || audience === "unknown";
+({ audience }) => ({
+  emit: true,
+  recordInputs: audience === "public",
+  recordOutputs: audience === "public",
+});
 ```
 
-This keeps unclassified local HTTP/TUI sessions observable while still rejecting channels classified as `private`.
+This keeps private TUI and messaging-channel trace metadata observable without capturing their content.
 
 The runtime order is:
 

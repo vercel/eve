@@ -102,14 +102,18 @@ describe("resolveLocalTracesContent", () => {
 describe("localTracePolicy", () => {
   it.each([
     ["public", true],
-    ["unknown", true],
+    ["unknown", false],
     ["private", false],
-  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
+  ] as const)("captures content for the %s audience: %s", (audience, capturesContent) => {
     expect(
       localTracePolicy({
         agentName: "weather",
         audience,
       }),
-    ).toBe(accepted);
+    ).toEqual({
+      emit: true,
+      recordInputs: capturesContent,
+      recordOutputs: capturesContent,
+    });
   });
 });

@@ -6,6 +6,7 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
@@ -278,10 +279,20 @@ function buildRouteArgs(
       ),
       { agentName: bundle.agentName },
     ),
-    async (input) =>
-      await bundle.runtime.createSession({
+    async ({ channelAudience, ...input }) => {
+      let channelMetadata = input.channelMetadata;
+      if (channelAudience !== undefined) {
+        const projection =
+          channelMetadata ?? buildChannelInstrumentationProjection({ adapter, channelName });
+        channelMetadata = {
+          ...projection,
+          metadata: { ...projection.metadata, audience: channelAudience },
+        };
+      }
+      return await bundle.runtime.createSession({
         ...input,
         adapter,
+        channelMetadata,
         channelName,
         continuationToken:
           input.continuationToken === undefined
@@ -289,7 +300,8 @@ function buildRouteArgs(
             : `${channelName}:${input.continuationToken}`,
         delivery: createChannelDeliveryMetadata(deliverySource),
         requestId,
-      }),
+      });
+    },
   );
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
