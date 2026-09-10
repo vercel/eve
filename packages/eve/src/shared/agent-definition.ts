@@ -255,6 +255,23 @@ export interface AgentBuildDefinition {
 export type AgentWorkflowWorldDefinition = string;
 
 /**
+ * Accepted values for `experimental.workflow.retention`.
+ *
+ * Declared as eve's own tuple so the authored type, the manifest schema, and
+ * the authored-definition normalizer share one source of truth. A drift test
+ * keeps it aligned with what the Workflow SDK accepts.
+ */
+export const AGENT_WORKFLOW_RETENTION_VALUES = [0, "default"] as const;
+
+/**
+ * How long the durable runtime keeps a run's data after the run finishes.
+ *
+ * The value is a duration, and zero is currently the only one besides the
+ * world's default.
+ */
+export type AgentWorkflowRetentionDefinition = (typeof AGENT_WORKFLOW_RETENTION_VALUES)[number];
+
+/**
  * Advanced durable-runtime configuration for eve's Workflow SDK integration.
  */
 export interface AgentWorkflowDefinition {
@@ -268,6 +285,28 @@ export interface AgentWorkflowDefinition {
    * @default 1
    */
   readonly modelCallsPerStep?: number;
+  /**
+   * How long the durable runtime keeps this agent's run data after a run
+   * finishes. eve applies it to the session run and to every turn run the
+   * session dispatches.
+   *
+   * - `"default"`: same as omission. The world decides. On Vercel that follows
+   *   your team's plan.
+   * - `0`: the world deletes run payloads and stream chunks as soon as the run
+   *   completes or fails. On Vercel, metadata such as run ids, status, and
+   *   timestamps may still persist for your plan's default period.
+   *
+   * The world enforces this, so it needs a world that implements it. The
+   * first-party worlds (Vercel, Local, Postgres) do; a world that does not
+   * recognize the value keeps the data.
+   *
+   * At `0` the purge races reads of a finished run and usually wins, so
+   * results and transcripts of completed sessions generally become
+   * unreadable. Persist anything you need to keep from inside a tool.
+   *
+   * @default "default"
+   */
+  readonly retention?: AgentWorkflowRetentionDefinition;
   /**
    * Workflow world module used for durable workflow storage, queueing, hooks,
    * and streaming.

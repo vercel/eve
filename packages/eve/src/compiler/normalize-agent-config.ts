@@ -189,6 +189,7 @@ function normalizeExperimentalDefinition(
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       modelCallsPerStep: experimental.workflow.modelCallsPerStep,
+      retention: experimental.workflow.retention,
       world: experimental.workflow.world,
     };
   }

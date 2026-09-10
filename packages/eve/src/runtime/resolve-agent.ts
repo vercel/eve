@@ -247,6 +247,7 @@ function createResolvedAgentConfig(
           ? undefined
           : {
               modelCallsPerStep: manifest.config.experimental.workflow.modelCallsPerStep,
+              retention: manifest.config.experimental.workflow.retention,
               world: manifest.config.experimental.workflow.world,
             },
     };

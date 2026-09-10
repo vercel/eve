@@ -12,6 +12,7 @@ export {
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
   type AgentWorkflowDefinition,
+  type AgentWorkflowRetentionDefinition,
   type AgentWorkflowWorldDefinition,
   type DefinedAgent,
   type DynamicSubagentDefinition,

@@ -296,6 +296,38 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
   });
 
+  it.each([0, "default"] as const)("accepts workflow retention %j", (value) => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          workflow: {
+            retention: value,
+          },
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.workflow?.retention).toBe(value);
+  });
+
+  it.each(["none", "0", 1, true, null])("rejects invalid workflow retention %j", (value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            workflow: {
+              retention: value,
+            },
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.workflow.retention" must be 0 or "default"');
+  });
+
   it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {
     expect(() =>
       normalizeAgentDefinition(

@@ -155,6 +155,9 @@ export function createWorkflowRuntime(config: {
         parentTraceContext: input.parentTraceContext,
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
+      // Retention is always the authored value: `experimental` cannot be
+      // selected by a dynamic subagent config, so there is nothing to resolve.
+      const retention = bundle.resolvedAgent.config?.experimental?.workflow?.retention;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
       if (
@@ -178,6 +181,7 @@ export function createWorkflowRuntime(config: {
           const collector = await startWorkflowOnCurrentDeployment(
             activityCollectorWorkflowReference,
             [collectorInput],
+            { experimental_retention: retention },
           );
           collectorRunId = collector.runId;
           const fallbackOrigin = process.env.VERCEL_URL
@@ -217,6 +221,9 @@ export function createWorkflowRuntime(config: {
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
+      if (retention !== undefined) {
+        workflowInput.retention = retention;
+      }
       const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
@@ -243,6 +250,7 @@ export function createWorkflowRuntime(config: {
         run = await startWorkflowOnCurrentDeployment(workflowEntryReference, [workflowInput], {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),
+          experimental_retention: retention,
         });
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
