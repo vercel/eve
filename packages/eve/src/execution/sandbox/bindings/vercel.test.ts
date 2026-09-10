@@ -1053,6 +1053,40 @@ describe("createVercelSandbox", () => {
     });
   });
 
+  it("does not invalidate the shared template when a fresh session initialization returns 410", async () => {
+    const templateSandbox = createMockSandbox({
+      name: "template-key",
+      snapshotId: "template-snapshot",
+    });
+    const freshSession = createMockSandbox({ name: "session-key" });
+    const snapshotUnavailableError = Object.assign(new Error("Cannot initialize sandbox"), {
+      response: { status: 410 },
+    });
+    vi.mocked(freshSession.runCommand).mockRejectedValueOnce(snapshotUnavailableError);
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValueOnce(freshSession),
+        get: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+          if (name === "template-key") return templateSandbox;
+          return null;
+        }),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.create({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        sessionKey: "session-key",
+        templateKey: "template-key",
+      }),
+    ).rejects.toThrow('Failed to initialize sandbox session "session-key"');
+
+    expect(templateSandbox.delete).not.toHaveBeenCalled();
+  });
+
   it("does not invalidate the shared template for an ambiguous session-create 404", async () => {
     const templateSandbox = createMockSandbox({
       name: "template-key",
@@ -1198,7 +1232,10 @@ describe("createVercelSandbox", () => {
         }),
       },
     };
+    const stableDelete = vi.fn().mockResolvedValue(undefined);
+    const stableGet = vi.fn().mockResolvedValue({ delete: stableDelete });
     const backend = createTestVercelSandbox({
+      loadDeleteSandboxModule: async () => ({ Sandbox: { get: stableGet } }) as never,
       loadSandboxModule: async () => sandboxModule as never,
     });
 
@@ -1209,7 +1246,17 @@ describe("createVercelSandbox", () => {
       templateKey: "template-key",
     });
 
-    expect(staleSession.delete).toHaveBeenCalledTimes(1);
+    expect(staleSession.delete).not.toHaveBeenCalled();
+    expect(stableGet).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
+      name: "persisted-sandbox-name",
+      resume: false,
+      signal: undefined,
+    });
+    expect(stableDelete).toHaveBeenCalledWith({
+      deleteOrphanSnapshots: true,
+      signal: undefined,
+    });
     expect(templateSandbox.delete).not.toHaveBeenCalled();
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
