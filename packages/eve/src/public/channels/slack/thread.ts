@@ -1,4 +1,46 @@
 import type { SlackThread, SlackThreadMessage } from "#public/channels/slack/api.js";
+import type { SlackMessage } from "#public/channels/slack/inbound.js";
+
+const COPIED_MESSAGE_UNFURL_DELAY_MS = 500;
+const SLACK_MESSAGE_PERMALINK =
+  /^:crosspost:\s*<https:\/\/[a-z0-9-]+(?:\.enterprise)?\.slack\.com\/archives\/[A-Z0-9]+\/p\d+(?:\?[^>]*)?(?:\|[^>]*)?>$/iu;
+
+/**
+ * Replaces a copied Slack permalink with the message unfurl Slack attaches
+ * shortly after delivery. Native forwards already contain their unfurl in the
+ * webhook and skip this path.
+ */
+export async function hydrateCopiedSlackMessage(
+  thread: Pick<SlackThread, "recentMessages" | "refresh">,
+  message: SlackMessage,
+  wait: (milliseconds: number) => Promise<void> = delay,
+): Promise<SlackMessage> {
+  if (!isCopiedSlackMessagePermalink(message.text)) return message;
+
+  await wait(COPIED_MESSAGE_UNFURL_DELAY_MS);
+  await thread.refresh();
+
+  const refreshed = thread.recentMessages.find((entry) => entry.ts === message.ts);
+  if (refreshed === undefined || isCopiedSlackMessagePermalink(refreshed.text)) {
+    return message;
+  }
+
+  return {
+    ...message,
+    text: refreshed.text,
+    markdown: refreshed.markdown,
+    raw: { ...message.raw, ...refreshed.raw },
+  };
+}
+
+function isCopiedSlackMessagePermalink(text: string): boolean {
+  const withoutLeadingMentions = text.trim().replace(/^(?:<@[^>\s]+>\s*)+/u, "");
+  return SLACK_MESSAGE_PERMALINK.test(withoutLeadingMentions);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 /**
  * Boundary for {@link loadThreadContextMessages}. `"thread-root"` returns all

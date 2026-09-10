@@ -179,7 +179,7 @@ export default slackChannel({
 
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
-When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content.
+When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content. For a copied Slack permalink whose event initially contains only `:crosspost:` and the link, eve briefly waits and refreshes the destination conversation once so Slack's delayed unfurl can reach the agent. This is best effort: if the app cannot read the destination conversation or Slack has not attached the unfurl yet, eve preserves the original link.
 
 #### Restrict who can invoke the agent
 
