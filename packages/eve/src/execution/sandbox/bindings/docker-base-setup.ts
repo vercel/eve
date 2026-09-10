@@ -10,6 +10,7 @@ export function buildDockerBaseSetupScript(): string {
   return [
     "set -e",
     `mkdir -p ${WORKSPACE_ROOT}`,
+    `if [ "$(id -u)" -eq 0 ] && [ -n "\${SUDO_UID:-}" ]; then chown "\${SUDO_UID}:\${SUDO_GID}" ${WORKSPACE_ROOT}; fi`,
     'command -v bash >/dev/null 2>&1 || { echo "the sandbox image must provide bash" >&2; exit 70; }',
     "if [ ! /dev/fd -ef /proc/self/fd ]; then",
     '  [ ! -e /dev/fd ] || { echo "the sandbox runtime must expose open descriptors through /dev/fd" >&2; exit 70; }',

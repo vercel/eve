@@ -7,8 +7,8 @@ import { vercel } from "eve/sandbox/vercel";
  * end-to-end through a real backend.
  *
  * - `bootstrap` runs once per sandbox template. It writes a known marker
- *   file into the workspace AND installs a custom CLI (`eve-greet`) onto the
- *   PATH, the way an author would provision tooling every later session
+ *   file into the workspace AND installs a custom CLI (`eve-greet`) under
+ *   `/workspace`, the way an author would provision tooling every later session
  *   inherits. The CLI is a Python script, so it also proves the base image's
  *   real Python runtime executes bootstrap-authored code.
  * - `onSession` runs once per live session. It writes a per-session marker
@@ -34,10 +34,9 @@ export const SANDBOX_MARKER_PATH = "/workspace/smoke-marker.txt";
 export const SANDBOX_MARKER_TOKEN = "sandbox-bootstrap-ok-J3Q";
 
 /**
- * Custom CLI installed during bootstrap. The base image puts the sandbox
- * user's npm global prefix on PATH, so the same install works across backends.
+ * Custom CLI installed during bootstrap at a user-independent workspace path.
  */
-const SANDBOX_CLI_DIRECTORY_PATH = "/home/vercel-sandbox/.local/bin";
+const SANDBOX_CLI_DIRECTORY_PATH = "/workspace/.eve/bin";
 export const SANDBOX_CLI_PATH = `${SANDBOX_CLI_DIRECTORY_PATH}/eve-greet`;
 export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 
@@ -150,7 +149,7 @@ export default defineSandbox({
       path: SANDBOX_MARKER_PATH,
       content: SANDBOX_MARKER_TOKEN,
     });
-    // Install a custom CLI onto the PATH and make it executable. Later
+    // Install a custom CLI and make it executable. Later
     // sessions inherit it from the template without re-running bootstrap.
     const mkdir = await sandbox.run({ command: `mkdir -p ${SANDBOX_CLI_DIRECTORY_PATH}` });
     if (mkdir.exitCode !== 0) {

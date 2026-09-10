@@ -1,14 +1,14 @@
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 
 const GHCR_EVE_SANDBOX_IMAGE_REPOSITORY = "ghcr.io/vercel/eve";
-const VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY = "vcr.vercel.com/vercel/eve/base";
+const VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY = "vercel/sandbox/universal";
 
 export function resolveEveSandboxImage(): string {
   return `${GHCR_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveEveSandboxImageTag()}`;
 }
 
 export function resolveVercelEveSandboxImage(): string {
-  return `${VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveEveSandboxImageTag()}`;
+  return `${VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY}:latest`;
 }
 
 function resolveEveSandboxImageTag(): string {
