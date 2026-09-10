@@ -1,3 +1,4 @@
+import { setTimeout } from "node:timers/promises";
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
@@ -45,6 +46,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  */
 export interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
+  open(options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   send(
     message: string | UserContent,
@@ -83,6 +85,43 @@ export function createChannelAddress<TState = undefined>(input: {
 
   return {
     continuationToken: input.continuationToken,
+    async open(options) {
+      if (options.mode !== undefined && options.mode !== "conversation") {
+        throw new Error("open() requires conversation mode.");
+      }
+      const existing = await this.resolveSession();
+      if (existing !== undefined) return existing;
+      const state = (options as { readonly state?: TState }).state;
+      const adapter =
+        state === undefined
+          ? input.adapter
+          : {
+              ...input.adapter,
+              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
+            };
+      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      await input.runtime.createSession({
+        adapter,
+        auth: options.auth,
+        capabilities: { requestInput: true },
+        channelName: input.channelName,
+        continuationToken: namespacedToken,
+        initiatorAuth: options.initiatorAuth,
+        input: { message: "" },
+        mode: "conversation",
+        startPaused: true,
+        requestId: metadata.requestId,
+        title: options.title,
+      });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const owner = await this.resolveSession();
+        if (owner !== undefined) return owner;
+        await setTimeout(100);
+      }
+      throw new Error(
+        "Session ownership is not available yet. Retry open() without sending a message.",
+      );
+    },
     async deliver(sendInput, options) {
       const delivery =
         metadata.channelKind !== undefined && metadata.channelName !== undefined

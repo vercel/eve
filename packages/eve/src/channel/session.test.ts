@@ -84,6 +84,60 @@ describe("createSession#cancel", () => {
   });
 });
 
+describe("idempotent fixed-session sends", () => {
+  it("retains a caller's operation identity after reconstructing the session handle", async () => {
+    const runtime = createRuntime();
+    const auth = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U1",
+      principalType: "user",
+    };
+    const options = { auth, operationId: "slack:Ev1" };
+    await createSession("sess_1", runtime).send("hello", options);
+    await createSession("sess_1", runtime).send("hello", options);
+    const calls = vi.mocked(runtime.dispatchSession).mock.calls;
+    const deliveries = calls.map(([input]) =>
+      input.command.kind === "send" ? input.command.delivery : undefined,
+    );
+    expect(deliveries[0]?.deliveryId).toEqual(expect.any(String));
+    expect(deliveries[1]?.deliveryId).toBe(deliveries[0]?.deliveryId);
+  });
+});
+
+describe("session operation identity", () => {
+  it("separates principals, sessions, and operation ids", async () => {
+    const runtime = createRuntime();
+    const auth = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U1",
+      principalType: "user",
+    };
+    await createSession("s1", runtime).send("one", { auth, operationId: "one" });
+    await createSession("s1", runtime).send("one", {
+      auth: { ...auth, principalId: "slack:T1:U2" },
+      operationId: "one",
+    });
+    await createSession("s2", runtime).send("one", { auth, operationId: "one" });
+    await createSession("s1", runtime).send("two", { auth, operationId: "two" });
+    const ids = vi
+      .mocked(runtime.dispatchSession)
+      .mock.calls.map(([input]) =>
+        input.command.kind === "send" ? input.command.delivery?.deliveryId : undefined,
+      );
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it("rejects unauthenticated operation ids before dispatch", async () => {
+    const runtime = createRuntime();
+    await expect(
+      createSession("s1", runtime).send("one", { auth: null, operationId: "one" }),
+    ).rejects.toThrow("authenticated principal");
+    expect(runtime.dispatchSession).not.toHaveBeenCalled();
+  });
+});
+
 describe("fixed session operations", () => {
   it("dispatches ephemeral context separately from durable channel context", async () => {
     const runtime = createRuntime();

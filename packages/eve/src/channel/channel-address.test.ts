@@ -30,6 +30,30 @@ describe("createChannelAddress", () => {
     ).toThrow("reserved session namespace");
   });
 
+  it("opens the canonical idle owner without delivering a message", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.resolveContinuation)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ sessionId: "canonical" });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+    const session = await address.open({ auth: null });
+    expect(session.id).toBe("canonical");
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationToken: "slack:C1:T1",
+        startPaused: true,
+        mode: "conversation",
+        input: { message: "" },
+      }),
+    );
+  });
+
   it("sends directly through the address and returns a fixed session handle", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

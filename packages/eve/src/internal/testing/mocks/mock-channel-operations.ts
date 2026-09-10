@@ -25,6 +25,9 @@ export function mockChannelContext<TState = undefined>(
   return {
     from(continuationToken) {
       const source: InternalChannelSource<TState> = {
+        async open() {
+          throw new Error("Mock channel open is not configured.");
+        },
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },

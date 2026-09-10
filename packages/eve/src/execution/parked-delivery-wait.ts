@@ -1,3 +1,4 @@
+import { acceptChannelOperation } from "#execution/channel-delivery-dedup.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
@@ -70,7 +71,7 @@ export async function nextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly seenTaskDeliveries?: Set<string>;
+  readonly seenDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
   if (input.awaitAuthorizationCallbacks !== true) {
@@ -92,11 +93,11 @@ async function awaitNextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly seenTaskDeliveries?: Set<string>;
+  readonly seenDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
   const cancelledTaskIds = input.cancelledTaskIds ?? new Set<string>();
-  const seenTaskDeliveries = input.seenTaskDeliveries ?? new Set<string>();
+  const seenDeliveries = input.seenDeliveries ?? new Set<string>();
   while (true) {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
@@ -104,7 +105,7 @@ async function awaitNextTurnDelivery(input: {
       cancelledTaskIds,
       commandInbox: input.commandInbox,
       deferDeliveries: input.deferDeliveries,
-      seenTaskDeliveries,
+      seenDeliveries,
       stateCursor: input.stateCursor,
     });
 
@@ -148,7 +149,7 @@ async function waitForNextSessionAction(input: {
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
-  readonly seenTaskDeliveries: Set<string>;
+  readonly seenDeliveries: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
@@ -238,13 +239,15 @@ async function waitForNextSessionAction(input: {
       continue;
     }
 
+    if (!acceptChannelOperation(decoded, input.seenDeliveries)) continue;
+
     const deliveryId = decoded.taskDeliveryId ?? decoded.caller?.taskId;
     if (deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, input.cancelledTaskIds)) {
       continue;
     }
     if (deliveryId !== undefined) {
-      if (input.seenTaskDeliveries.has(deliveryId)) continue;
-      input.seenTaskDeliveries.add(deliveryId);
+      if (input.seenDeliveries.has(deliveryId)) continue;
+      input.seenDeliveries.add(deliveryId);
     }
 
     if (input.deferDeliveries === true) {

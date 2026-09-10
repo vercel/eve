@@ -10,6 +10,7 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-command-token.js";
 import {
+  IDEMPOTENT_SESSION_SEND_METADATA_KEY,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
   WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
   isSessionInboxAddress,
@@ -38,9 +39,26 @@ export async function resumeSessionInbox(
         `Session inbox target declares unsupported wire version ${JSON.stringify(address.version)}.`,
       );
     }
+  }
+  if (command.kind === "send" && command.delivery?.deliveryId.startsWith("operation:")) {
+    const hook = await getHookByToken(
+      typeof address === "string" ? address : sessionCommandHookToken(address.sessionId),
+    );
+    if (!isObject(hook.metadata) || hook.metadata[IDEMPOTENT_SESSION_SEND_METADATA_KEY] !== true) {
+      throw new SessionInboxWireError(
+        "This session's driver does not support idempotent sends. Open a new session on an updated deployment.",
+      );
+    }
+    const target = await resolveSessionInboxWireTarget(hook);
+    return await resumeHook(hook, sessionInboxWire.encode(command, target));
+  }
+  if (typeof address !== "string") {
+    const version = address.version;
+    if (!isSessionInboxWireVersion(version))
+      throw new SessionInboxWireError("Unsupported session inbox version.");
     return await resumeHook(
       sessionCommandHookToken(address.sessionId),
-      sessionInboxWire.encode(command, { version: address.version }),
+      sessionInboxWire.encode(command, { version }),
     );
   }
 

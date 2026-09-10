@@ -172,7 +172,7 @@ describe("TurnControlReceiver", () => {
         { caller, kind: "send", payload: { message: "once" } },
         { caller, kind: "send", payload: { message: "duplicate" } },
       ]),
-      seenTaskDeliveries: new Set(),
+      seenDeliveries: new Set(),
     });
 
     expect(bufferedDeliveries.map((delivery) => delivery.payloads[0]?.message)).toEqual(["once"]);
@@ -200,12 +200,31 @@ describe("TurnControlReceiver", () => {
           taskDeliveryId: "task-1:q2",
         },
       ]),
-      seenTaskDeliveries: new Set(),
+      seenDeliveries: new Set(),
     });
 
     expect(
       bufferedDeliveries.map((delivery) => delivery.payloads[0]?.inputResponses?.[0]?.requestId),
     ).toEqual(["q1", "q2"]);
+  });
+
+  it("deduplicates retried channel operations while accepting distinct requests", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox(
+        ["operation:one", "operation:one", "operation:two"].map((deliveryId) => ({
+          kind: "send" as const,
+          payload: { message: deliveryId },
+          delivery: { channelKind: "slack", channelName: "slack", deliveryId },
+        })),
+      ),
+      seenDeliveries: new Set(),
+    });
+    expect(bufferedDeliveries.map((delivery) => delivery.payloads[0]?.message)).toEqual([
+      "operation:one",
+      "operation:two",
+    ]);
   });
 
   it("discards queued deliveries when their task is cancelled", async () => {
@@ -221,7 +240,7 @@ describe("TurnControlReceiver", () => {
         },
         { kind: "cancel", taskId: "task-1", turnId: "turn_3" },
       ]),
-      seenTaskDeliveries: new Set(),
+      seenDeliveries: new Set(),
     });
 
     expect(bufferedDeliveries).toEqual([]);
@@ -303,7 +322,7 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
-    readonly seenTaskDeliveries?: Set<string>;
+    readonly seenDeliveries?: Set<string>;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
@@ -311,7 +330,7 @@ function runReceiver(
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
     expectedTurnId: "turn_0",
-    seenTaskDeliveries: options.seenTaskDeliveries,
+    seenDeliveries: options.seenDeliveries,
     stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState: createState() }),
     token: "turn-control",
   });

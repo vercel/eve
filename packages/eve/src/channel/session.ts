@@ -1,6 +1,7 @@
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
+  createSessionOperationDelivery,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -70,7 +71,11 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
+export type SessionSendOptions = SessionDeliveryOptions & {
+  /** Replay-stable identity scoped to this exact session and authenticated principal. */
+  readonly operationId?: string;
+  readonly turnPolicy?: TurnPolicy;
+};
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -99,7 +104,15 @@ export function createSession(
   return {
     id,
     async send(message, options) {
-      const delivery = createDelivery(metadata);
+      const delivery =
+        options.operationId === undefined
+          ? createDelivery(metadata)
+          : await createSessionOperationDelivery({
+              auth: options.auth,
+              operationId: options.operationId,
+              sessionId: id,
+              source: metadata,
+            });
       const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const payload = attachClientContext<{
         context?: readonly string[];

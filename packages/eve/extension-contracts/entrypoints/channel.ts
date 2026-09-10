@@ -9,6 +9,7 @@ export {
   WS,
   createWebSocketUpgradeServer,
   defineChannel,
+  getSessionOperationDeliveryId,
   disableRoute,
   isChannel,
   isDisabledRouteSentinel,

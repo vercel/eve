@@ -12,6 +12,7 @@ import type {
   ChannelReceiveContext,
   ChannelResolveSession,
   ChannelRespondOptions,
+  ChannelOpenOptions,
   ChannelSendOptions,
   ChannelSource,
 } from "#channel/channel-operations.js";
@@ -42,6 +43,7 @@ export type {
   ChannelReceiveContext,
   ChannelResolveSession,
   ChannelRespondOptions,
+  ChannelOpenOptions,
   ChannelSendOptions,
   ChannelSource,
 };

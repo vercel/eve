@@ -1,3 +1,4 @@
+export { getSessionOperationDeliveryId } from "#channel/delivery-metadata.js";
 export {
   defineChannel,
   disableRoute,
@@ -21,6 +22,7 @@ export {
   type ChannelReceiveContext,
   type ChannelResolveSession,
   type ChannelRespondOptions,
+  type ChannelOpenOptions,
   type ChannelSendOptions,
   type ChannelSource,
   type ChannelCors,

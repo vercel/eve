@@ -8,6 +8,7 @@ import type {
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import {
+  IDEMPOTENT_SESSION_SEND_METADATA_KEY,
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
   WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
@@ -138,6 +139,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     // legacy shape.
     const hook = createHook<SessionInboxPayload>({
       metadata: {
+        [IDEMPOTENT_SESSION_SEND_METADATA_KEY]: true,
         [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
         [WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY]: true,
       },

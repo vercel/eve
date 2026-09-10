@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
+import { createSession } from "#channel/session.js";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -688,6 +689,81 @@ describe("workflowEntry integration", () => {
           outcome: "authorized",
         });
         expect(filterEventsByType(callbackTurn, "turn.cancelled")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("opens idle and deduplicates reconstructed fixed-session sends across turns", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "idempotent-admission" } });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          startPaused: true,
+          input: { message: "must never reach the model" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "http:idle-admission",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      await waitForHook({ runId: run.runId }, { token: "http:idle-admission" });
+      const provider = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const auth = {
+        attributes: {},
+        authenticator: "slack-webhook",
+        principalId: "slack:T1:U1",
+        principalType: "user",
+      };
+      try {
+        const first = await createSession(run.runId, provider).send("first request", {
+          auth,
+          operationId: "event-1",
+          turnPolicy: "queue",
+        });
+        const events = await stream.nextTurn();
+        expect(
+          events.some(
+            (event) =>
+              event.type === "message.completed" && event.data.message?.includes("first request"),
+          ),
+        ).toBe(true);
+        expect(
+          events.some(
+            (event) =>
+              event.type === "message.completed" && event.data.message?.includes("must never"),
+          ),
+        ).toBe(false);
+        const replay = await createSession(run.runId, provider).send("first request", {
+          auth,
+          operationId: "event-1",
+          turnPolicy: "queue",
+        });
+        expect(replay).toEqual(first);
+        await createSession(run.runId, provider).send("second request", {
+          auth,
+          operationId: "event-2",
+          turnPolicy: "queue",
+        });
+        const second = await stream.nextTurn();
+        expect(
+          second.some(
+            (event) =>
+              event.type === "message.completed" && event.data.message?.includes("second request"),
+          ),
+        ).toBe(true);
+        expect(
+          second.some(
+            (event) =>
+              event.type === "message.completed" && event.data.message?.includes("first request"),
+          ),
+        ).toBe(false);
       } finally {
         stream.dispose();
         await run.cancel();

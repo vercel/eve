@@ -1,3 +1,4 @@
+import { acceptChannelOperation } from "#execution/channel-delivery-dedup.js";
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
@@ -39,7 +40,7 @@ export async function runInlineTurn(input: {
   readonly delivery: HookPayload;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly seenTaskDeliveries?: Set<string>;
+  readonly seenDeliveries?: Set<string>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly stateCursor?: SessionStateCursor;
@@ -59,7 +60,7 @@ export async function runInlineTurn(input: {
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
-    seenTaskDeliveries: input.seenTaskDeliveries,
+    seenDeliveries: input.seenDeliveries,
     stateCursor: cursor,
   });
   let nextStepInput: TurnStepPayload | undefined = input.delivery;
@@ -164,7 +165,7 @@ class InlineTurnControl {
   private readonly commandInbox: SessionCommandInbox;
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
-  private readonly seenTaskDeliveries: Set<string>;
+  private readonly seenDeliveries: Set<string>;
   private readonly stateCursor: SessionStateCursor;
   private cancellation: TurnCancelPayload | undefined;
 
@@ -174,7 +175,7 @@ class InlineTurnControl {
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
-    readonly seenTaskDeliveries?: Set<string>;
+    readonly seenDeliveries?: Set<string>;
     readonly stateCursor: SessionStateCursor;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
@@ -182,7 +183,7 @@ class InlineTurnControl {
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
     this.expectedTurnId = input.expectedTurnId;
-    this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
+    this.seenDeliveries = input.seenDeliveries ?? new Set();
     this.stateCursor = input.stateCursor;
   }
 
@@ -217,11 +218,12 @@ class InlineTurnControl {
   }
 
   private acceptTaskDelivery(command: DeliverHookPayload): boolean {
+    if (!acceptChannelOperation(command, this.seenDeliveries)) return false;
     const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
     if (deliveryId === undefined) return true;
     if (this.originatesFromCancelledTask(deliveryId)) return false;
-    if (this.seenTaskDeliveries.has(deliveryId)) return false;
-    this.seenTaskDeliveries.add(deliveryId);
+    if (this.seenDeliveries.has(deliveryId)) return false;
+    this.seenDeliveries.add(deliveryId);
     return true;
   }
 

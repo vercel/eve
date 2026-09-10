@@ -88,6 +88,34 @@ describe("session inbox target resolution", () => {
 });
 
 describe("resumeSessionInbox", () => {
+  it("refuses idempotent sends to a pinned driver without deduplication support", async () => {
+    getHookByTokenMock.mockResolvedValue(
+      sessionHook("session-1", "token", { sessionInboxWireVersion: 6 }),
+    );
+    await expect(
+      resumeSessionInbox("token", {
+        kind: "send",
+        payload: { message: "hello" },
+        delivery: { channelKind: "slack", channelName: "slack", deliveryId: "operation:stable" },
+      }),
+    ).rejects.toThrow("does not support idempotent sends");
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("persists an idempotent send only after checking the exact target's capability", async () => {
+    const hook = sessionHook("session-1", "token", {
+      sessionInboxWireVersion: 6,
+      idempotentSessionSend: true,
+    });
+    getHookByTokenMock.mockResolvedValue(hook);
+    await resumeSessionInbox("token", {
+      kind: "send",
+      payload: { message: "hello" },
+      delivery: { channelKind: "slack", channelName: "slack", deliveryId: "operation:stable" },
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(hook, expect.any(Object));
+  });
+
   it.each(SESSION_INBOX_WIRE_VERSIONS)(
     "uses the persisted consumer version %i without reading hook metadata",
     async (version) => {

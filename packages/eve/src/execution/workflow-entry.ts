@@ -1,3 +1,4 @@
+import { acceptChannelOperation } from "#execution/channel-delivery-dedup.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
@@ -27,7 +28,10 @@ import { rebaseTaskAgentHandleMutations } from "#subagents/handles/rebase.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
-import { normalizeSerializableError } from "#execution/workflow-errors.js";
+import {
+  createSafeOuterWorkflowError,
+  normalizeSerializableError,
+} from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -50,9 +54,6 @@ import {
   SESSION_INBOX_WIRE_VERSION,
 } from "#execution/wire/session-inbox-contract.js";
 
-const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
-  "Agent workflow failed. Inspect the private session trace for details.";
-
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
 // Error logging happens inside `emitTerminalSessionFailureStep`.
@@ -63,6 +64,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly startPaused?: boolean;
   readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
@@ -247,6 +249,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       crashCleanupState.callerResolved = true;
 
       outcome = await runDriverLoop({
+        startPaused: input.startPaused,
         capabilities,
         commandInbox,
         driverWritable,
@@ -354,16 +357,8 @@ function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): 
   );
 }
 
-/**
- * Caller to reject from the crash path. Normally the resolved cell value —
- * including `undefined` after a settled reply cleared it, when there is
- * nothing left to notify. When the crash happened before
- * `resolveInitialTurnCallerStep` ever ran (e.g. `createSessionStep` threw),
- * the cell is empty even though a delegated caller may be parked on this
- * session's reply, so the caller is re-resolved from the serialized context
- * — which needs nothing from the failed steps. Best-effort: when resolution
- * fails again there is no reachable caller to notify.
- */
+/** A crash before caller resolution must still notify the delegated caller. Resolution
+ * is best effort because the same dependency may fail again during cleanup. */
 async function resolveCallerForCrash(
   state: CrashCleanupState,
   serializedContext: Record<string, unknown>,
@@ -378,13 +373,8 @@ async function resolveCallerForCrash(
   }
 }
 
-function createSafeOuterWorkflowError(): Error {
-  const error = new Error(SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE);
-  error.name = "EveWorkflowFailure";
-  return error;
-}
-
 async function runDriverLoop(input: {
+  readonly startPaused?: boolean;
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionCommandInbox;
   readonly driverWritable: WritableStream<Uint8Array>;
@@ -441,7 +431,7 @@ async function runDriverLoop(input: {
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
-        seenTaskDeliveries,
+        seenDeliveries,
         stateCursor,
       });
       if (next.kind !== "authorization") return next;
@@ -475,7 +465,9 @@ async function runDriverLoop(input: {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const cancelledTaskIds = new Set<string>();
-  const seenTaskDeliveries = new Set<string>();
+  const seenDeliveries = new Set<string>();
+  if (input.initialInput.kind === "deliver")
+    acceptChannelOperation(input.initialInput, seenDeliveries);
   const stateCursor = new SessionStateCursor({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
@@ -494,7 +486,7 @@ async function runDriverLoop(input: {
     const dispatchedSessionState = stateCursor.sessionState;
     const caller = input.crashCleanupState.caller;
     if (caller?.taskId !== undefined) {
-      seenTaskDeliveries.add(caller.taskId);
+      seenDeliveries.add(caller.taskId);
     }
     const serializedContext =
       caller === undefined
@@ -515,7 +507,7 @@ async function runDriverLoop(input: {
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext,
-      seenTaskDeliveries,
+      seenDeliveries,
       sessionState: stateCursor.sessionState,
       stateCursor,
     });
@@ -538,7 +530,13 @@ async function runDriverLoop(input: {
   try {
     await sessionTimeout?.start();
 
-    let action: TurnDriverAction = await runTurn(input.initialInput);
+    let action: TurnDriverAction = input.startPaused
+      ? {
+          kind: "park",
+          sessionState: stateCursor.sessionState,
+          serializedContext: stateCursor.serializedContext,
+        }
+      : await runTurn(input.initialInput);
 
     while (true) {
       if (action.kind === "done") {

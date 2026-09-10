@@ -63,3 +63,9 @@ export function rebuildSerializableError(error: unknown): Error {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
+
+export function createSafeOuterWorkflowError(): Error {
+  const error = new Error("Agent workflow failed. Inspect the private session trace for details.");
+  error.name = "EveWorkflowFailure";
+  return error;
+}

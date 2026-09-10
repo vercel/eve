@@ -42,7 +42,7 @@ interface TurnDispatchInput {
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
-  readonly seenTaskDeliveries?: Set<string>;
+  readonly seenDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
   readonly stateCursor?: SessionStateCursor;
 }
@@ -80,7 +80,7 @@ async function runAndAwaitTurn(
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
-    seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
+    seenDeliveries: input.seenDeliveries ?? new Set(),
     stateCursor: input.stateCursor!,
     token: input.controlToken,
   });

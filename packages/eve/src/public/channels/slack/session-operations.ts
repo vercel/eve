@@ -1,5 +1,6 @@
 import type {
   ChannelFrom,
+  ChannelOpenOptions,
   ChannelResolveSession,
   ChannelRespondOptions,
   ChannelSendOptions,
@@ -11,6 +12,11 @@ import type { UserContent } from "ai";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 type SlackSource = ChannelSource<SlackChannelState>;
+
+/** Options for opening an idle Slack thread session. */
+export type SlackOpenOptions = Omit<ChannelOpenOptions<SlackChannelState>, "auth" | "state"> & {
+  readonly auth?: SessionAuthContext | null;
+};
 
 /** Options for a message send already bound to one Slack thread. */
 export type SlackSendOptions = Omit<ChannelSendOptions<SlackChannelState>, "auth" | "state"> & {
@@ -24,6 +30,8 @@ export type SlackRespondOptions = Omit<ChannelRespondOptions<SlackChannelState>,
 
 /** Current-owner operations already bound to one Slack thread. */
 export interface SlackSessionOperations {
+  /** Opens an idle thread session without starting a turn. */
+  open(options?: SlackOpenOptions): ReturnType<SlackSource["open"]>;
   send(message: string | UserContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,
@@ -49,6 +57,8 @@ export function bindSlackSessionOperations(input: {
     value === undefined ? input.defaultAuth : value;
 
   return {
+    open: (options = {}) =>
+      source.open({ ...options, auth: auth(options.auth), state: input.state }),
     async send(message, options = {}) {
       return await source.send(message, {
         ...options,

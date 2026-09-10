@@ -4107,3 +4107,106 @@ describe("constrainAuthorizationRequired", () => {
     expect(handler.mock.calls[0]?.[2]).toBe(sessionCtx);
   });
 });
+
+describe("durable Slack admission", () => {
+  it("awaits persistence before acknowledgement and never dispatches the admitted message", async () => {
+    let release!: () => void;
+    const stored = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const admitMessage = vi.fn(() => stored);
+    const onAppMention = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { signingSecret: SIGNING_SECRET },
+      admitMessage,
+      onAppMention,
+    });
+    let acknowledged = false;
+    const pending = firePost(channel, buildSignedRequest({ body: buildMentionBody().body })).then(
+      (result) => {
+        acknowledged = true;
+        return result;
+      },
+    );
+    await vi.waitFor(() => expect(admitMessage).toHaveBeenCalledOnce());
+    expect(acknowledged).toBe(false);
+    release();
+    const result = await pending;
+    expect(result.response.status).toBe(200);
+    expect(result.waitUntil).not.toHaveBeenCalled();
+    expect(result.send).not.toHaveBeenCalled();
+    expect(onAppMention).not.toHaveBeenCalled();
+  });
+
+  it("retries failed storage and HTTP timeout redeliveries instead of swallowing them", async () => {
+    const admitMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+      .mockResolvedValue(undefined);
+    const channel = slackChannel({ credentials: { signingSecret: SIGNING_SECRET }, admitMessage });
+    const body = buildMentionBody().body;
+    expect((await firePost(channel, buildSignedRequest({ body }))).response.status).toBe(503);
+    const retry = buildSignedRequest({ body });
+    retry.headers.set("x-slack-retry-reason", "http_timeout");
+    expect((await firePost(channel, retry)).response.status).toBe(200);
+    expect(admitMessage).toHaveBeenCalledTimes(2);
+    expect(admitMessage.mock.calls[0]?.[0]).toEqual(admitMessage.mock.calls[1]?.[0]);
+  });
+
+  it("does not persist unverified events", async () => {
+    const admitMessage = vi.fn();
+    const channel = slackChannel({ credentials: { signingSecret: SIGNING_SECRET }, admitMessage });
+    const request = buildSignedRequest({ body: buildMentionBody().body });
+    request.headers.set("x-slack-signature", "v0=invalid");
+    expect((await firePost(channel, request)).response.status).toBe(401);
+    expect(admitMessage).not.toHaveBeenCalled();
+  });
+});
+
+it("prepares admitted Slack input without execution and preserves auth, context, and durable attachment URLs", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, messages: [] })));
+  try {
+    const admitted: import("./slackChannel.js").SlackAdmittedMessage[] = [];
+    const channel = slackChannel({
+      credentials: { signingSecret: SIGNING_SECRET },
+      admitMessage: async (message) => {
+        admitted.push(message);
+      },
+      onDirectMessage: (ctx, message) => ({
+        auth: defaultSlackAuth(message, ctx),
+        context: ["Only configured repositories"],
+      }),
+    });
+    await firePost(channel, buildSignedRequest({ body: buildDirectMessageBody().body }));
+    const message = admitted[0]!;
+    const send = vi.fn();
+    const context = mockChannelContext<SlackChannelState>(send);
+    const prepared = await channel.prepareMessage(
+      {
+        ...message,
+        message: {
+          ...message.message,
+          attachments: [
+            {
+              id: "F1",
+              type: "file",
+              url: "https://files.slack.com/file.pdf",
+              name: "file.pdf",
+              mimeType: "application/pdf",
+              size: 42,
+            },
+          ],
+        },
+      },
+      context,
+    );
+    expect(prepared?.state.audience).toBe("private");
+    expect(prepared?.options.context).toEqual(["Only configured repositories"]);
+    expect(prepared?.options.auth?.principalId).toContain("U01");
+    expect(JSON.parse(JSON.stringify(prepared))).toEqual(prepared);
+    expect(JSON.stringify(prepared?.message)).toContain("files.slack.com");
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

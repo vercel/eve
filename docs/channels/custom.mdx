@@ -78,6 +78,35 @@ contains `sessionId` directly.
 `from()`, `resolveSession()`, and `rekey()`. Framework namespace prefixes are not
 part of the authored channel API.
 
+## Durable application inboxes
+
+When an application owns a durable incoming-event queue, allocate the session before sending
+work. `from(address).open(options)` opens an idle conversation and waits 100 times with 100 ms between attempts for
+the canonical owner. It creates no model turn. Persist the returned session ID with the verified
+event, then use `attachSession(sessionId).send(message, { auth, operationId })` for each retry.
+
+```ts
+const session = await from(threadId).open({ auth });
+// Persist session.id with the event before the first send.
+const result = await attachSession(session.id).send(message, {
+  auth,
+  operationId: eventId,
+  turnPolicy: "queue",
+});
+```
+
+Operation IDs require an authenticated principal and contain 1–512 characters. They are scoped
+to the immutable session and principal. The first payload wins; retries return the same delivery
+identity and cannot start another turn. Events carry that delivery ID for result reconciliation.
+The guarantee lasts for the session's retained workflow history. A driver started by an older
+deployment rejects idempotent sends before accepting them.
+
+If a send returns `session_not_active`, inspect the recorded session's transcript or surface an
+unresolved delivery. Keep the recorded session ID: resolving the channel address again could
+select a replacement session and execute the work twice. `open()` can be retried after timeout;
+startup candidates are idle, and only the canonical owner is returned. A durable inbox still
+owns verified-event persistence before acknowledgement, retry scheduling, and reply reconciliation.
+
 ## Channel operations and session handles
 
 Channel operations are dynamic: every call targets whichever session currently

@@ -1,3 +1,4 @@
+import { acceptChannelOperation } from "#execution/channel-delivery-dedup.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
@@ -31,7 +32,7 @@ export class TurnControlReceiver {
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
   private readonly expectedTurnId: string;
   private readonly cancelledTaskIds: Set<string>;
-  private readonly seenTaskDeliveries: Set<string>;
+  private readonly seenDeliveries: Set<string>;
   private readonly stateCursor: SessionStateCursor;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
@@ -41,7 +42,7 @@ export class TurnControlReceiver {
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
-    readonly seenTaskDeliveries?: Set<string>;
+    readonly seenDeliveries?: Set<string>;
     readonly stateCursor: SessionStateCursor;
     readonly token: string;
   }) {
@@ -49,7 +50,7 @@ export class TurnControlReceiver {
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
-    this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
+    this.seenDeliveries = input.seenDeliveries ?? new Set();
     this.stateCursor = input.stateCursor;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
@@ -345,11 +346,12 @@ export class TurnControlReceiver {
   }
 
   private acceptTaskDelivery(command: DeliverHookPayload): boolean {
+    if (!acceptChannelOperation(command, this.seenDeliveries)) return false;
     const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
     if (deliveryId === undefined) return true;
     if (this.originatesFromCancelledTask(deliveryId)) return false;
-    if (this.seenTaskDeliveries.has(deliveryId)) return false;
-    this.seenTaskDeliveries.add(deliveryId);
+    if (this.seenDeliveries.has(deliveryId)) return false;
+    this.seenDeliveries.add(deliveryId);
     return true;
   }
 

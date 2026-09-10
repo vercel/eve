@@ -52,8 +52,16 @@ interface BaseChannelRespondOptions<TState = undefined> {
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
+/** Session allocation options; messages and turn callbacks belong to a later send. */
+export type ChannelOpenOptions<TState = undefined> = Omit<
+  ChannelSendOptions<TState>,
+  "callback" | "context" | "mode" | "outputSchema" | "turnPolicy"
+>;
+
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
+  /** Opens an idle conversation, returning its canonical owner without starting a turn. */
+  open(options: ChannelOpenOptions<TState>): Promise<Session>;
   /** Starts or resumes a turn with a user message. May create a session. */
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /** Answers pending input requests. Never creates a session. */
@@ -107,6 +115,7 @@ export function createChannelOperations<TState = undefined>(input: {
     from(address) {
       const bound = channelAddress(address);
       const source: InternalChannelSource<TState> = {
+        open: (options) => bound.open(options),
         async send(message, options) {
           return await bound.deliver(
             {

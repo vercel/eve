@@ -139,6 +139,9 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      if (input.startPaused && input.mode !== "conversation") {
+        throw new Error("Idle sessions require conversation mode.");
+      }
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -206,6 +209,7 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      if (input.startPaused === true) workflowInput.startPaused = true;
       const taskId = input.taskId ?? input.callback?.taskId;
       if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {

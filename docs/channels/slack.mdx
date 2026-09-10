@@ -473,3 +473,40 @@ Staged files live in the session sandbox under `/workspace/attachments`. Session
 
 - [Channels overview](./overview): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+
+## Durable incoming requests
+
+Use `admitMessage` when the application must retain mentions and DMs before acknowledgement:
+
+```ts
+const slack = slackChannel({
+  credentials,
+  async admitMessage(message, { waitUntil }) {
+    const record = await inbox.persist(message);
+    waitUntil(wakeWorker(record.id));
+  },
+  onAppMention: authorizeMessage,
+  onDirectMessage: authorizeMessage,
+});
+```
+
+The hook receives a verified, normalized `SlackAdmittedMessage`, without verification headers
+or bot credentials. It is awaited before HTTP 200; a thrown error returns HTTP 503 so the
+provider can retry. Persist by workspace and event ID. HTTP-timeout retries reach the hook too.
+The hook replaces automatic dispatch for mentions and DMs. Other events and interactive
+callbacks retain their existing handlers. Without this option, acknowledgement remains asynchronous.
+
+From an authenticated worker in the same channel, call `slack.prepareMessage(record.message, { from, resolveSession })`. This runs the authored admission hook and prepares attribution,
+context, attachments and audience without opening a session or sending input. Hooks used with
+preparation must not send messages themselves. A `null` result means the application intentionally
+ignored the input; failures propagate for retry. Persist the JSON-safe prepared result before
+opening a session, so later retries reuse the same authorized payload.
+
+Open with `from(address).open({ auth: prepared.options.auth ?? null, state: prepared.state })`,
+persist the returned exact session ID, then send using `attachSession(id).send(prepared.message, { ...prepared.options, auth: prepared.options.auth ?? null, operationId })`. Keep the thread
+address from `slackContinuationToken(message.channelId, message.threadTs)`.
+
+Compute and persist correlation before the send using `getSessionOperationDeliveryId({ sessionId, operationId, auth })` from `eve/channels`. It returns the same ID as accepted sends and lets
+maintenance find a completed turn even when the send response was lost. The application owns
+retry scheduling, trusted storage, expiry handling and reply recovery. See
+[durable application inboxes](./custom#durable-application-inboxes) for identity and retention limits.

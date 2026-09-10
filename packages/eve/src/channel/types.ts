@@ -453,6 +453,8 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Create an idle conversation that waits for its first explicit send. */
+  readonly startPaused?: boolean;
   readonly adapter: ChannelAdapter<any>;
   /** Framework task that owns this run, when the run is a task executor. */
   readonly taskId?: string;

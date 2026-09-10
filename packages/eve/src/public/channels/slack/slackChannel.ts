@@ -1,3 +1,4 @@
+import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { UserContent } from "ai";
@@ -84,6 +85,7 @@ import {
 export type {
   SlackRespondOptions,
   SlackSendOptions,
+  SlackOpenOptions,
   SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";
 
@@ -604,6 +606,12 @@ export interface SlackChannelInternalEvents extends Omit<
 }
 
 export interface SlackChannelConfig {
+  /** Persist verified mention/DM messages before acknowledgement. Throw to return 503 for retry.
+   * When configured, this replaces automatic dispatch for these messages. */
+  readonly admitMessage?: (
+    message: SlackAdmittedMessage,
+    context: { readonly waitUntil: (task: Promise<unknown>) => void },
+  ) => Promise<void>;
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
@@ -810,7 +818,36 @@ export interface SlackChannel extends Channel<
   SlackChannelState,
   SlackReceiveTarget,
   SlackInstrumentationMetadata
-> {}
+> {
+  /** Prepare a previously admitted message using current credentials and authored admission hooks.
+   * Call only with messages from admitMessage retained in trusted application storage.
+   * This does not send or create a session. Persist the result before opening/sending. */
+  prepareMessage(
+    message: SlackAdmittedMessage,
+    context: {
+      readonly from: ChannelFrom<SlackChannelState>;
+      readonly resolveSession: ChannelResolveSession;
+    },
+  ): Promise<SlackPreparedMessage | null>;
+}
+
+/** Verified, serializable message input. Contains no verification headers or bot credentials. */
+export interface SlackAdmittedMessage {
+  readonly eventId: string;
+  readonly kind: "app_mention" | "direct_message";
+  readonly appId?: string;
+  readonly botUserId?: string;
+  readonly receivingBotUserId?: string;
+  readonly installationTeamId?: string;
+  readonly message: SlackMessage;
+}
+
+/** JSON-serializable prepared input; URL attachments retain eve's durable file references. */
+export interface SlackPreparedMessage {
+  readonly message: string | UserContent;
+  readonly state: SlackChannelState;
+  readonly options: SlackSendOptions;
+}
 
 /**
  * Slack channel factory. Wires up the webhook route, mention dispatch,
@@ -948,7 +985,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         const body = await verifyInbound(req, config.credentials);
         if (body === null) return new Response("unauthorized", { status: 401 });
 
-        if (shouldDropSlackHttpTimeoutRetry(req.headers)) {
+        if (config.admitMessage === undefined && shouldDropSlackHttpTimeoutRetry(req.headers)) {
           return new Response("ok");
         }
 
@@ -992,7 +1029,31 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
     renderers: activityRenderers,
   });
-  return channel;
+  return Object.assign(channel, {
+    prepareMessage(
+      message: SlackAdmittedMessage,
+      context: {
+        readonly from: ChannelFrom<SlackChannelState>;
+        readonly resolveSession: ChannelResolveSession;
+      },
+    ) {
+      return prepareSlackMessage({
+        ...message,
+        ...context,
+        appId: message.appId,
+        botUserId: message.botUserId,
+        receivingBotUserId: message.receivingBotUserId,
+        installationTeamId: message.installationTeamId,
+        credentials: config.credentials,
+        handler:
+          message.kind === "app_mention"
+            ? (config.onAppMention ?? config.onMessage ?? defaultOnAppMention)
+            : (config.onDirectMessage ?? config.onMessage ?? defaultOnDirectMessage),
+        threadContext: config.threadContext,
+        uploadPolicy,
+      });
+    },
+  });
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
@@ -1168,6 +1229,27 @@ async function handleEventPost(input: {
     const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
     if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
+      if (config.admitMessage !== undefined) {
+        if (!envelope.event_id) return new Response("event_id required", { status: 400 });
+        try {
+          await config.admitMessage(
+            {
+              eventId: envelope.event_id,
+              kind,
+              appId,
+              botUserId,
+              receivingBotUserId,
+              installationTeamId,
+              message,
+            },
+            { waitUntil: input.waitUntil },
+          );
+          return new Response("ok");
+        } catch (error) {
+          logError(log, "durable message admission failed", error, { eventId: envelope.event_id });
+          return new Response("admission unavailable", { status: 503 });
+        }
+      }
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchSlackMessage({
@@ -1284,7 +1366,27 @@ function isSelfAuthoredSlackMessage(
   return identity.appId !== undefined && message.raw.app_id === identity.appId;
 }
 
-async function dispatchSlackMessage(input: {
+async function dispatchSlackMessage(
+  input: Parameters<typeof prepareSlackMessage>[0],
+): Promise<void> {
+  try {
+    const prepared = await prepareSlackMessage(input);
+    if (prepared === null) return;
+    await input
+      .from(slackContinuationToken(input.message.channelId, input.message.threadTs))
+      .send(prepared.message, {
+        ...prepared.options,
+        auth: prepared.options.auth ?? null,
+        state: prepared.state,
+      });
+  } catch (error) {
+    logError(log, `${input.kind} handler or delivery failed`, error, {
+      channelId: input.message.channelId,
+    });
+  }
+}
+
+async function prepareSlackMessage(input: {
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
   readonly receivingBotUserId: string | undefined;
@@ -1297,7 +1399,7 @@ async function dispatchSlackMessage(input: {
   readonly message: SlackMessage;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
-}): Promise<void> {
+}): Promise<SlackPreparedMessage | null> {
   const continuationToken = slackContinuationToken(input.message.channelId, input.message.threadTs);
   const { thread, slack } = buildSlackBinding({
     appId: input.appId,
@@ -1354,33 +1456,27 @@ async function dispatchSlackMessage(input: {
     thread,
   };
 
-  let result;
-  try {
-    result = await input.handler(ctx, input.message);
-  } catch (error) {
-    logError(log, `${input.kind} handler failed`, error, {
-      channelId: input.message.channelId,
-    });
-    return;
-  }
-  if (result === null || result === undefined) return;
+  const result = await input.handler(ctx, input.message);
+  if (result === null || result === undefined) return null;
 
   const isPrivateConversation = await isDMOrPrivateChannel();
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
-  await deliverSlackMessage({
-    botUserId: input.receivingBotUserId,
-    credentials: input.credentials,
-    kind: input.kind,
-    isPrivateConversation,
-    isMentioned: isBotMentioned,
-    message: input.message,
-    result,
-    sessionOperations,
-    thread,
-    threadContext: input.threadContext,
-    uploadPolicy: input.uploadPolicy,
-  });
+  return {
+    state: channelState,
+    ...(await prepareSlackDelivery({
+      botUserId: input.receivingBotUserId,
+      credentials: input.credentials,
+      kind: input.kind,
+      isPrivateConversation,
+      isMentioned: isBotMentioned,
+      message: input.message,
+      result,
+      thread,
+      threadContext: input.threadContext,
+      uploadPolicy: input.uploadPolicy,
+    })),
+  };
 }
 
 /** Runs a generic Events API handler with an imperative Slack operation surface. */
@@ -1469,9 +1565,8 @@ async function verifyInbound(
   }
 }
 
-async function deliverSlackMessage(input: {
+async function prepareSlackDelivery(input: {
   readonly botUserId: string | undefined;
-  readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
@@ -1481,48 +1576,42 @@ async function deliverSlackMessage(input: {
   readonly thread: SlackThread;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
-}): Promise<void> {
+}): Promise<Omit<SlackPreparedMessage, "state">> {
   const { message, thread } = input;
-  // This runs in the webhook's `waitUntil` task; an unguarded throw would
-  // reject silently into the dispatch `allSettled` ("no response, no logs").
-  try {
-    const priorMessages =
-      input.threadContext === undefined
-        ? []
-        : await loadThreadContextMessages(thread, message, input.threadContext);
-    const threadContext = formatSlackThreadContext(priorMessages);
-    const fileParts = await collectInboundFileParts({
-      mention: message,
-      thread,
-      policy: input.uploadPolicy,
-    });
-    const inboundContext: SlackInboundContext = {
-      botUserId: input.botUserId,
-      channelId: message.channelId,
-      fullName: message.author?.fullName,
-      isMentioned: input.isMentioned,
-      teamId: message.teamId,
-      threadTs: message.threadTs,
-      userId: message.author?.userId ?? "",
-      userName: message.author?.userName,
-    };
-    const attributedMessage = formatSlackInboundMessage(inboundContext, message);
-    const turnMessage = buildSlackTurnMessage(
-      threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
-      fileParts,
-    );
+  const priorMessages =
+    input.threadContext === undefined
+      ? []
+      : await loadThreadContextMessages(thread, message, input.threadContext);
+  const threadContext = formatSlackThreadContext(priorMessages);
+  const fileParts = await collectInboundFileParts({
+    mention: message,
+    thread,
+    policy: input.uploadPolicy,
+  });
+  const inboundContext: SlackInboundContext = {
+    botUserId: input.botUserId,
+    channelId: message.channelId,
+    fullName: message.author?.fullName,
+    isMentioned: input.isMentioned,
+    teamId: message.teamId,
+    threadTs: message.threadTs,
+    userId: message.author?.userId ?? "",
+    userName: message.author?.userName,
+  };
+  const attributedMessage = formatSlackInboundMessage(inboundContext, message);
+  const turnMessage = buildSlackTurnMessage(
+    threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
+    fileParts,
+  );
 
-    const channelContext = input.result.context ?? [];
-    const title = input.isPrivateConversation
-      ? PRIVATE_SLACK_RUN_TITLE
-      : (input.result.title ?? message.markdown);
-    const sendOptions: SlackSendOptions =
-      channelContext.length === 0
-        ? { auth: input.result.auth, title }
-        : { auth: input.result.auth, context: channelContext, title };
+  const channelContext = input.result.context ?? [];
+  const title = input.isPrivateConversation
+    ? PRIVATE_SLACK_RUN_TITLE
+    : (input.result.title ?? message.markdown);
+  const sendOptions: SlackSendOptions =
+    channelContext.length === 0
+      ? { auth: input.result.auth, title }
+      : { auth: input.result.auth, context: channelContext, title };
 
-    await input.sessionOperations.send(turnMessage, sendOptions);
-  } catch (error) {
-    logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
-  }
+  return { message: serializeUrlFilePartsInMessage(turnMessage)!, options: sendOptions };
 }

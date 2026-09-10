@@ -16,6 +16,8 @@ export const SESSION_INBOX_WIRE_VERSION_METADATA_KEY = "sessionInboxWireVersion"
  * drop those events, so producers fail fast instead of waiting on a callback
  * no channel will render.
  */
+export const IDEMPOTENT_SESSION_SEND_METADATA_KEY = "idempotentSessionSend";
+
 export const WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY = "workflowTaskAuthorization";
 
 export const SESSION_INBOX_CONTEXT_KEY = "eve.sessionInbox";

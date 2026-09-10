@@ -8,6 +8,8 @@ export type { ModelMessage } from "ai";
 
 export {
   slackChannel,
+  type SlackAdmittedMessage,
+  type SlackPreparedMessage,
   type SlackApiResponse,
   type SlackAuthorizationEventContext,
   type SlackAuthorizationRequiredHandler,
@@ -45,6 +47,7 @@ export {
   type SlackReceiveTarget,
   type SlackSessionTarget,
   type SlackRespondOptions,
+  type SlackOpenOptions,
   type SlackSendOptions,
   type SlackSessionOperations,
   type SlackThread,
