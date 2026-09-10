@@ -8,7 +8,7 @@ import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { createStepStartedEvent } from "#protocol/message.js";
 import { resolveConnectionSearchDynamicTools } from "#execution/tools/connection-search.js";
 import { never, always, once } from "#tools/approval/policies.js";
-import { APPROVED_TOOLS_KEY } from "#harness/hitl/approval-input-requests.js";
+import { APPROVED_TOOLS_KEY } from "#harness/hitl/approved-tools.js";
 import type { ApprovalContext } from "#approval/definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import {
