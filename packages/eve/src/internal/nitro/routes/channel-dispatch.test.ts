@@ -749,6 +749,26 @@ function slackChannel(
   } satisfies ResolvedChannelDefinition;
 }
 
+function mockRouteSendRuntime(): Runtime {
+  const tracedRuntime = createRuntime({
+    dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" }),
+  });
+  mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+    agentName: "test-agent",
+    channels: [
+      slackChannel(async () => new Response("unused"), {
+        adapter: { kind: "channel:slack" },
+        handler: async (_request, args) => {
+          await args.from("thread-1").send("hello", { auth: null });
+          return new Response("ok");
+        },
+      }),
+    ],
+    runtime: tracedRuntime,
+  });
+  return tracedRuntime;
+}
+
 describe("dispatchChannelRequest tracing", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
@@ -901,24 +921,7 @@ describe("dispatchChannelRequest tracing", () => {
   });
 
   it("captures the created SERVER span context on channel delivery metadata", async () => {
-    const tracedRuntime = createRuntime({
-      dispatchContinuation: vi
-        .fn()
-        .mockResolvedValue({ sessionId: "session-1", status: "accepted" }),
-    });
-    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
-      agentName: "test-agent",
-      channels: [
-        slackChannel(async () => new Response("unused"), {
-          adapter: { kind: "channel:slack" },
-          handler: async (_request, args) => {
-            await args.from("thread-1").send("hello", { auth: null });
-            return new Response("ok");
-          },
-        }),
-      ],
-      runtime: tracedRuntime,
-    });
+    const tracedRuntime = mockRouteSendRuntime();
 
     await dispatchChannelRequest(
       createEvent({
@@ -1172,6 +1175,30 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
     await provider.forceFlush();
     expect(exporter.getFinishedSpans()).toHaveLength(0);
   }
+
+  it("carries the active platform context without emitting an eve request span", async () => {
+    const tracedRuntime = mockRouteSendRuntime();
+    const platformSpan = apiTrace.getTracer("vercel").startSpan("vercel.function");
+
+    await apiContext.with(apiTrace.setSpan(apiContext.active(), platformSpan), () =>
+      dispatchChannelRequest(
+        createEvent({ method: "POST", waitUntil: vi.fn() }),
+        "POST /slack",
+        {} as never,
+      ),
+    );
+    platformSpan.end();
+
+    const command = vi.mocked(tracedRuntime.dispatchContinuation).mock.calls[0]?.[0].command;
+    const delivery = command?.kind === "send" ? command.delivery : undefined;
+    expect(delivery?.requestTraceContext).toEqual({
+      spanId: platformSpan.spanContext().spanId,
+      traceFlags: platformSpan.spanContext().traceFlags,
+      traceId: platformSpan.spanContext().traceId,
+    });
+    await provider.forceFlush();
+    expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual(["vercel.function"]);
+  });
 
   it("emits no request span by default when the flag is unset", async () => {
     registerInstrumentationConfig({}, { agentName: "test" });

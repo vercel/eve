@@ -81,11 +81,7 @@ and outcome fields. Content providers additionally receive only eve's known
 message, context, input-response, and output-schema fields; adapter-specific
 payload fields are never projected.
 
-For a single delivery that starts a turn, the built-in OpenTelemetry provider
-records the channel kind, channel name, delivery ID, optional request ID, and
-captured input on that turn's `invoke_agent` activation. When
-`traceChannelRequests: true` creates an inbound HTTP server span, the activation
-links to it with `eve.link.type=channel.request`.
+For a single delivery that starts a turn, the built-in OpenTelemetry provider records the channel kind, channel name, delivery ID, optional request ID, and captured input on that turn's `invoke_agent` activation. The activation remains a root in its own trace and links to the active upstream request or function span with `eve.link.type=channel.request`. Set `traceChannelRequests: true` to create an eve-owned HTTP server span as that link target; when the option is false, an already-active upstream span remains the target.
 
 Deliveries that do not map one-to-one to an activation still produce instrumentation lifecycle events, but the built-in OpenTelemetry provider does not emit a separate delivery span.
 
@@ -252,7 +248,7 @@ eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry
 
 This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names its invocation span `invoke_agent <agent>` and its model-attempt spans `agent.step`. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
-Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
+Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route. In the authored hierarchy above, this span parents the turn tree and any `hook.resume` or outgoing HTTP spans. In the provider layout, `invoke_agent` remains a separate trace root and links to the request span.
 
 ```text
 POST /eve/v1/session/:sessionId

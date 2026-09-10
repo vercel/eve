@@ -58,7 +58,8 @@ export interface TraceChannelRequestInput {
  *
  * Emitting these spans is opt-in: unless authored instrumentation enables it
  * via `traceChannelRequests: true`, the handler runs with no span (`undefined`)
- * and no context extraction — a true bypass, not a non-recording span.
+ * and performs no header extraction. The channel dispatcher can still use an
+ * already-active platform span for the activation's cross-trace link.
  *
  * This is observability-only: it never changes the response and performs no
  * synchronous span export in the request path, adding only minimal in-process

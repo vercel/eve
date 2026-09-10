@@ -167,10 +167,11 @@ export interface InstrumentationDefinition {
    */
   readonly recordOutputs?: boolean;
   /**
-   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
-   * request (the parent of the turn trace and any `hook.resume`/outgoing
-   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
-   * alongside the rest of the trace.
+   * Whether to emit an eve-owned HTTP `SERVER` span around each channel
+   * request. In the authored hierarchy, this span parents the turn trace. In
+   * the provider layout, a one-to-one activation remains a separate trace
+   * root and links to this span; when disabled, it links to any already-active
+   * upstream request or function span instead. Defaults to `false`.
    */
   readonly traceChannelRequests?: boolean;
   /**
