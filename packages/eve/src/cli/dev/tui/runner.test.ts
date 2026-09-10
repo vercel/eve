@@ -1025,6 +1025,106 @@ describe("EveTUIRunner idle session follow", () => {
     ]);
   });
 
+  it("reconnects idle following when a transport stream ends before an approval arrives", async () => {
+    const session = stubSession();
+    const prompt = createDeferred<string | undefined>();
+    const requestId = "task_123:approval-after-reconnect";
+    const firstWakeEvents = [
+      stampTestEvent({
+        type: "message.appended",
+        data: {
+          messageDelta: "Still working.",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "progress-turn",
+        },
+      } as UnstampedMessageStreamEvent),
+      stampTestEvent({
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      }),
+    ];
+    const wakeEvents = [
+      stampTestEvent({
+        type: "input.requested",
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "wake-turn",
+          requests: [
+            {
+              action: {
+                callId: "call-1",
+                input: { address: "connection/linear" },
+                kind: "tool-call",
+                toolName: "selfmod__registry_add",
+              },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Approve" },
+                { id: "cancel", label: "Cancel" },
+              ],
+              prompt: "Approve tool call: selfmod__registry_add",
+              requestId,
+            },
+          ],
+        },
+      } as UnstampedMessageStreamEvent),
+      stampTestEvent({
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      }),
+    ];
+    let streamCalls = 0;
+    vi.spyOn(session, "stream").mockImplementation((options?: { signal?: AbortSignal }) => {
+      const call = ++streamCalls;
+      const events = call === 1 ? firstWakeEvents : call === 2 ? wakeEvents : [];
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (const event of events) yield event;
+          if (call === 2) {
+            await new Promise<void>((resolve) => {
+              if (options?.signal?.aborted) resolve();
+              else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          }
+        },
+      };
+    });
+    const idleEvents: AgentTUIStreamEvent[] = [];
+    const fallback = setTimeout(() => prompt.resolve(undefined), 1_000);
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockImplementationOnce(() => prompt.promise)
+        .mockResolvedValueOnce(undefined),
+      readToolApproval: vi.fn(async () => ({ approved: false })),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) idleEvents.push(event);
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+      suspendPromptForInput: vi.fn(() => prompt.reject(interruptedError())),
+    });
+
+    try {
+      await new EveTUIRunner({ session, renderer, name: "Task Agent" }).run();
+    } finally {
+      clearTimeout(fallback);
+    }
+
+    expect(streamCalls).toBeGreaterThanOrEqual(2);
+    expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
+      { delta: "Still working.", id: "text:progress-turn:0", type: "assistant-delta" },
+    ]);
+    expect(renderer.readToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: requestId, toolName: "selfmod__registry_add" }),
+      { title: "Task Agent" },
+    );
+  });
+
   it("answers a background-task approval that arrives while the prompt is idle", async () => {
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();

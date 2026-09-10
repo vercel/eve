@@ -118,6 +118,8 @@ export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
 const idleChatGptAuthPollMs = 5_000;
+const idleSessionReconnectBaseDelayMs = 100;
+const idleSessionReconnectMaxDelayMs = 2_000;
 /**
  * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
  * window (locally the cancel hook is claimed well under a second after the
@@ -130,6 +132,20 @@ async function delayMs(ms: number): Promise<void> {
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
     timer.unref?.();
+  });
+}
+
+async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
   });
 }
 
@@ -1373,42 +1389,57 @@ export class EveTUIRunner {
   async #followIdleSession(signal: AbortSignal, options: AgentTUISessionOptions): Promise<void> {
     const sourceSession = this.#session;
     if (sourceSession === undefined) return;
-    const source = sourceSession.stream({ signal })[Symbol.asyncIterator]();
-    try {
-      while (!signal.aborted) {
-        let consumed = false;
-        const turn = {
-          async *[Symbol.asyncIterator]() {
-            while (!signal.aborted) {
-              const next = await source.next();
-              if (next.done === true) return;
-              consumed = true;
-              yield next.value;
-              if (isCurrentTurnBoundaryEvent(next.value)) return;
-            }
-          },
-        };
-        const result = this.#createTUIStreamResult(turn, () => {}, sourceSession);
-        await this.#renderer.renderIdleStream!(result, {
-          ...options,
-          continueSession: true,
-        });
-        this.#enterPendingConnectionAuthorization(result);
-        if (
-          (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
-          (result.turnState?.pendingQuestions.length ?? 0) > 0
-        ) {
-          this.#idleInputResult = {
-            events: (async function* () {})(),
-            turnState: result.turnState,
+    let reconnectDelayMs = idleSessionReconnectBaseDelayMs;
+    while (!signal.aborted) {
+      const source = sourceSession.stream({ signal })[Symbol.asyncIterator]();
+      let deliveredEvent = false;
+      try {
+        while (!signal.aborted) {
+          let consumed = false;
+          const turn = {
+            async *[Symbol.asyncIterator]() {
+              while (!signal.aborted) {
+                const next = await source.next();
+                if (next.done === true) return;
+                consumed = true;
+                deliveredEvent = true;
+                yield next.value;
+                if (isCurrentTurnBoundaryEvent(next.value)) return;
+              }
+            },
           };
-          this.#renderer.suspendPromptForInput?.();
-          return;
+          const result = this.#createTUIStreamResult(turn, () => {}, sourceSession);
+          await this.#renderer.renderIdleStream!(result, {
+            ...options,
+            continueSession: true,
+          });
+          this.#enterPendingConnectionAuthorization(result);
+          if (
+            (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
+            (result.turnState?.pendingQuestions.length ?? 0) > 0
+          ) {
+            this.#idleInputResult = {
+              events: (async function* () {})(),
+              turnState: result.turnState,
+            };
+            this.#renderer.suspendPromptForInput?.();
+            return;
+          }
+          if (
+            result.turnState?.boundaryEvent === "session.completed" ||
+            result.turnState?.boundaryEvent === "session.failed"
+          ) {
+            return;
+          }
+          if (!consumed) break;
         }
-        if (!consumed) return;
+      } finally {
+        await source.return?.();
       }
-    } finally {
-      await source.return?.();
+      reconnectDelayMs = deliveredEvent
+        ? idleSessionReconnectBaseDelayMs
+        : Math.min(reconnectDelayMs * 2, idleSessionReconnectMaxDelayMs);
+      if (!signal.aborted) await abortableDelay(reconnectDelayMs, signal);
     }
   }
 
