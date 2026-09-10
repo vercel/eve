@@ -9,6 +9,7 @@ import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-pr
 import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
@@ -77,6 +78,7 @@ export type TaskAgentInvocationDispatchResult =
 
 /** Dispatches one owner-scoped local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
   readonly replyTo: string;
@@ -246,7 +248,14 @@ export async function dispatchAgentInvocation(input: {
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
-      activityObserver: prepared.activityObserver,
+      activityObserver:
+        prepared.activityObserver === undefined
+          ? undefined
+          : {
+              sink: prepared.activityObserver.sink,
+              workIdentity: input.activityWorkIdentity ?? prepared.activityObserver.workIdentity,
+            },
+      parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       session,
       taskId: input.taskId,
@@ -325,6 +334,7 @@ export async function dispatchTaskAgentInvocationStep(
 ): Promise<TaskAgentInvocationDispatchResult> {
   "use step";
 
+  let activityWorkIdentity: ActivityWorkIdentityV1 | undefined;
   if (input.taskId !== undefined) {
     const session = await readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
@@ -333,9 +343,11 @@ export async function dispatchTaskAgentInvocationStep(
     if (view === undefined || isTerminalTaskStatus(view.status)) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
+    activityWorkIdentity = entry.activityWorkIdentity;
   }
   return await dispatchAgentInvocation({
     ...input,
+    activityWorkIdentity,
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
   });
 }
