@@ -34,7 +34,7 @@ import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createActionsRequestedEvent, createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -182,6 +182,27 @@ const TestTurnAgent = {
   tools: [],
   workspaceSpec: {} as never,
 };
+
+function createTurnStepTestBundle(modelCallsPerStep?: number) {
+  const config =
+    modelCallsPerStep === undefined ? {} : { experimental: { workflow: { modelCallsPerStep } } };
+  return {
+    adapterRegistry: {
+      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+    },
+    compiledArtifactsSource: {},
+    graph: {
+      nodesByNodeId: new Map(),
+      root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+    },
+    hookRegistry: createEmptyHookRegistry(),
+    moduleMap: { nodes: {} },
+    resolvedAgent: { config },
+    subagentRegistry: {},
+    toolRegistry: {},
+    turnAgent: TestTurnAgent,
+  } as never;
+}
 
 const threadContextAdapter: ChannelAdapter = {
   kind: "thread-context",
@@ -1170,6 +1191,196 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("runs the configured number of model calls inside one Workflow step", async () => {
+    const bundle = createTurnStepTestBundle(3);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const stepInputs: Array<Parameters<StepFn>[1]> = [];
+    let callCount = 0;
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, stepInput): Promise<StepResult> => {
+        callCount++;
+        stepInputs.push(stepInput);
+        const nextSession = {
+          ...session,
+          history: [
+            ...session.history,
+            { content: `model call ${String(callCount)}`, role: "assistant" as const },
+          ],
+        };
+        return {
+          next: callCount === 3 ? { done: true, output: "three calls complete" } : continueStep,
+          session: nextSession,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "run the chain" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({ action: "done", output: "three calls complete" });
+    expect(callCount).toBe(3);
+    expect(stepInputs).toEqual([
+      { message: "thread=unset; user=run the chain" },
+      undefined,
+      undefined,
+    ]);
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      { content: "model call 1", role: "assistant" },
+      { content: "model call 2", role: "assistant" },
+      { content: "model call 3", role: "assistant" },
+    ]);
+  });
+
+  it("checkpoints completed batched model calls when steering cancels the active call", async () => {
+    const bundle = createTurnStepTestBundle(100);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const controller = new AbortController();
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    let callCount = 0;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        callCount++;
+        if (callCount === 51) {
+          loadContext().set(ThreadKey, "discarded call 51");
+          controller.abort(new TurnCancelledError());
+          return {
+            next: continueStep,
+            session: {
+              ...session,
+              history: [
+                ...session.history,
+                { content: "discarded model call 51", role: "assistant" as const },
+              ],
+            },
+          };
+        }
+        loadContext().set(ThreadKey, `completed call ${String(callCount)}`);
+        return {
+          next: continueStep,
+          session: {
+            ...session,
+            history: [
+              ...session.history,
+              { content: `model call ${String(callCount)}`, role: "assistant" as const },
+            ],
+          },
+        };
+      };
+    });
+
+    const result = await turnStep({
+      abortSignal: controller.signal,
+      input: { kind: "deliver", payloads: [{ message: "run a long chain" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("cancelled");
+    expect(callCount).toBe(51);
+    expect(result.serializedContext).toMatchObject({ [ThreadKey.name]: "completed call 50" });
+    expect(result.sessionState.snapshot?.session.history).toHaveLength(50);
+    expect(result.sessionState.snapshot?.session.history.at(-1)).toEqual({
+      content: "model call 50",
+      role: "assistant",
+    });
+  });
+
+  it("keeps one model call per Workflow step by default", async () => {
+    const bundle = createTurnStepTestBundle();
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => ({
+      next: continueStep,
+      session,
+    }));
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "one call" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("continue");
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("checkpoints before continuing past a pending input request", async () => {
+    const bundle = createTurnStepTestBundle(3);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => ({
+      next: continueStep,
+      session: appendPendingInputBatch({
+        requests: [
+          {
+            action: { callId: "call-confirm", input: {}, kind: "tool-call", toolName: "confirm" },
+            kind: "question",
+            prompt: "Continue?",
+            requestId: "request-confirm",
+          },
+        ],
+        responseMessages: [],
+        session,
+      }),
+    }));
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "ask first" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("continue");
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("checkpoints before persisting a background-task state transition", async () => {
+    const bundle = createTurnStepTestBundle(3);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+
+    const continueStep: StepFn = async (current) => ({ next: null, session: current });
+    const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => ({
+      backgroundTasks: [],
+      backgroundTaskSession: current,
+      next: continueStep,
+      session: current,
+    }));
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "delegate" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "continue",
+      backgroundTasks: [],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
     const session = createStubSession({
       state: {

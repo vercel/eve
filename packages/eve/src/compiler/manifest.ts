@@ -580,6 +580,7 @@ const compiledAgentWorkflowWorldDefinitionSchema = z.string();
 
 const compiledAgentWorkflowDefinitionSchema = z
   .object({
+    modelCallsPerStep: z.number().int().positive().optional(),
     world: compiledAgentWorkflowWorldDefinitionSchema.optional(),
   })
   .strict();
@@ -1236,6 +1237,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
               config.experimental.workflow === undefined
                 ? undefined
                 : {
+                    modelCallsPerStep: config.experimental.workflow.modelCallsPerStep,
                     world: config.experimental.workflow.world,
                   },
           },

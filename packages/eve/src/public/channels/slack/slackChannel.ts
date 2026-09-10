@@ -36,6 +36,7 @@ import {
   defaultInputRequestedHandler,
   defaultOnAppMention,
   defaultOnDirectMessage,
+  postCompletedSlackReply,
 } from "#public/channels/slack/defaults.js";
 import {
   parseMessageEvent,
@@ -767,7 +768,7 @@ const activityOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.com
 ) => {
   channel.state.pendingToolCallMessage = null;
   if (event.finishReason !== "tool-calls" && event.message) {
-    await channel.thread.post(event.message);
+    await postCompletedSlackReply(channel, event.message);
   }
 };
 

@@ -17,6 +17,23 @@ export async function deleteVercelSandbox(input: {
   readonly signal?: AbortSignal;
 }): Promise<void> {
   await stopVercelSandbox(input.sandbox);
+  await deleteVercelSandboxRecord(input);
+}
+
+export async function deleteUnusableVercelSandbox(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelDeleteModule>;
+  readonly sandbox: VercelSandbox;
+}): Promise<void> {
+  await deleteVercelSandboxRecord(input);
+}
+
+async function deleteVercelSandboxRecord(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelDeleteModule>;
+  readonly sandbox: VercelSandbox;
+  readonly signal?: AbortSignal;
+}): Promise<void> {
   const credentials = await resolveVercelSandboxCredentials(input.createOptions);
   const sandboxModule = await input.loadDeleteSandboxModule();
   const sandbox = await sandboxModule.Sandbox.get({

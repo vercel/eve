@@ -15,6 +15,7 @@ import {
   type ObservedChannelDelivery,
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { experimental_slackActivityStatus } from "#public/channels/slack/activity.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
   HITL_ACTION_PREFIX,
@@ -25,6 +26,7 @@ import {
 } from "#public/channels/slack/hitl.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
@@ -85,6 +87,42 @@ function parseSlackRequestBody(init: RequestInit | undefined): Record<string, un
   return decodeSlackApiBody(init.body, contentType) as Record<string, unknown>;
 }
 
+function useSuccessfulSlackFileUpload(
+  fetchMock: ReturnType<typeof vi.fn>,
+  postTs = "1700000001.000001",
+): string[] {
+  const uploadedBodies: string[] = [];
+  fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "https://slack.com/api/chat.postMessage") {
+      return new Response(JSON.stringify({ ok: true, ts: postTs }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url === "https://slack.com/api/files.getUploadURLExternal") {
+      return new Response(
+        JSON.stringify({
+          file_id: "F01",
+          ok: true,
+          upload_url: "https://files.slack.com/upload/F01",
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url === "https://files.slack.com/upload/F01") {
+      uploadedBodies.push(await new Response(init?.body ?? null).text());
+      return new Response("OK");
+    }
+    if (url === "https://slack.com/api/files.completeUploadExternal") {
+      return new Response(JSON.stringify({ files: [{ id: "F01" }], ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected Slack request: ${url}`);
+  });
+  return uploadedBodies;
+}
+
 function withState(
   adapter: ChannelAdapter<any>,
   state: Record<string, unknown>,
@@ -112,6 +150,15 @@ function callEvent(
   ctx: any,
 ): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
+}
+
+function callCompletionHandler(
+  adapter: ChannelAdapter,
+  event: UnstampedMessageStreamEvent,
+  ctx: any,
+) {
+  if (event.type !== "message.completed") throw new Error("Expected message.completed");
+  return contextStorage.run(stubAlsContext, () => adapter["message.completed"]!(event.data, ctx));
 }
 
 /**
@@ -434,6 +481,150 @@ describe("slackChannel() default event handlers", () => {
       thread_ts: "1700000000.000001",
       markdown_text: "Hello from the agent",
     });
+  });
+
+  it("message.completed keeps a reply at the Markdown limit inline", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://slack.com/api/chat.postMessage");
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
+      markdown_text: message,
+    });
+  });
+
+  it("message.completed uploads an oversized reply as a Markdown snippet", async () => {
+    const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = `# Changelog\n\n${"é🦊".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls).toEqual([
+      "https://slack.com/api/files.getUploadURLExternal",
+      "https://files.slack.com/upload/F01",
+      "https://slack.com/api/files.completeUploadExternal",
+    ]);
+    expect(uploadedBodies).toEqual([message]);
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
+      filename: "eve-response.md",
+      snippet_type: "markdown",
+      length: String(new TextEncoder().encode(message).byteLength),
+    });
+    expect(parseSlackRequestBody(fetchMock.mock.calls[2]![1] as RequestInit)).toMatchObject({
+      channel_id: "C01",
+      files: [{ id: "F01", title: "eve-response.md" }],
+      initial_comment: "Here's a snippet with the full response.",
+      thread_ts: "1700000000.000001",
+    });
+  });
+
+  it.each([
+    ["files.getUploadURLExternal", "missing_scope"],
+    ["files.completeUploadExternal", "channel_not_found"],
+  ])("message.completed propagates %s failure", async (method, error) => {
+    useSuccessfulSlackFileUpload(fetchMock);
+    const successfulFetch = fetchMock.getMockImplementation() as typeof fetch;
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === `https://slack.com/api/${method}`) {
+        return new Response(JSON.stringify({ error, ok: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "https://slack.com/api/chat.postMessage") {
+        return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return successfulFetch(input);
+    });
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
+
+    await expect(
+      callCompletionHandler(
+        adapter,
+        makeEvent("message.completed", {
+          finishReason: "stop",
+          message,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t1",
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow(error);
+
+    expect(fetchMock).toHaveBeenCalledTimes(method === "files.getUploadURLExternal" ? 1 : 3);
+  });
+
+  it("activity-owned message.completed uses the same oversized reply snippet", async () => {
+    const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
+    const adapter = withState(
+      getAdapter(
+        slackChannel({
+          activity: { renderers: [experimental_slackActivityStatus()] },
+          credentials: { botToken: "xoxb-test" },
+        }),
+      ),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(uploadedBodies).toEqual([message]);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
+      "https://slack.com/api/chat.postMessage",
+    );
   });
 
   it("message.completed skips post when finishReason is tool-calls", async () => {
@@ -1406,6 +1597,89 @@ describe("rebuildSlackContext", () => {
     // raw token is unchanged across subsequent posts.
     const allTokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(allTokenWrites).toHaveLength(1);
+  });
+
+  it("anchors a threadless session before uploading an oversized reply snippet", async () => {
+    const fetchMock = vi.fn();
+    const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock, "1800000000.123456");
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      {
+        channelId: "C01",
+        threadTs: null,
+        teamId: null,
+      },
+    );
+    const { accessor, writes } = captureAccessor("slack:C01:");
+    const ctx = buildAdapterContext(adapter, accessor);
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(uploadedBodies).toEqual([message]);
+    const anchorBody = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(anchorBody).toMatchObject({
+      channel: "C01",
+      markdown_text: "Here's a snippet with the full response.",
+    });
+    expect(anchorBody.thread_ts).toBeUndefined();
+    expect(parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit)).toMatchObject({
+      snippet_type: "markdown",
+    });
+    const completeBody = parseSlackRequestBody(fetchMock.mock.calls[3]![1] as RequestInit);
+    expect(completeBody.thread_ts).toBe("1800000000.123456");
+    expect(completeBody.initial_comment).toBeUndefined();
+    expect((adapter.state as { threadTs: string | null }).threadTs).toBe("1800000000.123456");
+    expect(writes.filter(([key]) => key === "eve.continuationToken")).toEqual([
+      ["eve.continuationToken", "slack:C01:1800000000.123456"],
+    ]);
+  });
+
+  it("does not upload a threadless reply when Slack omits the anchor timestamp", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      {
+        channelId: "C01",
+        threadTs: null,
+        teamId: null,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await expect(
+      callCompletionHandler(
+        adapter,
+        makeEvent("message.completed", {
+          finishReason: "stop",
+          message: "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1),
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t1",
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow("Slack did not return a thread timestamp");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

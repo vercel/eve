@@ -9,7 +9,6 @@ import {
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
@@ -154,10 +153,9 @@ export async function runTurnOwnedWorkflow(
       // step may have missed the abort and completed normally. Pending
       // runtime-action batches are exempt — their wait observes the signal.
       if (result.action === "cancelled") {
-        // The cancelled step returns only the context carve-outs required by
-        // the driver epilogue and later turns, plus the accepted user input in
-        // durable history. Adopt those before settling so a steered replacement
-        // keeps the interrupted request without committing partial model output.
+        // The cancelled step returns its latest safe checkpoint: completed
+        // model calls survive, while the active model-and-tool cycle does not.
+        // Adopt it before the driver emits the cancellation epilogue.
         await cursor.adopt({
           serializedContext: result.serializedContext,
           sessionState: result.backgroundTaskState ?? result.sessionState,
@@ -170,15 +168,12 @@ export async function runTurnOwnedWorkflow(
         cancellation?.signal.aborted === true &&
         (pendingCallIds === undefined || hasBackgroundTasks)
       ) {
-        // Some worlds cannot interrupt a running step, so it can complete
-        // normally after the workflow observes cancellation. Roll that result
-        // back except for a session model selected by its one-time preamble.
+        // Some worlds cannot interrupt a running step, so it may complete just
+        // as cancellation arrives. Its successful return is already a durable
+        // boundary: preserve it, then settle cancellation before another step.
         await cursor.adopt({
-          serializedContext: preserveSerializedSessionDynamicModelSelection(
-            beforeStep.serializedContext,
-            result.serializedContext,
-          ),
-          sessionState: cursor.sessionState,
+          serializedContext: result.serializedContext,
+          sessionState: result.backgroundTaskState ?? result.sessionState,
         });
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas every session can resume by

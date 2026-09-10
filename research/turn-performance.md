@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-09-01"
+last_updated: "2026-09-04"
 ---
 
 # Turn performance and Workflow overhead
@@ -659,9 +659,10 @@ Expose slow-provider diagnostics. Separate internal network exporter drain from 
 provider `flush()` contract, move only the exporter drain to a host-retained boundary, and keep
 authored flush awaited at actual park/done/error transitions.
 
-Do not combine side-effectful tool cycles into one replayable step unless each tool invocation
-keeps an independent durable idempotency checkpoint. Faster retries that repeat external effects
-are a correctness regression.
+Keep one model/tool cycle per durable step by default. The opt-in
+[multi-call Workflow step proposal](./multi-call-workflow-steps.md) deliberately widens that replay
+unit for applications willing to trade repeated model calls, tool side effects, and stream events
+after an interruption for lower sequential-cycle latency.
 
 #### Instrumentation flush audit
 

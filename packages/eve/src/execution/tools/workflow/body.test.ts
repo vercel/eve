@@ -29,16 +29,17 @@ it("binds workflow-only methods to the run context", async () => {
     runId: "run",
   } as WorkflowBodyInput & { execution: "blocking"; runId: string };
   const question = { prompt: "Continue?" };
-  const invocation = { key: "review", target: "reviewer", message: "Review" };
+  const target = "reviewer";
+  const invocation = { message: "Review" };
   mocks.ask.mockResolvedValue({ optionId: "yes" });
   mocks.agent.mockResolvedValue("reviewed");
   mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
     expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
     expect(ctx.abortSignal).toBe(signal);
     const answer = await ctx.ask(question);
-    const result = await ctx.agent(invocation);
+    const result = await ctx.agent(target, invocation);
     expect(mocks.ask).toHaveBeenCalledWith(ctx, question);
-    expect(mocks.agent).toHaveBeenCalledWith(ctx, invocation);
+    expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation);
     return { answer, result };
   });
   await expect(executeWorkflowBody(input, signal)).resolves.toEqual({

@@ -11,6 +11,7 @@ import {
   type ProgrammaticAgentModule,
 } from "#compiler/source-graph.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { assertRootOnlyConfig } from "#compiler/normalize-manifest-helpers.js";
 import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
 import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
@@ -54,6 +55,26 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
 }
 
 describe("compileAgentManifest source graph", () => {
+  it("allows subagents to configure Workflow model calls per step", () => {
+    expect(() =>
+      assertRootOnlyConfig(
+        { experimental: { workflow: { modelCallsPerStep: 4 } } } as never,
+        false,
+        "child",
+      ),
+    ).not.toThrow();
+  });
+
+  it("keeps Workflow world selection root-only", () => {
+    expect(() =>
+      assertRootOnlyConfig(
+        { experimental: { workflow: { world: "@workflow/world-postgres" } } } as never,
+        false,
+        "child",
+      ),
+    ).toThrow('Remove "experimental.workflow.world" from "child".');
+  });
+
   it("freezes source metadata behind an immutable registry map", () => {
     const sourceRegistry = registry([]);
 

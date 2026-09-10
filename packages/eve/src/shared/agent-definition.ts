@@ -227,8 +227,7 @@ export interface AgentExperimentalDefinition {
    */
   readonly tasks?: boolean;
   /**
-   * Durable Workflow runtime configuration. Root agents may use this to select
-   * the Workflow world backing sessions and runs.
+   * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
 }
@@ -265,6 +264,16 @@ export type AgentWorkflowWorldDefinition = string;
  * Advanced durable-runtime configuration for eve's Workflow SDK integration.
  */
 export interface AgentWorkflowDefinition {
+  /**
+   * Maximum number of turn-model calls eve may run inside one durable Workflow step.
+   *
+   * Values greater than one reduce Workflow checkpoint overhead but widen the
+   * replay unit: if the Workflow step is interrupted, earlier model calls and
+   * inline tool executions in the same step may run again.
+   *
+   * @default 1
+   */
+  readonly modelCallsPerStep?: number;
   /**
    * Workflow world module used for durable workflow storage, queueing, hooks,
    * and streaming.
