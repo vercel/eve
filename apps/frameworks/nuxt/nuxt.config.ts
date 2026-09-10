@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
+import type { NuxtConfig } from "nuxt/schema";
 
-export default defineNuxtConfig({
+export default {
   modules: ["eve/nuxt"],
 
   css: ["~/assets/css/main.css"],
@@ -12,4 +13,4 @@ export default defineNuxtConfig({
   vite: {
     plugins: [tailwindcss()],
   },
-});
+} satisfies NuxtConfig;

@@ -8,10 +8,10 @@
  * through to the build. This compiles each `.md` / `.mdx` file the same way the
  * site does (markdown vs MDX by extension) and fails on the first parse error.
  *
- * `@mdx-js/mdx` is a transitive dependency (via fumadocs-mdx) and is not
- * importable by bare specifier from the repo root, so resolve it from the pnpm
- * store by globbing for the installed version.
+ * `@mdx-js/mdx` is a transitive dependency (via fumadocs-mdx), so resolve it
+ * from that package rather than assuming a particular pnpm virtual-store layout.
  */
+import { createRequire } from "node:module";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,15 +20,13 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const docsDir = `${repoRoot}/docs`;
 
 function findMdxPackage() {
-  const store = `${repoRoot}/node_modules/.pnpm`;
-  let match;
   try {
-    match = readdirSync(store).find((d) => d.startsWith("@mdx-js+mdx@"));
+    return createRequire(`${repoRoot}/apps/docs/node_modules/fumadocs-mdx/package.json`).resolve(
+      "@mdx-js/mdx",
+    );
   } catch {
     return null;
   }
-  if (!match) return null;
-  return `${store}/${match}/node_modules/@mdx-js/mdx/index.js`;
 }
 
 const mdxPath = findMdxPackage();
