@@ -1,5 +1,19 @@
 # eve
 
+## 0.53.0
+
+### Minor Changes
+
+- 0f8caf4: Simplify workflow-tool delegation to `ctx.agent(target, input)`. eve now derives replay-stable invocation identities, so workflow authors no longer provide separate `key` and `target` fields, and inline output schemas infer the structured result type.
+
+### Patch Changes
+
+- 7090a95: chore(eve): update AI SDK dependencies
+- 67ee820: Fix loading eve-owned authored modules, including the self-modification extension, from workspace-linked installations. Package builds now also preserve eve self-imports without unresolved-import warnings.
+- 8c1430c: Allow `Ctrl+C` to interrupt a pending dev TUI turn cancellation and arm the next press to exit.
+- 2b2ad19: Add an experimental `workflow.modelCallsPerStep` agent option for batching sequential model and inline tool cycles into fewer Workflow checkpoints. Raising it above one reduces checkpoint overhead while widening the retry and replay unit.
+- 86e13ff: Update Workflow packages to use released Windows read retries while preserving session inbox metadata negotiation.
+
 ## 0.52.5
 
 ### Patch Changes
