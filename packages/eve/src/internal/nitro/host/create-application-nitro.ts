@@ -39,7 +39,10 @@ import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
-import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
+import {
+  createEveVercelOptions,
+  readVercelBunVersion,
+} from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
@@ -839,6 +842,8 @@ export async function createProductionApplicationNitro(
       enabled: preset === "vercel",
       publicRoutePrefix: options.publicRoutePrefix,
       workspaceMember: options.workspaceMember,
+      bunVersion:
+        preset === "vercel" ? await readVercelBunVersion(preparedHost.appRoot) : undefined,
     }),
   });
   await writeEveVersionedCacheMetadata(options.buildDir);
