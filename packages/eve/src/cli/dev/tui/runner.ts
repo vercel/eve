@@ -419,7 +419,7 @@ export interface PromptCommandHandler {
 
 type TuiStartup = {
   readonly headerTip: string;
-  finish(): string;
+  finish(): { draft: string; queuedPrompt: string | undefined };
 };
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
@@ -516,6 +516,7 @@ export class EveTUIRunner {
   /** Seeds the first prompt's editable buffer. */
   readonly #initialInput?: string;
   readonly #startup?: TuiStartup;
+  #startupPrompt?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
@@ -693,7 +694,7 @@ export class EveTUIRunner {
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       if (!this.#onboard) await this.#renderSetupIssues(undefined);
-      return this.#startup?.finish() ?? this.#initialInput;
+      return this.#finishStartup();
     }
 
     let info: AgentInfoResult | undefined;
@@ -715,11 +716,17 @@ export class EveTUIRunner {
         }
       }
     }
-    const initialDraft = this.#startup?.finish() ?? this.#initialInput;
+    const initialDraft = this.#finishStartup();
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
     return initialDraft;
+  }
+
+  #finishStartup(): string | undefined {
+    const startup = this.#startup?.finish();
+    this.#startupPrompt = startup?.queuedPrompt;
+    return startup?.draft ?? this.#initialInput;
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
@@ -776,6 +783,9 @@ export class EveTUIRunner {
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
     let initialDraft = await this.#renderAgentHeader();
+    if (this.#startupPrompt !== undefined) {
+      prompt = this.#startupPrompt;
+    }
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
