@@ -1,4 +1,5 @@
 export {
+  checkPackageManagerAvailability,
   eveDevArguments,
   runPackageManagerInstall,
   runPnpmInstall,

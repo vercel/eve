@@ -23,6 +23,7 @@ import {
 } from "#setup/package-manager.js";
 import { pathExists } from "#setup/path-exists.js";
 import {
+  checkPackageManagerAvailability,
   eveDevArguments,
   packageManagerInstallFailureMessage,
   packageManagerInstallSucceeded,
@@ -43,7 +44,11 @@ import {
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import {
+  initAgentDevHandoff,
+  initAgentReadySummary,
+  initAgentReplPrompt,
+} from "./agent-instructions.js";
 import {
   installProgressDetail,
   INSTALL_OUTPUT_FALLBACK_LINES,
@@ -55,9 +60,13 @@ import {
   convertScaffoldToAgentWorkspace,
   formatWorkspaceRootMutationWarning,
   type InitCliLogger,
+  uniqueWorkspaceRootMutations,
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
-import { initAgentReadySummary } from "./agent-instructions.js";
+import {
+  assertPackageManagerAvailable,
+  resolveScaffoldPackageManager,
+} from "./init-package-manager.js";
 import {
   cleanupFreshInitTarget,
   workspaceFailureNote,
@@ -71,6 +80,7 @@ export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.j
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
+  checkPackageManagerAvailability: typeof checkPackageManagerAvailability;
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
@@ -87,6 +97,7 @@ export interface InitCommandDependencies {
 
 const defaultDependencies: InitCommandDependencies = {
   addAgentToProject,
+  checkPackageManagerAvailability,
   detectInvokingPackageManager,
   detectPackageManager,
   ensureChannel,
@@ -112,26 +123,12 @@ async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Pr
   }
 }
 
-function uniqueWorkspaceRootMutations(
-  mutations: readonly WorkspaceRootMutation[],
-): WorkspaceRootMutation[] {
-  const byKey = new Map<string, WorkspaceRootMutation>();
-  for (const mutation of mutations) {
-    const key = `${mutation.kind}:${mutation.path}`;
-    const existing = byKey.get(key);
-    byKey.set(key, {
-      ...mutation,
-      nodeEngineOverride: mutation.nodeEngineOverride ?? existing?.nodeEngineOverride,
-    });
-  }
-  return [...byKey.values()];
-}
-
 async function addToExistingProject(
   targetPath: string,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
+  packageManager: PackageManagerKind,
 ): Promise<{
   configurationFilesChanged: string[];
   dependenciesAdded: string[];
@@ -151,32 +148,20 @@ async function addToExistingProject(
     if (rejection !== null) throw new Error(rejection);
   }
 
-  const manager = await dependencies.detectPackageManager(targetPath);
   const result = await dependencies.addAgentToProject({
     projectRoot: targetPath,
     model: options.model ?? DEFAULT_AGENT_MODEL_ID,
     reasoning: options.reasoning,
-    packageManager: manager.kind,
+    packageManager,
     evePackage,
   });
   return {
     configurationFilesChanged: result.configurationFilesChanged,
     dependenciesAdded: result.dependenciesAdded,
     filesWritten: result.filesWritten,
-    packageManager: manager.kind,
+    packageManager,
     nodeEngineOverride: result.nodeEngineOverride,
   };
-}
-
-async function resolveScaffoldPackageManager(
-  projectPath: string,
-  dependencies: InitCommandDependencies,
-): Promise<PackageManagerKind> {
-  const detected = await dependencies.detectPackageManager(projectPath);
-  if (detected.source !== "default") {
-    return detected.kind;
-  }
-  return dependencies.detectInvokingPackageManager() ?? "pnpm";
 }
 
 async function scaffoldProject(
@@ -344,6 +329,18 @@ async function runInitSteps(input: {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
+  const packageManager =
+    initTarget.kind === "fresh"
+      ? await resolveScaffoldPackageManager({
+          ...dependencies,
+          projectPath: initTarget.projectPath,
+        })
+      : (await dependencies.detectPackageManager(initTarget.projectPath)).kind;
+  await assertPackageManagerAvailable(
+    dependencies.checkPackageManagerAvailability,
+    packageManager,
+    parentDirectory,
+  );
 
   let progress = startCliLiveRow(logger);
   let activeInitStep: EveCliSetupStep = "scaffold";
@@ -357,10 +354,6 @@ async function runInitSteps(input: {
     const agentStartedAt = dependencies.now();
     let project: PreparedInitProject;
     if (initTarget.kind === "fresh") {
-      const packageManager = await resolveScaffoldPackageManager(
-        initTarget.projectPath,
-        dependencies,
-      );
       const workspaceMember = isPackageManagerWorkspaceMember(
         packageManager,
         initTarget.projectPath,
@@ -412,6 +405,7 @@ async function runInitSteps(input: {
         options,
         dependencies,
         evePackage,
+        packageManager,
       );
       project =
         addition.nodeEngineOverride === undefined
