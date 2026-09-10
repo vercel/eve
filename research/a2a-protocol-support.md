@@ -1,143 +1,190 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-09-02"
+last_updated: "2026-09-05"
 ---
 
 # A2A protocol support
 
-## Summary
+## Decision
 
-Agent2Agent (A2A) is an open protocol, now stewarded by the Linux Foundation's Agentic AI
-Foundation, for one agent to delegate work to another opaque agent. Version 1.0 is released. Its
-model is small: a client discovers an **Agent Card** at `/.well-known/agent-card.json`, sends a
-**Message** and receives a **Task** that moves through a fixed lifecycle
-(`SUBMITTED → WORKING → INPUT_REQUIRED | AUTH_REQUIRED → COMPLETED | FAILED | CANCELED | REJECTED`),
-and reads results as **Artifacts**. Tasks are grouped by an optional `contextId`. Three wire
-bindings (JSON-RPC, gRPC, HTTP+JSON) are functionally equivalent; JSON-RPC over HTTP with SSE
-streaming is the one every SDK ships first.
+eve should support A2A 1.0 in both directions:
 
-The opinion this document forms:
+- `defineA2AAgent` consumes a remote A2A agent as an eve subagent.
+- `a2aChannel` exposes an eve agent as an A2A server.
+- The first release supports the JSON-RPC binding, SSE streaming, polling, cancellation, and
+  `ListTasks`. It does not support A2A 0.3, HTTP+JSON, gRPC, push notifications, signed cards, or
+  authenticated extended cards.
+- Vercel Connect is the recommended OAuth provider for outbound A2A calls. A2A remains a subagent
+  abstraction, but it reuses the protocol-neutral authorization runtime already used by MCP and
+  OpenAPI connections.
 
-1. **A2A is an agent protocol, not a tool protocol.** It exposes one ability (send a message, get a
-   task) rather than a tool list. eve already has the right abstraction for that: a subagent.
-   Consuming an A2A agent should be `defineA2AAgent` under `agent/subagents/`, lowered to a
-   background subagent tool exactly like `defineRemoteAgent`. It should **not** be a connection;
-   a connection would surface a single `send_message` tool with worse semantics than the subagent
-   path eve already has (durable park, callbacks, follow-ups, cancellation).
-
-2. **Serving A2A is a channel, and it is a thin binding over a kernel eve already has.**
-   `WorkflowAgentInvocationExecution` (`internal/invocation/`) already projects a task-mode
-   session as `working | input_required | authorization_required | completed | failed | cancelled`
-   with an owner key, a poll hint, structured input requests, and a result. That is the A2A task
-   model one rename away. The MCP channel is the first binding over that kernel; `a2aChannel`
-   is the second. This keeps the core lean and gives eve a real "protocol-neutral invocation"
-   story: MCP and A2A are two ways to address the same durable task.
-
-3. **Ship JSON-RPC 1.0 only, with streaming, without push notifications, without 0.3 compat.**
-   One POST route plus the well-known card. Streaming is cheap because eve's event stream is
-   already durable and resumable; push notifications and card signatures add SSRF/retry and JWS
-   surface that v1 does not need. Pre-1.0 eve does not carry a legacy binding.
-
-4. **Task = task-mode session in v1; `contextId` continuity waits for immutable tasks.** The
-   tools-as-tasks work (`research/tools-as-tasks.md`) already aligns eve's future task model with
-   A2A's "immutable task inside a longer-lived context". Until that lands, v1 sets
-   `contextId = taskId` and rejects client-supplied `contextId` values it does not know, which the
-   spec permits. Serving conversational contexts (`contextId` = eve session, `taskId` = eve turn)
-   is the first follow-up, not a v1 blocker.
+This design targets the official `a2aproject/A2A` `v1.0.1` tag (`3303592`). A2A negotiates only
+`Major.Minor`, so cards and requests use `1.0`, not `1.0.1`.
 
 ```text
-                 eve as A2A client                          eve as A2A server
- ┌─────────────────────────────────────┐        ┌──────────────────────────────────────┐
- │ agent/subagents/researcher.ts       │        │ agent/channels/a2a.ts                │
- │   defineA2AAgent({ url, ... })      │        │   a2aChannel({ auth, card? })        │
- │            │ lowered to subagent    │        │            │                         │
- │            ▼ tool (background)      │        │  GET  /.well-known/agent-card.json   │
- │  A2A JSON-RPC client                │──────▶ │  POST /eve/v1/a2a   (JSON-RPC + SSE) │
- │   SendMessage(returnImmediately)    │        │            │                         │
- │   GetTask poll (durable sleep)      │◀────── │  WorkflowAgentInvocationExecution    │
- │   CancelTask on parent cancel       │        │   task-mode session ⇄ A2A Task       │
- └─────────────────────────────────────┘        └──────────────────────────────────────┘
+ eve as A2A client                              eve as A2A server
+
+ agent/subagents/planner.ts                     agent/channels/a2a.ts
+ defineA2AAgent(...)                            a2aChannel(...)
+          │                                              │
+          │ GET /.well-known/agent-card.json             │
+          ├─────────────────────────────────────────────▶│ Agent Card
+          │                                              │
+          │ POST /eve/v1/a2a                             │
+          │ Authorization + SendMessage                  │
+          ├─────────────────────────────────────────────▶│ task-mode session
+          │                                              │
+          │ GetTask / CancelTask / SendMessage           │
+          ◀─────────────────────────────────────────────▶│ durable invocation
 ```
 
-## Protocol facts that shape the design
+## Why A2A maps to these eve concepts
 
-- **Blocking by default.** `SendMessage` MUST wait for a terminal or interrupted state unless
-  `configuration.returnImmediately: true`. Serverless hosts bound request duration, so a server
-  needs a deadline and a client should never rely on blocking.
-- **Interrupted states are first-class.** `INPUT_REQUIRED` and `AUTH_REQUIRED` are how an agent
-  asks for human input or out-of-band authorization; the client continues by sending a `Message`
-  with the same `taskId`. Section 7.6 explicitly describes the pattern eve already implements for
-  connection OAuth: the agent parks in `AUTH_REQUIRED`, receives the credential out of band, and
-  resumes without a client message.
-- **Server generates ids.** `taskId` is always server-generated; clients cannot create tasks with
-  their own ids. `contextId` may be server-generated and clients treat it as opaque.
-- **Ownership is scoped to the caller.** `GetTask` / `ListTasks` MUST only return tasks visible to
-  the authenticated caller.
-- **Messages are not results.** Outputs go in `artifacts`; `status.message` carries
-  clarifications and progress. History is best-effort.
-- **`A2A-Version` header is required** and an empty value means 0.3. Unsupported versions get
-  `VersionNotSupportedError` (`-32009`).
-- **Errors are JSON-RPC codes `-32001..-32009`** with a `google.rpc.ErrorInfo` object in `data`
-  (`reason`, `domain: "a2a-protocol.org"`).
-- **The reference JS SDK (`@a2a-js/sdk`) is not a fit as a runtime dependency**: it depends on
-  `jose`, peer-depends on Express and gRPC, and its server is Express-shaped. The subset eve needs
-  (one JSON-RPC method set, SSE framing, the data model) is small enough to own. The SDK is the
-  right `devDependency` for interop tests.
+A2A delegates work to an opaque agent. It does not expose a tool list, so an A2A client belongs
+under `agent/subagents/`, not `agent/connections/`.
 
-## Authoring API
+An A2A server accepts messages and manages durable tasks. That is a channel over eve's existing
+`WorkflowAgentInvocationExecution`: task-mode sessions already expose working, input-required,
+authorization-required, completed, failed, and canceled states with ownership and durable events.
+The A2A channel translates that invocation model without adding A2A concepts to the execution
+kernel.
 
-### Consume an A2A agent: `defineA2AAgent`
+## Consume an A2A agent
+
+### Recommended: OAuth through Vercel Connect
 
 ```ts
 // agent/subagents/travel-planner.ts
+import { connect } from "@vercel/connect/eve";
 import { defineA2AAgent } from "eve";
-import { bearer } from "eve/agents/auth";
 
 export default defineA2AAgent({
-  url: "https://travel.example.com", // origin; eve fetches /.well-known/agent-card.json
+  url: "https://travel.example.com",
   description: "Plans multi-city itineraries and returns a day-by-day schedule.",
-  auth: bearer(() => process.env.TRAVEL_AGENT_TOKEN!),
+  auth: connect("travel.example.com/travel-planner"),
 });
 ```
 
-- Identity derives from the file path (`travel-planner`), as with every subagent. No `name`.
-- `url: string | () => string` — the agent origin or a direct Agent Card URL. eve resolves the
-  card at first dispatch per process, validates `supportedInterfaces` for a `JSONRPC` entry at
-  `protocolVersion: "1.0"`, and caches it. Compile stays offline; `description` is authored so the
-  parent's tool description does not depend on a network call at build.
-- `auth?: OutboundAuthFn` and `headers?: HeadersValue` — identical to `defineRemoteAgent`. Card
-  `securitySchemes` are informational in v1; eve does not negotiate OAuth from the card.
-- `outputSchema?` — forwarded as a `data` part request via `acceptedOutputModes:
-["application/json"]` and validated on the returned artifact, mirroring remote agents.
-- `defineDynamic` works unchanged: return `defineA2AAgent(...)` or `null` from `session.started`.
+`connect(...)` is user-scoped by default. The active eve session must contain an authenticated user
+principal, and each user authorizes their own account. Use an app-scoped connector for a shared
+machine identity:
 
-The parent model sees the standard subagent tool (`{ message, outputSchema? }` → task receipt).
-Semantics match a persistent remote child:
+```ts
+auth: connect({
+  connector: "travel.example.com/travel-planner",
+  principalType: "app",
+});
+```
 
-| Parent action                       | A2A operation                                                                                   |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| First call                          | `SendMessage` with `returnImmediately: true`; store `{ contextId, taskId }` on the child handle |
-| Follow-up while task is interrupted | `SendMessage` with the stored `taskId` (continues that task)                                    |
-| Follow-up after task is terminal    | `SendMessage` with the stored `contextId` only (new task in the same context)                   |
-| Parent cancelled                    | `CancelTask` on the active task; failures logged, never block parent settlement                 |
-| Waiting                             | Durable poll loop: `GetTask` after `sleep(min(backoff, 30s))`; no held HTTP connection          |
+App-scoped auth must resolve without eve's interactive browser flow. Interactive OAuth remains
+user-scoped.
 
-- **Waking the parent.** v1 polls with a durable sleep inside a workflow step rather than holding
-  the blocking `SendMessage` or an SSE connection open. Polling is universal (every server MUST
-  implement `GetTask`), it survives function timeouts, and it needs no inbound webhook. Push
-  notifications are the obvious v2 optimization once a real caller needs lower latency.
-- **Result projection.** Terminal `COMPLETED`: artifacts are flattened — `text` parts joined,
-  a single `data` part returned as structured output when `outputSchema` was requested. `FAILED`
-  and `REJECTED`: errored tool result carrying `status.message` text (`A2A_TASK_FAILED` /
-  `A2A_TASK_REJECTED` when absent). `CANCELED`: cancelled result.
-- **Interrupted states.** `INPUT_REQUIRED` and `AUTH_REQUIRED` surface to the parent as a task
-  update with the remote `status.message` text, the same way a remote eve child reports a HITL
-  request. The parent model answers by calling the subagent tool again; eve routes that message to
-  the interrupted `taskId`. eve does not translate remote input requests into eve's structured
-  `InputRequest` kinds in v1 — A2A carries free-form messages there, so the model does.
+### Static or custom credentials
 
-### Serve A2A: `a2aChannel`
+`auth` accepts the same `ConnectionAuthDefinition` as MCP and OpenAPI connections. `headers`
+accepts their shared `HeadersDefinition` for API keys and other non-Bearer schemes.
+
+```ts
+import { defineA2AAgent } from "eve";
+
+export default defineA2AAgent({
+  url: "https://research.example.com/agent-card.json",
+  description: "Researches a supplied topic.",
+  auth: {
+    getToken: async () => ({ token: process.env.RESEARCH_AGENT_TOKEN! }),
+  },
+});
+```
+
+### Definition shape
+
+```ts
+interface A2AAgentDefinitionInput {
+  readonly url: string | (() => string | Promise<string>);
+  readonly description: string;
+  readonly auth?: ConnectionAuthDefinition;
+  readonly headers?: HeadersDefinition;
+  readonly allowedInterfaceOrigins?: readonly string[];
+  readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
+}
+```
+
+- Identity derives from the file path. `agent/subagents/travel-planner.ts` becomes
+  `travel-planner`; there is no `name` field.
+- `url` may be an origin or a direct Agent Card URL. An origin resolves to
+  `/.well-known/agent-card.json`.
+- `allowedInterfaceOrigins` contains exact origins for registry-hosted cards that intentionally
+  point somewhere other than the card origin. Wildcards are not accepted.
+- `description` is authored because compile remains offline. Card discovery happens at runtime.
+- `defineDynamic` may return `defineA2AAgent(...)` or `null` from `session.started`.
+
+### Discovery and authentication flow
+
+```text
+1. Resolve the authored card URL.
+2. Fetch the public card without auth or authored headers.
+3. Validate the complete A2A 1.0 Agent Card.
+4. Select the first JSONRPC/1.0 interface in card preference order.
+5. Reject an unknown required extension or an unapproved interface origin.
+6. Resolve auth for the active app or user principal.
+7. Send the A2A request with A2A-Version: 1.0 and the selected interface's tenant.
+8. On HTTP 401, evict the rejected token and attempt authorization once before surfacing the error.
+```
+
+The Agent Card describes acceptable security schemes and OAuth scopes. It does not choose or
+provision eve's credential. The authored Vercel Connect connector is the trust boundary: it owns
+the registered OAuth client, provider configuration, token storage, and refresh. eve does not start
+OAuth against an issuer named only by an untrusted card.
+
+If a user-scoped Connect credential is missing, eve emits `authorization.required`, parks the parent
+turn on its existing durable callback, and resumes the original subagent call after Connect
+completes OAuth. Tokens are resolved per execution step and are never serialized into workflow
+state.
+
+This requires generalizing the shared authorization runtime's current connection-oriented names:
+
+```ts
+interface OutboundAuthorizationContext {
+  readonly scope: string; // path-derived connection or subagent identity
+  readonly protocol: "mcp" | "openapi" | "a2a";
+  readonly url: string; // selected remote service URL
+}
+```
+
+The token cache, principal resolution, challenge, callback, completion, and eviction logic remain
+unchanged. The A2A compiler path also preserves Vercel Connect's serializable connector marker on
+the subagent node for setup and deployment tooling. A2A does not become a connection and does not
+appear in `connection_search`.
+
+### Task flow
+
+The parent model sees the standard background subagent tool.
+
+| Parent action              | A2A operation                                 |
+| -------------------------- | --------------------------------------------- |
+| First call                 | `SendMessage` with `returnImmediately: true`  |
+| Wait for a task            | Durable `GetTask` polling with capped backoff |
+| Answer `INPUT_REQUIRED`    | `SendMessage` with the active `taskId`        |
+| Follow up after completion | `SendMessage` with the stored `contextId`     |
+| Cancel the parent          | Best-effort `CancelTask` for the active task  |
+
+`SendMessage` may return either:
+
+- A direct `Message`: complete the subagent call immediately and retain its `contextId`, if present.
+- A `Task`: store `{ contextId, taskId }`, then poll. Polling avoids holding an HTTP connection and
+  works with every conforming server.
+
+For a completed task, eve joins text artifact parts. When `outputSchema` is present, eve requests
+`application/json` and validates a single data part. Failed and rejected tasks return typed tool
+errors; canceled tasks return a canceled result.
+
+`INPUT_REQUIRED` and `AUTH_REQUIRED` surface as child task updates. The parent can answer an input
+request by calling the subagent again. `AUTH_REQUIRED` means the remote task needs secondary
+authorization; it is not the OAuth used to call the A2A endpoint. The remote agent receives that
+credential out of band while eve continues polling the same task.
+
+## Serve an eve agent over A2A
 
 ```ts
 // agent/channels/a2a.ts
@@ -152,155 +199,197 @@ export default a2aChannel({
     version: "2.4.0",
     provider: { organization: "Acme", url: "https://acme.example.com" },
     documentationUrl: "https://acme.example.com/docs/agent",
+    skills: [
+      {
+        id: "travel-planning",
+        name: "Travel planning",
+        description: "Plans multi-city itineraries.",
+        tags: ["travel", "itinerary"],
+      },
+    ],
+    securitySchemes: {
+      oidc: {
+        openIdConnectSecurityScheme: {
+          openIdConnectUrl: "https://auth.example.com/.well-known/openid-configuration",
+        },
+      },
+    },
+    securityRequirements: [{ schemes: { oidc: { list: ["a2a.invoke"] } } }],
   },
 });
 ```
 
-- `auth` is required, exactly as on `mcpChannel`; `none()` is the explicit public opt-in. Every
-  operation reruns the policy. With authenticated policies a task belongs to the principal that
-  created it (same owner key as MCP invocations); on a public channel the task id is a bearer
-  capability until workflow retention expires.
-- `route?` overrides the JSON-RPC path (default `/eve/v1/a2a`). The card is always served at
-  `GET /.well-known/agent-card.json` on the deployment origin; the channel owns that route only
-  when this file exists, so nothing is ambiently exposed.
-- `card?` overrides fields eve cannot derive. Defaults:
-  - `name`, `description` — from compiled agent metadata via the same agent-info responder the
-    MCP channel uses.
-  - `version` — the application's `package.json` version, falling back to the build id.
-  - `skills` — one `AgentSkill` per static eve skill (`id`, `name`, `description`, `tags: []`),
-    or a single skill for the agent when it has none. eve skills are descriptive instruction
-    bundles, which is what A2A skills are.
-  - `supportedInterfaces` — `[{ url: "<origin>/eve/v1/a2a", protocolBinding: "JSONRPC",
-protocolVersion: "1.0" }]`.
-  - `capabilities` — `{ streaming: true, pushNotifications: false, extendedAgentCard: false }`.
-  - `defaultInputModes: ["text/plain", "application/json"]`,
-    `defaultOutputModes: ["text/plain", "application/json"]`.
-  - `securitySchemes` — `{ bearer: { httpAuthSecurityScheme: { scheme: "bearer" } } }` with a
-    matching requirement, or an `openIdConnect` scheme when `oauthResource(...)` metadata is
-    present. Authors override when their policy differs.
-- The card is served with `cache-control: public, max-age=300` and no signature.
+`auth` is required. Use `none()` for an intentionally public agent. `routeAuth` authenticates every
+request; `oauthResource(...)` also supplies challenge metadata. When eve cannot derive an exact
+Agent Card declaration from the auth policy, the author must provide matching `securitySchemes`
+and `securityRequirements`. Channel construction fails rather than advertising a generic Bearer
+scheme that may not match the route.
 
-## Semantics of the served binding
+The channel exposes:
 
-### Operations
+```text
+GET  /.well-known/agent-card.json
+POST /eve/v1/a2a
+```
 
-| JSON-RPC method                       | v1 behavior                                                                                                                                                                                                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SendMessage` (new task)              | Creates a task-mode session through the invocation kernel. Returns a `Task`. With `returnImmediately: false` (default) waits for terminal/interrupted state up to `blockingTimeoutMs` (default 60s, capped by host), then returns the current snapshot. |
-| `SendMessage` (with `taskId`)         | Task must be `INPUT_REQUIRED`; the message answers the pending batch (see below). Terminal tasks → `UnsupportedOperationError`. Unknown → `TaskNotFoundError`.                                                                                          |
-| `SendMessage` (with `contextId` only) | v1 rejects with `UnsupportedOperationError` and reason `CONTEXT_CONTINUATION_UNSUPPORTED` (spec §3.4.1 requires rejection rather than a new id).                                                                                                        |
-| `SendStreamingMessage`                | Same as above but responds with SSE: initial `Task`, then `statusUpdate` / `artifactUpdate` events derived from the session stream; closes at terminal state. Interrupted states keep the stream open until the deadline.                               |
-| `GetTask`                             | Projects the invocation; honors `historyLength`.                                                                                                                                                                                                        |
-| `SubscribeToTask`                     | SSE from the current snapshot; terminal → `UnsupportedOperationError`.                                                                                                                                                                                  |
-| `CancelTask`                          | `getRun(id).cancel()`; returns the snapshot. Cancellation is cooperative; the snapshot may still read `WORKING` until `turn.cancelled` lands. Terminal → `TaskNotCancelableError`.                                                                      |
-| `ListTasks`                           | `UnsupportedOperationError`. The workflow world cannot filter runs by attribute today, so an owner-scoped list would be unbounded work (see open questions).                                                                                            |
-| Push notification methods             | `PushNotificationNotSupportedError`.                                                                                                                                                                                                                    |
-| `GetExtendedAgentCard`                | `ExtendedAgentCardNotConfiguredError`.                                                                                                                                                                                                                  |
+`route` may override the JSON-RPC path. The well-known path is deployment-global, so v1 permits one
+A2A channel per deployment.
 
-`A2A-Version` must be `1.0`; anything else, including empty, returns `VersionNotSupportedError`.
-Requests exceeding a body cap (1 MiB) or containing `raw` parts above a size cap are rejected
-with a JSON-RPC invalid-params error.
+### Agent Card defaults
+
+The public Agent Card contains only metadata safe for anonymous callers:
+
+- `name` and `description` from compiled agent metadata.
+- `version` from the application package version, with the build id as a fallback.
+- One agent-level skill by default. Individual eve skills are included only through explicit
+  `card.skills`; internal skill instructions are never published automatically.
+- One `JSONRPC` interface at the channel route with protocol version `1.0`.
+- `streaming: true`, `pushNotifications: false`, and `extendedAgentCard: false`.
+- `text/plain` and `application/json` input and output modes.
+- Empty security requirements for `none()`, or the exact declaration configured for authenticated
+  routes.
+
+The response includes `Cache-Control: public, max-age=300` and a content-hash `ETag`. The first
+release does not sign cards.
+
+### Request and ownership flow
+
+```text
+A2A request
+  │
+  ├─ validate A2A-Version, tenant, JSON-RPC envelope, and body limits
+  ├─ authenticate with routeAuth
+  ├─ derive the invocation owner from the authenticated principal
+  ├─ authorize the operation before reading or writing a task
+  ├─ project A2A input onto WorkflowAgentInvocationExecution
+  └─ return a Task snapshot or SSE event stream
+```
+
+Primary auth failures remain HTTP-level responses:
+
+- `401` plus `WWW-Authenticate` for missing or invalid credentials.
+- `403` for an authenticated caller without permission.
+
+Neither response creates a task or uses `TASK_STATE_AUTH_REQUIRED`. Every continuation, poll,
+cancel, list, and stream subscription reruns auth. Unknown and inaccessible task ids both return
+`TaskNotFoundError` so task existence does not leak.
+
+With `none()`, a cryptographically unguessable task id acts as a bearer capability until workflow
+retention expires. This is weaker than principal-bound ownership and must remain an explicit opt-in.
+
+### Operation mapping
+
+| A2A operation             | eve behavior                                                                                  |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `SendMessage`             | Create a task-mode session, or answer its pending input request.                              |
+| `SendStreamingMessage`    | Return the initial task, then ordered `taskStatusUpdate` and `taskArtifactUpdate` SSE events. |
+| `GetTask`                 | Return the current invocation projection and requested history.                               |
+| `ListTasks`               | Query owner-scoped invocations with filters and opaque cursor pagination.                     |
+| `SubscribeToTask`         | Return the current snapshot first, then tail durable events until terminal state.             |
+| `CancelTask`              | Request cooperative workflow cancellation and return the current snapshot.                    |
+| Push notification methods | Return `PushNotificationNotSupportedError`.                                                   |
+| `GetExtendedAgentCard`    | Return `UnsupportedOperationError` because the card advertises no support.                    |
+
+`ListTasks` is a core A2A 1.0 operation. Serving A2A therefore requires an owner-scoped invocation
+query that supports context, state, timestamp, descending update order, cursor pagination, history
+length, and artifact inclusion. Authorization must be part of the query so counts and timing do not
+leak inaccessible runs.
+
+`SendMessage` defaults to blocking until a terminal or interrupted state, as required by the
+normative proto. `returnImmediately: true` returns the submitted task. If the hosting platform ends
+a blocking request first, the caller receives a transport failure and can retry with
+`returnImmediately: true`; eve must not return a nonstandard working snapshot at an arbitrary
+framework timeout.
 
 ### Task projection
 
-| eve invocation status      | A2A `status.state`          | Notes                                                                                                                                                                             |
-| -------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| created, no `turn.started` | `TASK_STATE_SUBMITTED`      | Only visible on the immediate `returnImmediately` response.                                                                                                                       |
-| `working`                  | `TASK_STATE_WORKING`        | `status.message` carries the latest `task_update` text when present.                                                                                                              |
-| `input_required`           | `TASK_STATE_INPUT_REQUIRED` | `status.message` has a `text` part rendering each request and one `data` part with the raw `InputRequest[]`.                                                                      |
-| `authorization_required`   | `TASK_STATE_AUTH_REQUIRED`  | `status.message` has the challenge (`url`, `userCode`, `instructions`) as text and a `data` part. The connection callback resumes the task; no client message is needed (§7.6.1). |
-| `completed`                | `TASK_STATE_COMPLETED`      | One artifact: `text` part for a text result, `data` part for structured output.                                                                                                   |
-| `failed`                   | `TASK_STATE_FAILED`         | `status.message` carries the sanitized error message; internals stay in server logs.                                                                                              |
-| `cancelled`                | `TASK_STATE_CANCELED`       |                                                                                                                                                                                   |
+| eve invocation         | A2A state                   | Payload                                               |
+| ---------------------- | --------------------------- | ----------------------------------------------------- |
+| Created                | `TASK_STATE_SUBMITTED`      | Initial task snapshot.                                |
+| Working                | `TASK_STATE_WORKING`        | Latest public task update in `status.message`.        |
+| Input required         | `TASK_STATE_INPUT_REQUIRED` | Human-readable text plus structured `InputRequest[]`. |
+| Authorization required | `TASK_STATE_AUTH_REQUIRED`  | Safe challenge instructions; never credentials.       |
+| Completed              | `TASK_STATE_COMPLETED`      | Text or structured result as an artifact.             |
+| Failed                 | `TASK_STATE_FAILED`         | Sanitized message; details remain in server logs.     |
+| Canceled               | `TASK_STATE_CANCELED`       | No result artifact.                                   |
 
-- `id` and `contextId` are both the eve session id in v1. `history` is the initiating user
-  message plus the final agent message; eve does not persist per-step assistant messages into
-  task history.
-- `status.timestamp` is the `meta.at` of the event that produced the state, ISO 8601 with
-  millisecond precision.
-- Answering `INPUT_REQUIRED`: the client message must contain a `data` part
-  `{ responses: InputResponse[] }` answering the complete pending batch exactly once (same rule
-  as MCP `agent_update`). When the batch is a single free-form question, a lone `text` part is
-  accepted as its answer. Anything else → invalid params with a message naming the pending request
-  ids.
-- Inbound message parts: `text` parts concatenate into the user message; `data` parts are
-  serialized as fenced JSON; `url` parts are passed through as text for the model; `raw` parts are
-  rejected in v1 (`ContentTypeNotSupportedError`) until eve's file-part story is settled.
+In v1, `taskId` and `contextId` both map to the task-mode eve session id. A client may continue an
+interrupted task by `taskId`. A client-supplied `contextId` that does not identify that task is
+rejected. Mapping one conversation to multiple immutable tasks waits for the tools-as-tasks work:
+`contextId` will then map to the conversation and `taskId` to one turn.
 
-### Streaming
+Inbound text parts concatenate into the user message. Data parts become fenced JSON. URL parts are
+shown to the model as text and are not fetched by the protocol layer. Raw parts are rejected until
+eve has a file-part contract. Request bodies are capped at 1 MiB.
 
-SSE events map from eve's durable stream with no new persistence:
+## Security boundaries
 
-- `turn.started`, `input.requested`, `authorization.required`, `authorization.completed`,
-  `turn.completed`, `turn.failed`, `turn.cancelled` → `statusUpdate`.
-- `message.appended` (final assistant message deltas) → `artifactUpdate` with `append: true`;
-  `message.completed` → final `artifactUpdate` with `lastChunk: true`.
-- Reasoning, tool calls, and subagent events are not forwarded; A2A is opaque by design.
+- Production card and interface URLs require HTTPS; loopback HTTP is development-only.
+- Card discovery sends no invocation credentials or authored headers.
+- Card and interface requests do not follow redirects.
+- The selected interface must share the card origin unless its exact origin is authored in
+  `allowedInterfaceOrigins`.
+- Credentials are sent only to the selected, approved interface origin.
+- Network validation covers literal and resolved loopback, private, link-local, multicast, and
+  cloud metadata addresses. The connection must stay bound to a validated address to prevent DNS
+  rebinding.
+- Unknown required extensions fail before auth or dispatch. v1 activates no extensions.
+- Cards follow HTTP caching rules and revalidate with `ETag` or `Last-Modified`. A refresh that
+  changes the approved origin or required auth/extension contract fails closed for existing task
+  handles.
+- Tokens, authorization codes, API keys, and callback secrets never enter A2A messages, artifacts,
+  metadata, URLs, model context, durable workflow state, or logs.
+- In-task authorization remains bound to the principal, task, tenant, downstream audience, and
+  scopes to prevent confused-deputy and cross-task replay attacks.
 
-Reconnection is `SubscribeToTask`, which replays the snapshot first, then tails from the current
-stream index — the same tail-relative read the eve channel already supports.
+## Implementation boundaries
 
-## Boundaries and surfaces
+| Surface                               | Change                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `public/definitions/a2a-agent.ts`     | Add `defineA2AAgent` with shared outbound auth and headers.                                                   |
+| A2A compiler and runtime graph paths  | Preserve live auth resolvers and Vercel Connect's serializable connector marker on A2A nodes.                 |
+| `runtime/a2a/client.ts`               | Resolve cards, authorize requests, and implement JSON-RPC operations.                                         |
+| `execution/a2a-agent-dispatch.ts`     | Lower A2A agents to background subagent execution.                                                            |
+| Shared outbound authorization runtime | Generalize connection-specific context and cache keys for A2A subagents without exposing them as connections. |
+| `public/channels/a2a.ts`              | Add the card and authenticated JSON-RPC routes.                                                               |
+| `internal/a2a/*`                      | Own the A2A 1.0 data model, validation, errors, and SSE framing without a runtime dependency.                 |
+| Invocation kernel                     | Add SSE subscription and owner-scoped filtered listing; keep A2A types out of the kernel.                     |
 
-| Surface                                                                      | Change                                                                                                                        |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `internal/a2a/types.ts`, `internal/a2a/jsonrpc.ts` (new)                     | eve-owned v1.0 data model (camelCase, SCREAMING_SNAKE enums), error table, SSE framing. No runtime dependency.                |
-| `internal/invocation/agent-invocation.ts`, `workflow-execution.ts`           | Unchanged kernel; add `subscribe(invocationId, startIndex)` returning the session event stream for SSE.                       |
-| `public/channels/a2a.ts` (new), export `eve/channels/a2a`                    | `a2aChannel`: card route, JSON-RPC route, auth via `routeAuth` + `oauthResource` (same as `mcpChannel`).                      |
-| `public/definitions/a2a-agent.ts` (new), export from `eve`                   | `defineA2AAgent` stamping `kind: "a2a"`; `compiler/normalize-subagent.ts` accepts the new kind.                               |
-| `runtime/a2a/client.ts`, `execution/a2a-agent-dispatch.ts` (new)             | Card resolution, `SendMessage` / `GetTask` / `CancelTask`, durable poll loop, handle bookkeeping (`contextId`, `taskId`).     |
-| `execution/subagent-tool.ts`, `runtime/subagents/registry.ts`                | Route `kind: "a2a"` nodes to the A2A dispatcher beside `remote`.                                                              |
-| `docs/protocols/a2a.md`, `docs/channels/a2a.mdx`, `docs/subagents/index.mdx` | Serving and consuming guides; remove the "not an A2A server" caveat from `docs/channels/eve.mdx` for deployments that opt in. |
-| `e2e/fixtures/agent-a2a/` (new)                                              | Loopback: the fixture serves `a2aChannel` and consumes itself through `defineA2AAgent`.                                       |
+The official `@a2a-js/sdk` remains a development dependency for interoperability tests. Its Express,
+gRPC, and `jose` dependency surface is not suitable for eve's runtime package.
 
-Invariants:
+## Out of scope for the first release
 
-- Everything A2A-specific lives in `public/channels/a2a.ts`, `runtime/a2a/`, and
-  `execution/a2a-agent-dispatch.ts`. `execution/` and `harness/` core paths do not learn about
-  A2A beyond the `kind` dispatch already present for `remote`.
-- Client-facing errors carry the A2A reason and a generic message; stack traces and workflow
-  internals stay in logs.
-- Outbound requests go only to the card's declared interface URL, which must be HTTPS in
-  production and must not resolve to a reserved address (reuse `isReservedIpAddress`).
-
-## Out of scope for v1
-
-- HTTP+JSON and gRPC bindings; A2A 0.3 compatibility.
-- Push notifications (both directions), `ListTasks`, extended agent card, card signatures
-  (JWS + RFC 8785 canonicalization).
-- `contextId` continuity on the served side. Planned mapping once immutable tasks exist:
-  `contextId` = conversation-mode session, `taskId` = turn.
-- Translating remote `INPUT_REQUIRED` payloads into eve structured `InputRequest` kinds.
-- Replacing eve-to-eve `defineRemoteAgent` with A2A. eve's native hop carries forwarded
-  principals, structured HITL, activity observers, and trace policy that A2A lacks; A2A is for
-  crossing framework boundaries, not for eve talking to eve.
-- Advertising eve tools or connections as A2A skills beyond the descriptive skill list.
+- A2A 0.3, HTTP+JSON, and gRPC bindings.
+- Push notifications and their webhook auth, SSRF, retry, and replay surface.
+- Authenticated private cards, extended cards, and caller-specific capability disclosure.
+- Agent Card JWS signing and RFC 8785 canonicalization.
+- Automatic OAuth/OIDC/device-flow negotiation from card metadata.
+- mTLS client identity.
+- General registry search or model-selected remote agents.
+- Translating arbitrary remote input payloads into every eve `InputRequest` kind.
+- Replacing eve-to-eve `defineRemoteAgent`, which carries eve-specific principal and trace policy.
 
 ## Open questions
 
-- **`ListTasks` needs an attribute-filtered run query.** The kernel keys ownership on run
-  attributes but `world.runs.list` filters only by workflow name and status. Either the workflow
-  world grows an attribute filter or eve maintains a per-owner index; until then the operation is
-  unsupported.
-- **Blocking deadline.** Spec says `SendMessage` MUST wait; hosts cap request duration. Is a
-  documented `blockingTimeoutMs` deviation acceptable, or should the default flip to
-  `returnImmediately`-like behavior with `capabilities` metadata explaining it?
-- **Card `version` source.** Application `package.json` version is the least surprising default
-  but many eve apps never bump it. Build id fallback keeps the field populated but not meaningful.
-- **Skill mapping.** Confirm that surfacing eve skill names and descriptions publicly on the card
-  is acceptable; skills may contain internal wording. An allowlist on `card.skills` may be needed.
+- **Owner-scoped listing:** Should the workflow world add a general attribute-filtered run query, or
+  should the invocation layer maintain its own owner index?
+- **Agent version:** Is the application package version meaningful enough for the card, or should
+  `card.version` be required?
+- **Multiple agents per deployment:** A future card-routing surface is required before multiple A2A
+  channels can share one deployment origin.
 
-## Delivery and verification
+## Verification
 
-Two PRs, each with a **patch** changeset (additive public API):
+Deliver serving and consuming support separately, each with a patch changeset.
 
-1. **Serve.** `a2aChannel`, card, JSON-RPC route, SSE. Unit: projection table, error mapping,
-   version negotiation, input-answer validation, card defaults and overrides. Integration: route
-   auth + ownership (other principal → `TaskNotFoundError`), blocking vs `returnImmediately`.
-   Scenario: `@a2a-js/sdk` client (devDependency) against a real `eve dev` server runs
-   `SendMessage`, `GetTask`, `SendStreamingMessage`, `CancelTask`, and `INPUT_REQUIRED` round
-   trip. E2E: `agent-a2a` fixture eval with the mock model.
-2. **Consume.** `defineA2AAgent`, client, dispatcher. Unit: card resolution and interface
-   selection, handle bookkeeping across interrupted/terminal tasks, artifact flattening, error
-   projection. Integration: dispatch → poll → result in memory with a stubbed A2A server. E2E:
-   the `agent-a2a` fixture delegates to itself over the loopback route and cancels mid-task.
+1. **Serve:** test card defaults and security declarations, ETags, version and tenant validation,
+   HTTP `401`/`403`, owner isolation, input continuation, task projection, list filtering and
+   pagination, SSE ordering, cancellation, body limits, and unsupported capabilities. Run the
+   official JS client against `eve dev` in a scenario test.
+2. **Consume:** test card schema and cache revalidation, interface preference and tenant echo,
+   required extensions, direct Message and Task responses, Vercel Connect authorization and resume,
+   user isolation, rejected-token eviction, cross-origin credential prevention, redirect handling,
+   DNS and literal-address SSRF, polling, continuation, result projection, and cancellation.
+3. **E2E:** add a loopback fixture that serves `a2aChannel`, consumes itself through
+   `defineA2AAgent`, completes a task, handles input, and cancels active work.
