@@ -463,7 +463,7 @@
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
-    "@ai-sdk/code-mode": "1.0.39",
+    "@ai-sdk/code-mode": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
