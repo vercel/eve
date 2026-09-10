@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Compaction now asks for a factual summary of the supplied visible conversation rather than a model handoff. Empty-summary errors retain bounded provider stop codes to help diagnose refusals.
+Compaction now supplies the current user request as bounded context when summarizing older tool exchanges, so the recorded actions remain tied to the requested work. Provider-filtered summaries are rejected even when partial text is returned, and summary errors retain bounded provider stop codes for diagnosis.

@@ -228,6 +228,8 @@ export async function compactMessages(
     }
   }
 
+  const request = findLastRealUserMessage(conversation);
+  const requestContext = typeof request?.content === "string" ? request.content : undefined;
   let summaryAttempt = 0;
   while (true) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
@@ -235,6 +237,8 @@ export async function compactMessages(
     const summaryPrompt = createCompactionPrompt({
       messages: older,
       previousCheckpoint,
+      requestContext:
+        request !== undefined && !older.includes(request) ? requestContext : undefined,
       transcriptBudgetTokens: config.threshold,
     });
 
@@ -250,8 +254,10 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    if (result.text.trim().length === 0) {
+    const empty = result.text.trim().length === 0;
+    if (empty || result.finishReason === "content-filter") {
       throw createCompactionSummaryError({
+        empty,
         finishReason: result.finishReason,
         rawFinishReason: result.rawFinishReason,
         providerMetadata: result.providerMetadata,

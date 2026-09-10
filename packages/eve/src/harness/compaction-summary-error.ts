@@ -1,6 +1,7 @@
 import { isObject } from "#shared/guards.js";
 
 interface CompactionSummaryFailure {
+  readonly empty: boolean;
   readonly finishReason: string | undefined;
   readonly rawFinishReason: string | undefined;
   readonly providerMetadata: Readonly<Record<string, unknown>> | undefined;
@@ -29,7 +30,9 @@ export function createCompactionSummaryError(input: CompactionSummaryFailure): E
   };
 
   return new Error(
-    `The compaction model returned an empty summary. Finish reason: ${finishReason}.`,
+    input.empty
+      ? `The compaction model returned an empty summary. Finish reason: ${finishReason}.`
+      : `The compaction model returned a filtered summary. Finish reason: ${finishReason}.`,
     { cause: details },
   );
 }

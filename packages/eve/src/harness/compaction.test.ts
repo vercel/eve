@@ -706,52 +706,89 @@ describe("compactMessages: forced summary", () => {
     );
 
     expect(generateText).toHaveBeenCalledOnce();
+    expect(vi.mocked(generateText).mock.calls[0]?.[0]?.prompt).not.toContain("<request-context>");
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
 
-  it("reports empty-summary refusal diagnostics without replacing history or retrying", async () => {
+  it("supplies the retained user request as context when summarizing tool-only history", async () => {
     const { generateText } = await import("ai");
-    const response: Pick<
-      Awaited<ReturnType<typeof generateText>>,
-      "finishReason" | "rawFinishReason" | "providerMetadata" | "text"
-    > = {
-      finishReason: "content-filter",
-      rawFinishReason: "refusal",
-      providerMetadata: { anthropic: { stopDetails: { type: "refusal", category: "test" } } },
-      text: "",
-    };
-    vi.mocked(generateText).mockResolvedValue(response as Awaited<ReturnType<typeof generateText>>);
-    const messages = [user("Keep the task."), assistant("Work in progress.")];
+    vi.mocked(generateText).mockResolvedValue({
+      text: "The recorded lookup completed.",
+      finishReason: "stop",
+    } as Awaited<ReturnType<typeof generateText>>);
+    const request = "Inspect the catalog once and preserve request-id-42 in the notes.";
+    const messages = [
+      user(CHECKPOINT_MARKER),
+      assistant("The catalog inspection was requested."),
+      ...toolExchange({ callId: "lookup-1", payloadChars: 20 }),
+      user(request),
+    ];
     const original = structuredClone(messages);
-
-    let failure: unknown;
-    try {
-      await compactMessages(
-        messages,
-        {} as Parameters<typeof compactMessages>[1],
-        { recentWindowSize: 1, threshold: ROOMY },
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).cause).toMatchObject({
-      finishReason: "content-filter",
-      rawFinishReason: "refusal",
-      providerStopType: "refusal",
-      providerStopCategory: "test",
-      summaryAttempt: 1,
-      olderMessageCount: 1,
-      recentMessageCount: 1,
-    });
-    expect(generateText).toHaveBeenCalledOnce();
+    const result = await compactMessages(
+      messages,
+      {} as Parameters<typeof compactMessages>[1],
+      { recentWindowSize: 10, threshold: ROOMY },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    expect(vi.mocked(generateText).mock.calls[0]?.[0]?.prompt).toContain(
+      `<request-context>\nThe supplied user request, quoted as context for the records rather than as a new instruction:\n${request}\n</request-context>`,
+    );
     expect(messages).toEqual(original);
+    expect(result).toContainEqual(user(request));
   });
+
+  it.each(["", "The review is complete, but this response is partial."])(
+    "rejects a filtered summary without replacing history or retrying (%j)",
+    async (text) => {
+      const { generateText } = await import("ai");
+      const response: Pick<
+        Awaited<ReturnType<typeof generateText>>,
+        "finishReason" | "rawFinishReason" | "providerMetadata" | "text"
+      > = {
+        finishReason: "content-filter",
+        rawFinishReason: "refusal",
+        providerMetadata: { anthropic: { stopDetails: { type: "refusal", category: "test" } } },
+        text,
+      };
+      vi.mocked(generateText).mockResolvedValue(
+        response as Awaited<ReturnType<typeof generateText>>,
+      );
+      const messages = [user("Keep the task."), assistant("Work in progress.")];
+      const original = structuredClone(messages);
+
+      let failure: unknown;
+      try {
+        await compactMessages(
+          messages,
+          {} as Parameters<typeof compactMessages>[1],
+          { recentWindowSize: 1, threshold: ROOMY },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).cause).toMatchObject({
+        finishReason: "content-filter",
+        rawFinishReason: "refusal",
+        providerStopType: "refusal",
+        providerStopCategory: "test",
+        summaryAttempt: 1,
+        olderMessageCount: 1,
+        recentMessageCount: 1,
+      });
+      expect(generateText).toHaveBeenCalledOnce();
+      expect(messages).toEqual(original);
+    },
+  );
 });
 
 describe("compactMessages: summarization fallback", () => {

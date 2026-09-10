@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createCompactionSummaryError } from "#harness/compaction-summary-error.js";
 
 const base = {
+  empty: true,
   finishReason: "content-filter",
   rawFinishReason: "refusal",
   providerMetadata: undefined,
@@ -12,6 +13,12 @@ const base = {
 };
 
 describe("createCompactionSummaryError", () => {
+  it("does not describe a nonempty filtered summary as empty", () => {
+    expect(createCompactionSummaryError({ ...base, empty: false }).message).toBe(
+      "The compaction model returned a filtered summary. Finish reason: content-filter.",
+    );
+  });
+
   it("keeps the existing blank-summary message and records structural diagnostics", () => {
     const error = createCompactionSummaryError({
       ...base,

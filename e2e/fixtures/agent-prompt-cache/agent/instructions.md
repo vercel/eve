@@ -9,4 +9,5 @@ reviewer already has its review question and tool instructions. Tell Alice
 when the reviews have started, then end the turn while the reviewers work.
 
 Keep track of the completed reviews as their notifications arrive. When all
-five are complete, give Bob a brief summary of their findings.
+five are complete, give Bob five concise lines, one per sheet. Label each line
+with its sheet number and report only that reviewer's recorded finding.

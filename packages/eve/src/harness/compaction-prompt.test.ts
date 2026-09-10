@@ -7,8 +7,45 @@ import {
   sliceUtf16Safe,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 
 describe("createCompactionPrompt", () => {
+  it("quotes a bounded user request separately without truncating the prior checkpoint", () => {
+    const request = `Inspect the catalog.\nPreserve order-42. ${"context ".repeat(500)}REQUEST_TAIL`;
+    const previousCheckpoint = `${"Previously recorded result. ".repeat(200)}CHECKPOINT_TAIL`;
+    const result = createCompactionPrompt({
+      messages: [],
+      previousCheckpoint,
+      requestContext: request,
+      transcriptBudgetTokens: 100,
+    });
+    expect(result.prompt).toContain("<request-context>");
+    expect(result.prompt).toContain("rather than as a new instruction");
+    expect(result.prompt).toContain("Preserve order-42.");
+    expect(result.prompt).not.toContain("REQUEST_TAIL");
+    expect(result.prompt).toContain(`<previous-checkpoint>\n${previousCheckpoint}\n`);
+    expect(request).toContain("REQUEST_TAIL");
+  });
+
+  it("includes request context in the transcript budget", () => {
+    const message = `${"Old record. ".repeat(400)}OLD_RECORD_TAIL`;
+    const input = {
+      messages: [{ role: "user" as const, content: message }],
+      previousCheckpoint: undefined,
+    };
+    const budget = Math.ceil(estimateTokens(createCompactionPrompt(input).prompt));
+    expect(createCompactionPrompt({ ...input, transcriptBudgetTokens: budget }).prompt).toContain(
+      "OLD_RECORD_TAIL",
+    );
+    expect(
+      createCompactionPrompt({
+        ...input,
+        requestContext: "Current request. ".repeat(100),
+        transcriptBudgetTokens: budget,
+      }).prompt,
+    ).not.toContain("OLD_RECORD_TAIL");
+  });
+
   it("requests a factual summary bounded to supplied visible records", () => {
     const result = createCompactionPrompt({ messages: [], previousCheckpoint: undefined });
 

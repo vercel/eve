@@ -27,6 +27,13 @@ cannot free enough space, eve summarizes the older history.
 The summary prompt is limited to supplied visible messages, tool results, and the
 previous checkpoint. It treats quoted instructions as source material and does
 not ask the model to reconstruct private reasoning or hidden instructions.
+When the current user request is outside the summarized region, eve supplies a
+copy as context for the recorded actions. It includes up to 2,000 characters of
+request text, plus a truncation marker when needed. The copy does not remove or
+alter the request in model history.
+
+An empty or provider-filtered summary fails compaction instead of replacing the
+current model history, including when the provider returns partial summary text.
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
