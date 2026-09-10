@@ -5,8 +5,11 @@ import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
+import { getLocalDevCapability } from "#runtime/local-dev-capability.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import {
   defaultEveAuth,
+  type EveAudienceContext,
   type EveChannelCors,
   type EveChannelCorsOptions,
   type EveChannelInput,
@@ -126,6 +129,25 @@ interface OnMessageOutcome {
   readonly title?: string;
 }
 
+export async function resolveEveAudience(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly config: EveChannelInput;
+  readonly request: Request;
+}): Promise<ChannelAudience | Response> {
+  if (getLocalDevCapability()?.interactiveClient === true) return "private";
+  if (input.config.audience === undefined) return "unknown";
+
+  try {
+    return normalizeChannelAudience(await input.config.audience(createEveAudienceContext(input)));
+  } catch (error) {
+    const errorId = logError(log, "audience resolver failed", error);
+    return Response.json(
+      { error: "Audience resolver failed.", errorId, ok: false },
+      { status: 500 },
+    );
+  }
+}
+
 export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
   readonly config: EveChannelInput;
@@ -137,11 +159,7 @@ export async function resolveOnMessage(input: {
 
   let result: EveMessageResult;
   try {
-    const eve: EveHandle =
-      input.sessionId === undefined
-        ? { caller: input.auth, request: input.request }
-        : { caller: input.auth, request: input.request, sessionId: input.sessionId };
-    const ctx: EveMessageContext = { eve };
+    const ctx = createEveMessageContext(input);
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {
       throw new TypeError("eveChannel onMessage must return an auth result.");
@@ -161,4 +179,23 @@ export async function resolveOnMessage(input: {
 
 export function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
   return { auth: defaultEveAuth(ctx) };
+}
+
+function createEveAudienceContext(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly request: Request;
+}): EveAudienceContext {
+  return { caller: input.auth, request: input.request };
+}
+
+function createEveMessageContext(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly request: Request;
+  readonly sessionId?: string;
+}): EveMessageContext {
+  const eve: EveHandle =
+    input.sessionId === undefined
+      ? { caller: input.auth, request: input.request }
+      : { caller: input.auth, request: input.request, sessionId: input.sessionId };
+  return { eve };
 }

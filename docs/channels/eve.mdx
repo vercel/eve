@@ -157,6 +157,47 @@ Neither admits browser users or external clients in production. For a public app
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
+## Audience classification
+
+Use `audience` to set the value passed to `tracePolicy` for a new HTTP session.
+The value is observability metadata; it does not change HTTP authorization.
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+import { resolveTraceAudience } from "../lib/observability";
+
+export default eveChannel({
+  auth: [vercelOidc(), localDev()],
+  audience(ctx) {
+    return resolveTraceAudience(ctx.caller, ctx.request);
+  },
+});
+```
+
+`resolveTraceAudience` is application code. Return `public`, `private`, or
+`unknown` according to the audience classification your trace policy should
+use. A common mapping is `public` for an open or workspace-visible
+conversation, `private` for a conversation limited to specific people, and
+`unknown` when the application cannot establish either classification.
+
+The callback receives the verified `caller` and inbound `request`. eve does not
+add an audience field to `caller`; use a verified custom auth attribute or an
+application-owned lookup. Because the default trace policy may capture content
+for `public`, do not return it based on an unverified request header or body
+field.
+
+eve calls `audience` once, after authentication, when it creates a session.
+Follow-up messages keep the stored value. Omitting the callback or returning an
+unsupported value produces `unknown`; throwing rejects session creation with
+`500`.
+
+For the local `eve dev` TUI, eve sets the tracing audience to `private` and
+bypasses the callback. A remote TUI uses the configured callback like any other
+HTTP client. See
+[Observability](../guides/instrumentation#open-telemetry) for how audience
+controls trace capture.
+
 ## Customization
 
 Use `onMessage` to add request-specific context before the agent sees the user message, and `events` to observe stream events from sessions this channel created:

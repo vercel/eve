@@ -35,6 +35,7 @@ import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
 } from "#internal/nitro/routes/channel-dispatch.js";
+import { readRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 
 vi.mock("#internal/nitro/routes/runtime-stack.js", () => ({
@@ -873,6 +874,59 @@ describe("dispatchChannelRequest tracing", () => {
 
     const [span] = await finishedSpans();
     expect(span!.attributes["eve.channel.kind"]).toBe("channel:support");
+  });
+
+  it("projects a route-resolved audience onto new session metadata", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "session-1",
+    });
+    const routedRuntime = createRuntime({ createSession });
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(async () => new Response("unused"), {
+          adapter: {
+            kind: "http",
+            instrumentation: {
+              metadata: () => ({ audience: "unknown", workspaceId: "workspace-1" }),
+            },
+          },
+          handler: async (_request, args) => {
+            const create = readRouteSessionCreator(args);
+            if (create === undefined) throw new Error("Expected route session creator.");
+            await create({
+              auth: null,
+              channelAudience: "private",
+              input: { message: "hello" },
+              mode: "conversation",
+            });
+            return new Response("ok");
+          },
+        }),
+      ],
+      runtime: routedRuntime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ method: "POST", waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelMetadata: {
+          channelType: "http",
+          kind: "channel:slack",
+          metadata: {
+            audience: "private",
+            workspaceId: "workspace-1",
+          },
+        },
+      }),
+    );
   });
 
   it("makes a span created inside the handler a child of the request span", async () => {

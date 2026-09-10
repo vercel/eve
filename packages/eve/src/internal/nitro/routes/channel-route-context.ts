@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
 export interface HomeRouteMetadata {
@@ -11,7 +12,9 @@ export interface HomeRouteMetadata {
  * established here is visible to `resolveSession` on the same channel.
  */
 export type RouteSessionCreator = (
-  input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
+  input: Omit<RunInput, "adapter" | "channelName" | "requestId"> & {
+    readonly channelAudience?: ChannelAudience;
+  },
 ) => Promise<RunHandle>;
 
 export type RemoteAgentStreamHeadersResolver = (input: {

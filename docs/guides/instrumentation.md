@@ -60,7 +60,7 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
-Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Proactive Slack `receive` / `ctx.send` handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
+Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. The [eve HTTP channel](../channels/eve#audience-classification) uses its `audience(ctx)` resolver for new sessions and sets the tracing audience of a parent-attested local TUI to `private`. Proactive Slack `receive` / `ctx.send` handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
 
 ## Channel delivery traces
 
@@ -238,12 +238,12 @@ These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy
 
 ## Local traces
 
-Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
+Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. It emits trace metadata for every audience, but its capture ceiling includes model and tool content only for `public` sessions. Read traces two ways:
 
 - [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
 
-Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
+Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture content for `public` sessions. Private and unknown content remains excluded unless an authored trace policy explicitly admits it.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 

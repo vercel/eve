@@ -890,6 +890,85 @@ describe("eveChannel — onMessage", () => {
   });
 });
 
+describe("eveChannel — audience", () => {
+  it("classifies a new session after authentication", async () => {
+    const audience = vi.fn(async (ctx) => {
+      expect(ctx.caller).toEqual(ACCEPTED_AUTH);
+      expect(ctx.request.url).toBe("https://example.com/eve/v1/session");
+      return "private" as const;
+    });
+    const handler = createEveCreateHandler({
+      audience,
+      auth: () => ACCEPTED_AUTH,
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    expect(audience).toHaveBeenCalledOnce();
+    expect(handler.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ channelAudience: "private" }),
+    );
+  });
+
+  it("normalizes an unsupported audience to unknown", async () => {
+    const handler = createEveCreateHandler({
+      audience: (() => "workspace") as never,
+      auth: none(),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    expect(handler.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ channelAudience: "unknown" }),
+    );
+  });
+
+  it("rejects session creation when the audience resolver throws", async () => {
+    const handler = createEveCreateHandler({
+      audience: () => {
+        throw new Error("visibility lookup failed");
+      },
+      auth: none(),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Audience resolver failed.",
+      ok: false,
+    });
+    expect(handler.createSession).not.toHaveBeenCalled();
+  });
+
+  it("does not reclassify follow-up messages", async () => {
+    const audience = vi.fn(() => "public" as const);
+    const handler = createEveContinueHandler({ audience, auth: none() });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
+
+    expect(response.status).toBe(202);
+    expect(audience).not.toHaveBeenCalled();
+  });
+
+  it("does not reclassify an existing idempotent session", async () => {
+    const audience = vi.fn(() => "public" as const);
+    const handler = createEveCreateHandler(
+      { audience, auth: () => ACCEPTED_AUTH },
+      { activeSessionId: "child-1" },
+    );
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(audience).not.toHaveBeenCalled();
+  });
+});
+
 describe("eveChannel — create session idempotency", () => {
   it("creates once for an operation id and uses it as the continuation token", async () => {
     const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH });
@@ -2221,6 +2300,27 @@ describe("eveChannel — forwarded principal", () => {
     expect(onMessage).toHaveBeenCalledTimes(1);
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth?.principalId).toBe(FORWARDED_CURRENT.principalId);
+  });
+
+  it("exposes the stamped forwarded principal to the audience resolver", async () => {
+    const audience = vi.fn((ctx: Parameters<NonNullable<EveChannelInput["audience"]>>[0]) => {
+      expect(ctx.caller?.principalId).toBe(FORWARDED_CURRENT.principalId);
+      expect(ctx.caller?.attributes["eve:forwarded-by"]).toBe(ROUTER_CALLER.principalId);
+      return "private" as const;
+    });
+    const handler = createEveCreateHandler({
+      audience,
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    expect(response.status).toBe(202);
+    expect(audience).toHaveBeenCalledOnce();
+    expect(handler.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ channelAudience: "private" }),
+    );
   });
 
   it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
