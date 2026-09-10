@@ -1,3 +1,4 @@
+import { SessionHistoryUnavailableError } from "#channel/session-history.js";
 import { randomBytes } from "node:crypto";
 
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
@@ -300,6 +301,15 @@ export function createWorkflowRuntime(config: {
       const readable = getRun(sessionId).getReadable();
       try {
         return await readable.getTailIndex();
+      } catch (error) {
+        if (
+          [...walkCauseChain(error)].some(
+            (cause) => WorkflowRunNotFoundError.is(cause) || RunExpiredError.is(cause),
+          )
+        ) {
+          throw new SessionHistoryUnavailableError(sessionId);
+        }
+        throw error;
       } finally {
         await readable.cancel().catch(() => {});
       }

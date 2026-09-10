@@ -1,3 +1,4 @@
+import { SessionHistoryUnavailableError } from "#channel/session-history.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { context as apiContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -1175,4 +1176,22 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(serialized["eve.otelTraceEnabled"]).toBe(false);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
   });
+});
+
+it("distinguishes retired session history from transient read failures", async () => {
+  const { WorkflowRunNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+  const getTailIndex = vi
+    .fn()
+    .mockRejectedValueOnce(new WorkflowRunNotFoundError("lost-session"))
+    .mockRejectedValueOnce(new Error("temporary outage"));
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  getRunMock.mockReturnValue({ getReadable: () => ({ getTailIndex, cancel }) });
+  const runtime = createWorkflowRuntime({
+    compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+  });
+  await expect(runtime.getStreamTailIndex("lost-session")).rejects.toBeInstanceOf(
+    SessionHistoryUnavailableError,
+  );
+  await expect(runtime.getStreamTailIndex("live-session")).rejects.toThrow("temporary outage");
+  expect(cancel).toHaveBeenCalledTimes(2);
 });

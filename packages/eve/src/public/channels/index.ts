@@ -1,3 +1,4 @@
+export { SessionHistoryUnavailableError } from "#channel/session-history.js";
 export { getSessionOperationDeliveryId } from "#channel/delivery-metadata.js";
 export {
   defineChannel,

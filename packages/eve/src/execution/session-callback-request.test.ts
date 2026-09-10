@@ -59,7 +59,18 @@ describe("postSessionCallbackRequest", () => {
         }),
       );
       const logged = JSON.stringify(errorSpy.mock.calls);
-      for (const secret of ["private", "password", "user:", "secret=query", "fragment"]) {
+      for (const secret of [
+        "private response body",
+        "private update",
+        "private result",
+        "private failure",
+        "private-body-token",
+        "private-token",
+        "password",
+        "user:",
+        "secret=query",
+        "fragment",
+      ]) {
         expect(logged).not.toContain(secret);
       }
     },

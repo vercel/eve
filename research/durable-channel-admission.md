@@ -35,3 +35,6 @@ other event handlers retain their existing behavior.
 `getSessionOperationDeliveryId({ sessionId, operationId, auth })` exposes correlation before
 sending so a lost response followed by session retirement can still be reconciled. The
 application owns the inbox store and maintenance; eve does not supply an application queue.
+
+`SessionHistoryUnavailableError` distinguishes provider-reported missing/expired history from
+transient stream-tail read failures, so maintenance can surface permanently unresolved admissions.

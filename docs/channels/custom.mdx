@@ -451,3 +451,9 @@ The framework handles staging bytes to the sandbox, enforcing upload policy, hyd
 - [Auth & route protection](../guides/auth-and-route-protection)
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
 - [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel
+
+`Session.getStreamTailIndex()` throws `SessionHistoryUnavailableError` (from `eve/channels`)
+when the provider reports the exact run missing or expired. Keep that admission unresolved and
+surface its reference; do not create a replacement to replay it. Transient provider read failures
+remain retryable errors. An admitted operation can also be safely retried with the same exact
+session, principal and `operationId` to detect `session_not_active` without executing another turn.

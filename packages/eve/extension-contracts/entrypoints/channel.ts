@@ -5,6 +5,7 @@ export {
   OPTIONS,
   PATCH,
   POST,
+  SessionHistoryUnavailableError,
   PUT,
   WS,
   createWebSocketUpgradeServer,

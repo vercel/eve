@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "channel",
   "epoch": 20,
-  "sha256": "4dd310ef5ae69a81f80326508d4a4ccffeae6254713b2b5fc9d3e0ea550a2d6a",
+  "sha256": "8bc482f793ab409f67a46e2e1740faa30b510ed4789a6683d05ec490dd483b10",
   "exports": [
     "DELETE",
     "GET",
@@ -11,6 +11,7 @@
     "PATCH",
     "POST",
     "PUT",
+    "SessionHistoryUnavailableError",
     "WS",
     "createWebSocketUpgradeServer",
     "defineChannel",
