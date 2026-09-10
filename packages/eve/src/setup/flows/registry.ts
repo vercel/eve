@@ -56,6 +56,7 @@ const SECTIONS = {
       "channel/github",
       "channel/linear",
       "channel/photon-imessage",
+      "channel/teams",
     ],
     includes: (item: Item) => item.name.startsWith("channel/"),
   },
