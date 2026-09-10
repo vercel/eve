@@ -6,6 +6,7 @@ import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contr
 import {
   resolveSessionInboxWireTarget,
   resumeSessionInbox,
+  sessionDriverSupportsWorkflowTaskAuthorization,
 } from "#execution/wire/session-inbox-resume.js";
 
 const getHookByTokenMock = vi.fn();
@@ -22,6 +23,18 @@ afterEach(() => {
   getHookByTokenMock.mockReset();
   getRawHookByTokenMock.mockReset();
   resumeHookMock.mockReset();
+});
+
+describe("workflow task authorization support", () => {
+  it("reads the capability from lazy hook metadata", async () => {
+    getHookByTokenMock.mockResolvedValue(
+      sessionHook("session-1", sessionCommandHookToken("session-1"), {
+        workflowTaskAuthorization: true,
+      }),
+    );
+
+    await expect(sessionDriverSupportsWorkflowTaskAuthorization("session-1")).resolves.toBe(true);
+  });
 });
 
 describe("session inbox target resolution", () => {
@@ -280,5 +293,5 @@ describe("resumeSessionInbox", () => {
 });
 
 function sessionHook(runId: string, token: string, metadata?: unknown) {
-  return { metadata, runId, token } as never;
+  return { metadata: Promise.resolve(metadata), runId, token } as never;
 }

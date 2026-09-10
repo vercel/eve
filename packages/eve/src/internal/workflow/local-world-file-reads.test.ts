@@ -16,7 +16,7 @@ beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const url = new URL("./fs.js", pathToFileURL(require.resolve("@workflow/world-local")));
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
-  // Exercise the installed patch's Windows path on every CI operating system.
+  // Exercise the installed package's Windows path on every CI operating system.
   Object.defineProperty(process, "platform", { ...platform, value: "win32" });
   try {
     reader = await import(/* @vite-ignore */ url.href);
