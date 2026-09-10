@@ -23,7 +23,10 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
-import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
+import {
+  isReservedSessionCommandToken,
+  sessionCommandHookToken,
+} from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface BaseChannelAddressDeliveryOptions {
@@ -90,27 +93,32 @@ export function createChannelAddress<TState = undefined>(input: {
         throw new Error("open() requires conversation mode.");
       }
       const existing = await this.resolveSession();
-      if (existing !== undefined) return existing;
-      const adapter = adapterWithState(
-        input.adapter,
-        (options as { readonly state?: TState }).state,
-      );
-      await input.runtime.createSession({
-        adapter,
-        auth: options.auth,
-        capabilities: { requestInput: true },
-        channelName: input.channelName,
-        continuationToken: namespacedToken,
-        initiatorAuth: options.initiatorAuth,
-        input: { message: "" },
-        mode: "conversation",
-        startPaused: true,
-        requestId: metadata.requestId,
-        title: options.title,
-      });
+      if (existing === undefined) {
+        const adapter = adapterWithState(
+          input.adapter,
+          (options as { readonly state?: TState }).state,
+        );
+        await input.runtime.createSession({
+          adapter,
+          auth: options.auth,
+          capabilities: { requestInput: true },
+          channelName: input.channelName,
+          continuationToken: namespacedToken,
+          initiatorAuth: options.initiatorAuth,
+          input: { message: "" },
+          mode: "conversation",
+          startPaused: true,
+          requestId: metadata.requestId,
+          title: options.title,
+        });
+      }
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const owner = await this.resolveSession();
-        if (owner !== undefined) return owner;
+        const owner =
+          attempt === 0 && existing !== undefined ? existing : await this.resolveSession();
+        if (owner !== undefined) {
+          const inbox = await input.runtime.resolveContinuation(sessionCommandHookToken(owner.id));
+          if (inbox?.sessionId === owner.id) return owner;
+        }
         await setTimeout(100);
       }
       throw new Error(

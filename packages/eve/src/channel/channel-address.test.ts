@@ -34,7 +34,8 @@ describe("createChannelAddress", () => {
     const runtime = createRuntime();
     vi.mocked(runtime.resolveContinuation)
       .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({ sessionId: "canonical" });
+      .mockResolvedValueOnce({ sessionId: "canonical" })
+      .mockResolvedValue({ sessionId: "canonical" });
     const address = createChannelAddress({
       adapter: { kind: "slack" },
       channelName: "slack",
@@ -238,3 +239,43 @@ describe("createChannelAddress", () => {
     });
   });
 });
+
+it.each([false, true])(
+  "waits for the exact owner's send inbox when the alias already exists: %s",
+  async (exists) => {
+    const runtime = createRuntime();
+    let aliasCalls = 0;
+    let stableCalls = 0;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(runtime.resolveContinuation).mockImplementation(async (token) => {
+      if (token === "eve:session:canonical:inbox") {
+        stableCalls += 1;
+        if (stableCalls === 1) return undefined;
+        await ready;
+        return { sessionId: "canonical" };
+      }
+      aliasCalls += 1;
+      return !exists && aliasCalls === 1 ? undefined : { sessionId: "canonical" };
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C:T",
+      runtime,
+    });
+    let returned = false;
+    const pending = address.open({ auth: null }).then((session) => {
+      returned = true;
+      return session;
+    });
+    await vi.waitFor(() => expect(stableCalls).toBe(2));
+    expect(returned).toBe(false);
+    release();
+    expect((await pending).id).toBe("canonical");
+    expect(runtime.createSession).toHaveBeenCalledTimes(exists ? 0 : 1);
+    expect(runtime.dispatchSession).not.toHaveBeenCalled();
+  },
+);
