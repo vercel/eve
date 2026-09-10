@@ -37,7 +37,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_KIND = "vercel-eve-agent-summary" as const
  * making semantic changes consumers must opt into. Adding optional fields
  * does not require a version bump.
  */
-export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 5;
+export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 6;
 
 /**
  * Output path (relative to the agent's `appRoot`) where eve writes the
@@ -69,8 +69,17 @@ interface VercelEveAgentEntryBase {
 
 export type VercelEveAgentEntry = VercelEveAgentEntryBase &
   (
-    | { readonly modelId: string; readonly modelRouting?: never }
-    | { readonly modelId?: never; readonly modelRouting: { readonly kind: "dynamic" } }
+    | {
+        readonly harnessId: string;
+        readonly modelId?: never;
+        readonly modelRouting?: never;
+      }
+    | { readonly harnessId?: never; readonly modelId: string; readonly modelRouting?: never }
+    | {
+        readonly harnessId?: never;
+        readonly modelId?: never;
+        readonly modelRouting: { readonly kind: "dynamic" };
+      }
   );
 
 /**

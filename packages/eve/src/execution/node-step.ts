@@ -111,6 +111,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
+    harness: input.node.turnAgent.harness,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,

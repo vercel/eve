@@ -7,9 +7,10 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
 
 describe("buildAgentInfoResponse", () => {
-  it("projects v4 exclusively from the effective compiled graph", async () => {
+  it("projects v5 exclusively from the effective compiled graph", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",
@@ -36,7 +37,7 @@ describe("buildAgentInfoResponse", () => {
       },
       capabilities: { devRoutes: true },
       kind: "eve-agent-info",
-      version: 4,
+      version: 5,
     });
     expect(response.tools.static).toContainEqual(
       expect.objectContaining({
@@ -62,6 +63,40 @@ describe("buildAgentInfoResponse", () => {
         winnerSourceId: "memory:info-agent:agent.ts",
       }),
     );
+  });
+
+  it("reports harness metadata separately from model metadata", async () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      async doStart() {
+        throw new Error("Not implemented in this test.");
+      },
+    } as HarnessV1;
+    const { manifest } = await compileFromMemory({
+      agent: { harness },
+      model: "unused",
+      name: "harness-agent",
+    });
+
+    const response = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "development",
+      },
+    );
+
+    expect(response.agent).toMatchObject({
+      harness: {
+        id: "test-harness",
+        source: { logicalPath: "agent.ts", sourceKind: "module" },
+      },
+      name: "harness-agent",
+    });
+    expect(response.agent.model).toBeUndefined();
+    expect(() => AgentInfoResultSchema.parse(response)).not.toThrow();
   });
 
   it("reports selected memory and provider-tool wrapper provenance", async () => {
@@ -246,7 +281,7 @@ describe("buildAgentInfoResponse", () => {
     expect(serialized).not.toContain("sk-canary-direct");
     expect(serialized).not.toContain("canary-header");
     // Non-secret options survive for the dev TUI (`gateway.serviceTier`).
-    expect(response.agent.model.providerOptions).toEqual({
+    expect(response.agent.model?.providerOptions).toEqual({
       gateway: { serviceTier: "priority" },
       openai: {
         apiKey: "[redacted]",

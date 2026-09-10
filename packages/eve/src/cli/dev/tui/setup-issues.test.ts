@@ -17,13 +17,14 @@ function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionCo
 }
 
 type AgentInfo = NonNullable<BootDetectionContext["info"]>;
+type AgentModel = NonNullable<AgentInfo["agent"]["model"]>;
 
 /** A minimal but fully-typed `/eve/v1/info` payload carrying a routing decision. */
 function infoWithRouting(
-  routing: AgentInfo["agent"]["model"]["routing"],
-  endpoint?: AgentInfo["agent"]["model"]["endpoint"],
+  routing: AgentModel["routing"],
+  endpoint?: AgentModel["endpoint"],
 ): AgentInfo {
-  const model: AgentInfo["agent"]["model"] =
+  const model: AgentModel =
     routing.kind === "dynamic"
       ? { routing }
       : endpoint === undefined
@@ -35,6 +36,23 @@ function infoWithRouting(
 }
 
 describe("BOOT_DETECTIONS", () => {
+  it("skips model-provider setup for harness-backed agents", async () => {
+    const info = createTestAgentInfoResult();
+    const harnessInfo: AgentInfo = {
+      ...info,
+      agent: {
+        ...info.agent,
+        harness: {
+          id: "test-harness",
+          source: info.agent.config,
+        },
+        model: undefined,
+      },
+    };
+
+    await expect(detectSetupIssues(context({ info: harnessInfo }))).resolves.toEqual([]);
+  });
+
   it("keeps an unavailable runtime diagnostic-only", async () => {
     const issues = await detectSetupIssues(context());
     expect(issues).toEqual([

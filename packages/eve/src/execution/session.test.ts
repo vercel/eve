@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { HarnessV1 } from "@ai-sdk/harness";
 
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import {
@@ -12,6 +13,7 @@ import {
 } from "#execution/session.js";
 
 type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+type HarnessRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly harness: unknown }>;
 
 function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
@@ -37,6 +39,16 @@ function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): Runti
     ],
     workspaceSpec: { rootEntries: [] },
     ...overrides,
+  };
+}
+
+function createHarnessTurnAgent(harness: HarnessV1): HarnessRuntimeTurnAgent {
+  return {
+    harness,
+    id: "test-agent",
+    instructions: ["You are a helpful assistant."],
+    tools: [],
+    workspaceSpec: { rootEntries: [] },
   };
 }
 
@@ -76,6 +88,34 @@ describe("createCompactionConfig", () => {
 });
 
 describe("createSession", () => {
+  it("keeps only harness identity in durable session state", () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      async doStart() {
+        throw new Error("Not implemented in this test.");
+      },
+    } as HarnessV1;
+    const turnAgent = createHarnessTurnAgent(harness);
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent,
+    });
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({ durable, turnAgent });
+
+    expect(session.agent).toMatchObject({ harnessId: "test-harness" });
+    expect(session.agent).not.toHaveProperty("harness");
+    expect(durable.agent).toEqual({
+      harnessId: "test-harness",
+      system: "You are a helpful assistant.",
+    });
+    expect(JSON.stringify(durable)).not.toContain("doStart");
+    expect(hydrated.agent).toMatchObject({ harnessId: "test-harness" });
+  });
+
   it("creates a session with correct agent configuration", () => {
     const outputSchema = { properties: { title: { type: "string" } }, type: "object" } as const;
     const session = createSession({

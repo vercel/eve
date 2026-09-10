@@ -15,7 +15,11 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
-import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
+import type {
+  PublicAgentModelDefinition,
+  PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
 import {
   isDynamicSentinel,
   type DynamicEvents,
@@ -52,6 +56,7 @@ export function normalizeAgentDefinition(
       "defaultTools",
       "description",
       "experimental",
+      "harness",
       "limits",
       "model",
       "modelContextWindowTokens",
@@ -61,20 +66,35 @@ export function normalizeAgentDefinition(
     ],
     message,
   );
-  if (record.model === undefined) {
-    throw new Error(`${message} The "model" field is required.`);
+  if (record.model === undefined && record.harness === undefined) {
+    throw new Error(`${message} Either the "model" or "harness" field is required.`);
+  }
+  if (record.model !== undefined && record.harness !== undefined) {
+    throw new Error(`${message} The "model" and "harness" fields are mutually exclusive.`);
   }
 
-  const definition: Mutable<NormalizedAgentDefinition> = {
-    model: normalizeAgentModelDefinition(record.model, message),
-  };
+  const definition = (
+    record.harness === undefined
+      ? { model: normalizeAgentModelDefinition(record.model, message) }
+      : { harness: normalizeAgentHarnessDefinition({ message, value: record.harness }) }
+  ) as Mutable<NormalizedAgentDefinition>;
 
   if (
+    definition.model !== undefined &&
     isDynamicSentinel(definition.model) &&
     (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
   ) {
     throw new Error(
       `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+    );
+  }
+
+  if (
+    definition.harness !== undefined &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
+    throw new Error(
+      `${message} Harness definitions do not support "modelContextWindowTokens" or "modelOptions" fields.`,
     );
   }
 
@@ -147,9 +167,9 @@ function normalizeAgentReasoningDefinition(
 function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
-): NormalizedAgentDefinition["model"] {
+): PublicAgentModelDefinition {
   if (!isDynamicSentinel(value)) {
-    return value as NormalizedAgentDefinition["model"];
+    return value as PublicAgentModelDefinition;
   }
 
   const record = expectObjectRecord(value, message);
@@ -166,7 +186,27 @@ function normalizeAgentModelDefinition(
   return {
     events,
     kind: record.kind,
-  } as NormalizedAgentDefinition["model"];
+  } as PublicAgentModelDefinition;
+}
+
+function normalizeAgentHarnessDefinition(input: {
+  readonly message: string;
+  readonly value: unknown;
+}): HarnessV1 {
+  const harness = expectObjectRecord(input.value, input.message);
+
+  if (
+    harness.specificationVersion !== "harness-v1" ||
+    typeof harness.harnessId !== "string" ||
+    typeof harness.builtinTools !== "object" ||
+    harness.builtinTools === null ||
+    Array.isArray(harness.builtinTools) ||
+    typeof harness.doStart !== "function"
+  ) {
+    throw new Error(input.message);
+  }
+
+  return input.value as HarnessV1;
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

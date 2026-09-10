@@ -35,6 +35,7 @@ export interface BootDetection {
 }
 
 type ModelProviderAccess =
+  | { kind: "harness" }
   | { kind: "unknown" }
   | { kind: "external" }
   | {
@@ -62,6 +63,7 @@ export function normalizeLocalModelEndpoint(
   const { credential } = access.runtime;
 
   const model = info.agent.model;
+  if (model === undefined) return info;
   if (model.id === undefined || model.routing.kind !== "gateway") return info;
   const endpoint = model.endpoint;
   if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
@@ -94,6 +96,7 @@ export function normalizeLocalModelEndpoint(
 function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
+  if (context.info?.agent.harness !== undefined) return { kind: "harness" };
   const model = context.info?.agent.model;
   if (model?.routing?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
@@ -138,6 +141,7 @@ const modelProvider: BootDetection = {
   async detect({ appRoot, env, info }) {
     const access = modelProviderAccess({ env, info });
 
+    if (access.kind === "harness") return [];
     if (access.kind === "external") return [];
     if (access.kind === "gateway") {
       if (access.runtime.status === "connected") return [];

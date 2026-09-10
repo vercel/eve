@@ -1,4 +1,5 @@
 import { ToolLoopAgent } from "ai";
+import type { HarnessV1 } from "@ai-sdk/harness";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -316,6 +317,46 @@ describe("createNodeHarnessTools", () => {
 });
 
 describe("createExecutionNodeStep", () => {
+  it("passes a live harness to the tool-loop boundary without constructing ToolLoopAgent", async () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      doStart: vi.fn(async () => {
+        throw new Error("Not implemented in this test.");
+      }),
+    } as HarnessV1;
+    const turnAgent: RuntimeTurnAgent = {
+      harness,
+      id: "test-agent",
+      instructions: ["You are a test agent."],
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    };
+    const node = createTestNode(turnAgent);
+    const step = createExecutionNodeStep({
+      createRuntime: () => createNoopRuntime(),
+      instrumentation: undefined,
+      mode: "task",
+      modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
+      node,
+    });
+
+    await expect(
+      step(
+        createSession({
+          continuationToken: "test-root",
+          sessionId: "sess-root",
+          turnAgent,
+        }),
+        { message: "Hello" },
+      ),
+    ).rejects.toThrow("Harness-backed agent execution is not implemented.");
+    expect(harness.doStart).not.toHaveBeenCalled();
+    expect(resolveRuntimeModelReference).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
   it("builds a usable harness step for the root node", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
     const forceFlush = vi.fn(async () => undefined);

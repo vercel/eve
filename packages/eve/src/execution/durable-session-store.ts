@@ -66,9 +66,10 @@ export interface DurableSessionState {
  * `agent.compactionModelReference`, and the `compaction` thresholds —
  * those are rebuilt every turn from `bundle.turnAgent` by
  * {@link import("#execution/session.js").hydrateDurableSession}.
- * `agent.system` is the last applied prompt snapshot. Before each model step,
- * the execution layer replaces it from the current deployment's
- * `bundle.turnAgent`.
+ * Harness-backed sessions retain only `agent.harnessId`; the live harness
+ * instance is reloaded with the runtime bundle. `agent.system` is the last
+ * applied prompt snapshot. Before each model step, the execution layer
+ * replaces it from the current deployment's `bundle.turnAgent`.
  */
 export interface DurableSession {
   readonly sessionId: string;
@@ -88,6 +89,7 @@ export interface DurableSession {
   readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
   readonly agent: {
+    readonly harnessId?: string;
     readonly system: string;
   };
   readonly compaction?: {

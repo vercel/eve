@@ -132,6 +132,9 @@ function createSessionAgent(
   if (turnAgent.model !== undefined) {
     return { ...base, modelReference: turnAgent.model };
   }
+  if (turnAgent.harness !== undefined) {
+    return { ...base, harnessId: turnAgent.harness.harnessId };
+  }
   if (turnAgent.dynamicModel !== undefined) {
     return { ...base, dynamicModel: true };
   }
@@ -200,7 +203,7 @@ export function mintSubagentContinuationToken(suffix?: string): string {
  */
 export function projectToDurableSession(session: HarnessSession): DurableSession {
   const durable: {
-    agent: { system: string };
+    agent: { harnessId?: string; system: string };
     compaction?: {
       lastKnownInputTokens?: number;
       lastKnownPromptMessageCount?: number;
@@ -216,7 +219,10 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     taskId?: string;
     workflowMaxSubagents?: number;
   } = {
-    agent: { system: session.agent.system },
+    agent:
+      session.agent.harnessId === undefined
+        ? { system: session.agent.system }
+        : { harnessId: session.agent.harnessId, system: session.agent.system },
     continuationToken: session.continuationToken,
     history: session.history,
     sessionId: session.sessionId,

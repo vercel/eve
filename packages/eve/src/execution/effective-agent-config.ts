@@ -37,6 +37,7 @@ export function resolveEffectiveAgentRuntimeFromConfig(
     compactionModel: _compiledCompactionModel,
     configResolver: _configResolver,
     dynamicModel: _dynamicModel,
+    harness: _compiledHarness,
     model: _compiledModel,
     ...turnAgent
   } = bundle.turnAgent;

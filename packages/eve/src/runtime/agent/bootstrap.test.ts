@@ -34,7 +34,7 @@ function createFrameworkAgentTool(): PreparedRuntimeTool {
 
 function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
   const agent: Partial<ResolvedAgent> = {
-    config: { name: "test-agent" } as ResolvedAgent["config"],
+    config: { model: { id: "test-model" }, name: "test-agent" },
     connections: [],
     instructions: [],
     skills: [],
@@ -112,9 +112,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
 
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
+      agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [
         {
@@ -134,9 +132,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
 
   it("omits the messaging instruction when no agent tool was compiled", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
+      agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [],
     });
@@ -146,9 +142,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
 
   it("omits the messaging instruction for a non-root node without declared subagents", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
+      agent: createResolvedAgentForTest(),
       nodeId: "subagents/researcher",
       tools: [],
     });

@@ -6,10 +6,61 @@ import {
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
+const TEST_HARNESS = {
+  builtinTools: {},
+  harnessId: "test-harness",
+  specificationVersion: "harness-v1",
+  async doStart() {
+    throw new Error("Not implemented in this test.");
+  },
+} as HarnessV1;
 
 describe("normalizeAgentDefinition", () => {
+  it("accepts a HarnessV1 instance and preserves its identity", () => {
+    const definition = normalizeAgentDefinition({ harness: TEST_HARNESS }, FAILURE_MESSAGE);
+
+    expect(definition.harness).toBe(TEST_HARNESS);
+  });
+
+  it("requires exactly one model or harness", () => {
+    expect(() => normalizeAgentDefinition({}, FAILURE_MESSAGE)).toThrow(
+      'Either the "model" or "harness" field is required',
+    );
+    expect(() =>
+      normalizeAgentDefinition({ harness: TEST_HARNESS, model: "openai/gpt-5.5" }, FAILURE_MESSAGE),
+    ).toThrow('The "model" and "harness" fields are mutually exclusive');
+  });
+
+  it("rejects model options and harness options for harness definitions", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { harness: TEST_HARNESS, modelOptions: { providerOptions: {} } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/Harness definitions do not support.*modelOptions/);
+    expect(() =>
+      normalizeAgentDefinition({ harness: TEST_HARNESS, harnessOptions: {} }, FAILURE_MESSAGE),
+    ).toThrow('Unknown key "harnessOptions"');
+  });
+
+  it("rejects values that do not implement HarnessV1", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          harness: {
+            builtinTools: {},
+            harnessId: "test-harness",
+            specificationVersion: "harness-v1",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

@@ -329,6 +329,7 @@ function collectReferencedModuleSources(
   };
   if ("config" in node) {
     add(node.config.source);
+    if (node.config.harness !== undefined) add(node.config.harness.source);
     if (node.config.model?.source !== undefined) add(node.config.model.source);
     if (node.config.dynamicModel !== undefined) add(node.config.dynamicModel);
   }

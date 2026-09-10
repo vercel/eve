@@ -1290,7 +1290,7 @@ export class EveTUIRunner {
         await runtimeArtifacts.refreshIdle({
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
         });
-        const endpoint = this.#agentInfo?.agent.model.endpoint;
+        const endpoint = this.#agentInfo?.agent.model?.endpoint;
         const shouldRefreshChatGptAuth =
           endpoint?.kind === "chatgpt" &&
           (endpoint.state === "signed-out" || endpoint.state === "reauth-required");
@@ -1706,7 +1706,7 @@ export class EveTUIRunner {
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
-    const endpoint = this.#agentInfo?.agent.model.endpoint;
+    const endpoint = this.#agentInfo?.agent.model?.endpoint;
     const baseContext: PromptCommandHandlerContext = {
       ...input,
       renderer: this.#renderer,
@@ -2111,8 +2111,8 @@ function formatAgentUpdateNotice(
   previousInfo: AgentInfoResult | undefined,
   nextInfo: AgentInfoResult | undefined,
 ): string {
-  const previousModel = previousInfo?.agent.model.id;
-  const nextModel = nextInfo?.agent.model.id;
+  const previousModel = previousInfo?.agent.model?.id;
+  const nextModel = nextInfo?.agent.model?.id;
 
   if (previousModel !== undefined && nextModel !== undefined && previousModel !== nextModel) {
     return `Agent updated: Model ${previousModel} -> ${nextModel}`;

@@ -404,6 +404,9 @@ function updateSessionModelReference(
   session: HarnessSession,
   modelReference: RuntimeModelReference,
 ): HarnessSession {
+  if (session.agent.harnessId !== undefined) {
+    throw new Error("Cannot apply a dynamic model selection to a harness-backed session.");
+  }
   return {
     ...session,
     agent: {
@@ -579,6 +582,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         turnId: `turn_${emissionState.sequence}`,
       });
     };
+
+    if (config.harness !== undefined) {
+      void config.harness;
+      throw new Error("Harness-backed agent execution is not implemented.");
+    }
 
     if (config.clearOnly === true) {
       session = {

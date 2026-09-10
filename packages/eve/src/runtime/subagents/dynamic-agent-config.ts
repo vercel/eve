@@ -46,7 +46,14 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (definition.experimental !== undefined) {
     throw new Error(`${message} The "experimental" field cannot be selected at runtime.`);
   }
-  if (isDynamicModelDefinition(definition.model)) {
+  if (definition.harness !== undefined) {
+    throw new Error(`${message} Dynamic subagent definitions do not support the "harness" field.`);
+  }
+  const model = definition.model;
+  if (model === undefined) {
+    throw new Error(`${message} The returned "model" is required.`);
+  }
+  if (isDynamicModelDefinition(model)) {
     throw new Error(`${message} The returned "model" must be static.`);
   }
 
@@ -62,7 +69,7 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     model: await normalizeDurableModelSelection({
       catalog: input.catalog,
       selection: {
-        model: definition.model,
+        model,
         modelContextWindowTokens: definition.modelContextWindowTokens,
         modelOptions: definition.modelOptions,
       },

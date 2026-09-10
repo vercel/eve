@@ -10,6 +10,7 @@ import {
   VERCEL_EVE_AGENT_SUMMARY_KIND,
   VERCEL_EVE_AGENT_SUMMARY_VERSION,
 } from "#internal/vercel-agent-summary.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
 
 const GENERATOR_VERSION = "0.0.0-test";
 
@@ -88,6 +89,28 @@ describe("buildVercelAgentSummary", () => {
     const summary = buildVercelAgentSummary({ manifest });
 
     expect(summary.generatorVersion.length).toBeGreaterThan(0);
+  });
+
+  it("reports a harness id without model metadata", async () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      async doStart() {
+        throw new Error("Not implemented in this test.");
+      },
+    } as HarnessV1;
+    const { manifest } = await compileFromMemory({
+      agent: { harness },
+      model: "unused",
+      name: "harness-agent",
+    });
+
+    const summary = buildVercelAgentSummary({ manifest });
+
+    expect(summary.agent).toEqual({ harnessId: "test-harness", name: "harness-agent" });
+    expect(summary.agent).not.toHaveProperty("modelId");
+    expect(summary.agent).not.toHaveProperty("modelRouting");
   });
 });
 

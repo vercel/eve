@@ -118,6 +118,13 @@ const agentModel = z.union([
     .strict(),
 ]);
 
+const agentHarness = z
+  .object({
+    id: z.string(),
+    source,
+  })
+  .strict();
+
 const tool = entry
   .extend({
     description: z.string(),
@@ -278,21 +285,36 @@ const workflow = z.discriminatedUnion("enabled", [
   z.object({ enabled: z.literal(true), source, toolName: z.string() }).strict(),
 ]);
 
-/** Runtime contract for the authoritative `/eve/v1/info` v4 response. */
+const agentBaseFields = {
+  agentRoot: z.string(),
+  appRoot: z.string(),
+  config: source.extend({ binding }).strict(),
+  description: z.string().optional(),
+  name: z.string(),
+  nodeId: z.string(),
+  outputSchema: z.unknown().optional(),
+};
+
+const agent = z
+  .object({
+    ...agentBaseFields,
+    harness: agentHarness.optional(),
+    model: agentModel.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.harness === undefined) === (value.model === undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: 'Expected exactly one of "harness" or "model".',
+      });
+    }
+  });
+
+/** Runtime contract for the authoritative `/eve/v1/info` v5 response. */
 export const AgentInfoResultSchema = z
   .object({
-    agent: z
-      .object({
-        agentRoot: z.string(),
-        appRoot: z.string(),
-        config: source.extend({ binding }).strict(),
-        description: z.string().optional(),
-        model: agentModel,
-        name: z.string(),
-        nodeId: z.string(),
-        outputSchema: z.unknown().optional(),
-      })
-      .strict(),
+    agent,
     capabilities: z.object({ devRoutes: z.boolean() }).strict(),
     channels: z
       .object({ routes: z.array(channelRoute), shadowed: z.array(shadowedChannelRoute) })
@@ -320,7 +342,7 @@ export const AgentInfoResultSchema = z
     skills: z.object({ dynamic: z.array(dynamicResolver), static: z.array(skill) }).strict(),
     subagents: z.object({ local: z.array(subagent), total: z.number() }).strict(),
     tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }).strict(),
-    version: z.literal(4),
+    version: z.literal(5),
     workflow,
     workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }).strict(),
   })
@@ -382,14 +404,20 @@ export const AgentInfoResultSchema = z
       readonly [ParsedAgentInfoSource, readonly (string | number)[]]
     > = [
       [value.agent.config, ["agent", "config"]],
-      ...(value.agent.model.source === undefined
-        ? []
-        : ([[value.agent.model.source, ["agent", "model", "source"]]] as const)),
-      ...(value.agent.model.routing.kind === "dynamic"
-        ? ([
-            [value.agent.model.routing.resolver, ["agent", "model", "routing", "resolver"]],
-          ] as const)
-        : []),
+      ...(value.agent.harness !== undefined
+        ? ([[value.agent.harness.source, ["agent", "harness", "source"]]] as const)
+        : value.agent.model === undefined
+          ? []
+          : [
+              ...(value.agent.model.source === undefined
+                ? []
+                : ([[value.agent.model.source, ["agent", "model", "source"]]] as const)),
+              ...(value.agent.model.routing.kind === "dynamic"
+                ? ([
+                    [value.agent.model.routing.resolver, ["agent", "model", "routing", "resolver"]],
+                  ] as const)
+                : []),
+            ]),
       ...value.channels.routes.map(
         (entry, index) => [entry, ["channels", "routes", index]] as const,
       ),

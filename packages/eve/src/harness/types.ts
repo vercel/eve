@@ -1,4 +1,5 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
+import type { HarnessV1 } from "@ai-sdk/harness";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
@@ -61,11 +62,18 @@ export type SessionAgent = SessionAgentBase &
   (
     | {
         readonly dynamicModel?: never;
+        readonly harnessId?: never;
         readonly modelReference: RuntimeModelReference;
       }
     | {
         readonly dynamicModel: true;
+        readonly harnessId?: never;
         readonly modelReference?: RuntimeModelReference;
+      }
+    | {
+        readonly dynamicModel?: never;
+        readonly harnessId: string;
+        readonly modelReference?: never;
       }
   );
 
@@ -309,6 +317,11 @@ export interface ToolLoopHarnessConfig {
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */
   readonly historyView?: PreparedHistoryView;
+  /**
+   * Live authored AI SDK harness retained at the tool-loop boundary. This
+   * instance stays outside durable session state because it contains methods.
+   */
+  readonly harness?: HarnessV1;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

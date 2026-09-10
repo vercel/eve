@@ -41,7 +41,12 @@ export function markConfigRuntimeEntries(
   config: CompiledAgentDefinition,
   evaluation: NodeModuleEvaluationContext,
 ): void {
-  const sources = [config.dynamicModel, config.model?.source, config.compaction?.model?.source];
+  const sources = [
+    config.dynamicModel,
+    config.harness?.source,
+    config.model?.source,
+    config.compaction?.model?.source,
+  ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
   }

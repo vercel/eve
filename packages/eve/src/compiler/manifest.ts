@@ -22,6 +22,7 @@ import type {
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type {
   InternalAgentDefinition,
+  InternalAgentHarnessDefinition,
   InternalAgentModelDefinition,
   InternalAgentCompactionDefinition,
   AgentBuildDefinition,
@@ -54,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 48;
+export const COMPILED_AGENT_MANIFEST_VERSION = 49;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -150,7 +151,10 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
 /**
  * Normalized additive agent configuration preserved in the compiled manifest.
  */
-type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "compaction"> & {
+type CompiledAgentDefinitionBase = Omit<
+  InternalAgentDefinition,
+  "compaction" | "harness" | "model"
+> & {
   compaction?: CompiledAgentCompactionDefinition;
   source: ModuleSourceRef;
 };
@@ -158,12 +162,19 @@ type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "comp
 export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
   (
     | {
-        readonly model: CompiledRuntimeModelReference;
         readonly dynamicModel?: never;
+        readonly harness?: never;
+        readonly model: CompiledRuntimeModelReference;
       }
     | {
+        readonly harness?: never;
         readonly model?: never;
         readonly dynamicModel: CompiledDynamicModelDefinition;
+      }
+    | {
+        readonly dynamicModel?: never;
+        readonly harness: InternalAgentHarnessDefinition;
+        readonly model?: never;
       }
   );
 
@@ -635,6 +646,17 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
     .object({
       ...compiledAgentConfigBaseFields,
       dynamicModel: compiledDynamicModelDefinitionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...compiledAgentConfigBaseFields,
+      harness: z
+        .object({
+          harnessId: z.string(),
+          source: moduleSourceRefSchema,
+        })
+        .strict(),
     })
     .strict(),
 ]);
@@ -1236,6 +1258,16 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     return {
       ...base,
       dynamicModel: { ...config.dynamicModel },
+    };
+  }
+
+  if (config.harness !== undefined) {
+    return {
+      ...base,
+      harness: {
+        harnessId: config.harness.harnessId,
+        source: { ...config.harness.source },
+      },
     };
   }
 
