@@ -27,7 +27,9 @@ export default defineAgent(
             }
           : markers
               .map((marker) =>
-                String(request.toolResults.find((entry) => entry.id === `record-${marker}`)?.output),
+                String(
+                  request.toolResults.find((entry) => entry.id === `record-${marker}`)?.output,
+                ),
               )
               .join("\n");
       }
