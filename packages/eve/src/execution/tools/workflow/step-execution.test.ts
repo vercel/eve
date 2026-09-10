@@ -12,6 +12,9 @@ import type {
 } from "#execution/tools/workflow/step-context.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 
 const durable = vi.hoisted(() => ({
   attempt: 1,
@@ -113,6 +116,26 @@ describe("workflow step authorization", () => {
         authorizationSupported: false,
       }),
     ).resolves.toMatchObject({ kind: "result", output: { session: "session-1" } });
+  });
+
+  it("resolves the delivery generation inside the authorization context", async () => {
+    const source = createDiskRuntimeCompiledArtifactsSource(
+      "/app/.eve/dev-runtime/snapshots/g/source/app",
+      {
+        durableReference: "development-generation",
+      },
+    );
+    await withDevelopmentWorkflowGeneration({ generationId: "g", source }, async () => {
+      await expect(
+        runStep(async () => {
+          await Promise.resolve();
+          return resolveDurableCompiledArtifactsSource({ kind: "development" });
+        }),
+      ).resolves.toMatchObject({ kind: "result", output: source });
+    });
+    expect(() => resolveDurableCompiledArtifactsSource({ kind: "development" })).toThrow(
+      "outside a generation-bound delivery",
+    );
   });
 
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
