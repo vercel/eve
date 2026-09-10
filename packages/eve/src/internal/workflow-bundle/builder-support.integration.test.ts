@@ -5,9 +5,36 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 
-import { bundleFinalWorkflowOutput } from "./builder-support.js";
+import {
+  bundleFinalWorkflowOutput,
+  createEvePackageImportsPlugin,
+  createWorkflowNodeBuiltinGuardPlugin,
+} from "./builder-support.js";
+
+it("bundles code mode approval state without Node-only request handlers", async () => {
+  const packageRoot = resolvePackageRoot();
+  const chunk = await buildSingleRolldownChunk("code mode state", {
+    cwd: packageRoot,
+    input: resolvePackageSourceFilePath("src/execution/code-mode/state.ts"),
+    platform: "neutral",
+    plugins: [
+      createEvePackageImportsPlugin(packageRoot, { workflowCondition: true }),
+      createWorkflowNodeBuiltinGuardPlugin(),
+    ],
+    resolve: { conditionNames: ["eve-source", "workflow"] },
+    tsconfig: join(packageRoot, "tsconfig.json"),
+    output: { format: "esm" },
+  });
+  expect(chunk.code).toContain("adoptCodeModeStateChanges");
+  expect(chunk.code).toContain("eve.runtime.hitl.approvedTools");
+});
 
 describe("bundleFinalWorkflowOutput", () => {
   it("writes the final wrapper with encoded code and resolved runtime imports", async () => {

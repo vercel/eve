@@ -281,7 +281,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, runs in the background when called directly, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -373,13 +373,22 @@ export default disableTool();
 
 ### `connection_search`
 
-`connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+`connection_search` discovers tools across declared [connections](../connections) and makes matches available by qualified name, such as `linear__list_issues`. When `experimental.codeMode` is enabled, eligible matches are called through `code_mode`; otherwise they are directly callable. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
 
 An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
 You can also add the opt-in framework tools described below.
+
+## Programmatic orchestration
+
+Enable `experimental.codeMode` to add the [`code_mode`](../tools/code-mode)
+tool, which coordinates tools and subagents in one JavaScript program that runs
+as a durable workflow. `code_mode` is available only in the root session.
+Subagent calls inside its program await the child result; direct subagent calls
+return background task receipts. Built-in and authored tools remain directly
+available; eligible dynamic tools are called through the program.
 
 ## Opt-in framework tools
 

@@ -32,6 +32,8 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
+Optional input fields can be omitted. eve disables implicit provider strict-mode normalization to preserve that distinction and validates tool inputs against your schema before execution. Include rules such as mutually exclusive arguments in the tool description as well as the schema, since custom validation rules may not appear in the model's JSON Schema.
+
 ### Label tool activity
 
 Use `label.start(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:
@@ -170,6 +172,13 @@ Use `defineWorkflowTool` from `eve/tools` to run each call as a durable Workflow
 executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The tool can
 wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
 examples.
+
+### Code mode
+
+Set `experimental.codeMode: true` in `agent.ts` to add the framework `code_mode` tool. The model
+writes a JavaScript program that calls eligible tools and subagents, and eve runs it as a durable
+workflow with one step per nested call. See [Code mode](/docs/tools/code-mode) for which tools a
+program can call, how discovery and authorization work inside it, and its current limits.
 
 ### The `ctx` parameter
 

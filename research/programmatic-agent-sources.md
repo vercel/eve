@@ -532,8 +532,8 @@ canonical path exactly as it would for an application file.
 
 The same projection applies to every extension-supported primitive and eligible
 subagent source. Existing extension capability restrictions remain validation
-policy on projected candidates: an extension still cannot enable root-owned
-Workflow or configure the consumer's web-search provider. Consumer override
+policy on projected candidates: an extension cannot configure the consumer's
+web-search provider. Consumer override
 files project to the same slots at the higher `extension-override` layer, and a
 root application source at the final qualified path may replace either.
 
@@ -598,9 +598,8 @@ through source composition:
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
-`eve/tools/grep` but never registered. Workflow shares the slot pattern
-without a framework default: an authored `experimental_workflow()` sentinel
-at `tools/workflow.ts` opts in at that canonical identity. Authored
+`eve/tools/grep` but never registered. The framework `code_mode` tool occupies
+`tools/code_mode.ts` and is enabled through `experimental.codeMode`. Authored
 `instrumentation.ts` likewise composes as an ordinary module slot with no
 framework default and no dedicated plan artifact. Native behavior outside
 these identities is limited to `final_output` and the closed host inventory.

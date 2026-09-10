@@ -378,6 +378,91 @@ const resolvedStepTools = new WeakMap<
   { readonly coordinate: string; readonly metadata: readonly CurrentDynamicToolMetadata[] }
 >();
 
+function scopeOfEvent(event: UnstampedMessageStreamEvent): DynamicToolCallbackScope {
+  return event.type.split(".")[0] as DynamicToolCallbackScope;
+}
+
+/** Persisted entries whose callbacks are missing in this process or saved in an old shape. */
+export function dynamicToolsNeedingRebind(
+  ctx: AlsContext,
+  scope: DynamicToolCallbackScope,
+): readonly PersistedDynamicToolMetadata[] {
+  const key = durableKeyForEvent(`${scope}.started`);
+  const sessionId = ctx.require(SessionIdKey);
+  return (key === undefined ? [] : (ctx.get(key) ?? [])).filter(
+    (entry) =>
+      !isCurrentDynamicToolMetadata(entry) ||
+      hasUnregisteredDurableDynamicCallbacks([entry], { sessionId, scope }),
+  );
+}
+
+interface RebindDynamicToolScope {
+  /** The persisted catalog with any bindings the resolvers re-registered. */
+  readonly merged: readonly CurrentDynamicToolMetadata[];
+  /** What the resolvers produced this time, before merging. */
+  readonly resolved: readonly CurrentDynamicToolMetadata[];
+  /** Merged entries still lacking a registered callback. */
+  readonly unbound: readonly CurrentDynamicToolMetadata[];
+}
+
+/**
+ * Re-runs `resolvers` for the scope of `event` and merges the callbacks they
+ * register into the persisted catalog. Callers decide what to write back and
+ * whether unbound entries are fatal; this is the one place the rebind itself
+ * happens.
+ */
+async function rebindDynamicToolScope(input: {
+  readonly ctx: AlsContext;
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+}): Promise<RebindDynamicToolScope> {
+  const key = durableKeyForEvent(input.event.type);
+  if (key === undefined) throw new Error(`"${input.event.type}" does not scope dynamic tools.`);
+  const persisted = input.ctx.get(key) ?? [];
+  const resolved =
+    input.resolvers.length === 0
+      ? []
+      : (await resolveToolsFromEvent(input.ctx, input.resolvers, input.event, input.messages))
+          .metadata;
+  const merged = toCurrentDynamicToolMetadataList(persisted, resolved);
+  const sessionId = input.ctx.require(SessionIdKey);
+  const scope = scopeOfEvent(input.event);
+  const unbound = merged.filter((entry) =>
+    hasUnregisteredDurableDynamicCallbacks([entry], { sessionId, scope }),
+  );
+  return { merged, resolved, unbound };
+}
+
+/**
+ * Rebinds every scope of a dispatched tool snapshot before a nested call runs
+ * it. Only resolvers that own persisted entries run, and the catalog is not
+ * rewritten: the snapshot stays what the dispatching step advertised.
+ */
+export async function rebindDispatchedDynamicTools(input: {
+  readonly ctx: AlsContext;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  for (const event of input.events) {
+    const key = durableKeyForEvent(event.type);
+    const persisted = key === undefined ? [] : (input.ctx.get(key) ?? []);
+    if (persisted.length === 0) continue;
+    const owners = new Set(persisted.map((entry) => entry.resolverSlug));
+    const { unbound } = await rebindDynamicToolScope({
+      ...input,
+      event,
+      resolvers: input.resolvers.filter((resolver) => owners.has(resolver.slug)),
+    });
+    if (unbound.length > 0) {
+      throw new Error(
+        `Dynamic tool "${unbound[0]!.name}" could not restore its dispatched callbacks.`,
+      );
+    }
+  }
+}
+
 function stepCoordinate(event: StepStartedStreamEvent): string {
   return `${event.data.turnId}:${String(event.data.stepIndex)}`;
 }
@@ -515,17 +600,13 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   ) {
     return;
   }
-  const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes("session.started"),
-  );
-  const { metadata } =
-    matching.length === 0
-      ? { metadata: [] }
-      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
-  input.ctx.set(
-    SessionDynamicToolMetadataKey,
-    revisionChanged ? metadata : toCurrentDynamicToolMetadataList(persisted, metadata),
-  );
+  const { merged, resolved } = await rebindDynamicToolScope({
+    ...input,
+    resolvers: input.resolvers.filter((resolver) =>
+      resolver.eventNames.includes("session.started"),
+    ),
+  });
+  input.ctx.set(SessionDynamicToolMetadataKey, revisionChanged ? resolved : merged);
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
 
@@ -538,14 +619,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
 }): Promise<void> {
   const persisted: readonly PersistedDynamicToolMetadata[] =
     input.ctx.get(TurnDynamicToolMetadataKey) ?? [];
-  const needsResolution = persisted.filter(
-    (entry) =>
-      !isCurrentDynamicToolMetadata(entry) ||
-      hasUnregisteredDurableDynamicCallbacks([entry], {
-        sessionId: input.ctx.require(SessionIdKey),
-        scope: "turn",
-      }),
-  );
+  const needsResolution = dynamicToolsNeedingRebind(input.ctx, "turn");
   if (needsResolution.length === 0) return;
   const resolverSlugs = new Set(needsResolution.map((entry) => entry.resolverSlug));
   const oldResolverSlugs = new Set(
@@ -563,23 +637,15 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
     return;
   }
 
-  const resolved: ResolvedDynamicToolEvent = await contextStorage.run(
-    input.ctx,
-    async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
+  const { merged, unbound } = await contextStorage.run(input.ctx, () =>
+    rebindDynamicToolScope({ ...input, resolvers: matching }),
   );
-  const updated = toCurrentDynamicToolMetadataList(persisted, resolved.metadata);
-  input.ctx.set(TurnDynamicToolMetadataKey, updated);
+  input.ctx.set(TurnDynamicToolMetadataKey, merged);
 
-  const unresolved = updated.filter(
-    (entry) =>
-      needsResolution.some(
-        (candidate) =>
-          candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,
-      ) &&
-      hasUnregisteredDurableDynamicCallbacks([entry], {
-        sessionId: input.ctx.require(SessionIdKey),
-        scope: "turn",
-      }),
+  const unresolved = unbound.filter((entry) =>
+    needsResolution.some(
+      (candidate) => candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,
+    ),
   );
   if (unresolved.length > 0) {
     throw new Error(

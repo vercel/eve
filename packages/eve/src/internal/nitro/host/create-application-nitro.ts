@@ -1,3 +1,4 @@
+import { resolveCodeModeOptions } from "#execution/code-mode/schema.js";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,7 +81,15 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
 /** Whether any agent needs the dynamic Workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowTool !== undefined);
+  return nodes.some((node) => {
+    if (!("config" in node) || typeof node.config !== "object" || node.config === null)
+      return false;
+    return (
+      resolveCodeModeOptions(
+        (node.config as CompiledAgentManifest["config"]).experimental?.codeMode,
+      ) !== undefined
+    );
+  });
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {

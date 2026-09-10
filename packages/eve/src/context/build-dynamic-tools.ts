@@ -23,6 +23,7 @@ import type {
 import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
+  stampDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
   type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
@@ -62,6 +63,12 @@ function buildReplayedApproval(
             requestReference.closure,
             context,
           )) as ApprovalStatus;
+  if (request !== undefined) {
+    stampDurableDynamicCallback(requestPolicy, {
+      callback: request,
+      closure: requestReference.closure,
+    });
+  }
 
   const responseReference = metadata.callbacks.approvalResponse;
   if (responseReference === undefined) return requestPolicy;
@@ -133,6 +140,7 @@ export function replayDynamicTools(
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
     } = {
+      dynamic: true,
       description: entry.description,
       execute:
         entry.execution === "background"

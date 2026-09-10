@@ -1,5 +1,5 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+import { emitTaskSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
@@ -45,6 +45,27 @@ export async function applyTaskAgentRequest(
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
+      // Settlement is the one place a subagent result is announced on this
+      // session's stream. Deliveries proxied for a background child's own
+      // subagents (`taskId` set) belong to the child's stream instead.
+      if (delivery.taskId === undefined && settled.accepted && request.result.isError !== true) {
+        const emitted = await emitTaskSubagentEventStep({
+          event: {
+            type: "subagent.completed",
+            data: {
+              callId: request.result.callId,
+              subagentName: request.result.subagentName,
+              output:
+                typeof request.result.output === "string"
+                  ? request.result.output
+                  : JSON.stringify(request.result.output),
+            },
+          },
+          parentWritable: ctx.parentWritable,
+          serializedContext: ctx.serializedContext,
+        });
+        return { serializedContext: emitted.serializedContext, sessionState: settled.sessionState };
+      }
       return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
     }
     case "agent-invoke": {
@@ -58,7 +79,7 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitTaskSubagentCalledStep({
+          const emitted = await emitTaskSubagentEventStep({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
             serializedContext: ctx.serializedContext,

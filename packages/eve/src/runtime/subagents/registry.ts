@@ -6,7 +6,10 @@ import type {
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
-import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import {
+  AGENT_TASK_RECEIPT_DESCRIPTION,
+  SUBAGENT_TOOL_INPUT_SCHEMA,
+} from "#tools/framework/agent-contract.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
@@ -143,7 +146,7 @@ export function createPreparedRuntimeSubagentTool(
               },
       },
     },
-    description: `${definition.description}\n\nThis call starts a background task and returns a task receipt immediately.`,
+    description: `${definition.description}\n\n${AGENT_TASK_RECEIPT_DESCRIPTION}`,
     execution: "background",
     inputSchema,
     kind: definition.kind,

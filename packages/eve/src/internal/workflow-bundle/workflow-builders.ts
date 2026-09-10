@@ -4,8 +4,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
+import { CODE_MODE_WORKFLOW_NAME } from "#execution/code-mode/workflow-reference.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
+import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
 import {
   findWorkflowDirectiveFunctions,
   stripJavaScriptExtension,
@@ -57,6 +58,7 @@ export async function applyWorkflowTransform(
   stableWorkflowNames: ReadonlySet<string> = new Set([
     ...STABLE_WORKFLOW_NAMES,
     SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME,
+    CODE_MODE_WORKFLOW_NAME,
   ]),
 ): Promise<{
   code: string;
@@ -98,8 +100,10 @@ export async function applyWorkflowTransform(
   }
 
   return transformWorkflowDirectives({
-    // The test harness authors workflow tools inside eve's own package.
-    authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
+    // The test harness authors workflow tools inside eve's own package, and
+    // the code_mode body authorizes nested tool calls like an authored tool.
+    authorizeSteps:
+      isPackageTestFixtureModule(absoluteFilename) || isCodeModeProgramStepModule(absoluteFilename),
     filename,
     mode,
     moduleSpecifier,
@@ -111,6 +115,12 @@ export async function applyWorkflowTransform(
 
 function isPackageTestFixtureModule(absolutePath: string): boolean {
   return absolutePath.replace(/\\/g, "/").includes("/src/internal/testing/");
+}
+
+function isCodeModeProgramStepModule(absolutePath: string): boolean {
+  return /\/src\/execution\/code-mode\/program-step\.[cm]?[jt]s$/.test(
+    absolutePath.replace(/\\/g, "/"),
+  );
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {

@@ -2,6 +2,7 @@ import type { z } from "#compiled/zod/index.js";
 import { defineTool } from "#tools/definition.js";
 import {
   AGENT_TOOL_DESCRIPTION,
+  AGENT_TASK_RECEIPT_DESCRIPTION,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
@@ -9,7 +10,7 @@ import { attachToolBehavior } from "#tools/behavior.js";
 
 export const agent = attachToolBehavior(
   defineTool({
-    description: `${AGENT_TOOL_DESCRIPTION} This call starts a background task and returns a task receipt immediately.`,
+    description: `${AGENT_TOOL_DESCRIPTION} ${AGENT_TASK_RECEIPT_DESCRIPTION}`,
     execution: "background",
     inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
     outputSchema: SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA,

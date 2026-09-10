@@ -30,8 +30,8 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { attachToolBehavior } from "#tools/behavior.js";
 
 function manifest() {
   return createAgentSourceManifest({
@@ -73,6 +73,33 @@ describe("compileAgentManifest source graph", () => {
         "child",
       ),
     ).toThrow('Remove "experimental.workflow.world" from "child".');
+  });
+
+  it("compiles code_mode as an executable framework workflow tool", async () => {
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [
+        registry([
+          {
+            logicalPath: "agent.ts",
+            loadNamespace: async () => ({
+              default: defineAgent({
+                experimental: { codeMode: true },
+                model: "openai/gpt-5.4",
+              }),
+            }),
+          },
+        ]),
+      ],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "code_mode")).toMatchObject({
+      behavior: {
+        availability: ["root-session"],
+        handling: { kind: "workflow-tool", workflowId: "workflow//eve//codeModeWorkflow" },
+      },
+      hasExecute: true,
+      name: "code_mode",
+    });
   });
 
   it("freezes source metadata behind an immutable registry map", () => {
@@ -229,35 +256,41 @@ describe("compileAgentManifest source graph", () => {
     },
   );
 
-  it("compiles a workflow tool with programmatic executor metadata", async () => {
-    const execute = async () => ({ ok: true });
-    Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/durable.ts",
-        loadNamespace: async () => ({
-          default: defineWorkflowTool({
-            description: "Runs durably.",
-            execute,
-            inputSchema: { type: "object" },
+  it.each([{ availability: [] }, { availability: ["root-session"] }] as const)(
+    "preserves availability $availability when deriving workflow handling from executor metadata",
+    async ({ availability }) => {
+      const execute = async () => ({ ok: true });
+      Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
+      const sourceRegistry = registry([
+        {
+          logicalPath: "tools/durable.ts",
+          loadNamespace: async () => ({
+            default: attachToolBehavior(
+              defineWorkflowTool({
+                description: "Runs durably.",
+                execute,
+                inputSchema: { type: "object" },
+              }),
+              { availability },
+            ),
           }),
-        }),
-      },
-    ]);
+        },
+      ]);
 
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
 
-    expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
-      availability: [],
-      handling: {
-        kind: "workflow-tool",
-        workflowId: "workflow//example/tool//execute",
-      },
-      shape: { lifetime: "step", suspend: "workflow" },
-    });
-  });
+      expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
+        availability,
+        shape: { lifetime: "step", suspend: "workflow" },
+        handling: {
+          kind: "workflow-tool",
+          workflowId: "workflow//example/tool//execute",
+        },
+      });
+    },
+  );
 
   it("preserves selected native behavior through serialization and runtime preparation", async () => {
     const sourceRegistry = registry([
@@ -404,10 +437,6 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-      },
-      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -470,7 +499,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
-      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 

@@ -1,0 +1,381 @@
+import type { ToolSet } from "ai";
+
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import {
+  codeModeSessionState,
+  diffCodeModeState,
+  type CodeModeStateChange,
+} from "#execution/code-mode/state.js";
+import { contextStorage } from "#context/container.js";
+import { withContextScope } from "#context/run-step.js";
+import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
+import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
+import {
+  dynamicToolsNeedingRebind,
+  rebindDispatchedDynamicTools,
+} from "#context/dynamic-tool-lifecycle.js";
+import { buildRuntimeIdentity, createNodeHarnessTools } from "#execution/node-step.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { requireSessionModelReference } from "#harness/types.js";
+import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
+import {
+  createSessionStartedEvent,
+  createTurnStartedEvent,
+  createStepStartedEvent,
+} from "#protocol/message.js";
+import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { hydrateDurableSession } from "#execution/session.js";
+import { createExecutionHistoryView } from "#execution/history-view.js";
+import { approvalDenied, type CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import {
+  AuthorizationHookKey,
+  PendingAuthorizationResultKey,
+  type AuthorizationSignal,
+} from "#harness/authorization.js";
+import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import {
+  codeModeBridgeRequestLimit,
+  claimsForCodeMode,
+  createDiscoveryTools,
+  isCodeModeAgentTool,
+} from "#harness/code-mode.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import {
+  getApprovedTools,
+  resolveApprovalKeyFromTools,
+} from "#harness/hitl/approval-input-requests.js";
+import { createToolApprovalPrompt } from "#harness/input-extraction.js";
+import {
+  evaluateToolApproval,
+  wrapToolExecute,
+  type NativeApprovalStatus,
+} from "#harness/tools.js";
+import { getWorkflowContinuationSecurity } from "#harness/workflow-continuation-security.js";
+import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { isObject } from "#shared/guards.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import { toErrorMessage } from "#shared/errors.js";
+import {
+  createParkingHostTool,
+  createWorkflowSandbox,
+  type WorkflowSandboxInterrupt,
+  type WorkflowSandboxResolution,
+} from "#shared/workflow-sandbox.js";
+import type { ToolContext, ToolExecuteOptions, ToolInputRequest } from "#tools/definition.js";
+
+export type CodeModeProgramOutcome =
+  | { readonly status: "completed"; readonly output: JsonValue }
+  | { readonly status: "failed"; readonly error: string }
+  | {
+      readonly status: "interrupted";
+      /** The signed continuation the next `resume` settles. */
+      readonly interrupt: WorkflowSandboxInterrupt;
+      /** The parked nested calls, in the order the sandbox recorded them. */
+      readonly pending: readonly WorkflowSandboxInterrupt[];
+    };
+
+export type CodeModeToolOutcome =
+  | ((WorkflowSandboxResolution | { readonly status: "cleared" }) & {
+      readonly stateChanges?: readonly CodeModeStateChange[];
+    })
+  | CodeModeApprovalRequired;
+
+/** The tool's policy wants the person's approval; nothing ran. */
+export interface CodeModeApprovalRequired {
+  readonly status: "approval-required";
+  /** Key `once()` remembers on approval: `approvalKey(input)` when the tool defines one, else the tool name. */
+  readonly approvalKey: string;
+  /**
+   * The nested call as the approval card shows it. `callId` is the sandbox's
+   * nested id (`<code_mode callId>:tool-N`): unique per call, so the card
+   * renders as its own nested tool call instead of rewriting the `code_mode`
+   * card, and never a turn action the owner could dispatch.
+   */
+  readonly action: {
+    readonly callId: string;
+    readonly input: JsonObject;
+    readonly toolName: string;
+  };
+  readonly request: ToolInputRequest;
+}
+
+/**
+ * Starts the generated program, or resumes it once every parked call settled.
+ *
+ * Every claimed tool is a stub that raises an interrupt, so this step never
+ * performs a side effect itself: the sandbox parks at the first unresolved
+ * batch of calls and returns a signed continuation. Replaying this step after
+ * a crash therefore re-parks at the same calls rather than re-firing anything.
+ *
+ * A `Promise.all` in the program parks several calls in one continuation. The
+ * body settles them concurrently and hands the results back together. Each
+ * `continue` re-runs the program from its source with the signed resolution
+ * ledger replayed, so a batch of k calls costs k sandbox runs inside this step
+ * and the ledger (every prior call's output) travels with each step payload.
+ */
+export async function runCodeModeProgramStep(input: {
+  readonly callId: string;
+  readonly program: CodeModeWorkflowInput;
+  readonly sessionState: DurableSessionState;
+  readonly resume?: {
+    readonly interrupt: WorkflowSandboxInterrupt;
+    readonly resolutions: readonly WorkflowSandboxResolution[];
+  };
+}): Promise<CodeModeProgramOutcome> {
+  "use step";
+
+  const security = getWorkflowContinuationSecurity(await readDurableSession(input.sessionState));
+  const hostTools: ToolSet = { ...createDiscoveryTools(input.program.toolCatalog) };
+  for (const entry of input.program.toolCatalog) {
+    if (entry.target !== "direct") hostTools[entry.name] = createParkingHostTool(entry);
+  }
+  const sandbox = await createWorkflowSandbox({
+    bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
+    continuationSecurity: security,
+    hostTools,
+  });
+  const outcome =
+    input.resume === undefined
+      ? await sandbox.run({ js: input.program.js, toolCallId: input.callId })
+      : await sandbox.resume(input.resume);
+  if (outcome.status === "completed") {
+    return { output: parseJsonValue(outcome.output ?? null), status: "completed" };
+  }
+  if (outcome.status === "failed") return outcome;
+  if (outcome.pending.length === 0) {
+    throw new Error("code_mode continuation contains no pending call.");
+  }
+  return { interrupt: outcome.interrupt, pending: outcome.pending, status: "interrupted" };
+}
+
+export interface CodeModeToolCall {
+  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+  readonly toolCallId: string;
+  readonly toolInput: unknown;
+  readonly toolName: string;
+  /** The person approved this call under `key`; the policy is not evaluated again. */
+  readonly approval?: { readonly key: string };
+}
+
+/**
+ * Executes one claimed tool with the turn's context rebuilt from its serialized
+ * form. The sandbox and connections resolve through the same providers a turn
+ * step uses, so `bash`, `read_file`, connection tools, and authored tools all
+ * run unchanged; the parent materialized the sandbox before dispatching, so
+ * this step only reconnects to it.
+ *
+ * The approval policy is evaluated here, exactly as a direct call would, with
+ * the keys the person already approved (including earlier in this program).
+ * When it asks for the person, the step returns `approval-required` without
+ * running anything; the body asks and calls again with `approval` set.
+ * Authored workflow tools stop at `cleared`: their body runs inline in the
+ * workflow, not in a step.
+ *
+ * Authorization rides the workflow-tool step mechanism: passing the run's
+ * `ctx` routes the call through `workflowToolStep`, whose twin seeds the hook
+ * token and pending results on the ambient context, publishes challenges to
+ * the owner, and retries this step once the callbacks land. This step only
+ * mirrors those keys into the hydrated turn context and returns the tool's
+ * `AuthorizationSignal` unchanged.
+ */
+export async function executeCodeModeToolStep(
+  _ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
+  input: CodeModeToolCall,
+): Promise<CodeModeToolOutcome | AuthorizationSignal> {
+  "use step";
+
+  const ambient = contextStorage.getStore();
+  const { ctx, harnessTools, session, rehydrateConnections } = await hydrateTurnTools(input);
+  const hookToken = ambient?.get(AuthorizationHookKey);
+  if (hookToken !== undefined) ctx.set(AuthorizationHookKey, hookToken);
+  ctx.set(PendingAuthorizationResultKey, ambient?.get(PendingAuthorizationResultKey) ?? []);
+  const definition = harnessTools.get(input.toolName);
+  if (
+    definition === undefined ||
+    isCodeModeAgentTool(definition) ||
+    !claimsForCodeMode(input.toolName, harnessTools)
+  ) {
+    return {
+      status: "failed",
+      error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
+    };
+  }
+  if (definition.approval !== undefined && input.approval === undefined) {
+    let gate: CodeModeToolOutcome | undefined;
+    try {
+      gate = await evaluateApprovalGate({ ctx, definition, harnessTools, input, session });
+    } catch (error) {
+      return { status: "failed", error: toErrorMessage(error) };
+    }
+    if (gate !== undefined) return gate;
+  }
+  if (definition.workflowId !== undefined) return { status: "cleared" };
+  const execute = wrapToolExecute(definition);
+  if (execute === undefined) {
+    return { status: "failed", error: `Tool "${input.toolName}" has no executor.` };
+  }
+  // The turn's history as of dispatch: the same view a direct call would see.
+  const options: ToolExecuteOptions = {
+    messages: createExecutionHistoryView(session).initial.messages,
+    toolCallId: input.toolCallId,
+  } as ToolExecuteOptions;
+  const toolContext = () => {
+    const serialized = serializeContext(ctx);
+    delete serialized[AuthorizationHookKey.name];
+    delete serialized[PendingAuthorizationResultKey.name];
+    return serialized;
+  };
+  const before = structuredClone({
+    serializedContext: toolContext(),
+    ...codeModeSessionState(session),
+  });
+  let updatedSession = session;
+  let outcome: CodeModeToolOutcome;
+  try {
+    const scoped = await withContextScope(ctx, session, async (enriched) => {
+      await rehydrateConnections();
+      const result = await execute(input.toolInput, options);
+      const output = isAsyncIterable(result) ? await lastOf(result) : result;
+      return { result: output, session: enriched };
+    });
+    // The tool consumed results from the hydrated context; the twin reads the
+    // remainder from the ambient one to report which attempts completed.
+    ambient?.setVirtualContext(
+      PendingAuthorizationResultKey,
+      ctx.get(PendingAuthorizationResultKey) ?? [],
+    );
+    updatedSession = scoped.session;
+    const authorization = readToolInterrupt(ctx, input.toolCallId);
+    // State captured before a sign-in is re-derived when the twin retries.
+    if (authorization !== undefined) return authorization;
+    outcome = { status: "completed", output: parseJsonValue(scoped.result ?? null) };
+  } catch (error) {
+    outcome = { status: "failed", error: toErrorMessage(error) };
+  }
+  const stateChanges = diffCodeModeState(before, {
+    serializedContext: toolContext(),
+    ...codeModeSessionState(updatedSession),
+  });
+  return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
+}
+
+async function evaluateApprovalGate(input: {
+  readonly ctx: Awaited<ReturnType<typeof hydrateTurnTools>>["ctx"];
+  readonly definition: HarnessToolDefinition;
+  readonly harnessTools: ReadonlyMap<string, HarnessToolDefinition>;
+  readonly input: CodeModeToolCall;
+  readonly session: Awaited<ReturnType<typeof hydrateTurnTools>>["session"];
+}): Promise<CodeModeToolOutcome | undefined> {
+  const { ctx, definition, harnessTools, session } = input;
+  const call = input.input;
+  const approvedTools = getApprovedTools(session, resolveApprovalKeyFromTools(harnessTools));
+  const scoped = await withContextScope(ctx, session, async (enriched) => ({
+    result: await evaluateToolApproval(definition, {
+      approvedTools,
+      callId: call.toolCallId,
+      toolInput: call.toolInput,
+    }),
+    session: enriched,
+  }));
+  const status: NativeApprovalStatus = scoped.result;
+  const kind = typeof status === "object" ? status.type : status;
+  if (kind === "user-approval") {
+    const toolInput = readApprovalToolInput(call.toolInput);
+    return {
+      status: "approval-required",
+      approvalKey: definition.approvalKey?.(toolInput) ?? definition.name,
+      action: { callId: call.toolCallId, input: toolInput, toolName: call.toolName },
+      request: createToolApprovalPrompt(call.toolName),
+    };
+  }
+  if (kind === "denied") {
+    const reason = typeof status === "object" ? status.reason : undefined;
+    return approvalDenied("the approval policy", call.toolName, reason);
+  }
+  return undefined;
+}
+
+async function hydrateTurnTools(input: {
+  readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}) {
+  const durable = await readDurableSession(input.sessionState);
+  const ctx = await deserializeContext(input.serializedContext);
+  const bundle = ctx.require(BundleKey);
+  const effective = resolveEffectiveAgentRuntime(bundle, ctx);
+  const baseNode = getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId);
+  const node = { ...baseNode, turnAgent: effective.turnAgent };
+  const session = hydrateDurableSession({
+    compactionOverrides: { thresholdPercent: effective.thresholdPercent },
+    durable,
+    turnAgent: effective.turnAgent,
+  });
+  const emission = getHarnessEmissionState(session.state);
+  const runtime = buildRuntimeIdentity(node);
+  const connections = bindDynamicConnections(ctx, bundle.resolvedAgent);
+  const rehydrateConnections = () => connections.rehydrate(emission, runtime, false);
+  const needsRebind = (["session", "turn", "step"] as const).some(
+    (scope) => dynamicToolsNeedingRebind(ctx, scope).length > 0,
+  );
+  if (needsRebind) {
+    await withContextScope(ctx, session, async (enriched) => {
+      await rehydrateConnections();
+      await rebindDispatchedDynamicTools({
+        ctx,
+        resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
+        events: [
+          createSessionStartedEvent({ runtime }),
+          createTurnStartedEvent(input.event),
+          createStepStartedEvent({
+            ...input.event,
+            modelId: requireSessionModelReference(session).id,
+          }),
+        ],
+        messages: createExecutionHistoryView(session).initial.messages,
+      });
+      return { result: undefined, session: enriched };
+    });
+  }
+  const harnessTools = new Map<string, HarnessToolDefinition>(createNodeHarnessTools({ node }));
+  for (const dynamicSubagent of buildDynamicSubagentTools(ctx)) {
+    harnessTools.set(dynamicSubagent.name, dynamicSubagent);
+  }
+  return {
+    ctx,
+    harnessTools: buildResponseAuthorizationTools({ authoredTools: harnessTools, context: ctx }),
+    session,
+    rehydrateConnections,
+  };
+}
+
+// Approval cards and `approvalKey(input)` expect the object the model would
+// have sent; a program passing anything else still gets its schema error from
+// the tool itself once approved.
+function readApprovalToolInput(value: unknown): JsonObject {
+  if (!isObject(value)) return {};
+  try {
+    return parseJsonObject(value);
+  } catch {
+    return {};
+  }
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function"
+  );
+}
+
+async function lastOf(iterable: AsyncIterable<unknown>): Promise<unknown> {
+  let last: unknown;
+  for await (const value of iterable) last = value;
+  return last;
+}

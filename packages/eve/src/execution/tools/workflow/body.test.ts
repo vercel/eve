@@ -3,6 +3,7 @@ import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import {
+  readCodeModeRunContext,
   findWorkflowToolRunContext,
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/ask.js";
@@ -14,6 +15,49 @@ vi.mock("#execution/tools/workflow/ask.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ask: mocks.ask,
 }));
+
+it.each(["completed", "failed", "cancelled"])(
+  "retains the Code Mode state cursor after a %s body",
+  async (status) => {
+    const controller = new AbortController();
+    const input: WorkflowBodyInput & { execution: "blocking"; runId: string } = {
+      callId: "call",
+      input: {},
+      session: {
+        id: "session",
+        auth: { current: null, initiator: null },
+        turn: { id: "turn", sequence: 1 },
+      },
+      stepIndex: 0,
+      toolName: "code_mode",
+      workflowId: "workflow//test//execute",
+      owner: { inbox: "inbox" },
+      execution: "blocking",
+      runId: "run",
+      codeMode: {
+        serializedContext: { todo: "old" },
+        sessionState: {
+          version: 1,
+          sessionId: "session",
+          continuationToken: "token",
+          hasProxyInputRequests: false,
+          emissionState: { sequence: 1, stepIndex: 0, turnId: "turn", sessionStarted: true },
+        },
+      },
+    };
+    mocks.execute.mockImplementation(async (_input, ctx) => {
+      readCodeModeRunContext(ctx).serializedContext = { todo: "new" };
+      if (status === "cancelled") controller.abort(new Error("stop"));
+      if (status !== "completed") throw new Error("program failed");
+      return "result";
+    });
+    const result = await executeWorkflowBody(input, controller.signal);
+    expect(result.outcome).toMatchObject({ status });
+    expect(result.outcome).not.toHaveProperty("codeMode");
+    if (result.outcome.status === "completed") expect(result.outcome.output).toBe("result");
+    expect(input.codeMode?.serializedContext).toEqual({ todo: "new" });
+  },
+);
 
 it("binds workflow-only methods to the run context", async () => {
   const signal = new AbortController().signal;

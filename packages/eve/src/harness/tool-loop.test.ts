@@ -2,6 +2,7 @@ import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
+  asSchema,
   jsonSchema,
   type LanguageModelCallEndEvent,
   type LanguageModel,
@@ -47,7 +48,11 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
-import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  registerDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
+import { never, always } from "#tools/approval/policies.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -102,18 +107,22 @@ import {
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
-vi.mock("ai", () => ({
-  ToolLoopAgent: vi.fn(),
-  gateway: {
-    tools: {
-      exaSearch: vi.fn(() => ({})),
-      parallelSearch: vi.fn(() => ({})),
+vi.mock("ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("ai")>();
+  return {
+    ToolLoopAgent: vi.fn(),
+    gateway: {
+      tools: {
+        exaSearch: vi.fn(() => ({})),
+        parallelSearch: vi.fn(() => ({})),
+      },
     },
-  },
-  jsonSchema: vi.fn((s: unknown) => s),
-  isStepCount: vi.fn((n: number) => n),
-  tool: vi.fn((t: unknown) => t),
-}));
+    jsonSchema: actual.jsonSchema,
+    asSchema: actual.asSchema,
+    isStepCount: vi.fn((n: number) => n),
+    tool: vi.fn((t: unknown) => t),
+  };
+});
 
 const {
   mockCreateAiSdkHookBridge,
@@ -1094,7 +1103,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
+    expect(agentCall!.tools).not.toHaveProperty("code_mode");
   });
 
   it("registers atomic background tool calls before AI SDK execution", async () => {
@@ -1880,11 +1889,13 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
-    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
+    // The owner announced `subagent.completed` when the invocation settled;
+    // the harness only re-announces background start receipts.
+    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(0);
     expect(events.at(-1)?.type).toBe("session.waiting");
   });
 
-  it("keeps declared subagent tools when Workflow is unavailable outside the root", async () => {
+  it("keeps child tools direct with code_mode enabled on the root", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -1892,59 +1903,30 @@ describe("createToolLoopHarness", () => {
       toolCalls: [],
       toolResults: [],
     });
-
     const config = createTestConfig("conversation", undefined, {
-      workflow: true,
+      codeMode: { maxSubagents: 100 },
       tools: new Map([
+        ...createDelegationToolMap(),
         [
-          "delegate",
+          "code_mode",
           {
-            description: "Delegate to a subagent.",
+            behavior: { availability: ["root-session"] },
+            description: "Run a program.",
             inputSchema: jsonSchema({ type: "object" }),
-            name: "delegate",
-            resultKind: "subagent",
-            workflowId: "workflow//./agent/subagents/researcher//execute",
+            name: "code_mode",
+            workflowId: "workflow//eve//codeModeWorkflow",
           },
         ],
       ]),
     });
     const runStep = createToolLoopHarness(config);
 
-    await runStep(createTestSession({ rootSessionId: "root-session" }), {
-      message: "Hi",
-    });
+    await runStep(createTestSession({ rootSessionId: "root-session" }), { message: "Hi" });
 
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
-  });
-
-  it("omits Workflow from runtime subagent sessions", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      workflow: true,
-      tools: createDelegationToolMap(),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    await runStep(
-      createTestSession({
-        rootSessionId: "root-session",
-      }),
-      { message: "Hi" },
-    );
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).toHaveProperty("delegate");
+    expect(agentCall!.tools).not.toHaveProperty("code_mode");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
@@ -2458,6 +2440,68 @@ describe("createToolLoopHarness", () => {
     );
   });
 
+  it("advertises every dynamic tool through code mode, approval-gated ones included", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const metadata = [
+      { name: "discovered", approval: never() },
+      { name: "gated_dynamic", approval: always() },
+    ].map(({ name, approval }) => {
+      const descriptor = readDurableDynamicCallback(approval)!;
+      const owner = {
+        sessionId: "test-session",
+        scope: "step" as const,
+        resolverSlug: "dynamic",
+        entryKey: name,
+        name,
+      };
+      registerDurableDynamicCallback({ callback: () => "ok", phase: "execute", owner });
+      registerDurableDynamicCallback({
+        callback: descriptor.callback,
+        phase: "approvalRequest",
+        owner,
+      });
+      return {
+        name,
+        description: name,
+        resolverSlug: "dynamic",
+        entryKey: name,
+        inputSchema: { type: "object" },
+        callbacks: { execute: { closure: {} }, approvalRequest: { closure: descriptor.closure } },
+      };
+    });
+    ctx.set(StepDynamicToolMetadataKey, metadata);
+    const base = createTestConfig();
+    const runStep = createToolLoopHarness({
+      ...base,
+      codeMode: { maxSubagents: 100 },
+      tools: new Map([
+        ...base.tools,
+        [
+          "code_mode",
+          {
+            name: "code_mode",
+            description: "Run a program",
+            workflowId: "workflow//eve//codeModeWorkflow",
+            inputSchema: jsonSchema({ type: "object" }),
+          },
+        ],
+      ]),
+    });
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
+    const advertised = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
+    expect(Object.keys(advertised ?? {}).sort()).toEqual(["add", "code_mode"]);
+    expect(advertised?.code_mode?.description).toContain("discovered");
+    expect(advertised?.code_mode?.description).toContain("gated_dynamic");
+  });
+
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -2511,7 +2555,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("web_search");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
+    expect(agentCall!.tools).not.toHaveProperty("code_mode");
   });
 
   it("returns done when task mode finishes with stop", async () => {
@@ -10215,7 +10259,7 @@ describe("createToolLoopHarness", () => {
           providerOptions: structuredClone(prepared.providerOptions),
           tools: Object.entries(settings.tools ?? {}).map(([name, tool]) => ({
             description: structuredClone(tool.description),
-            inputSchema: structuredClone(tool.inputSchema),
+            inputSchema: structuredClone(asSchema(tool.inputSchema as never).jsonSchema),
             name,
             providerOptions: structuredClone(tool.providerOptions),
           })),

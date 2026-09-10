@@ -1,5 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type {
+  WorkflowToolAskRequest,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunReport,
   WorkflowToolRunRef,
@@ -10,7 +11,6 @@ import type {
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
-import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundMessage, TaskInboundUpdate } from "#tasks/types.js";
 import { isTaskMessage } from "#tools/task.js";
@@ -197,14 +197,14 @@ function normalizeInputRequest(
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
     case "ask":
-      return normalizeAskRequest(request.request, from, requestId);
+      return normalizeAskRequest(request, from, requestId);
     default:
       return request;
   }
 }
 
 function normalizeAskRequest(
-  authored: ToolInputRequest,
+  { request: authored }: WorkflowToolAskRequest,
   from: WorkflowToolRunRef,
   requestId: string,
 ): InputRequest {

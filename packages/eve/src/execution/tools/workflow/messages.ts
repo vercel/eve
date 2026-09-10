@@ -8,6 +8,7 @@ import type {
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";
+import type { CodeModeStateChange } from "#execution/code-mode/state.js";
 
 export interface WorkflowToolRunOwner {
   readonly inbox: string;
@@ -64,10 +65,14 @@ export interface WorkflowToolRunRef {
   readonly turnId: string;
 }
 
-export type WorkflowToolRunOutcome =
+export type WorkflowToolRunOutcome = (
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: unknown }
-  | { readonly status: "cancelled"; readonly reason?: string };
+  | { readonly status: "cancelled"; readonly reason?: string }
+) & {
+  /** Present only for framework `code_mode` runs, which the dispatch step starts with turn state. */
+  readonly codeMode?: { readonly stateChanges: readonly CodeModeStateChange[] };
+};
 
 export interface WorkflowToolRunReport {
   readonly from: WorkflowToolRunRef;

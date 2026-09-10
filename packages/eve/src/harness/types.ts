@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
+import type { CodeModeOptions } from "#execution/code-mode/schema.js";
 import type { AlsContext } from "#context/container.js";
 import type {
   RuntimeIdentity,
@@ -96,12 +97,6 @@ export interface HarnessSession {
   readonly state?: SessionStateMap;
   /** Framework task that owns this durable session, when present. */
   readonly taskId?: string;
-  /**
-   * Effective maximum subagent calls one `Workflow` invocation may dispatch
-   * for this session, configured by `experimental_workflow({ maxSubagents })`.
-   * When omitted, the dispatch step applies the framework default.
-   */
-  readonly workflowMaxSubagents?: number;
 }
 
 export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
@@ -287,23 +282,10 @@ export interface ToolLoopHarnessConfig {
   readonly capabilities?: SessionCapabilities;
   /** Clears model-message history without running a model turn. */
   readonly clearOnly?: boolean;
+  /** Enables the framework `code_mode` workflow tool with these options. */
+  readonly codeMode?: CodeModeOptions;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved from the `experimental_workflow(...)` definition exported
-   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
-   * Defaults to `false`.
-   */
-  readonly workflow?: boolean;
-  /**
-   * Maximum subagent calls one `Workflow` invocation may dispatch, from the
-   * authored Workflow tool definition. Advertised in the tool description;
-   * the dispatch step enforces it. Defaults to
-   * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
-   */
-  readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

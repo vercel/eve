@@ -74,17 +74,17 @@ export async function agent(
 
 /** Invokes an agent with a framework-selected replay-stable invocation id. */
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options: { readonly invocationId: string; readonly returnResult: true },
 ): Promise<JsonValue | RuntimeSubagentResult>;
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options?: { readonly invocationId?: string; readonly returnResult?: false },
 ): Promise<JsonValue>;
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal" | "callId" | "toolName">,
   input: InternalAgentInput,
   options: { readonly invocationId?: string; readonly returnResult?: boolean } = {},
 ): Promise<JsonValue | RuntimeSubagentResult> {

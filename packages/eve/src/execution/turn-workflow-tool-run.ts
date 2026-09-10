@@ -10,6 +10,8 @@ import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requ
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
 import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { adoptCodeModeStateChanges } from "#execution/code-mode/state.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   workflowToolRunOutcomeToSubagentResult,
   workflowToolRunOutcomeToToolResult,
@@ -68,10 +70,19 @@ async function handleWorkflowToolRunOutcome(
   );
   if (recorded?.runId !== message.from.runId) return undefined;
 
+  let settledMessage = message;
+  if (message.result.codeMode !== undefined) {
+    try {
+      await cursor.adopt(adoptCodeModeStateChanges(cursor, message.result.codeMode.stateChanges));
+    } catch (error) {
+      settledMessage = { ...message, result: { status: "failed", error: toErrorMessage(error) } };
+    }
+  }
+
   const result: RuntimeSubagentResult | RuntimeToolResultActionResult =
     recorded.resultKind === "subagent"
       ? await settleSubagentOutcome(input)
-      : workflowToolRunOutcomeToToolResult(message);
+      : workflowToolRunOutcomeToToolResult(settledMessage);
 
   // Any workflow tool run may have invoked agents through its request channel,
   // so leases are released regardless of the run's result kind.

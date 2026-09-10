@@ -28,7 +28,7 @@ const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
 const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
 
 const model = mockModel((request) => {
-  const childResults = request.toolResults.filter((result) => result.name === "Workflow");
+  const childResults = request.toolResults.filter((result) => result.name === "code_mode");
 
   if (childResults.length === 0) {
     return {
@@ -38,7 +38,7 @@ const model = mockModel((request) => {
           input: {
             js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ message: \${JSON.stringify("Remember the codeword " + CODEWORD + ". Confirm that you stored it.")} });\`,
           },
-          name: "Workflow",
+          name: "code_mode",
         },
       ],
     };
@@ -60,7 +60,7 @@ const model = mockModel((request) => {
           input: {
             js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ agentId: \${JSON.stringify(agentId)}, message: "What codeword did I ask you to remember? Reply with the codeword." });\`,
           },
-          name: "Workflow",
+          name: "code_mode",
         },
       ],
     };
@@ -78,6 +78,7 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
+  experimental: { codeMode: true },
   model,
   modelContextWindowTokens: 32_000,
 });
@@ -134,12 +135,13 @@ export default defineAgent({
 `;
 
 const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
+  dependencies: { "just-bash": "3.1.0" },
   files: {
+    "agent/sandbox.ts":
+      'import { defineSandbox } from "eve/sandbox";\nimport { justbash } from "eve/sandbox/just-bash";\nexport default defineSandbox({ backend: justbash() });\n',
     "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
-    "agent/tools/workflow.ts":
-      'import { experimental_workflow } from "eve/tools/workflow";\nexport default experimental_workflow();\n',
     "agent/subagents/memory-child/agent.ts": MEMORY_AGENT_SOURCE,
     "agent/subagents/memory-child/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
@@ -161,12 +163,13 @@ const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
 
 function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
+    dependencies: { "just-bash": "3.1.0" },
     files: {
+      "agent/sandbox.ts":
+        'import { defineSandbox } from "eve/sandbox";\nimport { justbash } from "eve/sandbox/just-bash";\nexport default defineSandbox({ backend: justbash() });\n',
       "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
-      "agent/tools/workflow.ts":
-        'import { experimental_workflow } from "eve/tools/workflow";\nexport default experimental_workflow();\n',
       "agent/subagents/remote-memory-child.ts": `import { defineRemoteAgent } from "eve";
 import { bearer } from "eve/agents/auth";
 

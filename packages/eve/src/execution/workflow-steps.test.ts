@@ -1238,6 +1238,41 @@ describe("turnStep", () => {
     ]);
   });
 
+  it("ends a model-call batch while a code-mode workflow task needs coordination", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle(3));
+    installSessionStoreMocks([createStubSession()]);
+    const continueStep: StepFn = async (session) => ({ next: null, session });
+    const runStep = vi.fn<StepFn>(async (session) => ({
+      next: continueStep,
+      session: setPendingCoordinationBatch({
+        session,
+        runtimeActions: [],
+        tasks: [
+          {
+            callId: "call-code-mode",
+            input: { js: "return 1;" },
+            kind: "workflow-task",
+            toolName: "code_mode",
+            workflowId: "workflow//eve//codeModeWorkflow",
+          },
+        ],
+        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        responseMessages: [],
+      }),
+    }));
+
+    vi.mocked(createExecutionNodeStep).mockReturnValue(runStep);
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "run a program" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(runStep).toHaveBeenCalledOnce();
+  });
+
   it("checkpoints completed batched model calls when steering cancels the active call", async () => {
     const bundle = createTurnStepTestBundle(100);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);

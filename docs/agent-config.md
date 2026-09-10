@@ -287,12 +287,28 @@ for the retry behavior.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
+Set `experimental.codeMode: true` to add the `code_mode` tool, which lets the
+model orchestrate eligible tools and subagents from one JavaScript program that
+runs as a durable workflow. Built-in, authored, and subagent tools stay directly
+callable; eligible dynamic tools, including discovered connection tools, are
+called through the program. See [Code mode](./tools/code-mode) for eligibility
+rules, discovery, durability, authorization, session state, and current limits.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "openai/gpt-5.5",
+  experimental: { codeMode: true },
+});
+```
+
 | Field          | Type                                    | Default          | Description                                                                                                                                                                                              |
 | -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                            |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                   |
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                              |
-| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit.                           |
+| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `codeMode` enables the [`code_mode`](./tools/code-mode) tool, with `{ maxSubagents }` to cap subagent calls per program; `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit.                           |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.             |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output. |
 

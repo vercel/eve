@@ -10,6 +10,34 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it.each([true, false])("accepts boolean code mode %j", (codeMode) => {
+    const definition = normalizeAgentDefinition(
+      { model: "test/model", experimental: { codeMode } },
+      FAILURE_MESSAGE,
+    );
+    expect(definition.experimental?.codeMode).toBe(codeMode);
+  });
+
+  it.each([{}, { maxSubagents: 2 }])("accepts code mode options %j", (codeMode) => {
+    const definition = normalizeAgentDefinition(
+      { model: "test/model", experimental: { codeMode } },
+      FAILURE_MESSAGE,
+    );
+    expect(definition.experimental?.codeMode).toEqual(codeMode);
+  });
+
+  it.each([{ mode: "lazy" }, { maxSubagents: 0 }, { maxSubagents: "2" }, "eager", 1])(
+    "rejects invalid code mode %j",
+    (codeMode) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "test/model", experimental: { codeMode } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(FAILURE_MESSAGE);
+    },
+  );
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

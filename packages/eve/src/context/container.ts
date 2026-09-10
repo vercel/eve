@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { type ContextAccessor, type ContextKey, resolveKey } from "#context/key.js";
 import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import type { DevelopmentGenerationContext } from "#internal/workflow/development-generation-context.js";
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 
@@ -18,6 +19,8 @@ const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 export interface AlsContext extends ContextAccessor {
   /** Verified local development provenance, inherited across durable execution contexts. */
   readonly localDevRequest?: LocalDevRequestProvenance;
+  /** Delivery metadata inherited by nested contexts, never serialized or cleared with step-local values. */
+  readonly developmentWorkflowGeneration?: DevelopmentGenerationContext;
   /** Removes a durable or step-local value from the context. */
   delete<T>(key: ContextKey<T>): boolean;
   /**
@@ -35,9 +38,16 @@ export interface AlsContext extends ContextAccessor {
 export class ContextContainer implements AlsContext {
   private readonly _durableValues = new Map<string, unknown>();
   private readonly _virtualValues = new Map<string, unknown>();
+  readonly developmentWorkflowGeneration?: DevelopmentGenerationContext;
 
-  constructor(input?: { readonly localDevRequest?: LocalDevRequestProvenance }) {
-    const localDevRequest = input?.localDevRequest ?? contextStorage.getStore()?.localDevRequest;
+  constructor(input?: {
+    readonly localDevRequest?: LocalDevRequestProvenance;
+    readonly developmentWorkflowGeneration?: DevelopmentGenerationContext;
+  }) {
+    const parent = contextStorage.getStore();
+    this.developmentWorkflowGeneration =
+      input?.developmentWorkflowGeneration ?? parent?.developmentWorkflowGeneration;
+    const localDevRequest = input?.localDevRequest ?? parent?.localDevRequest;
     if (localDevRequest !== undefined) {
       this._durableValues.set(LocalDevRequestKey.name, localDevRequest);
     }

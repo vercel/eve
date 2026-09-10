@@ -26,7 +26,7 @@ import {
   type BackgroundToolCallBatch,
 } from "#harness/background-tools.js";
 
-type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
+export type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
 const toolApprovals = new WeakMap<
   object,
@@ -92,6 +92,8 @@ export function buildToolSet(input: {
       description: definition.description,
       execute: wrapToolExecute(definition, backgroundBatch),
       inputSchema: definition.inputSchema,
+      // Responses otherwise normalizes optional properties into required fields.
+      strict: false,
       ...(definition.execution === "background"
         ? {
             onInputAvailable: ({
@@ -333,20 +335,37 @@ function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
 ): (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus> {
-  return async (toolInput: unknown, callId: string) => {
-    if (definition.approval === undefined) return undefined;
-
-    const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
-
-    const status = await resolveApprovalPolicy(definition.approval)({
-      ...buildCallbackContext(),
+  return (toolInput: unknown, callId: string) =>
+    evaluateToolApproval(definition, {
       approvedTools: input.approvedTools ?? new Set(),
       callId,
-      toolInput: toolInputRecord,
-      toolName: definition.name,
+      toolInput,
     });
-    return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
-  };
+}
+
+/**
+ * Evaluates a definition's request-time approval policy with the session
+ * context of the active scope. Boolean answers map to the AI SDK statuses so
+ * every caller sees one shape.
+ */
+export async function evaluateToolApproval(
+  definition: HarnessToolDefinition,
+  input: {
+    readonly approvedTools: ReadonlySet<string>;
+    readonly callId: string;
+    readonly toolInput: unknown;
+  },
+): Promise<NativeApprovalStatus> {
+  if (definition.approval === undefined) return undefined;
+
+  const status = await resolveApprovalPolicy(definition.approval)({
+    ...buildCallbackContext(),
+    approvedTools: input.approvedTools,
+    callId: input.callId,
+    toolInput: isObject(input.toolInput) ? input.toolInput : undefined,
+    toolName: definition.name,
+  });
+  return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
 }
 
 /** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */

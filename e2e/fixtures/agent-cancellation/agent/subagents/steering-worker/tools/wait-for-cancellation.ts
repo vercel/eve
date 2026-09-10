@@ -1,1 +1,1 @@
-export { default } from "../../sleeper/tools/wait-for-cancellation.js";
+export { default } from "../../../tools/wait-for-cancellation.js";

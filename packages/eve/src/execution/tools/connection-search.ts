@@ -1,3 +1,4 @@
+import { scoreToolSearch, tokenizeToolSearch } from "#shared/tool-search.js";
 import { z } from "#compiled/zod/index.js";
 
 import { loadContext } from "#context/container.js";
@@ -20,7 +21,11 @@ import {
   type ApprovalResponseContext,
 } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  stampDurableDynamicToolCallbacks,
+} from "#tools/durable-callbacks.js";
+import { isNeverApproval } from "#tools/approval/policies.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
   createAuthorizationExecution,
@@ -99,34 +104,6 @@ interface ConnectionSearchResultItem {
   readonly qualifiedName?: string;
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[\s_\-./]+/)
-    .filter((t) => t.length > 1);
-}
-
-function scoreMatch(queryTokens: string[], tool: ConnectionToolMetadata): number {
-  const nameTokens = tokenize(tool.name);
-  const descTokens = tokenize(tool.description);
-  let score = 0;
-
-  for (const qt of queryTokens) {
-    for (const nt of nameTokens) {
-      if (nt.includes(qt) || qt.includes(nt)) {
-        score += 3;
-      }
-    }
-    for (const dt of descTokens) {
-      if (dt.includes(qt) || qt.includes(dt)) {
-        score += 1;
-      }
-    }
-  }
-
-  return score;
-}
-
 async function resolveInteractiveAuth(
   registry: ConnectionRegistry,
   connectionName: string,
@@ -169,7 +146,7 @@ async function executeConnectionSearch(
   }
 
   const limit = input.limit ?? 10;
-  const queryTokens = tokenize(input.keywords);
+  const queryTokens = tokenizeToolSearch(input.keywords);
   const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
   const failedConnections: ConnectionSearchResultItem[] = [];
 
@@ -254,7 +231,7 @@ async function executeConnectionSearch(
     }
 
     for (const tool of tools) {
-      const score = scoreMatch(queryTokens, tool);
+      const score = scoreToolSearch(queryTokens, tool);
       if (score > 0) {
         results.push({
           item: {
@@ -397,7 +374,7 @@ export async function resolveConnectionSearchDynamicTools() {
   const connectionSearchTool = defineTool({
     description:
       "Search for tools across your connections. " +
-      "Discovered tools become directly callable by their qualified name " +
+      "Discovered tools become available by their qualified name " +
       "(e.g. `linear__list_issues`) in your next response. " +
       `Available connections: ${connectionNames.join(", ")}.`,
     inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
@@ -436,10 +413,12 @@ export async function resolveConnectionSearchDynamicTools() {
       ...(approval === undefined
         ? {}
         : {
-            approvalRequest: {
-              callback: requestDiscoveredConnectionToolApproval,
-              closure,
-            },
+            approvalRequest: isNeverApproval(approval)
+              ? readDurableDynamicCallback(resolveApprovalPolicy(approval))!
+              : {
+                  callback: requestDiscoveredConnectionToolApproval,
+                  closure,
+                },
           }),
       ...(approval === undefined ||
       typeof approval === "function" ||

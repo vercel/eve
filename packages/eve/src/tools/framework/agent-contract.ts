@@ -1,6 +1,8 @@
 import { z } from "#compiled/zod/index.js";
 
 export const AGENT_TOOL_NAME = "agent";
+export const AGENT_TASK_RECEIPT_DESCRIPTION =
+  "This call starts a background task and returns a task receipt immediately.";
 
 export const AGENT_TOOL_DESCRIPTION = [
   "Delegate a focused subtask to a copy of yourself, or continue or steer a previous delegation with `agentId`.",

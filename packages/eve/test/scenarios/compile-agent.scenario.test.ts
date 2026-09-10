@@ -1130,7 +1130,7 @@ describe("compileAgent", () => {
     );
   });
 
-  it("rejects the removed experimental.codeMode field", async () => {
+  it("accepts boolean code mode and rejects the removed object configuration", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-experimental-code-mode-",
       APP_ROOT_OPTIONS,
@@ -1148,6 +1148,16 @@ describe("compileAgent", () => {
       ].join("\n"),
     );
 
+    await expect(compileAgent({ startPath: appRoot })).resolves.toMatchObject({
+      manifest: { config: { experimental: { codeMode: true } } },
+    });
+
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      ['export default { model: "openai/gpt-5.4", experimental: { codeMode: {} } };', ""].join(
+        "\n",
+      ),
+    );
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow("codeMode");
   });
 

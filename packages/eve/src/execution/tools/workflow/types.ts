@@ -1,4 +1,5 @@
 import type { SessionContext } from "#context/session-context.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
@@ -28,8 +29,19 @@ export function readWorkflowToolExecutorAddress(
     : undefined;
 }
 
+/**
+ * Cursor shared by the workflow run and its Code Mode body. Nested calls
+ * advance it; the run reports changes even if cancellation interrupts the body.
+ * Authored workflow tools stay limited to `ToolContext`.
+ */
+export interface WorkflowToolRunCodeModeContext {
+  serializedContext: Record<string, unknown>;
+  sessionState: DurableSessionState;
+}
+
 export interface WorkflowToolRunInput {
   readonly callId: string;
+  readonly codeMode?: WorkflowToolRunCodeModeContext;
   readonly execution?: "background" | "blocking";
   readonly executeInput?: JsonValue;
   readonly hookToken: string;
