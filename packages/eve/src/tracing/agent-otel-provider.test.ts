@@ -756,50 +756,44 @@ describe("createAgentOtelInstrumentation", () => {
     expect(runtime.exporter.getFinishedSpans()).toEqual([]);
   });
 
-  it.each([
-    ["cancelled", SpanStatusCode.UNSET],
-    ["failed", SpanStatusCode.ERROR],
-  ] as const)("records a %s channel delivery with the expected status", async (outcome, status) => {
-    const runtime = createRuntime();
-    const ctx = new ContextContainer();
-    const delivery = {
-      channelKind: "channel:slack",
-      channelName: "slack",
-      deliveryId: `delivery-${outcome}`,
-    };
-    const idempotencyKey = `channel-delivery:session-1:${delivery.deliveryId}`;
+  it.each(["cancelled", "failed"] as const)(
+    "does not emit a standalone span for a %s delivery without a turn",
+    async (outcome) => {
+      const runtime = createRuntime();
+      const ctx = new ContextContainer();
+      const delivery = {
+        channelKind: "channel:slack",
+        channelName: "slack",
+        deliveryId: `delivery-${outcome}`,
+      };
+      const idempotencyKey = `channel-delivery:session-1:${delivery.deliveryId}`;
 
-    await contextStorage.run(ctx, async () => {
-      await runtime.hooks.publish({
-        agentName: "weather",
-        delivery,
-        idempotencyKey,
-        rootSessionId: "session-1",
-        sessionId: "session-1",
-        type: "channel.delivery.started",
+      await contextStorage.run(ctx, async () => {
+        await runtime.hooks.publish({
+          agentName: "weather",
+          delivery,
+          idempotencyKey,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+          type: "channel.delivery.started",
+        });
+        await runtime.hooks.publish({
+          delivery,
+          error: outcome === "failed" ? new Error("failed") : undefined,
+          errorCode: outcome === "failed" ? "CHANNEL_DELIVERY_FAILED" : undefined,
+          idempotencyKey,
+          outcome,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+          type: `channel.delivery.${outcome}`,
+        });
       });
-      await runtime.hooks.publish({
-        delivery,
-        error: outcome === "failed" ? new Error("failed") : undefined,
-        errorCode: outcome === "failed" ? "CHANNEL_DELIVERY_FAILED" : undefined,
-        idempotencyKey,
-        outcome,
-        rootSessionId: "session-1",
-        sessionId: "session-1",
-        type: `channel.delivery.${outcome}`,
-      });
-    });
 
-    const span = runtime.exporter
-      .getFinishedSpans()
-      .find((candidate) => candidate.name === "agent.channel.delivery")!;
-    expect(span.status.code).toBe(status);
-    expect(span.attributes["error.type"]).toBe(
-      outcome === "failed" ? "CHANNEL_DELIVERY_FAILED" : undefined,
-    );
-  });
+      expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+    },
+  );
 
-  it("maps channel delivery under the session trace with an HTTP request link", async () => {
+  it("maps one channel delivery onto its activation with an HTTP request link", async () => {
     const runtime = createRuntime();
     const ctx = new ContextContainer();
     const requestTraceContext = {
@@ -893,7 +887,7 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
-  it("links the remote caller when delivery starts before the session event", async () => {
+  it("does not emit delivery spans when remote deliveries fan in before the session event", async () => {
     const runtime = createRuntime();
     const ctx = new ContextContainer();
     const parentTraceContext = {
@@ -968,13 +962,9 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
-    const channelDeliveries = byName(spans, "agent.channel.delivery");
     const turn = byName(spans, "invoke_agent")[0]!;
     expect(byName(spans, "agent.session")).toHaveLength(0);
-    expect(channelDeliveries).toHaveLength(2);
-    for (const delivery of channelDeliveries) {
-      expect(delivery.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
-    }
+    expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
     expect(turn.parentSpanContext).toBeUndefined();
     expect(turn.links).toEqual([
       {
@@ -987,6 +977,7 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.conversation.id": "parent-session",
       "gen_ai.operation.name": "invoke_agent",
     });
+    expect(turn.attributes).not.toHaveProperty("agent.channel.delivery.id");
     expect(turn.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
 
@@ -1929,7 +1920,7 @@ describe("createAgentOtelInstrumentation", () => {
     });
 
     expect(audiences.get("agent.approval")).toBe("private");
-    expect(audiences.get("agent.channel.delivery")).toBe("private");
+    expect(audiences.has("agent.channel.delivery")).toBe(false);
     expect(audiences.get("invoke_agent weather")).toBe("private");
   });
 

@@ -87,9 +87,7 @@ captured input on that turn's `invoke_agent` activation. When
 `traceChannelRequests: true` creates an inbound HTTP server span, the activation
 links to it with `eve.link.type=channel.request`.
 
-An `agent.channel.delivery` consumer span is emitted only when a delivery has no
-activation to describe it, including a delivery consumed inline or failed
-before a turn starts, or when multiple deliveries coalesce into one turn.
+Deliveries that do not map one-to-one to an activation still produce instrumentation lifecycle events, but the built-in OpenTelemetry provider does not emit a separate delivery span.
 
 ## Callback delivery errors
 
@@ -109,12 +107,12 @@ not mark the active span as failed.
 The built-in OpenTelemetry provider preserves each span's OTel name and adds
 `operation.name` and `resource.name` for Datadog's operation/resource mapping:
 
-| OTel span name                                                                                    | `operation.name`  | `resource.name`        |
-| ------------------------------------------------------------------------------------------------- | ----------------- | ---------------------- |
-| `invoke_agent weather`                                                                            | `invoke_agent`    | `invoke_agent weather` |
-| `execute_tool search`                                                                             | `execute_tool`    | `execute_tool search`  |
-| `chat <model>`                                                                                    | `chat`            | `chat <model>`         |
-| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.delivery`, `agent.channel.request` | Same as span name | Same as span name      |
+| OTel span name                                                          | `operation.name`  | `resource.name`        |
+| ----------------------------------------------------------------------- | ----------------- | ---------------------- |
+| `invoke_agent weather`                                                  | `invoke_agent`    | `invoke_agent weather` |
+| `execute_tool search`                                                   | `execute_tool`    | `execute_tool search`  |
+| `chat <model>`                                                          | `chat`            | `chat <model>`         |
+| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.request` | Same as span name | Same as span name      |
 
 These attributes apply to eve-owned spans in local tracing and the
 [instrumentation provider layout](./instrumentation-providers). They do not
@@ -148,15 +146,14 @@ remain available when model and tool content is redacted.
 The provider layout and zero-config local tracing emit the following spans.
 The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 
-| Span                     | Meaning                                                  |
-| ------------------------ | -------------------------------------------------------- |
-| `invoke_agent <agent>`   | One agent activation in its own trace                    |
-| `agent.step`             | One model attempt                                        |
-| `agent.action`           | Durable action lifecycle, including dispatch and waiting |
-| `execute_tool <tool>`    | In-process tool execution beneath its action             |
-| `agent.approval`         | Approval waiting beneath its action                      |
-| `agent.channel.delivery` | Exceptional delivery not represented by one activation   |
-| `agent.channel.request`  | Optional HTTP request span in the provider layout        |
+| Span                    | Meaning                                                  |
+| ----------------------- | -------------------------------------------------------- |
+| `invoke_agent <agent>`  | One agent activation in its own trace                    |
+| `agent.step`            | One model attempt                                        |
+| `agent.action`          | Durable action lifecycle, including dispatch and waiting |
+| `execute_tool <tool>`   | In-process tool execution beneath its action             |
+| `agent.approval`        | Approval waiting beneath its action                      |
+| `agent.channel.request` | Optional HTTP request span in the provider layout        |
 
 Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.
 Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use

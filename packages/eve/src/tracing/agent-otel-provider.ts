@@ -507,11 +507,8 @@ export function createAgentOtelInstrumentation(
 
   const channelDeliveries = createAgentChannelDeliveryInstrumentation({
     ensureSessionContext,
-    frameworkVersion: input.frameworkVersion,
-    idGenerator: input.idGenerator,
     recordInputs,
     stateStore: input.stateStore,
-    tracer: input.tracer,
   });
 
   const onStepMetadata = (event: InstrumentationStepAttemptMetadataEvent): void => {

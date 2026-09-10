@@ -3,7 +3,6 @@ export const AGENT_TRACE_SCHEMA_VERSION = 4;
 export const AGENT_SPAN_NAMES = {
   action: "agent.action",
   approval: "agent.approval",
-  channelDelivery: "agent.channel.delivery",
   channelRequest: "agent.channel.request",
   step: "agent.step",
 } as const;
