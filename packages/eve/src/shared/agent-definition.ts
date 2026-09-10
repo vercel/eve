@@ -295,8 +295,8 @@ export interface AgentWorkflowDefinition {
    *   completes or fails. Metadata such as run IDs, status, and timestamps may
    *   persist up to the default period.
    *
-   * The World you are using with the Workflow SDK might not support every option.
-   * A World that does not  value keeps the data.
+   * The World you are using with the Workflow SDK might not support every
+   * option. A World that does not recognize the value keeps the data.
    *
    * Note that with retention set to `0`, data deletion can race reads of a finished
    * run, so results and transcripts of completed sessions generally become
