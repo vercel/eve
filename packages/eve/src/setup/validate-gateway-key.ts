@@ -55,6 +55,7 @@ export async function validateGatewayApiKey(
   try {
     const provider = createGateway({
       apiKey,
+      baseURL: process.env.AI_GATEWAY_BASE_URL,
       fetch: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
         vercelGatewayFetch(url, { ...init, signal: effectiveSignal }),
     });
