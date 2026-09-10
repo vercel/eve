@@ -53,6 +53,15 @@ const sessionInboxWireV5Migration: VersionMigration = {
   to: 6,
 };
 
+const sessionInboxWireV6Migration: VersionMigration = {
+  from: 6,
+  migrate(prior) {
+    if (!isObject(prior)) throw new Error("session inbox wire v6 value is not an object.");
+    return { ...prior, version: 7 };
+  },
+  to: 7,
+};
+
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
@@ -60,6 +69,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV3Migration,
   sessionInboxWireV4Migration,
   sessionInboxWireV5Migration,
+  sessionInboxWireV6Migration,
 ];
 
 /**

@@ -44,6 +44,19 @@ describe("workflow helper context errors", () => {
 });
 
 describe("background agent invocation routing", () => {
+  it("rejects combining history with an existing agent id", async () => {
+    await expect(
+      agent({ callId: "call-1" } as ToolContext, {
+        agentId: "agent-1",
+        history: [],
+        key: "research",
+        message: "Continue",
+        target: "research",
+      }),
+    ).rejects.toThrow("cannot combine `agentId` with `history`");
+    expect(mocks.createHook).not.toHaveBeenCalled();
+  });
+
   it("stops waiting when the workflow body is cancelled", async () => {
     const controller = new AbortController();
     mocks.createHook.mockReturnValue({
@@ -124,8 +137,9 @@ describe("background agent invocation routing", () => {
       },
     });
 
+    const history = [{ content: "Prior context", role: "user" as const }];
     await expect(
-      agent(ctx, { key: "research", message: "Find it", target: "research" }),
+      agent(ctx, { history, key: "research", message: "Find it", target: "research" }),
     ).resolves.toBe("available");
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
@@ -133,7 +147,7 @@ describe("background agent invocation routing", () => {
       from,
       replyTo: "agent-reply",
       request: {
-        input: { message: "Find it", target: "research" },
+        input: { history, message: "Find it", target: "research" },
         invocationId: "call-1:research",
         kind: "agent-invoke",
       },

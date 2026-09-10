@@ -65,6 +65,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
 export interface WorkflowEntryInput {
   readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
+  readonly history?: Parameters<typeof createSessionStep>[0]["history"];
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
@@ -199,6 +200,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
             compiledArtifactsSource: serializedBundle.source,
             continuationToken,
             dynamicSubagentAgentConfig,
+            history: input.history,
             inheritedLimits: input.limits,
             nodeId: serializedBundle.nodeId,
             outputSchema: input.input.outputSchema,

@@ -18,6 +18,8 @@ import type { WorkflowHistory } from "#shared/history-message.js";
 
 export interface AgentInput {
   readonly agentId?: string;
+  /** Conversation history used to preload a newly created local subagent. */
+  readonly history?: WorkflowHistory;
   readonly key: string;
   readonly message: string;
   readonly outputSchema?: JsonObject;
