@@ -40,22 +40,21 @@ const authoredTools = new Map<string, HarnessToolDefinition>([
 ]);
 
 describe("connection tools in code mode", () => {
-  // Every discovered connection tool is claimed; gated ones carry the approval
-  // marker so the body asks before the nested step runs.
+  // Every discovered connection tool is claimed; the nested step evaluates the
+  // restored policy the way a direct call would.
   it.each([
-    { policy: "unset", approval: undefined, gated: false, decision: undefined },
-    { policy: "never", approval: never(), gated: false, decision: "not-applicable" },
-    { policy: "always", approval: always(), gated: true, decision: "user-approval" },
-    { policy: "once", approval: once(), gated: true, decision: "user-approval" },
+    { policy: "unset", approval: undefined, decision: undefined },
+    { policy: "never", approval: never(), decision: "not-applicable" },
+    { policy: "always", approval: always(), decision: "user-approval" },
+    { policy: "once", approval: once(), decision: "user-approval" },
     {
       policy: "custom",
       approval: () => "not-applicable" as const,
-      gated: true,
       decision: "not-applicable",
     },
   ])(
     "preserves discovery and $policy approval across step serialization",
-    async ({ approval, gated, decision }) => {
+    async ({ approval, decision }) => {
       const executeTool = vi.fn(async () => ({ issues: ["issue-1"] }));
       const registry: ConnectionRegistry = {
         dispose: async () => {},
@@ -137,11 +136,6 @@ describe("connection tools in code mode", () => {
       );
       const claimed = pinned.toolCatalog.filter((entry) => entry.target !== "direct");
       expect(claimed.map((entry) => entry.name)).toEqual(["linear__list_issues"]);
-      if (gated) {
-        expect(claimed[0]).toMatchObject({ approval: true });
-      } else {
-        expect(claimed[0]).not.toHaveProperty("approval");
-      }
 
       const nested = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(next))));
       provide(nested);

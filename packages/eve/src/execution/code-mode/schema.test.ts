@@ -55,27 +55,6 @@ describe("code_mode workflow input", () => {
     );
   });
 
-  it("round-trips the approval marker and omits it when unset", () => {
-    const gated: CodeModeToolCatalogEntry = { ...entry, name: "gated", approval: true };
-    const serialized = serializeCodeModeWorkflowInput(input(entry, gated));
-    expect((serialized.toolCatalog as object[])[0]).not.toHaveProperty("approval");
-    expect((serialized.toolCatalog as object[])[1]).toMatchObject({ approval: true });
-    expect(parseCodeModeWorkflowInput(JSON.parse(JSON.stringify(serialized)))).toEqual(
-      input(entry, gated),
-    );
-  });
-
-  it.each([
-    ["a non-boolean marker", { ...entry, approval: "yes" }],
-    ["a false marker", { ...entry, approval: false }],
-    ["a direct target", { ...entry, target: "direct", approval: true }],
-    ["an agent target", { ...entry, target: "agent", approval: true }],
-  ])("rejects %s", (_label, gated) => {
-    expect(() => parseCodeModeWorkflowInput({ ...input(), toolCatalog: [gated] })).toThrow(
-      "carries an invalid approval marker",
-    );
-  });
-
   it("rejects unknown targets", () => {
     expect(() =>
       parseCodeModeWorkflowInput({

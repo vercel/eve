@@ -28,7 +28,6 @@ import {
   CODE_MODE_CALL_INTERRUPT_KIND,
   createCodeModeToolStub,
 } from "#execution/code-mode/program-step.js";
-import type { CodeModeCallResolution } from "#execution/code-mode/schema.js";
 
 const security = { signingKey: "code-mode-program-step-test" };
 
@@ -243,7 +242,7 @@ describe("code-mode sandbox continuation contract", () => {
         inputSchema: jsonSchema({ type: "object" }),
         execute: async (toolInput: unknown, options: unknown) => {
           const resolution = (options as { codeModeInterrupt?: { resolution?: unknown } })
-            .codeModeInterrupt?.resolution as CodeModeCallResolution | undefined;
+            .codeModeInterrupt?.resolution as WorkflowSandboxResolution | undefined;
           if (resolution?.status === "completed") return resolution.output;
           hostCalls++;
           return experimental_requestCodeModeInterrupt({

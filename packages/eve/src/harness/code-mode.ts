@@ -5,7 +5,6 @@ import { z } from "#compiled/zod/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
-import { isNeverApproval } from "#tools/approval/policies.js";
 import { AGENT_TASK_RECEIPT_DESCRIPTION } from "#tools/framework/agent-contract.js";
 import {
   DEFAULT_CODE_MODE_MAX_SUBAGENTS,
@@ -64,7 +63,6 @@ export async function applyCodeModeTool(input: {
     let description = typeof tool.description === "string" ? tool.description : "";
     let target: CodeModeToolCatalogEntry["target"] = "direct";
     let workflowId: string | undefined;
-    let approval = false;
     if (claimsForCodeMode(name, input.harnessTools)) {
       const definition = input.harnessTools.get(name)!;
       if (isCodeModeAgentTool(definition)) {
@@ -75,7 +73,6 @@ export async function applyCodeModeTool(input: {
       } else {
         target = "tool";
       }
-      approval = target !== "agent" && isApprovalGated(definition);
     }
     if (target === "agent") {
       description = description.replace(AGENT_TASK_RECEIPT_DESCRIPTION, "").trim();
@@ -99,7 +96,6 @@ export async function applyCodeModeTool(input: {
             : parseJsonObject(asSchema(tool.outputSchema).jsonSchema),
         target,
       };
-    if (approval) entry.approval = true;
     if (workflowId !== undefined) entry.workflowId = workflowId;
     toolCatalog.push(entry);
   }
@@ -139,8 +135,8 @@ export async function applyCodeModeTool(input: {
 /**
  * Subagents are awaited through the owner and authored workflow tools run
  * inline inside the program's run; other background tools and framework
- * controls stay direct. Approval-gated tools are claimed too: the body asks
- * the person before each gated call (see `approval` on the catalog entry).
+ * controls stay direct. Approval-gated tools are claimed too: the tool step
+ * evaluates their policy and the body asks the person when it requires it.
  */
 export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean {
   if (name === CODE_MODE_TOOL_NAME) return false;
@@ -166,10 +162,6 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   if (definition.execution === "background") return false;
   if (definition.execute === undefined) return false;
   return definition.behavior?.handling === undefined;
-}
-
-function isApprovalGated(definition: HarnessToolDefinition): boolean {
-  return definition.approval !== undefined && !isNeverApproval(definition.approval);
 }
 
 /**

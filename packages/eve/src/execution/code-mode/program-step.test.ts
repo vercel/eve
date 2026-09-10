@@ -99,7 +99,7 @@ vi.mock("#runtime/graph.js", () => ({ getResolvedRuntimeAgentNode: () => ({}) })
 vi.mock("#context/dynamic-subagent-lifecycle.js", () => ({ buildDynamicSubagentTools: () => [] }));
 
 const { BundleKey } = await import("#runtime/sessions/runtime-context-keys.js");
-const { evaluateCodeModeApprovalStep, executeCodeModeToolStep, runCodeModeProgramStep } =
+const { executeCodeModeToolStep, runCodeModeProgramStep } =
   await import("#execution/code-mode/program-step.js");
 
 function definition(
@@ -154,10 +154,16 @@ function nested(name: string, authorizationResults?: AuthorizationResults) {
   return runStep(nestedInput(name), authorizationResults).result;
 }
 
-/** Settles a nested call the way the body sees it: a signal here is a test failure. */
-async function settled(input: StepInput): Promise<CodeModeToolOutcome> {
+type SettledToolOutcome = Exclude<CodeModeToolOutcome, { status: "approval-required" }>;
+
+/**
+ * Settles a nested call the way the body sees it once approval is behind it:
+ * a signal or an approval request here is a test failure.
+ */
+async function settled(input: StepInput): Promise<SettledToolOutcome> {
   const outcome = await runStep(input).result;
   if (isAuthorizationSignal(outcome)) throw new Error("unexpected authorization signal");
+  if (outcome.status === "approval-required") throw new Error("unexpected approval request");
   return outcome;
 }
 
@@ -198,124 +204,158 @@ beforeEach(() => {
   state.tools = new Map();
 });
 
-describe("evaluateCodeModeApprovalStep", () => {
-  const approvalRequest = {
-    allowFreeform: false,
-    display: "confirmation",
-    options: [
-      { id: "approve", label: "Approve" },
-      { id: "cancel", label: "Cancel" },
-    ],
-    prompt: "Approve tool call: gated",
-  };
-
-  it("asks for an always() tool with the direct path's prompt and the nested call as the action", async () => {
-    state.tools.set("gated", definition("gated", { approval: always() }));
-    await expect(
-      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "eu" } })),
-    ).resolves.toEqual({
-      status: "required",
-      approvalKey: "gated",
-      action: { callId: "inner", input: { region: "eu" }, toolName: "gated" },
-      request: approvalRequest,
-    });
-  });
-
-  it("keys once() on the recorded approval and skips the prompt afterwards", async () => {
-    state.tools.set("gated", definition("gated", { approval: once() }));
-    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toMatchObject({
-      status: "required",
-      approvalKey: "gated",
-    });
-    state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated"] };
-    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toEqual({
-      status: "not-required",
-    });
-  });
-
-  it("uses the definition's approvalKey for recording and remembered approvals", async () => {
-    state.tools.set(
-      "gated",
-      definition("gated", {
-        approval: ({ approvedTools, toolName, toolInput }) =>
-          approvedTools.has(`${toolName}:${String(toolInput?.region)}`)
-            ? "not-applicable"
-            : "user-approval",
-        approvalKey: (toolInput) => `gated:${String(toolInput.region)}`,
-      }),
-    );
-    // Fine-grained policies key on input: a different region still prompts.
-    state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated:us"] };
-    await expect(
-      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "eu" } })),
-    ).resolves.toMatchObject({ status: "required", approvalKey: "gated:eu" });
-    await expect(
-      evaluateCodeModeApprovalStep(nestedInput("gated", { toolInput: { region: "us" } })),
-    ).resolves.toEqual({ status: "not-required" });
-  });
-
-  it.each([
-    ["unset", {}, { status: "not-required" }],
-    ["never()", { approval: never() }, { status: "not-required" }],
-    ["approved", { approval: () => "approved" as const }, { status: "not-required" }],
-    ["true", { approval: () => true }, { status: "required" }],
-    ["false", { approval: () => false }, { status: "not-required" }],
-    ["denied", { approval: () => "denied" as const }, { status: "denied" }],
-    [
-      "denied with reason",
-      { approval: () => ({ type: "denied" as const, reason: "outside business hours" }) },
-      { status: "denied", reason: "outside business hours" },
-    ],
-  ] as const)("maps a %s policy answer", async (_label, extra, expected) => {
-    state.tools.set("gated", definition("gated", extra as Partial<HarnessToolDefinition>));
-    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toMatchObject(
-      expected,
-    );
-  });
-
-  it("evaluates the policy with the turn's session context", async () => {
-    const approval = vi.fn((_context: ApprovalContext) => "user-approval" as const);
-    state.tools.set("gated", definition("gated", { approval }));
-    await evaluateCodeModeApprovalStep(nestedInput("gated"));
-    expect(approval).toHaveBeenCalledOnce();
-    expect(approval.mock.calls[0]?.[0]).toMatchObject({
-      callId: "inner",
-      session: { id: "parent-session" },
-      toolName: "gated",
-    });
-  });
-
-  it("fails for tools the program cannot call and when the policy throws", async () => {
-    state.tools.set("background", definition("background", { execution: "background" }));
-    await expect(evaluateCodeModeApprovalStep(nestedInput("background"))).resolves.toEqual({
-      status: "failed",
-      error: 'Tool "background" is not available to code_mode in this session.',
-    });
-    state.tools.set(
-      "gated",
-      definition("gated", {
-        approval: () => {
-          throw new Error("policy exploded");
-        },
-      }),
-    );
-    await expect(evaluateCodeModeApprovalStep(nestedInput("gated"))).resolves.toEqual({
-      status: "failed",
-      error: "policy exploded",
-    });
-  });
-});
-
 describe("executeCodeModeToolStep", () => {
-  // Approval is settled by the body before this step runs, so a gated
-  // connection tool executes here like an ungated one.
+  describe("approval gate", () => {
+    const approvalRequest = {
+      allowFreeform: false,
+      display: "confirmation",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve tool call: gated",
+    };
+    const denied = (detail = "") =>
+      `CODE_MODE_APPROVAL_DENIED: the approval policy declined to run "gated".${detail}`;
+
+    it("asks for an always() tool with the direct path's prompt and the nested call as the action, running nothing", async () => {
+      const execute = vi.fn(async () => "ran");
+      state.tools.set("gated", definition("gated", { approval: always(), execute }));
+      await expect(
+        runStep(nestedInput("gated", { toolInput: { region: "eu" } })).result,
+      ).resolves.toEqual({
+        status: "approval-required",
+        approvalKey: "gated",
+        action: { callId: "inner", input: { region: "eu" }, toolName: "gated" },
+        request: approvalRequest,
+      });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("keys once() on the recorded approval and runs without asking afterwards", async () => {
+      const execute = vi.fn(async () => "ran");
+      state.tools.set("gated", definition("gated", { approval: once(), execute }));
+      await expect(nested("gated")).resolves.toMatchObject({
+        status: "approval-required",
+        approvalKey: "gated",
+      });
+      expect(execute).not.toHaveBeenCalled();
+      state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated"] };
+      await expect(nested("gated")).resolves.toEqual({ status: "completed", output: "ran" });
+      expect(execute).toHaveBeenCalledOnce();
+    });
+
+    it("uses the definition's approvalKey for recording and remembered approvals", async () => {
+      state.tools.set(
+        "gated",
+        definition("gated", {
+          approval: ({ approvedTools, toolName, toolInput }) =>
+            approvedTools.has(`${toolName}:${String(toolInput?.region)}`)
+              ? "not-applicable"
+              : "user-approval",
+          approvalKey: (toolInput) => `gated:${String(toolInput.region)}`,
+        }),
+      );
+      // Fine-grained policies key on input: a different region still prompts.
+      state.sessionState = { [APPROVED_TOOLS_KEY]: ["gated:us"] };
+      await expect(
+        runStep(nestedInput("gated", { toolInput: { region: "eu" } })).result,
+      ).resolves.toMatchObject({ status: "approval-required", approvalKey: "gated:eu" });
+      await expect(
+        runStep(nestedInput("gated", { toolInput: { region: "us" } })).result,
+      ).resolves.toEqual({ status: "completed", output: "ok" });
+    });
+
+    it("skips the policy and runs the tool when the call carries an approval", async () => {
+      const approval = vi.fn((_context: ApprovalContext) => "user-approval" as const);
+      const execute = vi.fn(async () => "ran");
+      state.tools.set("gated", definition("gated", { approval, execute }));
+      await expect(
+        runStep(nestedInput("gated", { approval: { key: "gated" } })).result,
+      ).resolves.toEqual({ status: "completed", output: "ran" });
+      expect(approval).not.toHaveBeenCalled();
+      expect(execute).toHaveBeenCalledOnce();
+    });
+
+    it("gates an authored workflow tool before clearing it for its inline body", async () => {
+      state.tools.set(
+        "gated_wf",
+        definition("gated_wf", { approval: always(), workflowId: "workflow//app//gated_wf" }),
+      );
+      await expect(nested("gated_wf")).resolves.toMatchObject({
+        status: "approval-required",
+        approvalKey: "gated_wf",
+      });
+      await expect(
+        runStep(nestedInput("gated_wf", { approval: { key: "gated_wf" } })).result,
+      ).resolves.toEqual({ status: "cleared" });
+    });
+
+    it.each([
+      ["unset", {}, { status: "completed", output: "ok" }],
+      ["never()", { approval: never() }, { status: "completed", output: "ok" }],
+      ["approved", { approval: () => "approved" as const }, { status: "completed", output: "ok" }],
+      ["true", { approval: () => true }, { status: "approval-required" }],
+      ["false", { approval: () => false }, { status: "completed", output: "ok" }],
+      ["denied", { approval: () => "denied" as const }, { status: "failed", error: denied() }],
+      [
+        "denied with reason",
+        { approval: () => ({ type: "denied" as const, reason: "outside business hours" }) },
+        { status: "failed", error: denied(" outside business hours") },
+      ],
+    ] as const)("maps a %s policy answer", async (_label, extra, expected) => {
+      state.tools.set("gated", definition("gated", extra as Partial<HarnessToolDefinition>));
+      await expect(nested("gated")).resolves.toMatchObject(expected);
+    });
+
+    it("evaluates the policy with the turn's session context", async () => {
+      const approval = vi.fn((_context: ApprovalContext) => "user-approval" as const);
+      state.tools.set("gated", definition("gated", { approval }));
+      await nested("gated");
+      expect(approval).toHaveBeenCalledOnce();
+      expect(approval.mock.calls[0]?.[0]).toMatchObject({
+        callId: "inner",
+        session: { id: "parent-session" },
+        toolName: "gated",
+      });
+    });
+
+    it("fails for tools the program cannot call and when the policy throws", async () => {
+      state.tools.set(
+        "background",
+        definition("background", { approval: always(), execution: "background" }),
+      );
+      await expect(nested("background")).resolves.toEqual({
+        status: "failed",
+        error: 'Tool "background" is not available to code_mode in this session.',
+      });
+      const execute = vi.fn(async () => "ran");
+      state.tools.set(
+        "gated",
+        definition("gated", {
+          approval: () => {
+            throw new Error("policy exploded");
+          },
+          execute,
+        }),
+      );
+      await expect(nested("gated")).resolves.toEqual({
+        status: "failed",
+        error: "policy exploded",
+      });
+      expect(execute).not.toHaveBeenCalled();
+    });
+  });
+
+  // A gated connection tool asks first like any other; once the body hands
+  // back the approval it executes here like an ungated one.
   it.each([
     { policy: "unset", approval: undefined },
     { policy: "never", approval: never() },
     { policy: "always", approval: always() },
   ])(
     "restores and executes a discovered connection with $policy approval after a cold start",
-    async ({ approval }) => {
+    async ({ policy, approval }) => {
       const executeTool = vi.fn(async () => ({ issues: ["issue-1"] }));
       const resolver: ResolvedDynamicToolResolver = {
         slug: "connection_search",
@@ -375,7 +415,22 @@ describe("executeCodeModeToolStep", () => {
       });
       clearDurableDynamicCallbacks("parent-session");
 
-      await expect(nested("tracker__list_issues")).resolves.toEqual({
+      const gated = policy === "always";
+      if (gated) {
+        await expect(nested("tracker__list_issues")).resolves.toMatchObject({
+          status: "approval-required",
+          approvalKey: "tracker__list_issues",
+        });
+        expect(executeTool).not.toHaveBeenCalled();
+      }
+      await expect(
+        runStep(
+          nestedInput(
+            "tracker__list_issues",
+            gated ? { approval: { key: "tracker__list_issues" } } : {},
+          ),
+        ).result,
+      ).resolves.toEqual({
         status: "completed",
         output: { issues: ["issue-1"] },
       });
@@ -428,17 +483,14 @@ describe("executeCodeModeToolStep", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("refuses to run an authored workflow tool as a plain step even though programs claim it", async () => {
+  it("clears an authored workflow tool for its inline body instead of running it as a step", async () => {
     const execute = vi.fn(async () => "done");
     state.tools.set(
       "plan_deploy",
       definition("plan_deploy", { execute, workflowId: "workflow//app//plan_deploy" }),
     );
     expect(claimsForCodeMode("plan_deploy", state.tools)).toBe(true);
-    await expect(nested("plan_deploy")).resolves.toEqual({
-      status: "failed",
-      error: 'Tool "plan_deploy" is a workflow tool and cannot run as a code_mode tool step.',
-    });
+    await expect(nested("plan_deploy")).resolves.toEqual({ status: "cleared" });
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -635,11 +687,9 @@ describe("runCodeModeProgramStep", () => {
       expect(tools.lookup!.description).toBe("Pinned lookup");
       expect(asSchema(tools.lookup!.inputSchema).jsonSchema).toEqual({ type: "object" });
       expect(asSchema(tools.lookup!.outputSchema!).jsonSchema).toEqual({ type: "string" });
-      const targets = { lookup: "tool", researcher: "agent", plan_deploy: "workflow" } as const;
       expect(parking.mock.calls.map(([call]) => call.interrupt({ query: "hello" }))).toEqual(
-        Object.entries(targets).map(([name, target]) => ({
+        ["lookup", "researcher", "plan_deploy"].map((name) => ({
           kind: "eve.code-mode-call",
-          target,
           toolName: name,
           toolInput: { query: "hello" },
         })),
@@ -647,33 +697,32 @@ describe("runCodeModeProgramStep", () => {
     },
   );
 
-  it.each(["agent", "tool", "workflow"] as const)(
-    "reads a parked %s call from the continuation",
-    async (target) => {
-      const payload = { kind: "eve.code-mode-call", target, toolInput: { q: 1 }, toolName: "t" };
-      const interrupt = { payload, toolCallId: "t-call" } as never;
-      vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
-        sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
-      );
-
-      await expect(runCodeModeProgramStep(input)).resolves.toEqual({
-        status: "interrupted",
-        interrupt,
-        pending: [{ call: payload, interrupt, toolCallId: "t-call" }],
-      });
-    },
-  );
-
-  it("rejects a parked call with an unknown target", async () => {
-    const interrupt = {
-      payload: { kind: "eve.code-mode-call", target: "remote", toolName: "t" },
-      toolCallId: "t-call",
-    } as never;
+  it("reads a parked call from the continuation by tool name", async () => {
+    const payload = { kind: "eve.code-mode-call", toolInput: { q: 1 }, toolName: "t" };
+    const interrupt = { payload, toolCallId: "t-call" } as never;
     vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
       sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
     );
 
-    await expect(runCodeModeProgramStep(input)).rejects.toThrow("Unsupported code_mode interrupt");
+    await expect(runCodeModeProgramStep(input)).resolves.toEqual({
+      status: "interrupted",
+      interrupt,
+      pending: [{ call: payload, interrupt, toolCallId: "t-call" }],
+    });
+  });
+
+  it.each([
+    ["a foreign kind", { kind: "eve.other", toolInput: {}, toolName: "t" }],
+    ["no tool name", { kind: "eve.code-mode-call", toolInput: {} }],
+  ])("rejects a parked call with %s", async (_label, payload) => {
+    const interrupt = { payload, toolCallId: "t-call" } as never;
+    vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
+      sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
+    );
+
+    await expect(runCodeModeProgramStep(input)).rejects.toThrow(
+      "Unsupported code_mode interrupt kind",
+    );
   });
 
   it("rejects an interrupted program with no pending call", async () => {

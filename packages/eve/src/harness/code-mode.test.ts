@@ -168,15 +168,6 @@ describe("applyCodeModeTool", () => {
           expect.objectContaining({ name: "remote_lookup", target: "tool" }),
         ]),
       );
-      for (const entry of input.toolCatalog) {
-        if (entry.name === "remote_lookup" || entry.name === CODE_MODE_TOOL_NAME) {
-          expect(entry).not.toHaveProperty("approval");
-        } else if (gated) {
-          expect(entry.approval).toBe(true);
-        } else {
-          expect(entry).not.toHaveProperty("approval");
-        }
-      }
     },
   );
 
@@ -271,15 +262,12 @@ describe("applyCodeModeTool", () => {
       toolCatalog: expect.arrayContaining([
         expect.objectContaining({ name: "add", target: "tool", outputSchema: { type: "number" } }),
         expect.objectContaining({ name: "researcher", target: "agent" }),
-        expect.objectContaining({ name: "gated", target: "tool", approval: true }),
+        expect.objectContaining({ name: "gated", target: "tool" }),
       ]),
     });
-    expect(
-      parseCodeModeWorkflowInput(executeInput).toolCatalog.find((entry) => entry.name === "add"),
-    ).not.toHaveProperty("approval");
   });
 
-  it("marks approval-gated tools and workflow tools for the body and keeps them direct", async () => {
+  it("claims approval-gated tools and workflow tools and keeps them direct", async () => {
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["gated", tool("gated", { approval: always() })],
       ["gated_once", tool("gated_once", { approval: once() })],
@@ -301,15 +289,14 @@ describe("applyCodeModeTool", () => {
       applied.harnessTools.get(CODE_MODE_TOOL_NAME)!.executeInput!({ js: "return 1;" }),
     );
     const byName = new Map(input.toolCatalog.map((entry) => [entry.name, entry]));
-    expect(byName.get("gated")).toMatchObject({ approval: true, target: "tool" });
-    expect(byName.get("gated_once")).toMatchObject({ approval: true, target: "tool" });
-    expect(byName.get("gated_dynamic")).toMatchObject({ approval: true, target: "tool" });
+    expect(byName.get("gated")).toMatchObject({ target: "tool" });
+    expect(byName.get("gated_once")).toMatchObject({ target: "tool" });
+    expect(byName.get("gated_dynamic")).toMatchObject({ target: "tool" });
     expect(byName.get("gated_wf")).toMatchObject({
-      approval: true,
       target: "workflow",
       workflowId: "workflow//app//gated_wf",
     });
-    expect(byName.get("open")).not.toHaveProperty("approval");
+    expect(byName.get("open")).toMatchObject({ target: "tool" });
   });
 
   it("lists names only and advertises discovery helpers", async () => {

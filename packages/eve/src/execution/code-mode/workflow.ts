@@ -10,19 +10,23 @@ import {
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/ask.js";
 import { executeWorkflowBody } from "#execution/tools/workflow/body.js";
-import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
-import type { CodeModeCallResolution, CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
+import {
+  approvalDenied,
+  parseCodeModeWorkflowInput,
+  type CodeModeToolCatalogEntry,
+  type CodeModeWorkflowInput,
+} from "#execution/code-mode/schema.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
-  evaluateCodeModeApprovalStep,
   executeCodeModeToolStep,
   runCodeModeProgramStep,
-  type CodeModeCallInterrupt,
   type CodeModePendingCall,
   type CodeModeProgramOutcome,
   type CodeModeToolCall,
+  type CodeModeToolOutcome,
 } from "#execution/code-mode/program-step.js";
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
+import type { WorkflowSandboxResolution } from "#shared/workflow-sandbox.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   adoptCodeModeStateChanges,
@@ -44,7 +48,7 @@ import {
  */
 export async function codeModeWorkflow(
   rawInput: unknown,
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
+  ctx: CodeModeBodyContext,
 ): Promise<JsonValue> {
   "use workflow";
 
@@ -66,7 +70,8 @@ export async function codeModeWorkflow(
     // together. Ids are assigned before the await so replay hands each call
     // the same id regardless of completion order.
     const settling = outcome.pending.map((pending): Promise<SettledNestedCall> => {
-      if (pending.call.target === "agent" && subagentCalls++ >= program.maxSubagents) {
+      const entry = catalogEntry(program, pending.call.toolName);
+      if (entry?.target === "agent" && subagentCalls++ >= program.maxSubagents) {
         return Promise.resolve({
           resolution: {
             status: "failed" as const,
@@ -81,7 +86,7 @@ export async function codeModeWorkflow(
     // Adopt state in pending order once the batch settles, so replay applies
     // the same merges (and surfaces the same conflicts) regardless of which
     // call finished first.
-    const resolutions = settled.map(({ resolution, stateChanges }): CodeModeCallResolution => {
+    const resolutions = settled.map(({ resolution, stateChanges }): WorkflowSandboxResolution => {
       if (stateChanges === undefined || stateChanges.length === 0) return resolution;
       try {
         const updated = adoptCodeModeStateChanges(run, stateChanges);
@@ -102,12 +107,21 @@ export async function codeModeWorkflow(
 }
 
 interface SettledNestedCall {
-  readonly resolution: CodeModeCallResolution;
+  readonly resolution: WorkflowSandboxResolution;
   readonly stateChanges?: readonly CodeModeStateChange[];
 }
 
+type CodeModeBodyContext = Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">;
+
+function catalogEntry(
+  program: CodeModeWorkflowInput,
+  toolName: string,
+): CodeModeToolCatalogEntry | undefined {
+  return program.toolCatalog.find((candidate) => candidate.name === toolName);
+}
+
 async function settleNestedCall(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
+  ctx: CodeModeBodyContext,
   run: ReturnType<typeof readCodeModeRunContext>,
   program: CodeModeWorkflowInput,
   pending: CodeModePendingCall,
@@ -117,21 +131,11 @@ async function settleNestedCall(
   const from = readWorkflowToolRunRef(ctx);
   const { sequence, stepIndex, turnId } = from;
   try {
-    const nestedCall: CodeModeToolCall = {
-      event: { sequence, stepIndex, turnId },
-      serializedContext: run.serializedContext,
-      sessionState: run.sessionState,
-      toolCallId,
-      toolInput: call.toolInput,
-      toolName: call.toolName,
-    };
-    const approval = await approveNestedCall(ctx, program, nestedCall);
-    if (approval.status === "denied") return { resolution: approval.resolution };
-    if (call.target === "workflow") {
-      const resolution = await runNestedWorkflowTool(ctx, from, program, call);
-      return { resolution, stateChanges: approval.stateChanges };
+    const entry = catalogEntry(program, call.toolName);
+    if (entry === undefined || entry.target === "direct") {
+      throw new Error(`Tool "${call.toolName}" is not callable from this program.`);
     }
-    if (call.target === "agent") {
+    if (entry.target === "agent") {
       const agentInput = readAgentInput(call.toolInput);
       const output = await invokeAgent(
         ctx,
@@ -149,19 +153,28 @@ async function settleNestedCall(
       if (answer.text !== undefined) output.text = answer.text;
       return { resolution: { status: "completed", output } };
     }
-    // Passing `ctx` opts this step into the workflow-tool authorization twin,
-    // which parks on sign-in and retries the step; the body only sees results.
-    const settled = await executeCodeModeToolStep(ctx, nestedCall);
-    // The authorization twin never lets a signal reach the body; a bare signal
-    // means this step ran without its twin. (Structural check: the harness
-    // module is not importable from the workflow driver body.)
-    if (!("status" in settled)) {
-      throw new Error(`Tool "${call.toolName}" requested authorization outside a workflow step.`);
-    }
+    const settled = await runNestedToolStep(ctx, {
+      event: { sequence, stepIndex, turnId },
+      serializedContext: run.serializedContext,
+      sessionState: run.sessionState,
+      toolCallId,
+      toolInput: call.toolInput,
+      toolName: call.toolName,
+    });
     const { stateChanges, ...resolution } = settled;
+    if (resolution.status !== "cleared") return { resolution, stateChanges };
+    if (entry.target !== "workflow" || entry.workflowId === undefined) {
+      throw new Error(`Tool "${call.toolName}" is not a workflow tool in this program's catalog.`);
+    }
     return {
-      resolution,
-      stateChanges: [...(approval.stateChanges ?? []), ...(stateChanges ?? [])],
+      resolution: await runNestedWorkflowTool(
+        ctx,
+        from,
+        entry.workflowId,
+        call.toolName,
+        call.toolInput,
+      ),
+      stateChanges,
     };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();
@@ -169,58 +182,59 @@ async function settleNestedCall(
   }
 }
 
-type NestedCallApproval =
-  | { readonly status: "approved"; readonly stateChanges?: readonly CodeModeStateChange[] }
-  | { readonly status: "denied"; readonly resolution: CodeModeCallResolution };
+type SettledToolStep = Exclude<CodeModeToolOutcome, { status: "approval-required" }>;
 
 /**
- * Asks the person before an approval-gated nested call, the way the harness
- * would before a direct call. The approval renders as a tool-approval card for
- * the nested tool; a granted approval is recorded as a state change so `once()`
- * holds for later calls in this program and for the parent session afterwards.
+ * Runs the tool step, asking the person when its approval policy requires it
+ * and running once more with the grant. The approval renders as a tool-approval
+ * card for the nested tool; a granted approval is recorded as a state change so
+ * `once()` holds for later calls in this program and for the parent session.
  */
-async function approveNestedCall(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
-  program: CodeModeWorkflowInput,
+async function runNestedToolStep(
+  ctx: CodeModeBodyContext,
   nestedCall: CodeModeToolCall,
-): Promise<NestedCallApproval> {
-  const entry = program.toolCatalog.find((candidate) => candidate.name === nestedCall.toolName);
-  if (entry?.approval !== true) return { status: "approved" };
-  const decision = await evaluateCodeModeApprovalStep(nestedCall);
-  switch (decision.status) {
-    case "not-required":
-      return { status: "approved" };
-    case "failed":
-      return { status: "denied", resolution: decision };
-    case "denied":
-      return {
-        status: "denied",
-        resolution: approvalDenied("the approval policy", nestedCall.toolName, decision.reason),
-      };
-    case "required": {
-      // The answer routes back by request id; `action` only attributes the
-      // card to the nested call so channels render it as a tool approval.
-      const answer = await requestInput(ctx, (requestId) => ({
-        ...decision.request,
-        action: { ...decision.action, kind: "tool-call" },
-        kind: "tool-approval",
-        options: decision.request.options === undefined ? undefined : [...decision.request.options],
-        requestId,
-      }));
-      if (answer.optionId !== "approve") {
-        return { status: "denied", resolution: approvalDenied("the user", nestedCall.toolName) };
-      }
-      return { status: "approved", stateChanges: [approvedToolStateChange(decision.approvalKey)] };
-    }
+): Promise<SettledToolStep> {
+  const first = await settleToolStep(ctx, nestedCall);
+  if (first.status !== "approval-required") return first;
+  // The answer routes back by request id; `action` only attributes the card
+  // to the nested call so channels render it as a tool approval.
+  const answer = await requestInput(ctx, (requestId) => ({
+    ...first.request,
+    action: { ...first.action, kind: "tool-call" },
+    kind: "tool-approval",
+    options: first.request.options === undefined ? undefined : [...first.request.options],
+    requestId,
+  }));
+  if (answer.optionId !== "approve") return approvalDenied("the user", nestedCall.toolName);
+  const approved = await settleToolStep(ctx, {
+    ...nestedCall,
+    approval: { key: first.approvalKey },
+  });
+  if (approved.status === "approval-required") {
+    throw new Error(`Tool "${nestedCall.toolName}" asked for approval twice.`);
   }
+  return {
+    ...approved,
+    stateChanges: [approvedToolStateChange(first.approvalKey), ...(approved.stateChanges ?? [])],
+  };
 }
 
-function approvalDenied(by: string, toolName: string, reason?: string): CodeModeCallResolution {
-  const detail = reason === undefined ? "" : ` ${reason}`;
-  return {
-    status: "failed",
-    error: `CODE_MODE_APPROVAL_DENIED: ${by} declined to run "${toolName}".${detail}`,
-  };
+async function settleToolStep(
+  ctx: CodeModeBodyContext,
+  nestedCall: CodeModeToolCall,
+): Promise<CodeModeToolOutcome> {
+  // Passing `ctx` opts this step into the workflow-tool authorization twin,
+  // which parks on sign-in and retries the step; the body only sees results.
+  const settled = await executeCodeModeToolStep(ctx, nestedCall);
+  // The authorization twin never lets a signal reach the body; a bare signal
+  // means this step ran without its twin. (Structural check: the harness
+  // module is not importable from the workflow driver body.)
+  if (!("status" in settled)) {
+    throw new Error(
+      `Tool "${nestedCall.toolName}" requested authorization outside a workflow step.`,
+    );
+  }
+  return settled;
 }
 
 /**
@@ -230,26 +244,23 @@ function approvalDenied(by: string, toolName: string, reason?: string): CodeMode
  * by that pair, so they are attributed to the `code_mode` call.
  */
 async function runNestedWorkflowTool(
-  ctx: Pick<ToolContext, "abortSignal" | "callId" | "session" | "toolName">,
+  ctx: CodeModeBodyContext,
   from: WorkflowToolRunRef,
-  program: CodeModeWorkflowInput,
-  call: CodeModeCallInterrupt,
-): Promise<CodeModeCallResolution> {
-  const entry = program.toolCatalog.find((candidate) => candidate.name === call.toolName);
-  if (entry?.target !== "workflow" || entry.workflowId === undefined) {
-    throw new Error(`Tool "${call.toolName}" is not a workflow tool in this program's catalog.`);
-  }
+  workflowId: string,
+  toolName: string,
+  toolInput: unknown,
+): Promise<WorkflowSandboxResolution> {
   const { outcome } = await executeWorkflowBody(
     {
       authorizationSupported: true,
       callId: from.callId,
       execution: "blocking",
-      input: readWorkflowToolInput(call),
+      input: readWorkflowToolInput(toolName, toolInput),
       owner: readWorkflowToolRunOwner(ctx),
       session: ctx.session,
       stepIndex: from.stepIndex,
-      toolName: call.toolName,
-      workflowId: entry.workflowId,
+      toolName,
+      workflowId,
     },
     ctx.abortSignal,
   );
@@ -257,14 +268,14 @@ async function runNestedWorkflowTool(
   if (outcome.status === "failed")
     return { status: "failed", error: toErrorMessage(outcome.error) };
   ctx.abortSignal.throwIfAborted();
-  throw new Error(outcome.reason || `Workflow tool "${call.toolName}" was cancelled.`);
+  throw new Error(outcome.reason || `Workflow tool "${toolName}" was cancelled.`);
 }
 
-function readWorkflowToolInput(call: CodeModeCallInterrupt): JsonObject {
+function readWorkflowToolInput(toolName: string, toolInput: unknown): JsonObject {
   try {
-    return parseJsonObject(call.toolInput);
+    return parseJsonObject(toolInput);
   } catch {
-    throw new TypeError(`Workflow tool "${call.toolName}" requires a JSON object input.`);
+    throw new TypeError(`Workflow tool "${toolName}" requires a JSON object input.`);
   }
 }
 

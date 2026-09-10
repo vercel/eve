@@ -28,11 +28,10 @@ import { readDurableSession, type DurableSessionState } from "#execution/durable
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
-import type {
-  CodeModeCallResolution,
-  CodeModeCallTarget,
-  CodeModeToolCatalogEntry,
-  CodeModeWorkflowInput,
+import {
+  approvalDenied,
+  type CodeModeToolCatalogEntry,
+  type CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
 import {
   AuthorizationHookKey,
@@ -67,6 +66,7 @@ import {
   createParkingHostTool,
   createWorkflowSandbox,
   type WorkflowSandboxInterrupt,
+  type WorkflowSandboxResolution,
 } from "#shared/workflow-sandbox.js";
 import type { ToolContext, ToolExecuteOptions, ToolInputRequest } from "#tools/definition.js";
 
@@ -75,7 +75,6 @@ export const CODE_MODE_CALL_INTERRUPT_KIND = "eve.code-mode-call";
 
 export interface CodeModeCallInterrupt {
   readonly kind: typeof CODE_MODE_CALL_INTERRUPT_KIND;
-  readonly target: Exclude<CodeModeCallTarget, "direct">;
   readonly toolInput: unknown;
   readonly toolName: string;
 }
@@ -97,9 +96,30 @@ export type CodeModeProgramOutcome =
       readonly pending: readonly CodeModePendingCall[];
     };
 
-export type CodeModeToolOutcome = CodeModeCallResolution & {
-  readonly stateChanges?: readonly CodeModeStateChange[];
-};
+export type CodeModeToolOutcome =
+  | ((WorkflowSandboxResolution | { readonly status: "cleared" }) & {
+      readonly stateChanges?: readonly CodeModeStateChange[];
+    })
+  | CodeModeApprovalRequired;
+
+/** The tool's policy wants the person's approval; nothing ran. */
+export interface CodeModeApprovalRequired {
+  readonly status: "approval-required";
+  /** Key `once()` remembers on approval: `approvalKey(input)` when the tool defines one, else the tool name. */
+  readonly approvalKey: string;
+  /**
+   * The nested call as the approval card shows it. `callId` is the sandbox's
+   * nested id (`<code_mode callId>:tool-N`): unique per call, so the card
+   * renders as its own nested tool call instead of rewriting the `code_mode`
+   * card, and never a turn action the owner could dispatch.
+   */
+  readonly action: {
+    readonly callId: string;
+    readonly input: JsonObject;
+    readonly toolName: string;
+  };
+  readonly request: ToolInputRequest;
+}
 
 /**
  * Starts the generated program, or resumes it once every parked call settled.
@@ -121,7 +141,7 @@ export async function runCodeModeProgramStep(input: {
   readonly sessionState: DurableSessionState;
   readonly resume?: {
     readonly interrupt: WorkflowSandboxInterrupt;
-    readonly resolutions: readonly CodeModeCallResolution[];
+    readonly resolutions: readonly WorkflowSandboxResolution[];
   };
 }): Promise<CodeModeProgramOutcome> {
   "use step";
@@ -162,14 +182,23 @@ export interface CodeModeToolCall {
   readonly toolCallId: string;
   readonly toolInput: unknown;
   readonly toolName: string;
+  /** The person approved this call under `key`; the policy is not evaluated again. */
+  readonly approval?: { readonly key: string };
 }
 
 /**
- * Executes one ordinary claimed tool with the turn's context rebuilt from its
- * serialized form. The sandbox and connections resolve through the same
- * providers a turn step uses, so `bash`, `read_file`, connection tools, and
- * authored tools all run unchanged; the parent materialized the sandbox before
- * dispatching, so this step only reconnects to it.
+ * Executes one claimed tool with the turn's context rebuilt from its serialized
+ * form. The sandbox and connections resolve through the same providers a turn
+ * step uses, so `bash`, `read_file`, connection tools, and authored tools all
+ * run unchanged; the parent materialized the sandbox before dispatching, so
+ * this step only reconnects to it.
+ *
+ * The approval policy is evaluated here, exactly as a direct call would, with
+ * the keys the person already approved (including earlier in this program).
+ * When it asks for the person, the step returns `approval-required` without
+ * running anything; the body asks and calls again with `approval` set.
+ * Authored workflow tools stop at `cleared`: their body runs inline in the
+ * workflow, not in a step.
  *
  * Authorization rides the workflow-tool step mechanism: passing the run's
  * `ctx` routes the call through `workflowToolStep`, whose twin seeds the hook
@@ -200,14 +229,16 @@ export async function executeCodeModeToolStep(
       error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
     };
   }
-  // The body runs authored workflow tools inline; their `execute` is a
-  // workflow function, not something this step can call directly.
-  if (definition.workflowId !== undefined) {
-    return {
-      status: "failed",
-      error: `Tool "${input.toolName}" is a workflow tool and cannot run as a code_mode tool step.`,
-    };
+  if (definition.approval !== undefined && input.approval === undefined) {
+    let gate: CodeModeToolOutcome | undefined;
+    try {
+      gate = await evaluateApprovalGate({ ctx, definition, harnessTools, input, session });
+    } catch (error) {
+      return { status: "failed", error: toErrorMessage(error) };
+    }
+    if (gate !== undefined) return gate;
   }
+  if (definition.workflowId !== undefined) return { status: "cleared" };
   const execute = wrapToolExecute(definition);
   if (execute === undefined) {
     return { status: "failed", error: `Tool "${input.toolName}" has no executor.` };
@@ -257,85 +288,40 @@ export async function executeCodeModeToolStep(
   return stateChanges.length === 0 ? outcome : { ...outcome, stateChanges };
 }
 
-export type CodeModeApprovalDecision =
-  | { readonly status: "not-required" }
-  | { readonly status: "denied"; readonly reason?: string }
-  | { readonly status: "failed"; readonly error: string }
-  | {
-      readonly status: "required";
-      /** Key `once()` remembers on approval: `approvalKey(input)` when the tool defines one, else the tool name. */
-      readonly approvalKey: string;
-      /**
-       * The nested call as the approval card shows it. `callId` is the
-       * sandbox's nested id (`<code_mode callId>:tool-N`): unique per call, so
-       * the card renders as its own nested tool call instead of rewriting the
-       * `code_mode` card, and never a turn action the owner could dispatch.
-       */
-      readonly action: {
-        readonly callId: string;
-        readonly input: JsonObject;
-        readonly toolName: string;
-      };
-      readonly request: ToolInputRequest;
-    };
-
-/**
- * Evaluates a claimed tool's approval policy exactly as a direct call would:
- * with the turn's session context and the keys the person already approved,
- * including those granted earlier in this program. The body asks the person
- * only when the policy answers `user-approval`; policy evaluation needs the
- * harness, so it runs here rather than in the workflow body.
- */
-export async function evaluateCodeModeApprovalStep(
-  input: CodeModeToolCall,
-): Promise<CodeModeApprovalDecision> {
-  "use step";
-
-  const { ctx, harnessTools, session } = await hydrateTurnTools(input);
-  const definition = harnessTools.get(input.toolName);
-  if (
-    definition === undefined ||
-    isCodeModeAgentTool(definition) ||
-    !claimsForCodeMode(input.toolName, harnessTools)
-  ) {
-    return {
-      status: "failed",
-      error: `Tool "${input.toolName}" is not available to code_mode in this session.`,
-    };
-  }
-  if (definition.approval === undefined) return { status: "not-required" };
-  const toolInput = readApprovalToolInput(input.toolInput);
+async function evaluateApprovalGate(input: {
+  readonly ctx: Awaited<ReturnType<typeof hydrateTurnTools>>["ctx"];
+  readonly definition: HarnessToolDefinition;
+  readonly harnessTools: ReadonlyMap<string, HarnessToolDefinition>;
+  readonly input: CodeModeToolCall;
+  readonly session: Awaited<ReturnType<typeof hydrateTurnTools>>["session"];
+}): Promise<CodeModeToolOutcome | undefined> {
+  const { ctx, definition, harnessTools, session } = input;
+  const call = input.input;
   const approvedTools = getApprovedTools(session, resolveApprovalKeyFromTools(harnessTools));
-  let status: NativeApprovalStatus;
-  try {
-    const scoped = await withContextScope(ctx, session, async (enriched) => ({
-      result: await evaluateToolApproval(definition, {
-        approvedTools,
-        callId: input.toolCallId,
-        toolInput: input.toolInput,
-      }),
-      session: enriched,
-    }));
-    status = scoped.result;
-  } catch (error) {
-    return { status: "failed", error: toErrorMessage(error) };
-  }
+  const scoped = await withContextScope(ctx, session, async (enriched) => ({
+    result: await evaluateToolApproval(definition, {
+      approvedTools,
+      callId: call.toolCallId,
+      toolInput: call.toolInput,
+    }),
+    session: enriched,
+  }));
+  const status: NativeApprovalStatus = scoped.result;
   const kind = typeof status === "object" ? status.type : status;
-  switch (kind) {
-    case "user-approval":
-      return {
-        status: "required",
-        approvalKey: definition.approvalKey?.(toolInput) ?? definition.name,
-        action: { callId: input.toolCallId, input: toolInput, toolName: input.toolName },
-        request: createToolApprovalPrompt(input.toolName),
-      };
-    case "denied": {
-      const reason = typeof status === "object" ? status.reason : undefined;
-      return reason === undefined ? { status: "denied" } : { status: "denied", reason };
-    }
-    default:
-      return { status: "not-required" };
+  if (kind === "user-approval") {
+    const toolInput = readApprovalToolInput(call.toolInput);
+    return {
+      status: "approval-required",
+      approvalKey: definition.approvalKey?.(toolInput) ?? definition.name,
+      action: { callId: call.toolCallId, input: toolInput, toolName: call.toolName },
+      request: createToolApprovalPrompt(call.toolName),
+    };
   }
+  if (kind === "denied") {
+    const reason = typeof status === "object" ? status.reason : undefined;
+    return approvalDenied("the approval policy", call.toolName, reason);
+  }
+  return undefined;
 }
 
 export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {
@@ -346,7 +332,6 @@ export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet
     interrupt: (toolInput) =>
       ({
         kind: CODE_MODE_CALL_INTERRUPT_KIND,
-        target: entry.target === "direct" ? "tool" : entry.target,
         toolInput,
         toolName: entry.name,
       }) satisfies CodeModeCallInterrupt,
@@ -421,16 +406,11 @@ function readApprovalToolInput(value: unknown): JsonObject {
 
 function readCallInterrupt(interrupt: WorkflowSandboxInterrupt): CodeModeCallInterrupt {
   const payload = interrupt.payload as Partial<CodeModeCallInterrupt>;
-  if (
-    payload.kind !== CODE_MODE_CALL_INTERRUPT_KIND ||
-    (payload.target !== "agent" && payload.target !== "tool" && payload.target !== "workflow") ||
-    typeof payload.toolName !== "string"
-  ) {
+  if (payload.kind !== CODE_MODE_CALL_INTERRUPT_KIND || typeof payload.toolName !== "string") {
     throw new Error(`Unsupported code_mode interrupt kind "${String(payload.kind)}".`);
   }
   return {
     kind: CODE_MODE_CALL_INTERRUPT_KIND,
-    target: payload.target,
     toolInput: payload.toolInput,
     toolName: payload.toolName,
   };

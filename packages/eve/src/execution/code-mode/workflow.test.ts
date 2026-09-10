@@ -4,6 +4,7 @@ import type {
   CodeModePendingCall,
   CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
+import type { CodeModeToolCatalogEntry } from "#execution/code-mode/schema.js";
 import type { ToolContext } from "#tools/definition.js";
 
 const runProgram = vi.fn<(...args: any[]) => Promise<CodeModeProgramOutcome>>();
@@ -12,14 +13,6 @@ const executeTool =
     (
       ...args: any[]
     ) => ReturnType<typeof import("#execution/code-mode/program-step.js").executeCodeModeToolStep>
-  >();
-const evaluateApproval =
-  vi.fn<
-    (
-      ...args: any[]
-    ) => ReturnType<
-      typeof import("#execution/code-mode/program-step.js").evaluateCodeModeApprovalStep
-    >
   >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 const ask = vi.fn<(...args: any[]) => Promise<unknown>>();
@@ -36,7 +29,6 @@ const runContext = { sessionState: initialSessionState as Record<string, unknown
 
 vi.mock("#execution/code-mode/program-step.js", () => ({
   CODE_MODE_CALL_INTERRUPT_KIND: "eve.code-mode-call",
-  evaluateCodeModeApprovalStep: (...args: unknown[]) => evaluateApproval(...args),
   executeCodeModeToolStep: (_ctx: unknown, ...args: unknown[]) => executeTool(...args),
   runCodeModeProgramStep: (...args: unknown[]) => runProgram(...args),
 }));
@@ -66,13 +58,9 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
 
 const { codeModeWorkflow } = await import("#execution/code-mode/workflow.js");
 
-function call(
-  target: CodeModePendingCall["call"]["target"],
-  toolName: string,
-  toolInput: unknown,
-): CodeModePendingCall {
+function call(toolName: string, toolInput: unknown): CodeModePendingCall {
   return {
-    call: { kind: "eve.code-mode-call", target, toolInput, toolName },
+    call: { kind: "eve.code-mode-call", toolInput, toolName },
     interrupt: { marker: toolName } as never,
     toolCallId: `${toolName}-call`,
   };
@@ -101,33 +89,44 @@ function context(aborted = false): ToolContext {
   } as ToolContext;
 }
 
-const planEntry = {
-  name: "plan_deploy",
+function entry(
+  name: string,
+  target: CodeModeToolCatalogEntry["target"] = "tool",
+): CodeModeToolCatalogEntry {
+  return {
+    name,
+    description: `${name}.`,
+    inputSchema: { type: "object" },
+    outputSchema: null,
+    target,
+  };
+}
+
+const planEntry: CodeModeToolCatalogEntry = {
+  ...entry("plan_deploy", "workflow"),
   description: "Plan a deploy.",
-  inputSchema: { type: "object" },
-  outputSchema: null,
-  target: "workflow" as const,
   workflowId: "workflow//app//plan_deploy",
 };
 
-const gatedEntry = {
-  name: "gated",
-  description: "Needs approval.",
-  inputSchema: { type: "object" },
-  outputSchema: null,
-  target: "tool" as const,
-  approval: true as const,
-};
-
+// The body resolves every parked call through the pinned catalog, so each tool
+// the programs below call has an entry with the target the harness would pin.
 const program = {
   js: "return 1;",
 
   maxSubagents: 100,
-  toolCatalog: [planEntry, gatedEntry, { ...planEntry, name: "gated_wf", approval: true as const }],
+  toolCatalog: [
+    ...["add", "ask_question", "first", "gated", "read", "second", "write"].map((name) =>
+      entry(name),
+    ),
+    ...["a", "b", "r", "researcher"].map((name) => entry(name, "agent")),
+    entry("direct_only", "direct"),
+    planEntry,
+    { ...planEntry, name: "gated_wf", workflowId: "workflow//app//gated_wf" },
+  ],
 };
 
 const approvalRequired = {
-  status: "required" as const,
+  status: "approval-required" as const,
   approvalKey: "gated",
   action: { callId: "gated-call", input: { region: "eu" }, toolName: "gated" },
   request: { prompt: "Approve tool call: gated", options: [{ id: "approve", label: "Approve" }] },
@@ -137,7 +136,6 @@ beforeEach(() => {
   runContext.sessionState = initialSessionState;
   runProgram.mockReset();
   executeTool.mockReset();
-  evaluateApproval.mockReset();
   invokeAgent.mockReset();
   ask.mockReset();
   requestInput.mockReset();
@@ -147,8 +145,8 @@ beforeEach(() => {
 describe("codeModeWorkflow", () => {
   it("carries state into later calls without exposing it to the program", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("tool", "write", {})))
-      .mockResolvedValueOnce(parked(call("tool", "read", {})))
+      .mockResolvedValueOnce(parked(call("write", {})))
+      .mockResolvedValueOnce(parked(call("read", {})))
       .mockResolvedValueOnce(completed("done"));
     executeTool
       .mockResolvedValueOnce({
@@ -171,7 +169,7 @@ describe("codeModeWorkflow", () => {
 
   it("applies batch state in pending order so the same call conflicts regardless of finish order", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("tool", "first", {}), call("tool", "second", {})))
+      .mockResolvedValueOnce(parked(call("first", {}), call("second", {})))
       .mockResolvedValueOnce(completed("done"));
     const change = (after: string) => [
       { path: ["serializedContext", "todo"], before: undefined, after },
@@ -202,14 +200,14 @@ describe("codeModeWorkflow", () => {
 
   it("counts failed calls and continuations against one budget across resumes", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "first" })))
+      .mockResolvedValueOnce(parked(call("researcher", { message: "first" })))
       .mockResolvedValueOnce(
         parked(
-          call("tool", "add", { a: 1, b: 2 }),
-          call("agent", "researcher", { agentId: "existing-child", message: "continue" }),
+          call("add", { a: 1, b: 2 }),
+          call("researcher", { agentId: "existing-child", message: "continue" }),
         ),
       )
-      .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "excess" })))
+      .mockResolvedValueOnce(parked(call("researcher", { message: "excess" })))
       .mockResolvedValueOnce(completed("caught"));
     invokeAgent.mockRejectedValueOnce(new Error("child failed")).mockResolvedValueOnce("continued");
     executeTool.mockResolvedValue({ status: "completed", output: 3 });
@@ -234,9 +232,9 @@ describe("codeModeWorkflow", () => {
     runProgram
       .mockResolvedValueOnce(
         parked(
-          call("agent", "researcher", { message: "first" }),
-          call("agent", "researcher", { message: "second" }),
-          call("agent", "researcher", { message: "excess" }),
+          call("researcher", { message: "first" }),
+          call("researcher", { message: "second" }),
+          call("researcher", { message: "excess" }),
         ),
       )
       .mockResolvedValueOnce(completed("settled"));
@@ -254,7 +252,7 @@ describe("codeModeWorkflow", () => {
     "reports a failed program without replaying it (resume=%s)",
     async (resume) => {
       if (resume) {
-        runProgram.mockResolvedValueOnce(parked(call("tool", "add", {})));
+        runProgram.mockResolvedValueOnce(parked(call("add", {})));
         executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
       }
       runProgram.mockResolvedValueOnce({ status: "failed", error: "Syntax error in program" });
@@ -278,7 +276,7 @@ describe("codeModeWorkflow", () => {
 
   it("executes ordinary tools in a child step and resumes the program with the result", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("tool", "add", { a: 1, b: 2 })))
+      .mockResolvedValueOnce(parked(call("add", { a: 1, b: 2 })))
       .mockResolvedValueOnce(completed(3));
     executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
 
@@ -306,7 +304,7 @@ describe("codeModeWorkflow", () => {
 
   it("routes subagent calls through the owner agent-invoke channel", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("agent", "researcher", { message: "dig" })))
+      .mockResolvedValueOnce(parked(call("researcher", { message: "dig" })))
       .mockResolvedValueOnce(completed("done"));
     invokeAgent.mockResolvedValueOnce("findings");
 
@@ -329,7 +327,7 @@ describe("codeModeWorkflow", () => {
     ];
     runProgram
       .mockResolvedValueOnce(
-        parked(call("tool", "ask_question", { prompt: "Ship it?", options, allowFreeform: true })),
+        parked(call("ask_question", { prompt: "Ship it?", options, allowFreeform: true })),
       )
       .mockResolvedValueOnce(completed("shipped"));
     ask.mockResolvedValueOnce({ optionId: "ship", text: undefined });
@@ -352,7 +350,7 @@ describe("codeModeWorkflow", () => {
     "fails an ask_question call without a prompt instead of asking (%j)",
     async (toolInput) => {
       runProgram
-        .mockResolvedValueOnce(parked(call("tool", "ask_question", toolInput)))
+        .mockResolvedValueOnce(parked(call("ask_question", toolInput)))
         .mockResolvedValueOnce(completed("recovered"));
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
@@ -368,11 +366,7 @@ describe("codeModeWorkflow", () => {
   it("settles calls parked together concurrently and resumes once with every result", async () => {
     runProgram
       .mockResolvedValueOnce(
-        parked(
-          call("agent", "a", { message: "a" }),
-          call("agent", "b", { message: "b" }),
-          call("tool", "add", { n: 1 }),
-        ),
+        parked(call("a", { message: "a" }), call("b", { message: "b" }), call("add", { n: 1 })),
       )
       .mockResolvedValueOnce(completed(null));
 
@@ -418,10 +412,8 @@ describe("codeModeWorkflow", () => {
 
   it("keeps invocation ids monotonic across successive batches", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("agent", "r", { message: "1" })))
-      .mockResolvedValueOnce(
-        parked(call("agent", "r", { message: "2" }), call("agent", "r", { message: "3" })),
-      )
+      .mockResolvedValueOnce(parked(call("r", { message: "1" })))
+      .mockResolvedValueOnce(parked(call("r", { message: "2" }), call("r", { message: "3" })))
       .mockResolvedValueOnce(completed(null));
     invokeAgent.mockResolvedValue("ok");
 
@@ -435,7 +427,7 @@ describe("codeModeWorkflow", () => {
 
   it("feeds tool failures back into the program instead of failing the run", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("tool", "add", {})))
+      .mockResolvedValueOnce(parked(call("add", {})))
       .mockResolvedValueOnce(completed("recovered"));
     executeTool.mockResolvedValueOnce({ status: "failed", error: "boom" });
 
@@ -446,16 +438,14 @@ describe("codeModeWorkflow", () => {
   });
 
   it("stops at the next batch once the run is cancelled", async () => {
-    runProgram.mockResolvedValueOnce(parked(call("tool", "add", {})));
+    runProgram.mockResolvedValueOnce(parked(call("add", {})));
     await expect(codeModeWorkflow(program, context(true))).rejects.toThrow("stop");
     expect(executeTool).not.toHaveBeenCalled();
   });
 
   it("resumes a mixed batch with a subagent failure and its successful siblings", async () => {
     runProgram
-      .mockResolvedValueOnce(
-        parked(call("agent", "researcher", { message: "dig" }), call("tool", "add", {})),
-      )
+      .mockResolvedValueOnce(parked(call("researcher", { message: "dig" }), call("add", {})))
       .mockResolvedValueOnce(completed("recovered"));
     invokeAgent.mockRejectedValueOnce({ message: "child failed" });
     executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
@@ -473,7 +463,7 @@ describe("codeModeWorkflow", () => {
 
   it("does not turn cancellation into a catchable nested failure", async () => {
     const controller = new AbortController();
-    runProgram.mockResolvedValueOnce(parked(call("agent", "researcher", { message: "dig" })));
+    runProgram.mockResolvedValueOnce(parked(call("researcher", { message: "dig" })));
     invokeAgent.mockImplementationOnce(async () => {
       controller.abort(new Error("cancelled"));
       throw controller.signal.reason;
@@ -486,8 +476,9 @@ describe("codeModeWorkflow", () => {
 
   it("runs authored workflow tools inline under the run's own ref and resumes with the body result", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })))
+      .mockResolvedValueOnce(parked(call("plan_deploy", { service: "api" })))
       .mockResolvedValueOnce(completed("planned"));
+    executeTool.mockResolvedValueOnce({ status: "cleared" });
     executeWorkflowBody.mockResolvedValueOnce({
       outcome: { status: "completed", output: { plan: "PLAN:api" } },
       reportCount: 1,
@@ -495,6 +486,10 @@ describe("codeModeWorkflow", () => {
 
     const ctx = context();
     await expect(codeModeWorkflow(program, ctx)).resolves.toBe("planned");
+    // The step clears the call (approval, availability) but never runs the body.
+    expect(executeTool).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ toolName: "plan_deploy", toolInput: { service: "api" } }),
+    );
     expect(executeWorkflowBody).toHaveBeenCalledWith(
       {
         authorizationSupported: true,
@@ -520,13 +515,13 @@ describe("codeModeWorkflow", () => {
         resolutions: [{ status: "completed", output: { plan: "PLAN:api" } }],
       },
     });
-    expect(executeTool).not.toHaveBeenCalled();
   });
 
   it("feeds a failed workflow body back into the program as a message", async () => {
     runProgram
-      .mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })))
+      .mockResolvedValueOnce(parked(call("plan_deploy", { service: "api" })))
       .mockResolvedValueOnce(completed("recovered"));
+    executeTool.mockResolvedValueOnce({ status: "cleared" });
     executeWorkflowBody.mockResolvedValueOnce({
       outcome: { status: "failed", error: { message: "plan rejected", name: "Error" } },
       reportCount: 0,
@@ -540,7 +535,8 @@ describe("codeModeWorkflow", () => {
 
   it("propagates a cancelled workflow body as run cancellation", async () => {
     const controller = new AbortController();
-    runProgram.mockResolvedValueOnce(parked(call("workflow", "plan_deploy", { service: "api" })));
+    runProgram.mockResolvedValueOnce(parked(call("plan_deploy", { service: "api" })));
+    executeTool.mockResolvedValueOnce({ status: "cleared" });
     executeWorkflowBody.mockImplementationOnce(async () => {
       controller.abort(new Error("cancelled"));
       return { outcome: { status: "cancelled", reason: "cancelled" }, reportCount: 0 };
@@ -553,16 +549,19 @@ describe("codeModeWorkflow", () => {
   });
 
   it.each([
-    ["unknown", "missing", { service: "api" }, "not a workflow tool"],
-    ["non-object input", "plan_deploy", "api", "requires a JSON object input"],
+    ["not in the catalog", "missing", { service: "api" }, 0, "not callable from this program"],
+    ["kept direct", "direct_only", {}, 0, "not callable from this program"],
+    ["non-object workflow input", "plan_deploy", "api", 1, "requires a JSON object input"],
   ])(
-    "fails a workflow call it cannot start instead of running a body (%s)",
-    async (_label, toolName, toolInput, message) => {
+    "fails a call it cannot start instead of running anything (%s)",
+    async (_label, toolName, toolInput, stepCalls, message) => {
       runProgram
-        .mockResolvedValueOnce(parked(call("workflow", toolName, toolInput)))
+        .mockResolvedValueOnce(parked(call(toolName, toolInput)))
         .mockResolvedValueOnce(completed("recovered"));
+      executeTool.mockResolvedValue({ status: "cleared" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+      expect(executeTool).toHaveBeenCalledTimes(stepCalls);
       expect(executeWorkflowBody).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         resume: { resolutions: [{ status: "failed", error: expect.stringContaining(message) }] },
@@ -570,40 +569,54 @@ describe("codeModeWorkflow", () => {
     },
   );
 
+  it("fails a cleared call whose catalog entry is not a workflow tool", async () => {
+    runProgram
+      .mockResolvedValueOnce(parked(call("add", {})))
+      .mockResolvedValueOnce(completed("recovered"));
+    executeTool.mockResolvedValueOnce({ status: "cleared" });
+
+    await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+    expect(executeWorkflowBody).not.toHaveBeenCalled();
+    expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+      resume: {
+        resolutions: [{ status: "failed", error: expect.stringContaining("not a workflow tool") }],
+      },
+    });
+  });
+
   describe("approval-gated calls", () => {
     const snapshotState = {
       sessionId: "s1",
       snapshot: { version: 1, session: { state: { agents: ["child"] }, sandboxState: null } },
     };
+    const nestedCall = {
+      event: { sequence: 1, stepIndex: 2, turnId: "turn" },
+      serializedContext: { ctx: true },
+      sessionState: snapshotState,
+      toolCallId: "gated-call",
+      toolInput: { region: "eu" },
+      toolName: "gated",
+    };
 
-    it("asks the person, then runs the tool and records the approval as a state change", async () => {
+    it("asks the person, then runs the tool with the grant and records the approval as a state change", async () => {
       runContext.sessionState = snapshotState;
       runProgram
-        .mockResolvedValueOnce(parked(call("tool", "gated", { region: "eu" })))
-        .mockResolvedValueOnce(parked(call("tool", "gated", { region: "us" })))
+        .mockResolvedValueOnce(parked(call("gated", { region: "eu" })))
+        .mockResolvedValueOnce(parked(call("gated", { region: "us" })))
         .mockResolvedValueOnce(completed("done"));
-      evaluateApproval
-        .mockResolvedValueOnce(approvalRequired)
-        .mockResolvedValueOnce({ status: "not-required" });
-      requestInput.mockResolvedValueOnce({ optionId: "approve" });
       executeTool
+        .mockResolvedValueOnce(approvalRequired)
         .mockResolvedValueOnce({
           status: "completed",
           output: "GATED",
           stateChanges: [{ path: ["serializedContext", "todo"], before: undefined, after: ["x"] }],
         })
         .mockResolvedValueOnce({ status: "completed", output: "GATED" });
+      requestInput.mockResolvedValueOnce({ optionId: "approve" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
-      const nestedCall = {
-        event: { sequence: 1, stepIndex: 2, turnId: "turn" },
-        serializedContext: { ctx: true },
-        sessionState: snapshotState,
-        toolCallId: "gated-call",
-        toolInput: { region: "eu" },
-        toolName: "gated",
-      };
-      expect(evaluateApproval.mock.calls[0]).toEqual([nestedCall]);
+      // First step call carries no grant; the step answers with the policy's request.
+      expect(executeTool.mock.calls[0]).toEqual([nestedCall]);
       // The body sends a complete tool-approval request attributed to the nested call.
       expect(requestInput).toHaveBeenCalledExactlyOnceWith({
         ...approvalRequired.request,
@@ -611,41 +624,45 @@ describe("codeModeWorkflow", () => {
         kind: "tool-approval",
         requestId: "approval-hook",
       });
-      expect(executeTool.mock.calls[0]).toEqual([nestedCall]);
+      // The second step call carries the grant so the policy is skipped and the tool runs.
+      expect(executeTool.mock.calls[1]).toEqual([{ ...nestedCall, approval: { key: "gated" } }]);
       expect(ask).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         resume: { resolutions: [{ status: "completed", output: "GATED" }] },
       });
       // The cursor carries the approval on to later calls (and the parent),
-      // alongside the tool's own context updates.
-      const later = {
-        ...nestedCall,
-        serializedContext: { ctx: true, todo: ["x"] },
-        sessionState: {
-          sessionId: "s1",
-          snapshot: {
-            version: 1,
-            session: {
-              state: { agents: ["child"], "eve.runtime.hitl.approvedTools": ["gated"] },
-              sandboxState: null,
+      // alongside the tool's own context updates, so the next call is a single
+      // step that the policy clears from the recorded approval.
+      expect(executeTool.mock.calls[2]).toEqual([
+        {
+          ...nestedCall,
+          serializedContext: { ctx: true, todo: ["x"] },
+          sessionState: {
+            sessionId: "s1",
+            snapshot: {
+              version: 1,
+              session: {
+                state: { agents: ["child"], "eve.runtime.hitl.approvedTools": ["gated"] },
+                sandboxState: null,
+              },
             },
           },
+          toolInput: { region: "us" },
         },
-        toolInput: { region: "us" },
-      };
-      expect(evaluateApproval.mock.calls[1]).toEqual([later]);
-      expect(executeTool.mock.calls[1]).toEqual([later]);
+      ]);
+      expect(executeTool).toHaveBeenCalledTimes(3);
     });
 
     it("rejects the call with CODE_MODE_APPROVAL_DENIED and never runs the tool when declined", async () => {
       runProgram
-        .mockResolvedValueOnce(parked(call("tool", "gated", {})))
+        .mockResolvedValueOnce(parked(call("gated", {})))
         .mockResolvedValueOnce(completed("recovered"));
-      evaluateApproval.mockResolvedValueOnce(approvalRequired);
+      executeTool.mockResolvedValueOnce(approvalRequired);
       requestInput.mockResolvedValueOnce({ optionId: "cancel" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
-      expect(executeTool).not.toHaveBeenCalled();
+      expect(executeTool).toHaveBeenCalledOnce();
+      expect(executeTool.mock.calls[0]?.[0]).not.toHaveProperty("approval");
       expect(runProgram.mock.calls[1]?.[0]).toEqual({
         callId: "outer",
         program,
@@ -662,16 +679,16 @@ describe("codeModeWorkflow", () => {
       });
     });
 
-    it("runs the tool directly when the policy does not require approval", async () => {
+    it("runs the tool in one step when the policy does not require approval", async () => {
       runProgram
-        .mockResolvedValueOnce(parked(call("tool", "gated", {})))
+        .mockResolvedValueOnce(parked(call("gated", {})))
         .mockResolvedValueOnce(completed("done"));
-      evaluateApproval.mockResolvedValueOnce({ status: "not-required" });
       executeTool.mockResolvedValueOnce({ status: "completed", output: "GATED" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
       expect(requestInput).not.toHaveBeenCalled();
       expect(executeTool).toHaveBeenCalledOnce();
+      expect(executeTool.mock.calls[0]?.[0]).not.toHaveProperty("approval");
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         sessionState: { sessionId: "s1" },
         resume: { resolutions: [{ status: "completed", output: "GATED" }] },
@@ -680,69 +697,114 @@ describe("codeModeWorkflow", () => {
     });
 
     it.each([
-      [{ status: "denied" as const }, 'the approval policy declined to run "gated".'],
-      [
-        { status: "denied" as const, reason: "outside business hours" },
-        'the approval policy declined to run "gated". outside business hours',
-      ],
-      [{ status: "failed" as const, error: "not available" }, "not available"],
+      'CODE_MODE_APPROVAL_DENIED: the approval policy declined to run "gated".',
+      'CODE_MODE_APPROVAL_DENIED: the approval policy declined to run "gated". outside business hours',
+      "not available",
     ])(
-      "feeds a policy decision %j back into the program without asking",
-      async (decision, message) => {
+      "feeds a step-side policy failure %j back into the program without asking",
+      async (error) => {
         runProgram
-          .mockResolvedValueOnce(parked(call("tool", "gated", {})))
+          .mockResolvedValueOnce(parked(call("gated", {})))
           .mockResolvedValueOnce(completed("recovered"));
-        evaluateApproval.mockResolvedValueOnce(decision);
+        executeTool.mockResolvedValueOnce({ status: "failed", error });
 
         await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
         expect(requestInput).not.toHaveBeenCalled();
-        expect(executeTool).not.toHaveBeenCalled();
+        expect(executeTool).toHaveBeenCalledOnce();
         expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-          resume: { resolutions: [{ status: "failed", error: expect.stringContaining(message) }] },
+          resume: { resolutions: [{ status: "failed", error }] },
         });
       },
     );
 
-    it("skips approval evaluation for catalog entries without the marker", async () => {
+    it("settles ungated tools and workflow tools with one step call each and no prompt", async () => {
       runProgram
-        .mockResolvedValueOnce(parked(call("tool", "add", {}), call("workflow", "plan_deploy", {})))
+        .mockResolvedValueOnce(parked(call("add", {}), call("plan_deploy", {})))
         .mockResolvedValueOnce(completed("done"));
-      executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
+      executeTool.mockImplementation(async (input) =>
+        input.toolName === "plan_deploy"
+          ? { status: "cleared" }
+          : { status: "completed", output: 3 },
+      );
       executeWorkflowBody.mockResolvedValueOnce({
         outcome: { status: "completed", output: "planned" },
         reportCount: 0,
       });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
-      expect(evaluateApproval).not.toHaveBeenCalled();
+      expect(requestInput).not.toHaveBeenCalled();
+      expect(executeTool).toHaveBeenCalledTimes(2);
+      for (const [input] of executeTool.mock.calls) expect(input).not.toHaveProperty("approval");
+      expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+        resume: {
+          resolutions: [
+            { status: "completed", output: 3 },
+            { status: "completed", output: "planned" },
+          ],
+        },
+      });
     });
 
     it("gates authored workflow tools before running their body inline", async () => {
       runContext.sessionState = snapshotState;
       runProgram
-        .mockResolvedValueOnce(parked(call("workflow", "gated_wf", { service: "api" })))
-        .mockResolvedValueOnce(parked(call("tool", "add", {})))
+        .mockResolvedValueOnce(parked(call("gated_wf", { service: "api" })))
+        .mockResolvedValueOnce(parked(call("add", {})))
         .mockResolvedValueOnce(completed("done"));
-      evaluateApproval.mockResolvedValueOnce({ ...approvalRequired, approvalKey: "gated_wf" });
+      executeTool
+        .mockResolvedValueOnce({
+          ...approvalRequired,
+          approvalKey: "gated_wf",
+          action: { callId: "gated_wf-call", input: { service: "api" }, toolName: "gated_wf" },
+        })
+        .mockResolvedValueOnce({ status: "cleared" })
+        .mockResolvedValueOnce({ status: "completed", output: 3 });
       requestInput.mockResolvedValueOnce({ optionId: "approve" });
       executeWorkflowBody.mockResolvedValueOnce({
         outcome: { status: "completed", output: "planned" },
         reportCount: 0,
       });
-      executeTool.mockResolvedValueOnce({ status: "completed", output: 3 });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
-      expect(executeWorkflowBody).toHaveBeenCalledOnce();
+      expect(requestInput).toHaveBeenCalledOnce();
+      expect(executeTool.mock.calls[1]?.[0]).toMatchObject({
+        toolName: "gated_wf",
+        approval: { key: "gated_wf" },
+      });
+      expect(executeWorkflowBody).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ toolName: "gated_wf", workflowId: "workflow//app//gated_wf" }),
+        expect.anything(),
+      );
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         resume: { resolutions: [{ status: "completed", output: "planned" }] },
       });
-      expect(executeTool.mock.calls[0]?.[0]).toMatchObject({
+      expect(executeTool.mock.calls[2]?.[0]).toMatchObject({
+        toolName: "add",
         sessionState: {
           snapshot: {
             session: {
               state: { agents: ["child"], "eve.runtime.hitl.approvedTools": ["gated_wf"] },
             },
           },
+        },
+      });
+    });
+
+    it("fails the call instead of asking again when the granted step still wants approval", async () => {
+      runProgram
+        .mockResolvedValueOnce(parked(call("gated", { region: "eu" })))
+        .mockResolvedValueOnce(completed("recovered"));
+      executeTool.mockResolvedValue(approvalRequired);
+      requestInput.mockResolvedValueOnce({ optionId: "approve" });
+
+      await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
+      expect(requestInput).toHaveBeenCalledOnce();
+      expect(executeTool).toHaveBeenCalledTimes(2);
+      expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
+        resume: {
+          resolutions: [
+            { status: "failed", error: expect.stringContaining("asked for approval twice") },
+          ],
         },
       });
     });
