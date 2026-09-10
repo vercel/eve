@@ -20,6 +20,7 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 
 function connection(name: string): ResolvedConnectionDefinition {
@@ -199,7 +200,112 @@ describe("connection dynamic tools", () => {
       "call-1",
     ]);
   });
+
+  it("projects the model-facing result while action.result keeps the full payload", async () => {
+    const fullResult = {
+      issues: [
+        { body: "b".repeat(20_000), id: "ENG-1", title: "First" },
+        { body: "b".repeat(20_000), id: "ENG-2", title: "Second" },
+      ],
+    };
+    const linear: ResolvedConnectionDefinition = {
+      ...connection("linear"),
+      toolCall: {
+        toModelOutput: {
+          list_issues: (output: typeof fullResult) => ({
+            type: "json",
+            value: { ids: output.issues.map((issue) => issue.id) },
+          }),
+        },
+      },
+    };
+
+    await withDiscoveredTools(
+      linear,
+      async () => fullResult,
+      async (tools) => {
+        const discovered = tools["linear__list_issues"]!;
+        const output = await discovered.execute({}, { callId: "call-1" } as ToolContext);
+
+        expect(output).toEqual(fullResult);
+        expect(
+          createRuntimeToolResultFromValue({
+            callId: "call-1",
+            output,
+            toolName: "linear__list_issues",
+          }).output,
+        ).toEqual(fullResult);
+        await expect(discovered.toModelOutput!(output)).resolves.toEqual({
+          type: "json",
+          value: { ids: ["ENG-1", "ENG-2"] },
+        });
+        expect(readDurableDynamicToolCallbacks(discovered)?.toModelOutput?.closure).toEqual({
+          connectionName: "linear",
+          toolName: "list_issues",
+        });
+      },
+    );
+  });
+
+  it("leaves the discovered tool unprojected when no operation is configured", async () => {
+    const linear: ResolvedConnectionDefinition = {
+      ...connection("linear"),
+      toolCall: {
+        toModelOutput: {
+          create_issue: () => ({ type: "json", value: {} }),
+        },
+      },
+    };
+
+    await withDiscoveredTools(
+      linear,
+      async () => ({ ok: true }),
+      (tools) => {
+        const discovered = tools["linear__list_issues"]!;
+
+        expect(discovered.toModelOutput).toBeUndefined();
+        expect(readDurableDynamicToolCallbacks(discovered)?.toModelOutput).toBeUndefined();
+      },
+    );
+  });
 });
+
+async function withDiscoveredTools(
+  target: ResolvedConnectionDefinition,
+  executeTool: (
+    toolName: string,
+    args: unknown,
+    options: ConnectionToolExecuteOptions,
+  ) => Promise<unknown>,
+  assert: (tools: DynamicToolSet) => Promise<void> | void,
+): Promise<void> {
+  const baseRegistry = registry({
+    connections: [target],
+    loadTools: {
+      [target.connectionName]: async () => [
+        { description: "List issues", inputSchema: { type: "object" }, name: "list_issues" },
+      ],
+    },
+  });
+  const connectionRegistry: ConnectionRegistry = {
+    ...baseRegistry,
+    getClient: (name) => ({ ...baseRegistry.getClient(name), executeTool }),
+  };
+  const ctx = new ContextContainer();
+  ctx.set(ConnectionRegistryKey, connectionRegistry);
+
+  await contextStorage.run(ctx, async () => {
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
+    const resolveContext = {
+      channel: {},
+      messages: [],
+      session: { auth: { current: null, initiator: null }, id: "test-session" },
+    } satisfies DynamicResolveContext;
+    const initial = (await resolve({}, resolveContext)) as DynamicToolSet;
+    await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
+    await assert((await resolve({}, resolveContext)) as DynamicToolSet);
+  });
+}
 
 describe("connection_search", () => {
   it("fails when every targeted connection fails to load", async () => {

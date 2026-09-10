@@ -31,7 +31,9 @@ export {
   type McpClientConnectionDefinition,
 } from "#public/definitions/connections/mcp.js";
 export type {
+  ConnectionToModelOutputDefinition,
   ConnectionToolCallDefinition,
+  ConnectionToolModelOutput,
   ProvidedArgumentContext,
   ProvidedArgumentsDefinition,
   ProvidedArgumentValue,

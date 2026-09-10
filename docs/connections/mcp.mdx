@@ -133,9 +133,28 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 
 ## Control result size
 
-eve sends an MCP tool's returned content to the model as the tool result. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+eve sends an MCP tool's returned content to the model as the tool result. When a remote tool returns more data than the model needs, project the model-facing result with `toolCall.toModelOutput`, keyed by the bare remote tool name:
 
-When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
+```ts title="agent/connections/docs.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://docs.example.com/mcp",
+  description: "Product documentation search and retrieval.",
+  toolCall: {
+    toModelOutput: {
+      search_documents: (result: { documents: { id: string; title: string }[] }) => ({
+        type: "json",
+        value: { hits: result.documents.map(({ id, title }) => ({ id, title })) },
+      }),
+    },
+  },
+});
+```
+
+This is the same [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput) contract authored tools use, and it has the same boundary: only the model sees the projection. `action.result`, channel events, and hooks still receive the complete remote result. Tools without an entry keep eve's default serialization. eve does not know the remote result shape, so `output` is unchecked — annotate it with the type the server returns.
+
+Narrowing at the server is still better when you control it: prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. Replacing an operation with an authored tool and blocking the original through [`tools.block`](#tool-filters) remains an option when you also need to change the operation's inputs or behavior, not just its result.
 
 ## Troubleshooting
 

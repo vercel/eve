@@ -24,6 +24,16 @@ describe("normalizeOpenApiConnectionDefinition", () => {
     expect(result.toolCall?.providedArguments?.tenantId).toBe(tenantId);
   });
 
+  it("preserves per-operation model-output projections", () => {
+    const getReport = () => ({ type: "json" as const, value: { status: "ready" } });
+    const result = normalizeOpenApiConnectionDefinition(
+      validInput({ toolCall: { toModelOutput: { getReport } } }),
+      MSG,
+    );
+
+    expect(result.toolCall?.toModelOutput?.getReport).toBe(getReport);
+  });
+
   describe("happy path", () => {
     it("accepts a string spec URL and base URL", () => {
       const result = normalizeOpenApiConnectionDefinition(validInput(), MSG);
