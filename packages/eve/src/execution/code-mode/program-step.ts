@@ -10,15 +10,10 @@ import { contextStorage } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
-import { restoreDynamicToolCallbacks } from "#context/dynamic-tool-lifecycle.js";
 import {
-  SessionDynamicToolMetadataKey,
-  SessionIdKey,
-  TurnDynamicToolMetadataKey,
-  StepDynamicToolMetadataKey,
-} from "#context/keys.js";
-import { isCurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
-import { hasUnregisteredDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
+  dynamicToolsNeedingRebind,
+  rebindDispatchedDynamicTools,
+} from "#context/dynamic-tool-lifecycle.js";
 import { buildRuntimeIdentity, createNodeHarnessTools } from "#execution/node-step.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
@@ -378,23 +373,13 @@ async function hydrateTurnTools(input: {
   const runtime = buildRuntimeIdentity(node);
   const connections = bindDynamicConnections(ctx, bundle.resolvedAgent);
   const rehydrateConnections = () => connections.rehydrate(emission, runtime, false);
-  const sessionId = ctx.require(SessionIdKey);
-  const scopedMetadata = [
-    ["session", SessionDynamicToolMetadataKey],
-    ["turn", TurnDynamicToolMetadataKey],
-    ["step", StepDynamicToolMetadataKey],
-  ] as const;
-  const needsRestore = scopedMetadata.some(([scope, key]) =>
-    (ctx.get(key) ?? []).some(
-      (entry) =>
-        !isCurrentDynamicToolMetadata(entry) ||
-        hasUnregisteredDurableDynamicCallbacks([entry], { sessionId, scope }),
-    ),
+  const needsRebind = (["session", "turn", "step"] as const).some(
+    (scope) => dynamicToolsNeedingRebind(ctx, scope).length > 0,
   );
-  if (needsRestore) {
+  if (needsRebind) {
     await withContextScope(ctx, session, async (enriched) => {
       await rehydrateConnections();
-      await restoreDynamicToolCallbacks({
+      await rebindDispatchedDynamicTools({
         ctx,
         resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
         events: [
