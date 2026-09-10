@@ -27,6 +27,8 @@ interface McpToolCache {
   readonly tools: ToolSet;
 }
 
+type MCPToolDefinition = Awaited<ReturnType<MCPClient["listTools"]>>["tools"][number];
+
 /**
  * Wraps one `MCPClient` from `@ai-sdk/mcp` for a single connection.
  *
@@ -178,13 +180,18 @@ export class McpConnectionClient implements ConnectionClient {
 
   async #fetchToolsInner(): Promise<McpToolCache> {
     const client = await this.connect();
-    const listResult = await client.listTools();
+    const allTools: MCPToolDefinition[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const page = await client.listTools({ params: { cursor } });
+      allTools.push(...page.tools);
+      cursor = page.nextCursor;
+    } while (cursor);
 
     const filter = this.#connection.tools;
     const filteredTools =
-      filter !== undefined
-        ? listResult.tools.filter((t) => passesToolFilter(t.name, filter))
-        : listResult.tools;
+      filter !== undefined ? allTools.filter((t) => passesToolFilter(t.name, filter)) : allTools;
 
     // `toolsFromDefinitions` returns `McpToolSet<"automatic">`, whose
     // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
