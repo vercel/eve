@@ -122,30 +122,35 @@ export async function createWorkflowSandbox(input: {
   };
 }
 
-/** A host tool that parks the program on first call and replays its resolution on resume. */
+/**
+ * A host tool that parks the program on first call and replays its resolution
+ * on resume. The interrupt the SDK records already names the tool, its call id,
+ * and its input; the payload only satisfies the SDK's `kind` requirement.
+ */
 export function createParkingHostTool(input: {
   readonly description: string;
   readonly inputSchema: JsonObject;
-  readonly outputSchema?: JsonObject;
-  readonly interrupt: (toolInput: unknown) => {
-    readonly kind: string;
-    readonly [key: string]: unknown;
-  };
+  readonly outputSchema?: JsonObject | null;
 }): ToolSet[string] {
   return {
     description: input.description,
     inputSchema: jsonSchema(input.inputSchema),
-    outputSchema: input.outputSchema === undefined ? undefined : jsonSchema(input.outputSchema),
-    execute: async (toolInput: unknown, options: unknown) => {
+    outputSchema:
+      input.outputSchema === undefined || input.outputSchema === null
+        ? undefined
+        : jsonSchema(input.outputSchema),
+    execute: async (_toolInput: unknown, options: unknown) => {
       const module = await loadWorkflowSandboxModule();
       const resolution = readResolution(options);
       // Preserves a nested tool's failure message across the sandbox bridge.
       if (resolution?.status === "failed") throw new module.CodeModeToolError(resolution.error);
       if (resolution?.status === "completed") return resolution.output;
-      return module.requestCodeModeInterrupt(input.interrupt(toolInput));
+      return module.requestCodeModeInterrupt({ kind: PARKED_CALL_KIND });
     },
   } as ToolSet[string];
 }
+
+const PARKED_CALL_KIND = "eve.workflow-sandbox.parked-call";
 
 /** Only program failures end the step successfully; infrastructure errors still retry. */
 async function settle(

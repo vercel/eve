@@ -691,19 +691,16 @@ describe("runCodeModeProgramStep", () => {
       expect(tools.lookup!.description).toBe("Pinned lookup");
       expect(asSchema(tools.lookup!.inputSchema).jsonSchema).toEqual({ type: "object" });
       expect(asSchema(tools.lookup!.outputSchema!).jsonSchema).toEqual({ type: "string" });
-      expect(parking.mock.calls.map(([call]) => call.interrupt({ query: "hello" }))).toEqual(
-        ["lookup", "researcher", "plan_deploy"].map((name) => ({
-          kind: "eve.code-mode-call",
-          toolName: name,
-          toolInput: { query: "hello" },
-        })),
-      );
+      expect(parking.mock.calls.map(([call]) => call.description)).toEqual([
+        "Pinned lookup",
+        expect.any(String),
+        expect.any(String),
+      ]);
     },
   );
 
-  it("reads a parked call from the continuation by tool name", async () => {
-    const payload = { kind: "eve.code-mode-call", toolInput: { q: 1 }, toolName: "t" };
-    const interrupt = { payload, toolCallId: "t-call" } as never;
+  it("hands the parked interrupts back in the sandbox's order", async () => {
+    const interrupt = { toolCallId: "t-call", toolName: "t", input: { q: 1 } } as never;
     vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
       sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
     );
@@ -711,22 +708,8 @@ describe("runCodeModeProgramStep", () => {
     await expect(runCodeModeProgramStep(input)).resolves.toEqual({
       status: "interrupted",
       interrupt,
-      pending: [{ call: payload, interrupt, toolCallId: "t-call" }],
+      pending: [interrupt],
     });
-  });
-
-  it.each([
-    ["a foreign kind", { kind: "eve.other", toolInput: {}, toolName: "t" }],
-    ["no tool name", { kind: "eve.code-mode-call", toolInput: {} }],
-  ])("rejects a parked call with %s", async (_label, payload) => {
-    const interrupt = { payload, toolCallId: "t-call" } as never;
-    vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
-      sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
-    );
-
-    await expect(runCodeModeProgramStep(input)).rejects.toThrow(
-      "Unsupported code_mode interrupt kind",
-    );
   });
 
   it("rejects an interrupted program with no pending call", async () => {

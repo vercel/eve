@@ -82,7 +82,6 @@ describe("createParkingHostTool", () => {
     description: "Lookup",
     inputSchema: { type: "object" },
     outputSchema: { type: "string" },
-    interrupt: (toolInput) => ({ kind: "test.call", toolInput, toolName: "lookup" }),
   });
   const execute = (options: unknown) => tool.execute!({ query: "q" } as never, options as never);
 
@@ -91,8 +90,7 @@ describe("createParkingHostTool", () => {
     expect(asSchema(tool.inputSchema).jsonSchema).toEqual({ type: "object" });
     expect(asSchema(tool.outputSchema!).jsonSchema).toEqual({ type: "string" });
     expect(
-      createParkingHostTool({ description: "d", inputSchema: {}, interrupt: () => ({ kind: "k" }) })
-        .outputSchema,
+      createParkingHostTool({ description: "d", inputSchema: {}, outputSchema: null }).outputSchema,
     ).toBeUndefined();
   });
 
@@ -115,11 +113,8 @@ describe("createParkingHostTool", () => {
   it("requests an interrupt when no resolution is present", async () => {
     const { requestCodeModeInterrupt } = installFakeModule({});
     await expect(execute({ toolCallId: "first" })).rejects.toThrow("parked");
-    expect(requestCodeModeInterrupt).toHaveBeenCalledWith({
-      kind: "test.call",
-      toolInput: { query: "q" },
-      toolName: "lookup",
-    });
+    // The SDK records the tool name, call id, and input itself; the payload only names the kind.
+    expect(requestCodeModeInterrupt).toHaveBeenCalledWith({ kind: expect.any(String) });
   });
 });
 

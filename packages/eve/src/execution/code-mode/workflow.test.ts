@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  CodeModePendingCall,
-  CodeModeProgramOutcome,
-} from "#execution/code-mode/program-step.js";
+import type { CodeModeProgramOutcome } from "#execution/code-mode/program-step.js";
+import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 import type { CodeModeToolCatalogEntry } from "#execution/code-mode/schema.js";
 import type { ToolContext } from "#tools/definition.js";
 
@@ -58,15 +56,11 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
 
 const { codeModeWorkflow } = await import("#execution/code-mode/workflow.js");
 
-function call(toolName: string, toolInput: unknown): CodeModePendingCall {
-  return {
-    call: { kind: "eve.code-mode-call", toolInput, toolName },
-    interrupt: { marker: toolName } as never,
-    toolCallId: `${toolName}-call`,
-  };
+function call(toolName: string, toolInput: unknown): WorkflowSandboxInterrupt {
+  return { input: toolInput, toolCallId: `${toolName}-call`, toolName } as WorkflowSandboxInterrupt;
 }
 
-const parked = (...pending: CodeModePendingCall[]): CodeModeProgramOutcome => ({
+const parked = (...pending: WorkflowSandboxInterrupt[]): CodeModeProgramOutcome => ({
   interrupt: { batch: pending.map((call) => call.toolCallId) } as never,
   pending,
   status: "interrupted",

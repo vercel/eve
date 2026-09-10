@@ -20,13 +20,15 @@ import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
   executeCodeModeToolStep,
   runCodeModeProgramStep,
-  type CodeModePendingCall,
   type CodeModeProgramOutcome,
   type CodeModeToolCall,
   type CodeModeToolOutcome,
 } from "#execution/code-mode/program-step.js";
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
-import type { WorkflowSandboxResolution } from "#shared/workflow-sandbox.js";
+import type {
+  WorkflowSandboxInterrupt,
+  WorkflowSandboxResolution,
+} from "#shared/workflow-sandbox.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   adoptCodeModeStateChanges,
@@ -70,12 +72,12 @@ export async function codeModeWorkflow(
     // together. Ids are assigned before the await so replay hands each call
     // the same id regardless of completion order.
     const settling = outcome.pending.map((pending): Promise<SettledNestedCall> => {
-      const entry = catalogEntry(program, pending.call.toolName);
+      const entry = catalogEntry(program, pending.toolName);
       if (entry?.target === "agent" && subagentCalls++ >= program.maxSubagents) {
         return Promise.resolve({
           resolution: {
             status: "failed" as const,
-            error: `CODE_MODE_SUBAGENT_LIMIT_REACHED: code_mode may invoke at most ${program.maxSubagents} subagents per program; "${pending.call.toolName}" was not called.`,
+            error: `CODE_MODE_SUBAGENT_LIMIT_REACHED: code_mode may invoke at most ${program.maxSubagents} subagents per program; "${pending.toolName}" was not called.`,
           },
         });
       }
@@ -124,30 +126,26 @@ async function settleNestedCall(
   ctx: CodeModeBodyContext,
   run: ReturnType<typeof readCodeModeRunContext>,
   program: CodeModeWorkflowInput,
-  pending: CodeModePendingCall,
+  pending: WorkflowSandboxInterrupt,
   invocationId: string,
 ): Promise<SettledNestedCall> {
-  const { call, toolCallId } = pending;
+  const { input: toolInput, toolCallId, toolName } = pending;
   const from = readWorkflowToolRunRef(ctx);
   const { sequence, stepIndex, turnId } = from;
   try {
-    const entry = catalogEntry(program, call.toolName);
+    const entry = catalogEntry(program, toolName);
     if (entry === undefined || entry.target === "direct") {
-      throw new Error(`Tool "${call.toolName}" is not callable from this program.`);
+      throw new Error(`Tool "${toolName}" is not callable from this program.`);
     }
     if (entry.target === "agent") {
-      const agentInput = readAgentInput(call.toolInput);
-      const output = await invokeAgent(
-        ctx,
-        { ...agentInput, target: call.toolName },
-        { invocationId },
-      );
+      const agentInput = readAgentInput(toolInput);
+      const output = await invokeAgent(ctx, { ...agentInput, target: toolName }, { invocationId });
       return { resolution: { status: "completed", output } };
     }
-    if (call.toolName === ASK_QUESTION_TOOL_NAME) {
+    if (toolName === ASK_QUESTION_TOOL_NAME) {
       // Answered through the workflow-tool `ask` protocol: the owner renders the
       // question on the session channel and the program waits for the answer.
-      const answer = await ask(ctx, readAskInput(call.toolInput));
+      const answer = await ask(ctx, readAskInput(toolInput));
       const output: Record<string, string> = { status: "answered" };
       if (answer.optionId !== undefined) output.optionId = answer.optionId;
       if (answer.text !== undefined) output.text = answer.text;
@@ -158,22 +156,16 @@ async function settleNestedCall(
       serializedContext: run.serializedContext,
       sessionState: run.sessionState,
       toolCallId,
-      toolInput: call.toolInput,
-      toolName: call.toolName,
+      toolInput,
+      toolName,
     });
     const { stateChanges, ...resolution } = settled;
     if (resolution.status !== "cleared") return { resolution, stateChanges };
     if (entry.target !== "workflow" || entry.workflowId === undefined) {
-      throw new Error(`Tool "${call.toolName}" is not a workflow tool in this program's catalog.`);
+      throw new Error(`Tool "${toolName}" is not a workflow tool in this program's catalog.`);
     }
     return {
-      resolution: await runNestedWorkflowTool(
-        ctx,
-        from,
-        entry.workflowId,
-        call.toolName,
-        call.toolInput,
-      ),
+      resolution: await runNestedWorkflowTool(ctx, from, entry.workflowId, toolName, toolInput),
       stateChanges,
     };
   } catch (error) {

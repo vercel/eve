@@ -24,10 +24,7 @@ import {
   parseCodeModeWorkflowInput,
   serializeCodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
-import {
-  CODE_MODE_CALL_INTERRUPT_KIND,
-  createCodeModeToolStub,
-} from "#execution/code-mode/program-step.js";
+import {} from "#execution/code-mode/program-step.js";
 
 const security = { signingKey: "code-mode-program-step-test" };
 
@@ -132,9 +129,7 @@ describe("code-mode sandbox continuation contract", () => {
         ].join("\n"),
       }),
     );
-    const echo = createCodeModeToolStub(
-      program.toolCatalog.find((entry) => entry.name === "echo")!,
-    );
+    const echo = createParkingHostTool(program.toolCatalog.find((entry) => entry.name === "echo")!);
     const sandbox = await sandboxFor({ echo, ...createDiscoveryTools(program.toolCatalog) });
     const parked = parkedOutcome(await sandbox.run({ js: program.js, toolCallId: "discovery" }));
     const restored = parseCodeModeWorkflowInput(
@@ -182,12 +177,10 @@ describe("code-mode sandbox continuation contract", () => {
     const hostTools = Object.fromEntries(
       ["child", "sibling"].map((name) => [
         name,
-        createCodeModeToolStub({
-          name,
+        createParkingHostTool({
           description: name,
           inputSchema: { type: "object" },
           outputSchema: null,
-          target: name === "child" ? "agent" : "tool",
         }),
       ]),
     ) as ToolSet;
@@ -241,17 +234,12 @@ describe("code-mode sandbox continuation contract", () => {
       ({
         description: name,
         inputSchema: jsonSchema({ type: "object" }),
-        execute: async (toolInput: unknown, options: unknown) => {
+        execute: async (_toolInput: unknown, options: unknown) => {
           const resolution = (options as { codeModeInterrupt?: { resolution?: unknown } })
             .codeModeInterrupt?.resolution as WorkflowSandboxResolution | undefined;
           if (resolution?.status === "completed") return resolution.output;
           hostCalls++;
-          return experimental_requestCodeModeInterrupt({
-            kind: CODE_MODE_CALL_INTERRUPT_KIND,
-            target: "tool",
-            toolInput,
-            toolName: name,
-          });
+          return experimental_requestCodeModeInterrupt({ kind: "test.parked" });
         },
       }) as ToolSet[string];
     const hostTools = { a: stub("a"), b: stub("b"), c: stub("c") } as ToolSet;
@@ -349,12 +337,10 @@ describe("compiled sandbox suspension and failure boundaries", () => {
     const hostTools = {
       effect: { inputSchema: jsonSchema({ type: "object" }), execute: effect },
       cleanup: { inputSchema: jsonSchema({ type: "object" }), execute: cleanup },
-      pause: createCodeModeToolStub({
-        name: "pause",
+      pause: createParkingHostTool({
         description: "Pause",
         inputSchema: { type: "object" },
         outputSchema: null,
-        target: "tool",
       }),
     } as ToolSet;
     const sandbox = await sandboxFor(hostTools);
@@ -416,14 +402,5 @@ describe("compiled sandbox suspension and failure boundaries", () => {
 });
 
 function parkingTool(name: string): ToolSet[string] {
-  return createParkingHostTool({
-    description: name,
-    inputSchema: { type: "object" },
-    interrupt: (toolInput) => ({
-      kind: CODE_MODE_CALL_INTERRUPT_KIND,
-      target: "tool",
-      toolInput,
-      toolName: name,
-    }),
-  });
+  return createParkingHostTool({ description: name, inputSchema: { type: "object" } });
 }

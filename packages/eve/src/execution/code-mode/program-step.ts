@@ -28,11 +28,7 @@ import { readDurableSession, type DurableSessionState } from "#execution/durable
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
-import {
-  approvalDenied,
-  type CodeModeToolCatalogEntry,
-  type CodeModeWorkflowInput,
-} from "#execution/code-mode/schema.js";
+import { approvalDenied, type CodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import {
   AuthorizationHookKey,
   PendingAuthorizationResultKey,
@@ -70,22 +66,6 @@ import {
 } from "#shared/workflow-sandbox.js";
 import type { ToolContext, ToolExecuteOptions, ToolInputRequest } from "#tools/definition.js";
 
-/** Interrupt payload raised by every claimed tool the generated program calls. */
-export const CODE_MODE_CALL_INTERRUPT_KIND = "eve.code-mode-call";
-
-export interface CodeModeCallInterrupt {
-  readonly kind: typeof CODE_MODE_CALL_INTERRUPT_KIND;
-  readonly toolInput: unknown;
-  readonly toolName: string;
-}
-
-/** One parked nested call, in the order the sandbox recorded it. */
-export interface CodeModePendingCall {
-  readonly call: CodeModeCallInterrupt;
-  readonly interrupt: WorkflowSandboxInterrupt;
-  readonly toolCallId: string;
-}
-
 export type CodeModeProgramOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: string }
@@ -93,7 +73,8 @@ export type CodeModeProgramOutcome =
       readonly status: "interrupted";
       /** The signed continuation the next `resume` settles. */
       readonly interrupt: WorkflowSandboxInterrupt;
-      readonly pending: readonly CodeModePendingCall[];
+      /** The parked nested calls, in the order the sandbox recorded them. */
+      readonly pending: readonly WorkflowSandboxInterrupt[];
     };
 
 export type CodeModeToolOutcome =
@@ -149,7 +130,7 @@ export async function runCodeModeProgramStep(input: {
   const security = getWorkflowContinuationSecurity(await readDurableSession(input.sessionState));
   const hostTools: ToolSet = { ...createDiscoveryTools(input.program.toolCatalog) };
   for (const entry of input.program.toolCatalog) {
-    if (entry.target !== "direct") hostTools[entry.name] = createCodeModeToolStub(entry);
+    if (entry.target !== "direct") hostTools[entry.name] = createParkingHostTool(entry);
   }
   const sandbox = await createWorkflowSandbox({
     bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
@@ -164,15 +145,10 @@ export async function runCodeModeProgramStep(input: {
     return { output: parseJsonValue(outcome.output ?? null), status: "completed" };
   }
   if (outcome.status === "failed") return outcome;
-  const pending = outcome.pending.map((interrupt): CodeModePendingCall => ({
-    call: readCallInterrupt(interrupt),
-    interrupt,
-    toolCallId: interrupt.toolCallId,
-  }));
-  if (pending.length === 0) {
+  if (outcome.pending.length === 0) {
     throw new Error("code_mode continuation contains no pending call.");
   }
-  return { interrupt: outcome.interrupt, pending, status: "interrupted" };
+  return { interrupt: outcome.interrupt, pending: outcome.pending, status: "interrupted" };
 }
 
 export interface CodeModeToolCall {
@@ -324,20 +300,6 @@ async function evaluateApprovalGate(input: {
   return undefined;
 }
 
-export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {
-  return createParkingHostTool({
-    description: entry.description,
-    inputSchema: entry.inputSchema,
-    outputSchema: entry.outputSchema ?? undefined,
-    interrupt: (toolInput) =>
-      ({
-        kind: CODE_MODE_CALL_INTERRUPT_KIND,
-        toolInput,
-        toolName: entry.name,
-      }) satisfies CodeModeCallInterrupt,
-  });
-}
-
 async function hydrateTurnTools(input: {
   readonly event: Pick<WorkflowToolRunRef, "sequence" | "stepIndex" | "turnId">;
   readonly serializedContext: Record<string, unknown>;
@@ -402,18 +364,6 @@ function readApprovalToolInput(value: unknown): JsonObject {
   } catch {
     return {};
   }
-}
-
-function readCallInterrupt(interrupt: WorkflowSandboxInterrupt): CodeModeCallInterrupt {
-  const payload = interrupt.payload as Partial<CodeModeCallInterrupt>;
-  if (payload.kind !== CODE_MODE_CALL_INTERRUPT_KIND || typeof payload.toolName !== "string") {
-    throw new Error(`Unsupported code_mode interrupt kind "${String(payload.kind)}".`);
-  }
-  return {
-    kind: CODE_MODE_CALL_INTERRUPT_KIND,
-    toolInput: payload.toolInput,
-    toolName: payload.toolName,
-  };
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
