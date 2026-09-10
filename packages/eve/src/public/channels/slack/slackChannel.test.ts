@@ -152,6 +152,15 @@ function callEvent(
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
+function callCompletionHandler(
+  adapter: ChannelAdapter,
+  event: UnstampedMessageStreamEvent,
+  ctx: any,
+) {
+  if (event.type !== "message.completed") throw new Error("Expected message.completed");
+  return contextStorage.run(stubAlsContext, () => adapter["message.completed"]!(event.data, ctx));
+}
+
 /**
  * Accessor whose `set` writes are captured so tests can assert on
  * `continuation.rekey` flowing through the SessionHandle. Returns
@@ -501,14 +510,14 @@ describe("slackChannel() default event handlers", () => {
     });
   });
 
-  it("message.completed attaches an oversized reply as a Markdown file", async () => {
+  it("message.completed uploads an oversized reply as a Markdown snippet", async () => {
     const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
-    const message = `# Changelog\n\n${"x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
+    const message = `# Changelog\n\n${"é🦊".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
 
     await callEvent(
       adapter,
@@ -531,21 +540,27 @@ describe("slackChannel() default event handlers", () => {
     expect(uploadedBodies).toEqual([message]);
     expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
       filename: "eve-response.md",
+      snippet_type: "markdown",
       length: String(new TextEncoder().encode(message).byteLength),
     });
     expect(parseSlackRequestBody(fetchMock.mock.calls[2]![1] as RequestInit)).toMatchObject({
       channel_id: "C01",
       files: [{ id: "F01", title: "eve-response.md" }],
-      initial_comment: "Here's a Markdown file with the full response.",
+      initial_comment: "Here's a snippet with the full response.",
       thread_ts: "1700000000.000001",
     });
   });
 
-  it("message.completed reports an oversized reply upload failure", async () => {
+  it.each([
+    ["files.getUploadURLExternal", "missing_scope"],
+    ["files.completeUploadExternal", "channel_not_found"],
+  ])("message.completed propagates %s failure", async (method, error) => {
+    useSuccessfulSlackFileUpload(fetchMock);
+    const successfulFetch = fetchMock.getMockImplementation() as typeof fetch;
     fetchMock.mockImplementation(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url === "https://slack.com/api/files.getUploadURLExternal") {
-        return new Response(JSON.stringify({ error: "missing_scope", ok: false }), {
+      if (url === `https://slack.com/api/${method}`) {
+        return new Response(JSON.stringify({ error, ok: false }), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -554,7 +569,7 @@ describe("slackChannel() default event handlers", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      throw new Error(`Unexpected Slack request: ${url}`);
+      return successfulFetch(input);
     });
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
@@ -563,26 +578,24 @@ describe("slackChannel() default event handlers", () => {
     const ctx = buildAdapterContext(adapter, stubAccessor());
     const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
 
-    await callEvent(
-      adapter,
-      makeEvent("message.completed", {
-        finishReason: "stop",
-        message,
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
+    await expect(
+      callCompletionHandler(
+        adapter,
+        makeEvent("message.completed", {
+          finishReason: "stop",
+          message,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t1",
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow(error);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1]![0])).toBe("https://slack.com/api/chat.postMessage");
-    expect(parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit)).toMatchObject({
-      markdown_text: "I couldn't attach the full response. Please try again.",
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(method === "files.getUploadURLExternal" ? 1 : 3);
   });
 
-  it("activity-owned message.completed uses the same oversized reply attachment", async () => {
+  it("activity-owned message.completed uses the same oversized reply snippet", async () => {
     const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
     const adapter = withState(
       getAdapter(
@@ -1586,7 +1599,7 @@ describe("rebuildSlackContext", () => {
     expect(allTokenWrites).toHaveLength(1);
   });
 
-  it("anchors a threadless session before attaching an oversized reply", async () => {
+  it("anchors a threadless session before uploading an oversized reply snippet", async () => {
     const fetchMock = vi.fn();
     const uploadedBodies = useSuccessfulSlackFileUpload(fetchMock, "1800000000.123456");
     vi.stubGlobal("fetch", fetchMock);
@@ -1618,9 +1631,12 @@ describe("rebuildSlackContext", () => {
     const anchorBody = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
     expect(anchorBody).toMatchObject({
       channel: "C01",
-      markdown_text: "Here's a Markdown file with the full response.",
+      markdown_text: "Here's a snippet with the full response.",
     });
     expect(anchorBody.thread_ts).toBeUndefined();
+    expect(parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit)).toMatchObject({
+      snippet_type: "markdown",
+    });
     const completeBody = parseSlackRequestBody(fetchMock.mock.calls[3]![1] as RequestInit);
     expect(completeBody.thread_ts).toBe("1800000000.123456");
     expect(completeBody.initial_comment).toBeUndefined();
@@ -1649,26 +1665,21 @@ describe("rebuildSlackContext", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    await callEvent(
-      adapter,
-      makeEvent("message.completed", {
-        finishReason: "stop",
-        message: "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1),
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
+    await expect(
+      callCompletionHandler(
+        adapter,
+        makeEvent("message.completed", {
+          finishReason: "stop",
+          message: "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1),
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t1",
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow("Slack did not return a thread timestamp");
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "https://slack.com/api/chat.postMessage",
-      "https://slack.com/api/chat.postMessage",
-    ]);
-    expect(parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit)).toMatchObject({
-      markdown_text: "I couldn't attach the full response. Please try again.",
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

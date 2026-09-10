@@ -1,6 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
@@ -35,8 +35,7 @@ const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
 const LONG_RESPONSE_FILENAME = "eve-response.md";
-const LONG_RESPONSE_NOTICE = "Here's a Markdown file with the full response.";
-const LONG_RESPONSE_DELIVERY_FAILURE = "I couldn't attach the full response. Please try again.";
+const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
 interface ReasoningAccumulator {
   readonly stepIndex: number;
   readonly text: string;
@@ -271,7 +270,7 @@ function groupInputRequestPostParts(
 /**
  * Delivers a completed default Slack reply without sending content that
  * exceeds Slack's native Markdown limit. Long replies stay intact as one
- * Markdown attachment instead of being truncated or split across messages.
+ * Markdown snippet instead of being truncated or split across messages.
  */
 export async function postCompletedSlackReply(
   channel: SlackContext,
@@ -288,28 +287,18 @@ export async function postCompletedSlackReply(
     mimeType: "text/markdown",
   };
 
-  try {
-    if (channel.slack.threadTs.length > 0) {
-      await channel.thread.post({
-        files: [file],
-        text: LONG_RESPONSE_NOTICE,
-      });
-      return;
-    }
-
-    // An upload-only post cannot anchor a proactive session. Land the short
-    // notice first so the file and future turns inherit the new thread root.
+  const hasThread = channel.slack.threadTs.length > 0;
+  if (!hasThread) {
+    // Uploads cannot anchor proactive sessions; post the notice first.
     const anchor = await channel.thread.post(LONG_RESPONSE_NOTICE);
     if (!anchor.id || channel.slack.threadTs.length === 0) {
       throw new Error("Slack did not return a thread timestamp for the long response notice.");
     }
-    await channel.slack.uploadFiles([file]);
-  } catch (error) {
-    logError(log, "Slack long response delivery failed", error, {
-      messageLength: message.length,
-    });
-    await channel.thread.post(LONG_RESPONSE_DELIVERY_FAILURE);
   }
+  await channel.slack.uploadFiles([file], {
+    initialComment: hasThread ? LONG_RESPONSE_NOTICE : undefined,
+    snippetType: "markdown",
+  });
 }
 
 /**
