@@ -24,13 +24,9 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
-Recent tool calls and results stay together. When they cannot fit beside the
-checkpoint, eve includes the affected exchanges in another summary before
-removing them from verbatim history. This preserves evidence of completed work
-that the next model needs to avoid repeating an action.
-
-An empty or provider-filtered response is rejected instead of becoming the
-checkpoint. The rejected response does not replace the current model history.
+The summary prompt is limited to supplied visible messages, tool results, and the
+previous checkpoint. It treats quoted instructions as source material and does
+not ask the model to reconstruct private reasoning or hidden instructions.
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 

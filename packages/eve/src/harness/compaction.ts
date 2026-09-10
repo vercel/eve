@@ -183,8 +183,8 @@ function evaluateThreshold(
 /**
  * Compacts messages by escalation: try each {@link CompactionHeuristic} in
  * order, then fall back to summarizing the older region with the compaction
- * model, keeping the recent tail verbatim when it fits and expanding the
- * summarized region before evicting more history.
+ * model — keeping the recent tail verbatim when it fits, degrading it to
+ * text-only, then shrinking the window.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -203,7 +203,7 @@ export async function compactMessages(
   if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return recent;
+      return keepNonToolResultMessages(recent);
     }
 
     // Capping preserves most of the measured prompt. Retain any known
@@ -250,10 +250,8 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    const empty = result.text.trim().length === 0;
-    if (empty || result.finishReason === "content-filter") {
+    if (result.text.trim().length === 0) {
       throw createCompactionSummaryError({
-        empty,
         finishReason: result.finishReason,
         rawFinishReason: result.rawFinishReason,
         providerMetadata: result.providerMetadata,
@@ -268,21 +266,28 @@ export async function compactMessages(
       { content: result.text, role: "assistant" },
     ];
 
+    // Prefer keeping the recent tail verbatim — surviving tool results are the
+    // model's evidence that work already ran. Degrade to text-only, then to a
+    // smaller window, only under threshold pressure.
     const verbatim = withResumptionGuard(
       [...summaryHead, ...recent],
       conversation,
       config.threshold,
     );
-    if (
-      evaluateThreshold(verbatim, config, "estimate").type === "within-limit" ||
-      recent.length === 0
-    ) {
+    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
 
-    // Only `older` was summarized. Move more history into the next transcript
-    // before evicting it; use the snapped tail size to avoid repeating a split.
-    keep = recent.length - 1;
+    const stripped = withResumptionGuard(
+      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      conversation,
+      config.threshold,
+    );
+    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+      return stripped;
+    }
+
+    keep -= 1;
   }
 }
 
@@ -419,6 +424,36 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
     conversation: messages.slice(2),
     previousCheckpoint: assistantMessageText(checkpoint),
   };
+}
+
+/**
+ * Returns the kept tail for a compacted history: recent messages with tool
+ * activity removed. Tool-result messages are dropped, and assistant messages are
+ * reduced to their text content (tool-call and reasoning parts stripped) so the
+ * rebuilt history never carries a tool_use without its matching result.
+ * Assistant messages with no remaining text are dropped; user messages are kept
+ * verbatim.
+ */
+function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  const kept: ModelMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role === "tool") {
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const text = assistantMessageText(message);
+      if (text.length > 0) {
+        kept.push({ content: text, role: "assistant" });
+      }
+      continue;
+    }
+
+    kept.push(message);
+  }
+
+  return kept;
 }
 
 /**

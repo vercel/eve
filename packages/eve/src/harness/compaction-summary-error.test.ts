@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { createCompactionSummaryError } from "#harness/compaction-summary-error.js";
 
 const base = {
-  empty: true,
   finishReason: "content-filter",
   rawFinishReason: "refusal",
   providerMetadata: undefined,
@@ -26,6 +25,8 @@ describe("createCompactionSummaryError", () => {
       "The compaction model returned an empty summary. Finish reason: content-filter.",
     );
     expect(error.cause).toEqual({
+      name: "CompactionSummaryDiagnostics",
+      message: "Summary attempt 2 stopped with 5 older messages and 2 recent messages.",
       finishReason: "content-filter",
       rawFinishReason: "refusal",
       providerStopType: "refusal",
@@ -35,13 +36,6 @@ describe("createCompactionSummaryError", () => {
       olderMessageCount: 5,
       recentMessageCount: 2,
     });
-  });
-
-  it("does not describe a nonempty refusal as empty", () => {
-    const error = createCompactionSummaryError({ ...base, empty: false });
-    expect(error.message).toBe(
-      "The compaction model declined to summarize the conversation. Finish reason: content-filter.",
-    );
   });
 
   it("does not retain provider explanations, response text, or credentials", () => {

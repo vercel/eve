@@ -1,7 +1,6 @@
 import { isObject } from "#shared/guards.js";
 
 interface CompactionSummaryFailure {
-  readonly empty: boolean;
   readonly finishReason: string | undefined;
   readonly rawFinishReason: string | undefined;
   readonly providerMetadata: Readonly<Record<string, unknown>> | undefined;
@@ -17,6 +16,8 @@ export function createCompactionSummaryError(input: CompactionSummaryFailure): E
   const stop = isObject(anthropic) ? anthropic.stopDetails : undefined;
   const gateway = input.providerMetadata?.gateway;
   const details = {
+    name: "CompactionSummaryDiagnostics",
+    message: `Summary attempt ${input.summaryAttempt} stopped with ${input.olderMessageCount} older messages and ${input.recentMessageCount} recent messages.`,
     finishReason,
     rawFinishReason: diagnosticCode(input.rawFinishReason),
     providerStopType: isObject(stop) ? diagnosticCode(stop.type) : undefined,
@@ -28,9 +29,7 @@ export function createCompactionSummaryError(input: CompactionSummaryFailure): E
   };
 
   return new Error(
-    input.empty
-      ? `The compaction model returned an empty summary. Finish reason: ${finishReason}.`
-      : `The compaction model declined to summarize the conversation. Finish reason: ${finishReason}.`,
+    `The compaction model returned an empty summary. Finish reason: ${finishReason}.`,
     { cause: details },
   );
 }
