@@ -200,68 +200,90 @@ describe("owner agent invocation dispatch", () => {
     ).toEqual(["agent-1", "agent-1"]);
   });
 
-  it("uses the parent-owned task activity identity when starting a fresh agent", async () => {
-    const taskWork = {
-      callId: "task-call",
-      id: "work:task",
-      kind: "task" as const,
-      name: "research",
-      parentId: "work:root",
-      rootSessionId: "root-session",
-      rootTurnId: "root-turn",
-    };
-    const indexedSession = recordSessionTask(session as never, {
-      activityWorkIdentity: taskWork,
-      createdByTurnId: "turn-1",
-      metadata: { kind: "subagent", name: "research" },
-      taskId: "task-1",
-      taskInboxToken: "task-token",
-      taskRunId: "task-run",
-    });
-    vi.mocked(readDurableSession).mockResolvedValue(indexedSession as never);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "subagent", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
-    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
-      ...prepared,
-      activityObserver: {
-        sink: { url: "https://parent.example/activity", version: 1 },
-        workIdentity: {
-          id: "work:root",
-          kind: "root-turn",
-          rootSessionId: "root-session",
-          rootTurnId: "root-turn",
-        },
-      },
-      plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
-      session: indexedSession,
-    } as never);
-    vi.mocked(startSubagent).mockResolvedValue(called);
+  it.each([
+    { dispatchKind: "start", taskKind: "subagent", observed: true },
+    { dispatchKind: "resume", taskKind: "subagent", observed: true },
+    { dispatchKind: "start", taskKind: "tool", observed: true },
+    { dispatchKind: "resume", taskKind: "tool", observed: true },
+    { dispatchKind: "start", taskKind: "subagent", observed: false },
+    { dispatchKind: "resume", taskKind: "subagent", observed: false },
+  ] as const)(
+    "resolves task activity for $dispatchKind ($taskKind, observed=$observed)",
+    async ({ dispatchKind, taskKind, observed }) => {
+      const taskWork = {
+        callId: "task-call",
+        id: "work:task",
+        kind: "task" as const,
+        name: "research",
+        parentId: "work:root",
+        rootSessionId: "root-session",
+        rootTurnId: "root-turn",
+      };
+      const indexedSession = recordSessionTask(session as never, {
+        activityWorkIdentity: taskWork,
+        createdByTurnId: "turn-1",
+        metadata: { kind: taskKind, name: "research" },
+        taskId: "task-1",
+        taskInboxToken: "task-token",
+        taskRunId: "task-run",
+      });
+      vi.mocked(readDurableSession).mockResolvedValue(indexedSession as never);
+      vi.mocked(readLatestTaskView).mockResolvedValue({
+        metadata: { kind: "subagent", name: "research" },
+        status: "working",
+        taskId: "task-1",
+      });
+      vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+        ...prepared,
+        activityObserver: observed
+          ? {
+              sink: { url: "https://parent.example/activity", version: 1 },
+              workIdentity: {
+                id: "work:root",
+                kind: "root-turn",
+                rootSessionId: "root-session",
+                rootTurnId: "root-turn",
+              },
+            }
+          : undefined,
+        plan: [
+          dispatchKind === "start"
+            ? { kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }
+            : { kind: "resume", action, agentId: "agent-1" },
+        ],
+        session: indexedSession,
+      } as never);
+      vi.mocked(startSubagent).mockResolvedValue(called);
+      vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
 
-    await dispatchTaskAgentInvocationStep({
-      ownerId: "task-1",
-      replyTo: "agent-reply",
-      request: {
-        input: { message: "Find it", target: "research" },
-        invocationId: "call-1",
-        kind: "agent-invoke",
-      },
-      serializedContext: {},
-      sessionState: {} as never,
-      taskId: "task-1",
-    });
-
-    expect(startSubagent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activityObserver: {
-          sink: { url: "https://parent.example/activity", version: 1 },
-          workIdentity: taskWork,
+      await dispatchTaskAgentInvocationStep({
+        ownerId: "task-1",
+        replyTo: "agent-reply",
+        request: {
+          input: { message: "Find it", target: "research" },
+          invocationId: "call-1",
+          kind: "agent-invoke",
         },
-      }),
-    );
-  });
+        serializedContext: {},
+        sessionState: {} as never,
+        taskId: "task-1",
+      });
+
+      const taskObserver =
+        observed && taskKind === "subagent"
+          ? { sink: { url: "https://parent.example/activity", version: 1 }, workIdentity: taskWork }
+          : undefined;
+      if (dispatchKind === "start") {
+        expect(startSubagent).toHaveBeenCalledWith(
+          expect.objectContaining({ taskActivityObserver: taskObserver }),
+        );
+      } else {
+        expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
+          expect.objectContaining({ activityObserver: taskObserver }),
+        );
+      }
+    },
+  );
 
   it("starts a fresh agent with task-owned handle semantics", async () => {
     const reserved = {

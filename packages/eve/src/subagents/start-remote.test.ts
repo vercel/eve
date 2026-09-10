@@ -27,7 +27,7 @@ const taskObserver = {
 describe("startRemoteSubagent", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("nests a remote agent beneath an inherited task observer", async () => {
+  it("derives a child identity when no task-owned observer is supplied", async () => {
     await startRemoteSubagent({
       action: {
         callId: "call-remote",

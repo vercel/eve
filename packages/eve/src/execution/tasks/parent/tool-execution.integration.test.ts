@@ -97,12 +97,13 @@ async function createScope(session = createSession(), activityObserver?: Activit
       callId = "steering-call",
       agentId: string | undefined = identity.id,
       name = identity.name,
+      resultKind: "subagent" | "tool" = "subagent",
     ) {
       const definition = {
         execute: vi.fn(),
         name,
         nodeId: identity.nodeId,
-        resultKind: "subagent" as const,
+        resultKind,
         workflowId: "research-workflow",
       };
       const toolInput = { agentId, message: "Use the updated instruction" };
@@ -154,33 +155,41 @@ describe("background subagent steering", () => {
     },
   );
 
-  it("persists the task activity identity in the parent session index", async () => {
-    const activityObserver = {
-      sink: { url: "https://parent.example/activity", version: 1 as const },
-      workIdentity: {
-        id: "work:root",
-        kind: "root-turn" as const,
+  it.each(["subagent", "tool"] as const)(
+    "persists agent-backed activity identity only (%s)",
+    async (resultKind) => {
+      const activityObserver = {
+        sink: { url: "https://parent.example/activity", version: 1 as const },
+        workIdentity: {
+          id: "work:root",
+          kind: "root-turn" as const,
+          rootSessionId: "parent",
+          rootTurnId: "turn-2",
+        },
+      };
+      const scope = await createScope(createSession(), activityObserver);
+
+      await scope.execute("steering-call", identity.id, identity.name, resultKind);
+      const committed = await scope.commit();
+      const task = getSessionTaskIndex(committed.state).find(
+        (candidate) => candidate.taskId !== entry.taskId,
+      );
+
+      expect(task).toBeDefined();
+      if (resultKind === "tool") {
+        expect(task?.activityWorkIdentity).toBeUndefined();
+        return;
+      }
+      expect(task?.activityWorkIdentity).toMatchObject({
+        callId: "steering-call",
+        kind: "task",
+        name: "research",
+        parentId: "work:root",
         rootSessionId: "parent",
         rootTurnId: "turn-2",
-      },
-    };
-    const scope = await createScope(createSession(), activityObserver);
-
-    await scope.execute();
-    const committed = await scope.commit();
-    const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
-    );
-
-    expect(task?.activityWorkIdentity).toMatchObject({
-      callId: "steering-call",
-      kind: "task",
-      name: "research",
-      parentId: "work:root",
-      rootSessionId: "parent",
-      rootTurnId: "turn-2",
-    });
-  });
+      });
+    },
+  );
 
   it("cancels the old task before starting a new task in the same child", async () => {
     const scope = await createScope();
