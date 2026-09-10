@@ -1179,10 +1179,19 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 });
 
 it("distinguishes retired session history from transient read failures", async () => {
-  const { WorkflowRunNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+  const { RunExpiredError, StreamExpiredError, WorkflowRunNotFoundError, WorkflowWorldError } =
+    await import("#compiled/@workflow/errors/index.js");
+  const missingStream = new WorkflowWorldError("Stream not found", { status: 404 });
   const getTailIndex = vi
     .fn()
     .mockRejectedValueOnce(new WorkflowRunNotFoundError("lost-session"))
+    .mockRejectedValueOnce(new RunExpiredError("Run expired"))
+    .mockRejectedValueOnce(
+      new Error("Stream info unavailable", {
+        cause: new StreamExpiredError("Stream expired", "expired-session", "default"),
+      }),
+    )
+    .mockRejectedValueOnce(missingStream)
     .mockRejectedValueOnce(new Error("temporary outage"));
   const cancel = vi.fn().mockResolvedValue(undefined);
   getRunMock.mockReturnValue({ getReadable: () => ({ getTailIndex, cancel }) });
@@ -1192,6 +1201,13 @@ it("distinguishes retired session history from transient read failures", async (
   await expect(runtime.getStreamTailIndex("lost-session")).rejects.toBeInstanceOf(
     SessionHistoryUnavailableError,
   );
+  await expect(runtime.getStreamTailIndex("expired-session")).rejects.toBeInstanceOf(
+    SessionHistoryUnavailableError,
+  );
+  await expect(runtime.getStreamTailIndex("expired-session")).rejects.toBeInstanceOf(
+    SessionHistoryUnavailableError,
+  );
+  await expect(runtime.getStreamTailIndex("starting-session")).rejects.toBe(missingStream);
   await expect(runtime.getStreamTailIndex("live-session")).rejects.toThrow("temporary outage");
-  expect(cancel).toHaveBeenCalledTimes(2);
+  expect(cancel).toHaveBeenCalledTimes(5);
 });

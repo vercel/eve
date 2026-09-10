@@ -6,6 +6,7 @@ import {
   EntityConflictError,
   HookNotFoundError,
   RunExpiredError,
+  StreamExpiredError,
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
@@ -304,7 +305,10 @@ export function createWorkflowRuntime(config: {
       } catch (error) {
         if (
           [...walkCauseChain(error)].some(
-            (cause) => WorkflowRunNotFoundError.is(cause) || RunExpiredError.is(cause),
+            (cause) =>
+              WorkflowRunNotFoundError.is(cause) ||
+              RunExpiredError.is(cause) ||
+              StreamExpiredError.is(cause),
           )
         ) {
           throw new SessionHistoryUnavailableError(sessionId);
