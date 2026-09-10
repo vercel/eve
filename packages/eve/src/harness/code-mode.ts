@@ -13,7 +13,7 @@ import {
   type CodeModeToolCatalogEntry,
   type CodeModeWorkflowInput,
 } from "#execution/code-mode/schema.js";
-import { createWorkflowSandboxTool } from "#shared/workflow-sandbox.js";
+import { createWorkflowSandbox } from "#shared/workflow-sandbox.js";
 import type { WorkflowSandboxContinuationSecurity } from "#shared/workflow-sandbox.js";
 import { parseJsonObject } from "#shared/json.js";
 
@@ -106,12 +106,12 @@ export async function applyCodeModeTool(input: {
 
   toolCatalog.sort((left, right) => (left.name < right.name ? -1 : 1));
   const discoveryTools = createDiscoveryTools(toolCatalog);
-  const generated = await createWorkflowSandboxTool({
+  const { description: sandboxDescription } = await createWorkflowSandbox({
     bridgeRequestLimit: codeModeBridgeRequestLimit(maxSubagents),
     continuationSecurity: input.continuationSecurity,
     hostTools: discoveryTools as ToolSet,
   });
-  const generatedDescription = discoveryDescription(generated, toolCatalog);
+  const generatedDescription = discoveryDescription(sandboxDescription, toolCatalog);
   const description = `${generatedDescription}\n\nA program may invoke at most ${maxSubagents} subagents in total, including retries and continuations. Excess calls reject with CODE_MODE_SUBAGENT_LIMIT_REACHED.`;
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeModelTool,
@@ -244,10 +244,9 @@ function readProgram(toolInput: unknown): string {
 }
 
 function discoveryDescription(
-  tool: ToolSet[string],
+  generated: string,
   catalog: readonly CodeModeToolCatalogEntry[],
 ): string {
-  const generated = typeof tool.description === "string" ? tool.description : "";
   const names = catalog.map((entry) => entry.name);
   return [
     generated,

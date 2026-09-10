@@ -68,7 +68,6 @@ export async function codeModeWorkflow(
     const settling = outcome.pending.map((pending): Promise<SettledNestedCall> => {
       if (pending.call.target === "agent" && subagentCalls++ >= program.maxSubagents) {
         return Promise.resolve({
-          interrupt: pending.interrupt,
           resolution: {
             status: "failed" as const,
             error: `CODE_MODE_SUBAGENT_LIMIT_REACHED: code_mode may invoke at most ${program.maxSubagents} subagents per program; "${pending.call.toolName}" was not called.`,
@@ -82,28 +81,27 @@ export async function codeModeWorkflow(
     // Adopt state in pending order once the batch settles, so replay applies
     // the same merges (and surfaces the same conflicts) regardless of which
     // call finished first.
-    const resolutions = settled.map(({ interrupt, resolution, stateChanges }) => {
-      if (stateChanges === undefined || stateChanges.length === 0) return { interrupt, resolution };
+    const resolutions = settled.map(({ resolution, stateChanges }): CodeModeCallResolution => {
+      if (stateChanges === undefined || stateChanges.length === 0) return resolution;
       try {
         const updated = adoptCodeModeStateChanges(run, stateChanges);
         run.serializedContext = updated.serializedContext;
         run.sessionState = updated.sessionState;
-        return { interrupt, resolution };
+        return resolution;
       } catch (error) {
-        return {
-          interrupt,
-          resolution: { status: "failed" as const, error: toErrorMessage(error) },
-        };
+        return { status: "failed", error: toErrorMessage(error) };
       }
     });
-    outcome = await runCodeModeProgramStep({ ...base, resume: resolutions });
+    outcome = await runCodeModeProgramStep({
+      ...base,
+      resume: { interrupt: outcome.interrupt, resolutions },
+    });
   }
   if (outcome.status === "failed") throw new Error(outcome.error);
   return outcome.output;
 }
 
 interface SettledNestedCall {
-  readonly interrupt: CodeModePendingCall["interrupt"];
   readonly resolution: CodeModeCallResolution;
   readonly stateChanges?: readonly CodeModeStateChange[];
 }
@@ -115,7 +113,7 @@ async function settleNestedCall(
   pending: CodeModePendingCall,
   invocationId: string,
 ): Promise<SettledNestedCall> {
-  const { call, interrupt, toolCallId } = pending;
+  const { call, toolCallId } = pending;
   const from = readWorkflowToolRunRef(ctx);
   const { sequence, stepIndex, turnId } = from;
   try {
@@ -128,10 +126,10 @@ async function settleNestedCall(
       toolName: call.toolName,
     };
     const approval = await approveNestedCall(ctx, program, nestedCall);
-    if (approval.status === "denied") return { interrupt, resolution: approval.resolution };
+    if (approval.status === "denied") return { resolution: approval.resolution };
     if (call.target === "workflow") {
       const resolution = await runNestedWorkflowTool(ctx, from, program, call);
-      return { interrupt, resolution, stateChanges: approval.stateChanges };
+      return { resolution, stateChanges: approval.stateChanges };
     }
     if (call.target === "agent") {
       const agentInput = readAgentInput(call.toolInput);
@@ -140,7 +138,7 @@ async function settleNestedCall(
         { ...agentInput, target: call.toolName },
         { invocationId },
       );
-      return { interrupt, resolution: { status: "completed", output } };
+      return { resolution: { status: "completed", output } };
     }
     if (call.toolName === ASK_QUESTION_TOOL_NAME) {
       // Answered through the workflow-tool `ask` protocol: the owner renders the
@@ -149,7 +147,7 @@ async function settleNestedCall(
       const output: Record<string, string> = { status: "answered" };
       if (answer.optionId !== undefined) output.optionId = answer.optionId;
       if (answer.text !== undefined) output.text = answer.text;
-      return { interrupt, resolution: { status: "completed", output } };
+      return { resolution: { status: "completed", output } };
     }
     // Passing `ctx` opts this step into the workflow-tool authorization twin,
     // which parks on sign-in and retries the step; the body only sees results.
@@ -162,13 +160,12 @@ async function settleNestedCall(
     }
     const { stateChanges, ...resolution } = settled;
     return {
-      interrupt,
       resolution,
       stateChanges: [...(approval.stateChanges ?? []), ...(stateChanges ?? [])],
     };
   } catch (error) {
     ctx.abortSignal.throwIfAborted();
-    return { interrupt, resolution: { status: "failed", error: toErrorMessage(error) } };
+    return { resolution: { status: "failed", error: toErrorMessage(error) } };
   }
 }
 

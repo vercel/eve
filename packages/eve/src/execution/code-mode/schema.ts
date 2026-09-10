@@ -1,10 +1,9 @@
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
+import type { WorkflowSandboxResolution } from "#shared/workflow-sandbox.js";
 
 export const DEFAULT_CODE_MODE_MAX_SUBAGENTS = 100;
 
-export type CodeModeCallResolution =
-  | { readonly status: "completed"; readonly output: JsonValue }
-  | { readonly status: "failed"; readonly error: string };
+export type CodeModeCallResolution = WorkflowSandboxResolution;
 
 export type CodeModeCallTarget = "agent" | "tool" | "workflow" | "direct";
 

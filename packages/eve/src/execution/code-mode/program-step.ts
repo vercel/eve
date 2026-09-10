@@ -1,4 +1,4 @@
-import { jsonSchema, type ToolSet } from "ai";
+import type { ToolSet } from "ai";
 
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
@@ -69,14 +69,8 @@ import { isObject } from "#shared/guards.js";
 import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
-  continueWorkflowSandboxInterrupt,
-  createWorkflowSandboxTool,
-  getWorkflowSandboxPendingInterrupts,
-  readWorkflowSandboxResolution,
-  readWorkflowSandboxProgramFailure,
-  rejectWorkflowSandboxToolCall,
-  requestWorkflowSandboxInterrupt,
-  unwrapWorkflowSandboxResult,
+  createParkingHostTool,
+  createWorkflowSandbox,
   type WorkflowSandboxInterrupt,
 } from "#shared/workflow-sandbox.js";
 import type { ToolContext, ToolExecuteOptions, ToolInputRequest } from "#tools/definition.js";
@@ -101,7 +95,12 @@ export interface CodeModePendingCall {
 export type CodeModeProgramOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: string }
-  | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
+  | {
+      readonly status: "interrupted";
+      /** The signed continuation the next `resume` settles. */
+      readonly interrupt: WorkflowSandboxInterrupt;
+      readonly pending: readonly CodeModePendingCall[];
+    };
 
 export type CodeModeToolOutcome = CodeModeCallResolution & {
   readonly stateChanges?: readonly CodeModeStateChange[];
@@ -125,10 +124,10 @@ export async function runCodeModeProgramStep(input: {
   readonly callId: string;
   readonly program: CodeModeWorkflowInput;
   readonly sessionState: DurableSessionState;
-  readonly resume?: readonly {
+  readonly resume?: {
     readonly interrupt: WorkflowSandboxInterrupt;
-    readonly resolution: CodeModeCallResolution;
-  }[];
+    readonly resolutions: readonly CodeModeCallResolution[];
+  };
 }): Promise<CodeModeProgramOutcome> {
   "use step";
 
@@ -137,65 +136,28 @@ export async function runCodeModeProgramStep(input: {
   for (const entry of input.program.toolCatalog) {
     if (entry.target !== "direct") hostTools[entry.name] = createCodeModeToolStub(entry);
   }
-  try {
-    let raw: unknown;
-    if (input.resume === undefined) {
-      const tool = await createWorkflowSandboxTool({
-        bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
-        continuationSecurity: security,
-        hostTools,
-      });
-      if (tool.execute === undefined) throw new Error("code_mode has no executor.");
-      // `ToolSet[string]` erases the input type; the sandbox tool accepts `{ js }`.
-      raw = await tool.execute(
-        { js: input.program.js } as never,
-        { messages: [], toolCallId: input.callId } as never,
-      );
-    } else {
-      let current = input.resume[0]?.interrupt;
-      if (current === undefined) {
-        throw new Error("code_mode resume requires at least one resolution.");
-      }
-      // Each resolution extends the signed ledger. Advance from that updated
-      // continuation; the program runs only after the last parked call settles.
-      for (const [index, { resolution }] of input.resume.entries()) {
-        if (index > 0) {
-          const advanced = await unwrapWorkflowSandboxResult(raw, security);
-          if (advanced.status !== "interrupted") {
-            throw new Error("code_mode resumed before every parked call was resolved.");
-          }
-          current =
-            getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
-        }
-        raw = await continueWorkflowSandboxInterrupt({
-          bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
-          continuationSecurity: security,
-          interrupt: current,
-          resolution,
-          tools: hostTools,
-        });
-      }
-    }
-    const unwrapped = await unwrapWorkflowSandboxResult(raw, security);
-    if (unwrapped.status === "completed") {
-      return { output: parseJsonValue(unwrapped.output ?? null), status: "completed" };
-    }
-    const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt).map(
-      (interrupt): CodeModePendingCall => ({
-        call: readCallInterrupt(interrupt),
-        interrupt,
-        toolCallId: interrupt.toolCallId,
-      }),
-    );
-    if (pending.length === 0) {
-      throw new Error("code_mode continuation contains no pending call.");
-    }
-    return { pending, status: "interrupted" };
-  } catch (error) {
-    const message = readWorkflowSandboxProgramFailure(error);
-    if (message === undefined) throw error;
-    return { status: "failed", error: message };
+  const sandbox = await createWorkflowSandbox({
+    bridgeRequestLimit: codeModeBridgeRequestLimit(input.program.maxSubagents),
+    continuationSecurity: security,
+    hostTools,
+  });
+  const outcome =
+    input.resume === undefined
+      ? await sandbox.run({ js: input.program.js, toolCallId: input.callId })
+      : await sandbox.resume(input.resume);
+  if (outcome.status === "completed") {
+    return { output: parseJsonValue(outcome.output ?? null), status: "completed" };
   }
+  if (outcome.status === "failed") return outcome;
+  const pending = outcome.pending.map((interrupt): CodeModePendingCall => ({
+    call: readCallInterrupt(interrupt),
+    interrupt,
+    toolCallId: interrupt.toolCallId,
+  }));
+  if (pending.length === 0) {
+    throw new Error("code_mode continuation contains no pending call.");
+  }
+  return { interrupt: outcome.interrupt, pending, status: "interrupted" };
 }
 
 export interface CodeModeToolCall {
@@ -382,24 +344,18 @@ export async function evaluateCodeModeApprovalStep(
 }
 
 export function createCodeModeToolStub(entry: CodeModeToolCatalogEntry): ToolSet[string] {
-  return {
+  return createParkingHostTool({
     description: entry.description,
-    inputSchema: jsonSchema(entry.inputSchema),
-    outputSchema: entry.outputSchema === null ? undefined : jsonSchema(entry.outputSchema),
-    execute: async (toolInput: unknown, options: unknown) => {
-      const resolution = readWorkflowSandboxResolution(options) as
-        | CodeModeCallResolution
-        | undefined;
-      if (resolution?.status === "failed") return rejectWorkflowSandboxToolCall(resolution.error);
-      if (resolution?.status === "completed") return resolution.output;
-      return requestWorkflowSandboxInterrupt({
+    inputSchema: entry.inputSchema,
+    outputSchema: entry.outputSchema ?? undefined,
+    interrupt: (toolInput) =>
+      ({
         kind: CODE_MODE_CALL_INTERRUPT_KIND,
         target: entry.target === "direct" ? "tool" : entry.target,
         toolInput,
         toolName: entry.name,
-      } satisfies CodeModeCallInterrupt);
-    },
-  } as ToolSet[string];
+      }) satisfies CodeModeCallInterrupt,
+  });
 }
 
 async function hydrateTurnTools(input: {

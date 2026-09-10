@@ -78,6 +78,7 @@ function call(
 }
 
 const parked = (...pending: CodeModePendingCall[]): CodeModeProgramOutcome => ({
+  interrupt: { batch: pending.map((call) => call.toolCallId) } as never,
   pending,
   status: "interrupted",
 });
@@ -161,9 +162,9 @@ describe("codeModeWorkflow", () => {
         return { status: "completed", output: "read" };
       });
     await codeModeWorkflow(program, context());
-    expect(runProgram.mock.calls[1]?.[0].resume[0].resolution).toEqual({
-      status: "completed",
-      output: "written",
+    expect(runProgram.mock.calls[1]?.[0].resume).toEqual({
+      interrupt: { batch: ["write-call"] },
+      resolutions: [{ status: "completed", output: "written" }],
     });
   });
 
@@ -190,9 +191,9 @@ describe("codeModeWorkflow", () => {
 
     await codeModeWorkflow(program, context());
 
-    const resume = runProgram.mock.calls[1]?.[0].resume;
-    expect(resume[0].resolution).toEqual({ status: "completed", output: "first" });
-    expect(resume[1].resolution).toMatchObject({
+    const { resolutions } = runProgram.mock.calls[1]![0].resume;
+    expect(resolutions[0]).toEqual({ status: "completed", output: "first" });
+    expect(resolutions[1]).toMatchObject({
       status: "failed",
       error: expect.stringContaining("CODE_MODE_STATE_CONFLICT"),
     });
@@ -222,7 +223,7 @@ describe("codeModeWorkflow", () => {
       message: "continue",
     });
     expect(executeTool).toHaveBeenCalledTimes(1);
-    expect(runProgram.mock.calls[3]?.[0].resume[0].resolution).toMatchObject({
+    expect(runProgram.mock.calls[3]?.[0].resume.resolutions[0]).toMatchObject({
       status: "failed",
       error: expect.stringContaining("CODE_MODE_SUBAGENT_LIMIT_REACHED"),
     });
@@ -244,7 +245,7 @@ describe("codeModeWorkflow", () => {
 
     expect(invokeAgent.mock.calls.map((args) => args[1].message)).toEqual(["first", "second"]);
     expect(
-      runProgram.mock.calls[1]?.[0].resume.map((entry: any) => entry.resolution.status),
+      runProgram.mock.calls[1]?.[0].resume.resolutions.map((entry: any) => entry.status),
     ).toEqual(["completed", "completed", "failed"]);
   });
 
@@ -294,7 +295,10 @@ describe("codeModeWorkflow", () => {
       callId: "outer",
       program,
       sessionState: { sessionId: "s1" },
-      resume: [{ interrupt: { marker: "add" }, resolution: { status: "completed", output: 3 } }],
+      resume: {
+        interrupt: { batch: ["add-call"] },
+        resolutions: [{ status: "completed", output: 3 }],
+      },
     });
     expect(invokeAgent).not.toHaveBeenCalled();
   });
@@ -312,7 +316,7 @@ describe("codeModeWorkflow", () => {
       { invocationId: "outer:0" },
     );
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ resolution: { status: "completed", output: "findings" } }],
+      resume: { resolutions: [{ status: "completed", output: "findings" }] },
     });
     expect(executeTool).not.toHaveBeenCalled();
   });
@@ -335,12 +339,10 @@ describe("codeModeWorkflow", () => {
       callId: "outer",
       program,
       sessionState: { sessionId: "s1" },
-      resume: [
-        {
-          interrupt: { marker: "ask_question" },
-          resolution: { status: "completed", output: { status: "answered", optionId: "ship" } },
-        },
-      ],
+      resume: {
+        interrupt: { batch: ["ask_question-call"] },
+        resolutions: [{ status: "completed", output: { status: "answered", optionId: "ship" } }],
+      },
     });
     expect(executeTool).not.toHaveBeenCalled();
   });
@@ -355,11 +357,9 @@ describe("codeModeWorkflow", () => {
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
       expect(ask).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-        resume: [
-          {
-            resolution: { status: "failed", error: expect.stringContaining("ask_question") },
-          },
-        ],
+        resume: {
+          resolutions: [{ status: "failed", error: expect.stringContaining("ask_question") }],
+        },
       });
     },
   );
@@ -404,11 +404,14 @@ describe("codeModeWorkflow", () => {
     ]);
     expect(runProgram).toHaveBeenCalledTimes(2);
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [
-        { interrupt: { marker: "a" }, resolution: { status: "completed", output: "a-result" } },
-        { interrupt: { marker: "b" }, resolution: { status: "completed", output: "b-result" } },
-        { interrupt: { marker: "add" }, resolution: { status: "completed", output: 2 } },
-      ],
+      resume: {
+        interrupt: { batch: ["a-call", "b-call", "add-call"] },
+        resolutions: [
+          { status: "completed", output: "a-result" },
+          { status: "completed", output: "b-result" },
+          { status: "completed", output: 2 },
+        ],
+      },
     });
   });
 
@@ -437,7 +440,7 @@ describe("codeModeWorkflow", () => {
 
     await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ resolution: { status: "failed", error: "boom" } }],
+      resume: { resolutions: [{ status: "failed", error: "boom" }] },
     });
   });
 
@@ -458,10 +461,12 @@ describe("codeModeWorkflow", () => {
 
     await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [
-        { resolution: { status: "failed", error: "child failed" } },
-        { resolution: { status: "completed", output: 3 } },
-      ],
+      resume: {
+        resolutions: [
+          { status: "failed", error: "child failed" },
+          { status: "completed", output: 3 },
+        ],
+      },
     });
   });
 
@@ -509,12 +514,10 @@ describe("codeModeWorkflow", () => {
       callId: "outer",
       program,
       sessionState: { sessionId: "s1" },
-      resume: [
-        {
-          interrupt: { marker: "plan_deploy" },
-          resolution: { status: "completed", output: { plan: "PLAN:api" } },
-        },
-      ],
+      resume: {
+        interrupt: { batch: ["plan_deploy-call"] },
+        resolutions: [{ status: "completed", output: { plan: "PLAN:api" } }],
+      },
     });
     expect(executeTool).not.toHaveBeenCalled();
   });
@@ -530,7 +533,7 @@ describe("codeModeWorkflow", () => {
 
     await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
     expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-      resume: [{ resolution: { status: "failed", error: "plan rejected" } }],
+      resume: { resolutions: [{ status: "failed", error: "plan rejected" }] },
     });
   });
 
@@ -561,7 +564,7 @@ describe("codeModeWorkflow", () => {
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
       expect(executeWorkflowBody).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-        resume: [{ resolution: { status: "failed", error: expect.stringContaining(message) } }],
+        resume: { resolutions: [{ status: "failed", error: expect.stringContaining(message) }] },
       });
     },
   );
@@ -607,7 +610,7 @@ describe("codeModeWorkflow", () => {
       expect(executeTool.mock.calls[0]).toEqual([nestedCall]);
       expect(ask).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-        resume: [{ resolution: { status: "completed", output: "GATED" } }],
+        resume: { resolutions: [{ status: "completed", output: "GATED" }] },
       });
       // The cursor carries the approval on to later calls (and the parent),
       // alongside the tool's own context updates.
@@ -643,15 +646,15 @@ describe("codeModeWorkflow", () => {
         callId: "outer",
         program,
         sessionState: { sessionId: "s1" },
-        resume: [
-          {
-            interrupt: { marker: "gated" },
-            resolution: {
+        resume: {
+          interrupt: { batch: ["gated-call"] },
+          resolutions: [
+            {
               status: "failed",
               error: 'CODE_MODE_APPROVAL_DENIED: the user declined to run "gated".',
             },
-          },
-        ],
+          ],
+        },
       });
     });
 
@@ -667,7 +670,7 @@ describe("codeModeWorkflow", () => {
       expect(executeTool).toHaveBeenCalledOnce();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         sessionState: { sessionId: "s1" },
-        resume: [{ resolution: { status: "completed", output: "GATED" } }],
+        resume: { resolutions: [{ status: "completed", output: "GATED" }] },
       });
       expect(runProgram.mock.calls[1]?.[0].sessionState).not.toHaveProperty("snapshot");
     });
@@ -691,7 +694,7 @@ describe("codeModeWorkflow", () => {
         expect(askApproval).not.toHaveBeenCalled();
         expect(executeTool).not.toHaveBeenCalled();
         expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-          resume: [{ resolution: { status: "failed", error: expect.stringContaining(message) } }],
+          resume: { resolutions: [{ status: "failed", error: expect.stringContaining(message) }] },
         });
       },
     );
@@ -727,7 +730,7 @@ describe("codeModeWorkflow", () => {
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
       expect(executeWorkflowBody).toHaveBeenCalledOnce();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
-        resume: [{ resolution: { status: "completed", output: "planned" } }],
+        resume: { resolutions: [{ status: "completed", output: "planned" }] },
       });
       expect(executeTool.mock.calls[0]?.[0]).toMatchObject({
         sessionState: {

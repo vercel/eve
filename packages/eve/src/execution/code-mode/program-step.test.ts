@@ -1,4 +1,4 @@
-import { asSchema, jsonSchema, type ToolSet } from "ai";
+import { asSchema, jsonSchema } from "ai";
 import * as serialization from "#context/serialize.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -562,20 +562,12 @@ describe("runCodeModeProgramStep", () => {
       const restore = vi
         .spyOn(serialization, "deserializeContext")
         .mockRejectedValue(new Error("Tool context must not be restored"));
-      const execute = vi.fn().mockResolvedValue("result");
+      const run = vi.fn().mockResolvedValue({ status: "completed", output: "done" });
+      const resumed = vi.fn().mockResolvedValue({ status: "completed", output: "done" });
       const created = vi
-        .spyOn(sandbox, "createWorkflowSandboxTool")
-        .mockResolvedValue({ execute } as never);
-      const continued = vi
-        .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
-        .mockResolvedValue("result" as never);
-      vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
-        status: "completed",
-        output: "done",
-      });
-      const interrupt = vi
-        .spyOn(sandbox, "requestWorkflowSandboxInterrupt")
-        .mockReturnValue("parked" as never);
+        .spyOn(sandbox, "createWorkflowSandbox")
+        .mockResolvedValue({ description: "", run, resume: resumed });
+      const parking = vi.spyOn(sandbox, "createParkingHostTool");
       const toolCatalog = [
         {
           name: "lookup",
@@ -613,20 +605,26 @@ describe("runCodeModeProgramStep", () => {
           program: { ...input.program, toolCatalog },
           ...(resume
             ? {
-                resume: [
-                  {
-                    interrupt: {} as never,
-                    resolution: { status: "completed" as const, output: null },
-                  },
-                ],
+                resume: {
+                  interrupt: {} as never,
+                  resolutions: [{ status: "completed" as const, output: null }],
+                },
               }
             : {}),
         }),
       ).resolves.toEqual({ status: "completed", output: "done" });
       expect(restore).not.toHaveBeenCalled();
-      const tools = (
-        resume ? continued.mock.calls[0]![0].tools : created.mock.calls[0]![0].hostTools
-      ) as ToolSet;
+      expect(resume ? resumed : run).toHaveBeenCalledOnce();
+      expect(resume ? run : resumed).not.toHaveBeenCalled();
+      if (resume) {
+        expect(resumed).toHaveBeenCalledWith({
+          interrupt: {},
+          resolutions: [{ status: "completed", output: null }],
+        });
+      } else {
+        expect(run).toHaveBeenCalledWith({ js: "return 1;", toolCallId: "program" });
+      }
+      const tools = created.mock.calls[0]![0].hostTools;
       expect(Object.keys(tools).sort()).toEqual([
         "describe_tools",
         "lookup",
@@ -638,19 +636,14 @@ describe("runCodeModeProgramStep", () => {
       expect(asSchema(tools.lookup!.inputSchema).jsonSchema).toEqual({ type: "object" });
       expect(asSchema(tools.lookup!.outputSchema!).jsonSchema).toEqual({ type: "string" });
       const targets = { lookup: "tool", researcher: "agent", plan_deploy: "workflow" } as const;
-      for (const [name, target] of Object.entries(targets)) {
-        await tools[name]!.execute!({ query: "hello" } as never, {
-          toolCallId: name,
-          messages: [],
-          context: {},
-        });
-        expect(interrupt).toHaveBeenLastCalledWith({
+      expect(parking.mock.calls.map(([call]) => call.interrupt({ query: "hello" }))).toEqual(
+        Object.entries(targets).map(([name, target]) => ({
           kind: "eve.code-mode-call",
           target,
           toolName: name,
           toolInput: { query: "hello" },
-        });
-      }
+        })),
+      );
     },
   );
 
@@ -659,17 +652,13 @@ describe("runCodeModeProgramStep", () => {
     async (target) => {
       const payload = { kind: "eve.code-mode-call", target, toolInput: { q: 1 }, toolName: "t" };
       const interrupt = { payload, toolCallId: "t-call" } as never;
-      vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({
-        execute: vi.fn().mockResolvedValue("raw"),
-      } as never);
-      vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
-        status: "interrupted",
-        interrupt,
-      });
-      vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockReturnValue([interrupt]);
+      vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
+        sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
+      );
 
       await expect(runCodeModeProgramStep(input)).resolves.toEqual({
         status: "interrupted",
+        interrupt,
         pending: [{ call: payload, interrupt, toolCallId: "t-call" }],
       });
     },
@@ -680,84 +669,56 @@ describe("runCodeModeProgramStep", () => {
       payload: { kind: "eve.code-mode-call", target: "remote", toolName: "t" },
       toolCallId: "t-call",
     } as never;
-    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({
-      execute: vi.fn().mockResolvedValue("raw"),
-    } as never);
-    vi.spyOn(sandbox, "unwrapWorkflowSandboxResult").mockResolvedValue({
-      status: "interrupted",
-      interrupt,
-    });
-    vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockReturnValue([interrupt]);
+    vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
+      sandboxWith({ status: "interrupted", interrupt, pending: [interrupt] }),
+    );
 
     await expect(runCodeModeProgramStep(input)).rejects.toThrow("Unsupported code_mode interrupt");
   });
 
-  it("applies every batch resolution to the updated continuation in order", async () => {
-    const interrupts = [0, 1, 2].map((revision) => ({ revision }) as never);
-    const resolutions = [
-      { status: "completed" as const, output: "first" },
-      { status: "failed" as const, error: "second failed" },
-      { status: "completed" as const, output: "third" },
-    ];
-    const continued = vi
-      .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
-      .mockResolvedValue("raw" as never);
-    vi.spyOn(sandbox, "unwrapWorkflowSandboxResult")
-      .mockResolvedValueOnce({ status: "interrupted", interrupt: interrupts[1]! })
-      .mockResolvedValueOnce({ status: "interrupted", interrupt: interrupts[2]! })
-      .mockResolvedValueOnce({ status: "completed", output: "done" });
-    vi.spyOn(sandbox, "getWorkflowSandboxPendingInterrupts").mockImplementation((interrupt) => [
-      interrupt,
-    ]);
-
-    await expect(
-      runCodeModeProgramStep({
-        ...input,
-        resume: resolutions.map((resolution) => ({ interrupt: interrupts[0]!, resolution })),
-      }),
-    ).resolves.toEqual({ status: "completed", output: "done" });
-
-    expect(
-      continued.mock.calls.map(([call]) => ({
-        interrupt: call.interrupt,
-        resolution: call.resolution,
-      })),
-    ).toEqual(
-      resolutions.map((resolution, index) => ({ interrupt: interrupts[index], resolution })),
+  it("rejects an interrupted program with no pending call", async () => {
+    const interrupt = {} as never;
+    vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(
+      sandboxWith({ status: "interrupted", interrupt, pending: [] }),
     );
+
+    await expect(runCodeModeProgramStep(input)).rejects.toThrow("contains no pending call");
   });
 
-  it.each([false, true])("settles a program failure as data (resume=%s)", async (resume) => {
-    const failure = Object.assign(new Error("invalid program"), { code: "RUN_USER_SOURCE_ERROR" });
-    const execute = vi.fn().mockRejectedValue(failure);
-    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockResolvedValue({ execute } as never);
-    const continued = vi
-      .spyOn(sandbox, "continueWorkflowSandboxInterrupt")
-      .mockRejectedValue(failure);
+  it.each([false, true])("passes a program failure through (resume=%s)", async (resume) => {
+    const failed = { status: "failed" as const, error: "invalid program" };
+    const instance = sandboxWith(failed);
+    vi.spyOn(sandbox, "createWorkflowSandbox").mockResolvedValue(instance);
     await expect(
       runCodeModeProgramStep({
         ...input,
         ...(resume
           ? {
-              resume: [
-                {
-                  interrupt: {} as never,
-                  resolution: { status: "completed" as const, output: null },
-                },
-              ],
+              resume: {
+                interrupt: {} as never,
+                resolutions: [{ status: "completed" as const, output: null }],
+              },
             }
           : {}),
       }),
-    ).resolves.toEqual({ status: "failed", error: "invalid program" });
-    expect(resume ? continued : execute).toHaveBeenCalledOnce();
+    ).resolves.toEqual(failed);
+    expect(resume ? instance.resume : instance.run).toHaveBeenCalledOnce();
   });
 
   it("rethrows a worker failure so workflow can retry it", async () => {
     const failure = Object.assign(new Error("worker failed"), { code: "RUN_ERROR" });
-    vi.spyOn(sandbox, "createWorkflowSandboxTool").mockRejectedValue(failure);
+    vi.spyOn(sandbox, "createWorkflowSandbox").mockRejectedValue(failure);
     await expect(runCodeModeProgramStep(input)).rejects.toBe(failure);
   });
 });
+
+function sandboxWith(outcome: sandbox.WorkflowSandboxOutcome) {
+  return {
+    description: "",
+    run: vi.fn().mockResolvedValue(outcome),
+    resume: vi.fn().mockResolvedValue(outcome),
+  };
+}
 
 describe("nested tool state across fresh contexts", () => {
   afterEach(() => vi.restoreAllMocks());
