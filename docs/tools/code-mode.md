@@ -113,9 +113,11 @@ first. Ties keep catalog order. Queries split on whitespace, underscores,
 hyphens, periods, and slashes, and ignore single-character tokens. Omit `query`
 to list the program's whole catalog.
 
-`tools.describe_tools({ names })` returns the same summary plus `inputSchema` for
-each requested name, or `{ name, error: "unknown tool" }` for names that are not
-in the catalog.
+`tools.describe_tools({ names })` returns the same summary plus `inputSchema` and
+`outputSchema` (JSON Schema, or `null` when the tool declares no output schema)
+for each requested name, or `{ name, error: "unknown tool" }` for names that are
+not in the catalog. Subagent tools report `outputSchema: null`; their result is
+the child's final response.
 
 The catalog is fixed when the program is dispatched. It excludes connection
 tools that have not been discovered yet, so an empty search result does not

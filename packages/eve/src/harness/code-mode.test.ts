@@ -409,8 +409,8 @@ describe("applyCodeModeTool", () => {
     expect(description).toMatch(
       /search_tools: \(input: \{\s+\/\*\* Space-separated keywords[^*]*\*\/\s+query\?: string;\s+\}\) => Promise<\{ name: string; description: string; requiresDirectCall: boolean; \}\[\]>;/u,
     );
-    expect(description).toContain(
-      'describe_tools: (input: { names: string[]; }) => Promise<Array<{ name: string; description: string; requiresDirectCall: boolean; inputSchema: Record<string, unknown>; } | { name: string; error: "unknown tool"; }>>;',
+    expect(description).toMatch(
+      /describe_tools: \(input: \{ names: string\[\]; \}\) => Promise<Array<\{\s+name: string;\s+description: string;\s+requiresDirectCall: boolean;\s+inputSchema: Record<string, unknown>;\s+outputSchema: Record<string, unknown> \| null;\s+\} \| \{ name: string; error: "unknown tool"; \}>>;/u,
     );
   });
 
@@ -471,7 +471,7 @@ describe("createDiscoveryTools", () => {
     name: "add",
     description: "Add numbers.",
     inputSchema: { type: "object" },
-    outputSchema: null,
+    outputSchema: { type: "number" },
     target: "tool" as const,
   };
   const tools = createDiscoveryTools([entry]);
@@ -553,6 +553,7 @@ describe("createDiscoveryTools", () => {
         name: "add",
         description: "Add numbers.",
         inputSchema: { type: "object" },
+        outputSchema: entry.outputSchema,
         requiresDirectCall: false,
       },
       { name: "missing", error: "unknown tool" },

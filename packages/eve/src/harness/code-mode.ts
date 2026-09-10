@@ -177,10 +177,11 @@ export function isCodeModeAgentTool(definition: HarnessToolDefinition): boolean 
 
 /** Discovery covers the complete advertised catalog, independently of execution routing. */
 export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[]) {
-  const descriptions = catalog.map(({ name, description, inputSchema, target }) => ({
+  const descriptions = catalog.map(({ name, description, inputSchema, outputSchema, target }) => ({
     name,
     description,
     inputSchema,
+    outputSchema,
     requiresDirectCall: target === "direct",
   }));
   const toolSummarySchema = z.object({
@@ -221,11 +222,15 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
     },
     [DESCRIBE_TOOLS_NAME]: {
       description:
-        "Describe every tool needed for the task, including final writes, before executing it.",
+        "Describe every tool needed for the task, including final writes, before executing it. " +
+        "Returns each tool's JSON Schema for input and, when the tool declares one, for output (null otherwise), so results can be reduced inside the program without guessing their shape.",
       inputSchema: z.object({ names: z.array(z.string()) }),
       outputSchema: z.array(
         z.union([
-          toolSummarySchema.extend({ inputSchema: z.record(z.string(), z.unknown()) }),
+          toolSummarySchema.extend({
+            inputSchema: z.record(z.string(), z.unknown()),
+            outputSchema: z.record(z.string(), z.unknown()).nullable(),
+          }),
           z.object({ name: z.string(), error: z.literal("unknown tool") }),
         ]),
       ),
