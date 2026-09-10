@@ -31,6 +31,8 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
+const workflowStreamClose = vi.hoisted(() => vi.fn());
+
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
   defineHook: () => ({
@@ -50,6 +52,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWritable: vi.fn(
     () =>
       new WritableStream<Uint8Array>({
+        close: workflowStreamClose,
         write() {},
       }),
   ),
@@ -168,6 +171,23 @@ describe("workflowEntry", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("closes its workflow stream when the session completes", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "ok" });
+
+    expect(workflowStreamClose).toHaveBeenCalledOnce();
   });
 
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
