@@ -336,7 +336,9 @@ describe("applyCodeModeTool", () => {
     expect(description).toContain(DESCRIBE_TOOLS_NAME);
     expect(description).toContain('"names"');
     expect(description).toContain('"query"');
-    expect(description).toContain("Matches any keyword");
+    // The model reads the search syntax from the tool and parameter descriptions.
+    expect(description).toContain("plain keywords separated by spaces");
+    expect(description).toContain("Space-separated keywords naming the capability");
     expect(description).toContain("call connection_search directly");
     expect(description).toContain("then start a new program");
     expect(description).not.toContain('"q"');
@@ -404,8 +406,8 @@ describe("applyCodeModeTool", () => {
     expect(applied.modelTools.background).toBeDefined();
     expect(applied.modelTools.provider).toBeDefined();
     const description = applied.modelTools[CODE_MODE_TOOL_NAME]!.description!;
-    expect(description).toContain(
-      "search_tools: (input: { query?: string; }) => Promise<{ name: string; description: string; requiresDirectCall: boolean; }[]>;",
+    expect(description).toMatch(
+      /search_tools: \(input: \{\s+\/\*\* Space-separated keywords[^*]*\*\/\s+query\?: string;\s+\}\) => Promise<\{ name: string; description: string; requiresDirectCall: boolean; \}\[\]>;/u,
     );
     expect(description).toContain(
       'describe_tools: (input: { names: string[]; }) => Promise<Array<{ name: string; description: string; requiresDirectCall: boolean; inputSchema: Record<string, unknown>; } | { name: string; error: "unknown tool"; }>>;',

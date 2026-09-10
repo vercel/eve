@@ -191,10 +191,20 @@ export function createDiscoveryTools(catalog: readonly CodeModeToolCatalogEntry[
   return {
     [SEARCH_TOOLS_NAME]: {
       description:
-        "Search this program's tool catalog by case-insensitive keywords in names and descriptions. " +
-        "Matches any keyword; partial name matches score 3 and description matches score 1, as in connection_search. Omit query to list the catalog. " +
+        "Search this program's tool catalog by keywords in tool names and descriptions. " +
+        'Write query as plain keywords separated by spaces; underscores, hyphens, dots, and slashes also split, so "list_issues" searches "list" and "issues". ' +
+        "Matching is case-insensitive, any keyword can match, and a keyword matches a word when either contains the other. " +
+        "Single-character keywords are ignored; there are no phrases, quotes, or operators. " +
+        "Results rank by score: 3 per matched tool-name word, 1 per matched description word, as in connection_search. Omit query to list the whole catalog. " +
         "Undiscovered connection tools are excluded: call connection_search directly to find them, then start a new program.",
-      inputSchema: z.object({ query: z.string().optional() }),
+      inputSchema: z.object({
+        query: z
+          .string()
+          .optional()
+          .describe(
+            'Space-separated keywords naming the capability, for example "issue list" or "send email". Distill intent into keywords; avoid stop words. Omit to list every tool.',
+          ),
+      }),
       outputSchema: z.array(toolSummarySchema),
       execute: async ({ query }: { readonly query?: string }) => {
         const keywords = tokenizeToolSearch(query ?? "");

@@ -1242,7 +1242,7 @@ describe("turnStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle(3));
     installSessionStoreMocks([createStubSession()]);
     const continueStep: StepFn = async (session) => ({ next: null, session });
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => async (session) => ({
+    const runStep = vi.fn<StepFn>(async (session) => ({
       next: continueStep,
       session: setPendingCoordinationBatch({
         session,
@@ -1261,6 +1261,8 @@ describe("turnStep", () => {
       }),
     }));
 
+    vi.mocked(createExecutionNodeStep).mockReturnValue(runStep);
+
     await turnStep({
       input: { kind: "deliver", payloads: [{ message: "run a program" }] },
       parentWritable: createTestWritable(),
@@ -1268,7 +1270,7 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(createExecutionNodeStep).toHaveBeenCalledOnce();
+    expect(runStep).toHaveBeenCalledOnce();
   });
 
   it("checkpoints completed batched model calls when steering cancels the active call", async () => {
