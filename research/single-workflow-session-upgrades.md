@@ -228,9 +228,10 @@ Still to settle:
 - Ingress behavior during the no-owner interval. Today a missing hook reads as an inactive or
   absent session. Bounded retry is required, and ingress must never create a replacement session
   for one that is upgrading.
-- `Run.getWritable()` availability. The repo pins `@workflow/core` 5.0.0-beta.48 and uses only the
-  body-local `getWritable()`; cross-run appends need the newer API and an SDK upgrade before
-  implementation.
+- `Run.getWritable()` semantics. The repo pins `@workflow/core` 5.0.0-beta.50, and
+  `workflow@5.0.0-beta.50` exposes `run.getWritable(options)` for writing to another run's stream.
+  Implementation must still verify stream lifetime, permissions, and append behavior for the
+  original-run anchor.
 - Exact deployment selection across local build generations.
 
 Upstream request, made in parallel and not a prerequisite for starting: an atomic,
