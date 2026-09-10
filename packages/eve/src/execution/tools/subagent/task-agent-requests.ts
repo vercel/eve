@@ -9,7 +9,6 @@ import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
-  readonly emitCompletion?: boolean;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
@@ -46,7 +45,10 @@ export async function applyTaskAgentRequest(
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
-      if (delivery.emitCompletion === true && settled.accepted && request.result.isError !== true) {
+      // Settlement is the one place a subagent result is announced on this
+      // session's stream. Deliveries proxied for a background child's own
+      // subagents (`taskId` set) belong to the child's stream instead.
+      if (delivery.taskId === undefined && settled.accepted && request.result.isError !== true) {
         const emitted = await emitTaskSubagentEventStep({
           event: {
             type: "subagent.completed",

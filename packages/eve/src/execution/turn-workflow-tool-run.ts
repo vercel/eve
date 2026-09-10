@@ -165,7 +165,6 @@ async function handleWorkflowToolRunRequest(
       await applyTaskAgentRequest(
         {
           accumulateUsage: message.from.resultKind !== "subagent",
-          emitCompletion: message.from.resultKind !== "subagent",
           ownerId: message.from.runId,
           replyTo: message.replyTo,
           request: message.request,

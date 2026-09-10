@@ -247,15 +247,21 @@ export async function resolvePendingCoordination(input: {
 
   if (input.emit !== undefined) {
     for (const result of readyResults) {
-      if (result.kind === "subagent-result" && result.isError !== true) {
-        const backgroundTask = readBackgroundTaskReceipt(result);
-        const data = {
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.subagentName,
-        };
+      // Settled results were announced when the invocation settled; only a
+      // background start receipt is first seen here.
+      const backgroundTask =
+        result.kind === "subagent-result" && result.isError !== true
+          ? readBackgroundTaskReceipt(result)
+          : undefined;
+      if (result.kind === "subagent-result" && backgroundTask !== undefined) {
         await input.emit({
-          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
+          data: {
+            backgroundTask,
+            callId: result.callId,
+            output:
+              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+            subagentName: result.subagentName,
+          },
           type: "subagent.completed",
         } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }

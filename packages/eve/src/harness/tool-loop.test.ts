@@ -1889,7 +1889,9 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
-    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
+    // The owner announced `subagent.completed` when the invocation settled;
+    // the harness only re-announces background start receipts.
+    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(0);
     expect(events.at(-1)?.type).toBe("session.waiting");
   });
 

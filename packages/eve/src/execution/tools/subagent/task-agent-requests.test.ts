@@ -16,13 +16,14 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep
 beforeEach(() => vi.resetAllMocks());
 
 it.each([
-  { accepted: true, emitCompletion: true, isError: false, expected: 1 },
-  { accepted: false, emitCompletion: true, isError: false, expected: 0 },
-  { accepted: true, emitCompletion: true, isError: true, expected: 0 },
-  { accepted: true, emitCompletion: false, isError: false, expected: 0 },
+  { accepted: true, taskId: undefined, isError: false, expected: 1 },
+  { accepted: false, taskId: undefined, isError: false, expected: 0 },
+  { accepted: true, taskId: undefined, isError: true, expected: 0 },
+  // A background child's own subagent settles on the child's stream, not here.
+  { accepted: true, taskId: "child-task", isError: false, expected: 0 },
 ])(
-  "emits only accepted nested successes: %j",
-  async ({ accepted, emitCompletion, isError, expected }) => {
+  "announces accepted settlements owned by this session: %j",
+  async ({ accepted, taskId, isError, expected }) => {
     const sessionState = {} as never;
     vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({ accepted, sessionState });
     vi.mocked(emitTaskSubagentEventStep).mockResolvedValue({
@@ -33,7 +34,7 @@ it.each([
       {
         ownerId: "code-mode-run",
         replyTo: "nested-reply",
-        emitCompletion,
+        taskId,
         request: {
           kind: "agent-settled",
           result: {
