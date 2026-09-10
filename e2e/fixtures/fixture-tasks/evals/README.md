@@ -52,6 +52,14 @@ separately checks that this service route adds no extra public prefix. Local and
 Postgres runs exercise the remote round trip, but only the Vercel build exercises
 service-prefix inference.
 
+## Child tool surface and completion
+
+`task.lifecycle.complete.accepted-nonterminal.child-tool-surface.eval.ts` uses a
+mock child in every suite to report its actual advertised tool names. It checks
+that `task_update` is absent and the final report reaches the parent with the
+correct task identity. Tool and workflow progress remain covered separately by
+`agent-background-tools` and `agent-workflow-tools`.
+
 ## Transition declarations
 
 These evals are executable evidence for the background-task contract. They do

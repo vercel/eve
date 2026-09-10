@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fireSessionCallbackStep, fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 
@@ -295,37 +295,6 @@ describe("fireSessionCallbackStep", () => {
       }),
     ).rejects.toBe(fetchError);
     expect(errorSpy).toHaveBeenCalled();
-  });
-});
-
-describe("fireTaskUpdateCallbackStep", () => {
-  it("posts a progress update over a task-owned callback", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const taskId = await fireTaskUpdateCallbackStep({
-      callback: {
-        callId: "parent-call",
-        subagentName: "research",
-        taskId: "task_abc",
-        token: "task-token",
-        url: "https://caller.example.com/eve/v1/callback/task-token",
-      },
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      message: "Found three matching records.",
-    });
-
-    expect(taskId).toBe("task_abc");
-    expect(parsePostedBody(fetchMock)).toEqual({
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      kind: "task.update",
-      message: "Found three matching records.",
-      taskId: "task_abc",
-    });
   });
 });
 

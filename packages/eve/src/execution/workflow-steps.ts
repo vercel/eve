@@ -82,7 +82,6 @@ import {
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
 import { runBackgroundStep } from "#execution/tasks/parent/tool-execution.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -129,14 +128,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const taskUpdatesEnabled =
-    durableSession.taskId !== undefined &&
-    effectiveAgent.turnAgent.tools.some(
-      (tool) =>
-        tool.kind === "authored-tool" &&
-        tool.behavior?.handling?.kind === "dispatch" &&
-        tool.behavior.handling.target.kind === "task-update",
-    );
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -468,7 +459,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         thresholdPercent: effectiveAgent.thresholdPercent,
       },
       session: lifecycleSession,
-      systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
       turnAgent: effectiveAgent.turnAgent,
     });
     const modelSession = refreshedSession;

@@ -12,7 +12,6 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
-import { deliverTaskUpdate } from "#execution/tasks/child/update.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import {
@@ -84,12 +83,7 @@ export async function dispatchCoordinationStep(
     if (entry.kind === "task-control") {
       const control = await executeTaskControlAction({
         action: entry.action,
-        adapter: prepared.adapter,
-        bundle: prepared.bundle,
         cancelOwnedWork: cancelBackgroundAgentTask,
-        deliverUpdate: deliverTaskUpdate,
-        parentStepIndex: batch.event.stepIndex,
-        parentTurnId: batch.event.turnId,
         serializedContext: prepared.serializedContext,
         session: nextSession,
       });

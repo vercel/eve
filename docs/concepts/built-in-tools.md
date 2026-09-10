@@ -319,26 +319,6 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `task_update`
-
-`task_update` lets a background task report progress to its parent. It appears only in delegated task sessions.
-
-```sh
-eve add tool/task_update
-```
-
-```ts title="agent/tools/task_update.ts"
-export { default } from "eve/tools/task_update";
-```
-
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
-
-```ts title="agent/tools/task_update.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `load_skill`
 
 `load_skill` pulls an on-demand [skill](../skills)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.

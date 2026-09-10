@@ -46,24 +46,23 @@ describe("createRuntimeToolRegistry", () => {
     });
   });
 
-  it("carries task_update availability into the prepared tool descriptor", async () => {
+  it("carries delegated-task-child availability into the prepared tool descriptor", async () => {
     const registry = await createRuntimeToolRegistry({
       tools: [
         createResolvedToolDefinition({
           behavior: {
             availability: ["delegated-task-child"],
-            handling: { action: "task-update", kind: "dispatch" },
           },
-          logicalPath: "tools/task_update.ts",
-          name: "task_update",
-          sourceId: "framework:tools/task_update.ts",
+          logicalPath: "tools/child_only.ts",
+          name: "child_only",
+          sourceId: "tools/child_only.ts",
         }),
       ],
     });
 
     expect(registry.preparedTools[0]?.behavior).toEqual({
       availability: ["delegated-task-child"],
-      handling: { kind: "dispatch", target: { kind: "task-update" } },
+      handling: undefined,
       presentation: undefined,
     });
   });

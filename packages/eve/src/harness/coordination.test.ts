@@ -228,14 +228,14 @@ describe("createCoordinationRequestFromToolCall", () => {
   it("reserves runtime actions for task controls", () => {
     expect(
       createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, toolName: "task_update" },
+        toolCall: { ...toolCall, input: { taskIds: ["task-1"] }, toolName: "task_cancel" },
         tools: new Map([
           [
-            "task_update",
+            "task_cancel",
             {
-              description: "Update a task.",
+              description: "Cancel tasks.",
               inputSchema: jsonSchema({ type: "object" }),
-              name: "task_update",
+              name: "task_cancel",
               runtimeAction: { kind: "task-control" as const },
             },
           ],
@@ -245,9 +245,9 @@ describe("createCoordinationRequestFromToolCall", () => {
       kind: "runtime-action",
       request: {
         callId: "call-1",
-        input: { message: "research this" },
+        input: { taskIds: ["task-1"] },
         kind: "tool-call",
-        toolName: "task_update",
+        toolName: "task_cancel",
       },
     });
   });

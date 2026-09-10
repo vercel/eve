@@ -12,10 +12,15 @@ const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
 const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 const TASK_STATE_LABEL = "[Task state]\n";
+const CHILD_TOOL_SURFACE_SCENARIO =
+  "Alice asks Bob to summarize the available tools for a background task.";
 
 function respond(
   request: MockModelRequest,
 ): MockModelResponse | Promise<MockModelResponse | string> | string {
+  if (request.userMessages.includes(CHILD_TOOL_SURFACE_SCENARIO)) {
+    return childToolSurfaceReport(request);
+  }
   if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
     return batchingBenchmark(request);
   }
@@ -26,9 +31,6 @@ function respond(
 
   // Framework announcements are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
-  if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
-    return "TASK-UPDATE-RECEIVED";
-  }
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
@@ -105,7 +107,6 @@ function respond(
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
   if (message === REDUNDANT_REVIEW_SCENARIO) return startRedundantReviewers(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
-  if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
     return inspectTerminalTask(
@@ -172,19 +173,30 @@ function respond(
   return `Mock reply: ${message}`;
 }
 
-function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | string {
-  if (resultById(request, "task-update-child") === undefined) {
+function childToolSurfaceReport(request: MockModelRequest): MockModelResponse | string {
+  const task = latestTaskState(request.userMessages)?.tasks.find(
+    (entry) => entry.status === "completed",
+  );
+  if (task !== undefined) {
+    if (task.output?.type !== "result" || typeof task.output.data !== "string") {
+      throw new Error("The completed child did not return a tool report.");
+    }
+    return task.output.data;
+  }
+  if (resultById(request, "task-child-tool-surface") === undefined) {
     return {
       toolCalls: [
         {
-          id: "task-update-child",
-          input: { message: "TASK-UPDATE-CHILD" },
-          name: "update-worker",
+          id: "task-child-tool-surface",
+          input: {
+            message: "Bob, list your available tool names and return your final report to Alice.",
+          },
+          name: "tool-surface-worker",
         },
       ],
     };
   }
-  return "TASK-UPDATE-STARTED";
+  return "TASK-CHILD-TOOL-SURFACE-STARTED";
 }
 
 function startRedundantReviewers(request: MockModelRequest): MockModelResponse | string {
