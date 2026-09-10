@@ -94,6 +94,10 @@ export async function dispatchAgentInvocation(input: {
   if (entry === undefined) {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
+  const taskActivityObserver =
+    prepared.activityObserver === undefined || input.activityWorkIdentity === undefined
+      ? undefined
+      : { sink: prepared.activityObserver.sink, workIdentity: input.activityWorkIdentity };
   let session = prepared.session;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
@@ -160,6 +164,7 @@ export async function dispatchAgentInvocation(input: {
       dynamicRemoteAgent: entry.dynamicRemoteAgent,
     });
     outcome = await dispatchToClaimedAgentAddress({
+      activityObserver: taskActivityObserver,
       action: entry.action,
       auth: prepared.auth,
       bundle,
@@ -222,13 +227,8 @@ export async function dispatchAgentInvocation(input: {
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
-      activityObserver:
-        prepared.activityObserver === undefined
-          ? undefined
-          : {
-              sink: prepared.activityObserver.sink,
-              workIdentity: input.activityWorkIdentity ?? prepared.activityObserver.workIdentity,
-            },
+      activityObserver: prepared.activityObserver,
+      taskActivityObserver,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       serializedContext: prepared.serializedContext,
@@ -311,7 +311,9 @@ export async function dispatchTaskAgentInvocationStep(
     if (view === undefined || isTerminalTaskStatus(view.status)) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
-    activityWorkIdentity = entry.activityWorkIdentity;
+    if (entry.metadata.kind === "subagent") {
+      activityWorkIdentity = entry.activityWorkIdentity;
+    }
   }
   return await dispatchAgentInvocation({
     ...input,

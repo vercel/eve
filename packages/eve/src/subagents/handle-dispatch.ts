@@ -1,6 +1,6 @@
 /** Continuation delivery for task-owned agent sessions. */
 
-import type { SessionAuthContext } from "#channel/types.js";
+import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import type { AgentAddress, AgentIdentity } from "#subagents/handles/store.js";
 import type {
@@ -73,6 +73,7 @@ export type DispatchOutcome =
 
 /** Delivers a continuation after the session handle store atomically claimed it for one owner. */
 export async function dispatchToClaimedAgentAddress(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
@@ -86,6 +87,7 @@ export async function dispatchToClaimedAgentAddress(input: {
 
 /** Delivers a continuation to an already-claimed local or remote agent address. */
 async function dispatchToAgentAddress(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
@@ -98,6 +100,7 @@ async function dispatchToAgentAddress(input: {
   const agentId = handle.identity.id;
 
   const delivery = await deliverToAgentAddress({
+    activityObserver: input.activityObserver,
     action,
     address: handle.address,
     auth: input.auth,
@@ -151,6 +154,7 @@ async function dispatchToAgentAddress(input: {
  * already-started siblings.
  */
 async function deliverToAgentAddress(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly action: RuntimeAgentHandleAction;
   readonly address: AgentAddress;
   readonly auth: SessionAuthContext | null;
@@ -181,6 +185,7 @@ async function deliverToAgentAddress(input: {
     }
     try {
       await continueRemoteAgentSession({
+        activityObserver: input.activityObserver,
         auth: input.auth,
         callback: {
           callId: action.callId,
@@ -216,6 +221,7 @@ async function deliverToAgentAddress(input: {
       command: {
         auth: input.auth,
         caller: {
+          activityObserver: input.activityObserver,
           callId: action.callId,
           replyTo: { kind: "hook", token: input.parentToken },
           subagentName: identity.name,

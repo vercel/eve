@@ -29,18 +29,22 @@ export async function startRemoteSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
+  /** Already resolved task-owned work; do not derive another child identity. */
+  readonly taskActivityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
   const { action } = input;
-  const activityObserver = deriveChildActivityObserverConfig({
-    activityObserver: input.activityObserver,
-    callId: action.callId,
-    kind: "remote-agent",
-    name: action.remoteAgentName,
-    parentSessionId: input.session.sessionId,
-    parentTurnId: input.batchEvent.turnId,
-  });
+  const activityObserver =
+    input.taskActivityObserver ??
+    deriveChildActivityObserverConfig({
+      activityObserver: input.activityObserver,
+      callId: action.callId,
+      kind: "remote-agent",
+      name: action.remoteAgentName,
+      parentSessionId: input.session.sessionId,
+      parentTurnId: input.batchEvent.turnId,
+    });
 
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.

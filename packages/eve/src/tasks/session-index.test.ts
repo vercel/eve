@@ -71,7 +71,8 @@ describe("session task index", () => {
       taskRunId: "run-1",
     });
 
-    expect(findSessionTaskEntry(session.state, "task_a")?.activityWorkIdentity).toEqual(
+    const restoredState = JSON.parse(JSON.stringify(session.state));
+    expect(findSessionTaskEntry(restoredState, "task_a")?.activityWorkIdentity).toEqual(
       activityWorkIdentity,
     );
   });
