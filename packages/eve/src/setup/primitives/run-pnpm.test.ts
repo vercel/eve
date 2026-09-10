@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  checkPackageManagerAvailability,
   eveDevArguments,
   runPackageManagerInstall,
   runPnpmInstall,
@@ -142,6 +143,18 @@ describe("runPnpmInstall", () => {
     expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
       { stream: "stdout", text: "workspace parse failed" },
     ]);
+  });
+});
+
+describe("checkPackageManagerAvailability", () => {
+  test("uses the selected manager without project-scoping arguments", async () => {
+    await checkPackageManagerAvailability("pnpm", "/tmp/app");
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "pnpm",
+      ["--version"],
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
   });
 });
 

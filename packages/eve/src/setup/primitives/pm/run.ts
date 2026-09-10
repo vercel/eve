@@ -4,6 +4,7 @@ import type { PackageManagerKind } from "../../package-manager.js";
 import { armProcessAbort } from "../process-abort.js";
 import { createProcessOutputBuffer, type ProcessOutputHandler } from "../process-output.js";
 import { getPackageManagerStrategy } from "./index.js";
+import type { PackageManagerInvocation } from "./types.js";
 import {
   createPackageProcessStdoutCollector,
   type PackageManagerProcessResult,
@@ -39,20 +40,15 @@ function abortedTermination(signal: AbortSignal | undefined): PackageManagerProc
     : { kind: "aborted", reason: reason instanceof Error ? reason.message : String(reason) };
 }
 
-/** Runs one package-manager command and returns its complete process evidence. */
-export function spawnPackageManager(
-  kind: PackageManagerKind,
-  projectRoot: string,
-  args: readonly string[],
+function spawnPackageManagerInvocation(
+  invocation: PackageManagerInvocation,
+  cwd: string,
   options: RunPackageManagerOptions = {},
 ): Promise<PackageManagerProcessResult> {
-  const strategy = getPackageManagerStrategy(kind);
-  const managerArgs = strategy.prepareArguments(projectRoot, args);
-  const invocation = strategy.resolveInvocation(managerArgs);
   const command = {
     executable: invocation.command,
     args: [...invocation.args],
-    cwd: projectRoot,
+    cwd,
   };
   if (options.signal?.aborted === true) {
     return Promise.resolve({
@@ -70,7 +66,7 @@ export function spawnPackageManager(
     let child;
     try {
       child = spawn(invocation.command, [...invocation.args], {
-        cwd: projectRoot,
+        cwd,
         stdio: captureOutput
           ? [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"]
           : "inherit",
@@ -117,6 +113,32 @@ export function spawnPackageManager(
       else settle({ kind: "exit", code: code ?? 1 });
     });
   });
+}
+
+/** Runs one package-manager command and returns its complete process evidence. */
+export function spawnPackageManager(
+  kind: PackageManagerKind,
+  projectRoot: string,
+  args: readonly string[],
+  options: RunPackageManagerOptions = {},
+): Promise<PackageManagerProcessResult> {
+  const strategy = getPackageManagerStrategy(kind);
+  return spawnPackageManagerInvocation(
+    strategy.resolveInvocation(strategy.prepareArguments(projectRoot, args)),
+    projectRoot,
+    options,
+  );
+}
+
+/** Verifies that the selected package-manager executable can start without touching a project. */
+export function checkPackageManagerAvailability(
+  kind: PackageManagerKind,
+  cwd: string,
+): Promise<PackageManagerProcessResult> {
+  return spawnPackageManagerInvocation(
+    getPackageManagerStrategy(kind).resolveInvocation(["--version"]),
+    cwd,
+  );
 }
 
 export interface RunInstallOptions extends RunPackageManagerOptions, PackageManagerInstallOptions {}

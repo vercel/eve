@@ -27,6 +27,21 @@ export interface InitCliLogger {
   log(message: string): void;
 }
 
+export function uniqueWorkspaceRootMutations(
+  mutations: readonly WorkspaceRootMutation[],
+): WorkspaceRootMutation[] {
+  const byKey = new Map<string, WorkspaceRootMutation>();
+  for (const mutation of mutations) {
+    const key = `${mutation.kind}:${mutation.path}`;
+    const existing = byKey.get(key);
+    byKey.set(key, {
+      ...mutation,
+      nodeEngineOverride: mutation.nodeEngineOverride ?? existing?.nodeEngineOverride,
+    });
+  }
+  return [...byKey.values()];
+}
+
 export function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): string {
   const target = mutation.kind === "package-json" ? "package.json" : "configuration";
   const suffix =

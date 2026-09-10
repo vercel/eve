@@ -63,6 +63,9 @@ function logger(): InitCliLogger & { messages: string[]; errors: string[] } {
 function dependencies(
   gitResult: GitInitResult = { kind: "initialized" },
 ): InitCommandDependencies & {
+  checkPackageManagerAvailability: ReturnType<
+    typeof vi.fn<InitCommandDependencies["checkPackageManagerAvailability"]>
+  >;
   detectInvokingPackageManager: ReturnType<
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
@@ -85,6 +88,11 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
+    checkPackageManagerAvailability: vi.fn(async (kind, cwd) => ({
+      command: { executable: kind, args: ["--version"], cwd },
+      termination: { kind: "exit", code: 0 },
+      stdout: "",
+    })),
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
@@ -1254,6 +1262,24 @@ describe("runInitCommand", () => {
       join(parentDirectory, "my-agent"),
       ["exec", "eve", "dev", "--onboard"],
     );
+  });
+
+  it("stops before scaffolding when the selected package manager is unavailable", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-preflight-fail-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.checkPackageManagerAvailability.mockResolvedValue({
+      command: { executable: "pnpm", args: ["--version"], cwd: parentDirectory },
+      termination: { kind: "spawn-error", code: "ENOENT", message: "spawn pnpm ENOENT" },
+      stdout: "",
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "pnpm was not found. Install it before running eve init.",
+    );
+
+    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
   it("categorizes a missing package manager without collecting process output", async () => {
