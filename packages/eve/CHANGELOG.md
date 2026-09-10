@@ -1,5 +1,15 @@
 # eve
 
+## 0.53.1
+
+### Patch Changes
+
+- 8c00b8e: Upload Slack responses longer than the native Markdown limit as Markdown snippets. Preserve upload errors for channel error logging instead of replacing them with a generic notice.
+- 11320e1: Enable the built-in Vercel Agent Runs instrumentation for Preview deployments as well as Production deployments.
+- 8c8888e: Normalize mixed provider-executed and local tool calls into replay-safe history so Gemini conversations can continue after the tool results are persisted.
+- 09df32c: Adds `experimental.workflow.retention` to `defineAgent`, which forwards a run's data-retention preference to the durable runtime. Set it to `0` to have a run's payloads, streams, and event log deleted as soon as the run finishes instead of kept for the world's default period.
+- 05d2047: Keep Vercel sandbox template records persistent and replace session sandboxes whose saved filesystem snapshot is no longer available. Ambiguous session creation failures no longer delete the shared template record.
+
 ## 0.53.0
 
 ### Minor Changes
