@@ -60,8 +60,7 @@ const localGuidance = `## Local environment
 
 The registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
-Local eve dev logs are available read-only at /logs.
-Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
+Local eve dev logs are mounted read-only at /logs. Local trace segments are mounted read-only at /traces when available. For latency, failure, token, or behavior analysis, load and follow the trace-analysis skill. Trace searches are scoped to the invoking conversation and exclude the current investigation by default.
 
 The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and registry_add for supported registry installations.`;
 
@@ -78,25 +77,6 @@ const packagedSubagentGuidance = `## Configure this subagent
 Configure this self-modification subagent's model, reasoning, and policy only through its authored mount. Check /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts; modify whichever exists. If neither file exists, this subagent is the bundled eve development default and is using the default settings: first call registry_add with the exact address eve/self-modification to scaffold the authored mount. This known scaffold does not require search_registry.
 
 After registry_add reports successful installation, try to read /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts. If either is available, modify it. If neither is yet available, you may need to wait for the next turn, by asking the requester to confirm.`;
-
-function readTrace(
-  event: unknown,
-): { readonly traceFlags: number; readonly traceId: string } | undefined {
-  return (
-    event as {
-      readonly data?: {
-        readonly trace?: { readonly traceFlags: number; readonly traceId: string };
-      };
-    }
-  ).data?.trace;
-}
-
-function localTraceGuidance(event: unknown): string {
-  const trace = readTrace(event);
-  if (trace === undefined) return "";
-
-  return `The invoking trace has ID ${trace.traceId}. ${(trace.traceFlags & 1) === 1 ? "If local segments were captured," : "This trace was not sampled, so local segments may be absent. If any are present,"} inspect them at /traces/${trace.traceId}.`;
-}
 
 function renderInstructions(sections: readonly string[]): string {
   return sections.filter((section) => section.length > 0).join("\n\n");
@@ -120,7 +100,6 @@ export default defineDynamic({
           registryWorkflow,
           documentationGuidance,
           mode === "local" ? localGuidance : deployedGuidance,
-          mode === "local" ? localTraceGuidance(event) : "",
           workingGuidance,
           mode === "local" ? localReportingGuidance : deployedReportingGuidance,
         ]),
