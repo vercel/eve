@@ -202,9 +202,19 @@ export async function waitForTaskStatus(
 ): Promise<EveEvalTurn> {
   const timeoutMs = 30_000;
   const deadline = performance.now() + timeoutMs;
-  const terminalSession = hasTaskNotification(session.events, taskId, status)
-    ? session
-    : (await waitForTaskNotification(t, session, taskId, status)).session;
+  // A correlated send can advance past a notification while returning the committed task view.
+  const terminalRecorded = session.events.some(
+    (event) =>
+      event.type === "action.result" &&
+      event.data.status === "completed" &&
+      event.data.result.kind === "tool-result" &&
+      event.data.result.toolName === "task_cancel" &&
+      taskStatus(event.data.result.output, taskId) === status,
+  );
+  const terminalSession =
+    terminalRecorded || hasTaskNotification(session.events, taskId, status)
+      ? session
+      : (await waitForTaskNotification(t, session, taskId, status)).session;
   if (performance.now() >= deadline) {
     throw new Error(
       `Task ${taskId} did not reach "${status}" within ${timeoutMs / 1_000} seconds.`,
