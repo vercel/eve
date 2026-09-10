@@ -15,14 +15,14 @@ export default defineChannel({
         sessionId?: string;
         operationId?: string;
         message?: string;
+        action?: "reset";
       };
       if (body.sessionId === undefined) {
         const session = await ctx.from(body.address).open({ auth });
         return Response.json({ sessionId: session.id });
       }
-      const session = await ctx.resolveSession(body.address);
-      if (session?.id !== body.sessionId)
-        return new Response("Session does not own this address", { status: 409 });
+      if (body.action === "reset")
+        return Response.json(await ctx.attachSession(body.sessionId).reset());
       return Response.json(
         await ctx.attachSession(body.sessionId).send(body.message ?? "", {
           auth,

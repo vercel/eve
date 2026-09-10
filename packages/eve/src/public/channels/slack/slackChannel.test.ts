@@ -4147,6 +4147,7 @@ describe("durable Slack admission", () => {
     const body = buildMentionBody().body;
     expect((await firePost(channel, buildSignedRequest({ body }))).response.status).toBe(503);
     const retry = buildSignedRequest({ body });
+    retry.headers.set("x-slack-retry-num", "1");
     retry.headers.set("x-slack-retry-reason", "http_timeout");
     expect((await firePost(channel, retry)).response.status).toBe(200);
     expect(admitMessage).toHaveBeenCalledTimes(2);
@@ -4209,4 +4210,20 @@ it("prepares admitted Slack input without execution and preserves auth, context,
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it("retains timeout-retry suppression for interactive callbacks with durable message admission", async () => {
+  const onSlashCommand = vi.fn();
+  const channel = slackChannel({
+    credentials: { signingSecret: SIGNING_SECRET },
+    admitMessage: vi.fn(),
+    onSlashCommand,
+  });
+  const request = buildSignedSlashCommandRequest();
+  request.headers.set("x-slack-retry-num", "1");
+  request.headers.set("x-slack-retry-reason", "http_timeout");
+  const result = await firePost(channel, request);
+  expect(result.response.status).toBe(200);
+  expect(result.waitUntil).not.toHaveBeenCalled();
+  expect(onSlashCommand).not.toHaveBeenCalled();
 });

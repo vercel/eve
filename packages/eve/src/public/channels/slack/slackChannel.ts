@@ -985,12 +985,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         const body = await verifyInbound(req, config.credentials);
         if (body === null) return new Response("unauthorized", { status: 401 });
 
-        if (config.admitMessage === undefined && shouldDropSlackHttpTimeoutRetry(req.headers)) {
-          return new Response("ok");
-        }
-
         const contentType = req.headers.get("content-type") ?? "";
         if (contentType.includes("application/x-www-form-urlencoded")) {
+          if (shouldDropSlackHttpTimeoutRetry(req.headers)) return new Response("ok");
           return handleInteractionPost(
             body,
             { from, resolveSession, waitUntil },
@@ -1213,6 +1210,10 @@ async function handleEventPost(input: {
   }
 
   if (envelope === null) return new Response("ok");
+  const durableMessage =
+    config.admitMessage !== undefined &&
+    (payload.kind === "app_mention" || payload.kind === "direct_message");
+  if (!durableMessage && shouldDropSlackHttpTimeoutRetry(input.headers)) return new Response("ok");
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);

@@ -91,15 +91,10 @@ export function createChannelAddress<TState = undefined>(input: {
       }
       const existing = await this.resolveSession();
       if (existing !== undefined) return existing;
-      const state = (options as { readonly state?: TState }).state;
-      const adapter =
-        state === undefined
-          ? input.adapter
-          : {
-              ...input.adapter,
-              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-            };
-      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      const adapter = adapterWithState(
+        input.adapter,
+        (options as { readonly state?: TState }).state,
+      );
       await input.runtime.createSession({
         adapter,
         auth: options.auth,
@@ -166,15 +161,10 @@ export function createChannelAddress<TState = undefined>(input: {
         );
       }
 
-      const state = (options as { readonly state?: TState }).state;
-      const adapter =
-        state === undefined
-          ? input.adapter
-          : {
-              ...input.adapter,
-              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-            };
-      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      const adapter = adapterWithState(
+        input.adapter,
+        (options as { readonly state?: TState }).state,
+      );
       const capabilities: RunInput["capabilities"] =
         options.mode === "task" ? undefined : { requestInput: true };
       const runInput: RunInput = {
@@ -256,4 +246,14 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
+}
+
+function adapterWithState<TState>(
+  adapter: ChannelAdapter<any>,
+  state: TState | undefined,
+): ChannelAdapter<any> {
+  if (state === undefined) return adapter;
+  const merged = { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } };
+  copyChannelActivityPresentation(adapter, merged);
+  return merged;
 }
