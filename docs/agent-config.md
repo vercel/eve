@@ -285,9 +285,9 @@ for the retry behavior.
 
 ## Run data retention
 
-The durable runtime keeps each run's data after the run finishes: model and tool
+The runtime keeps each run's data after the run finishes: model and tool
 payloads, streamed output, and the event log eve replays from. How long it keeps
-them is the world's decision, and on Vercel that follows your team's plan. Set
+them is the World's decision, and on Vercel that follows your team's plan. Set
 `experimental.workflow.retention` to `0` to have it deleted as soon as the run
 finishes instead:
 
@@ -304,24 +304,18 @@ export default defineAgent({
 });
 ```
 
-The value is a duration, and `0` is currently the only one besides `"default"`.
-`"default"` means the same as omitting the field.
-
-eve applies the setting to the session run, to every turn run the session
-dispatches, and to the run that collects session activity, so a session's
-payloads are covered end to end. Runs eve starts for other purposes keep the
-world's default: session timeouts, background tasks, and
-[workflow tools](./tools/workflows).
+This will be applied to the session run and every turn run the session
+dispatches, as well as the run that collects session activity. Runs eve
+starts for other purposes keep the world's default: session timeouts,
+background tasks, and [workflow tools](./tools/workflows).
 
 The value applies per agent. A [subagent](./subagents) that runs its own session
 uses its own value, unlike `experimental.workflow.world`, which is root-only.
 
-The world enforces retention, so it needs a world that implements it. The
-first-party worlds do; a world that does not recognize the value keeps the data.
+Custom Worlds used with eve might not support this feature, in which case
+it falls back to the World's default retention period.
 
-> ⚠️ **At `0`, a finished session's output is usually gone before you can read it.** The purge races reads of a completed run and generally wins, so results and transcripts become unreadable and a client polling for a finished session's output can see it disappear. Write anything you need to keep to your own storage from inside a tool.
-
-This option is experimental and may change or disappear in any release.
+> ⚠️ **At `0`, a finished session's output is usually gone before you can read it.** Since data is deleted immediately before it can be read back, results and transcripts become unreadable and a client polling for a finished session's output can see it disappear.
 
 ## Other defineAgent fields
 

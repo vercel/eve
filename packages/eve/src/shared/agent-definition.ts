@@ -286,22 +286,20 @@ export interface AgentWorkflowDefinition {
    */
   readonly modelCallsPerStep?: number;
   /**
-   * How long the durable runtime keeps this agent's run data after a run
-   * finishes. eve applies it to the session run and to every turn run the
-   * session dispatches.
+   * How long the agent's run data is kept after the run finishes.
+   * Applied to both the session run and every turn run.
    *
-   * - `"default"`: same as omission. The world decides. On Vercel that follows
-   *   your team's plan.
+   * - `"default"`: same as omission. The Workflow SDK World decides.
+   *   On Vercel this follows your team's plan.
    * - `0`: the world deletes run payloads and stream chunks as soon as the run
-   *   completes or fails. On Vercel, metadata such as run ids, status, and
-   *   timestamps may still persist for your plan's default period.
+   *   completes or fails. Metadata such as run IDs, status, and timestamps may
+   *   persist up to the default period.
    *
-   * The world enforces this, so it needs a world that implements it. The
-   * first-party worlds (Vercel, Local, Postgres) do; a world that does not
-   * recognize the value keeps the data.
+   * The World you are using with the Workflow SDK might not support every option.
+   * A World that does not  value keeps the data.
    *
-   * At `0` the purge races reads of a finished run and usually wins, so
-   * results and transcripts of completed sessions generally become
+   * Note that with retention set to `0`, data deletion can race reads of a finished
+   * run, so results and transcripts of completed sessions generally become
    * unreadable. Persist anything you need to keep from inside a tool.
    *
    * @default "default"
