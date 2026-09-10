@@ -53,6 +53,17 @@ describe("agent invocation input", () => {
       "agent() requires a non-empty agent name as its first argument.",
     );
   });
+
+  it("rejects inherited history with an existing agent id", () => {
+    expect(() =>
+      validateAgentInput({
+        agentId: "agent-1",
+        inheritHistory: true,
+        message: "Continue",
+        target: "research",
+      }),
+    ).toThrow("cannot combine `agentId` with `inheritHistory`");
+  });
 });
 
 describe("background agent invocation routing", () => {
@@ -82,6 +93,20 @@ describe("background agent invocation routing", () => {
 
     const result = agent(ctx, "research", { message: "Find it" });
     await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
+      from: expect.objectContaining({ execution: "background", runId: "run-1" }),
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:agent-reply",
+        kind: "agent-invoke",
+      },
+    });
+    const invocation = mocks.resumeHook.mock.calls[0]?.[1] as {
+      readonly request: { readonly input: object };
+    };
+    expect(invocation.request.input).not.toHaveProperty("parentHistory");
     controller.abort(new Error("task cancelled"));
 
     await expect(result).rejects.toThrow("task cancelled");
@@ -128,12 +153,14 @@ describe("background agent invocation routing", () => {
       turnId: "turn-1",
     };
     const ctx = { callId: "call-1" } as ToolContext;
+    const parentHistory = [{ content: "Prior context", role: "user" as const }];
     attachWorkflowToolRunContext(ctx, {
       admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",
       },
+      parentHistory,
     });
 
     const outputSchema = {
@@ -141,16 +168,16 @@ describe("background agent invocation routing", () => {
       required: ["findings"],
       type: "object",
     };
-    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
-      findings: ["available"],
-    });
+    await expect(
+      agent(ctx, "research", { inheritHistory: true, message: "Find it", outputSchema }),
+    ).resolves.toEqual({ findings: ["available"] });
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",
       from,
       replyTo: "agent-reply",
       request: {
-        input: { message: "Find it", outputSchema, target: "research" },
+        input: { parentHistory, message: "Find it", outputSchema, target: "research" },
         invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
       },

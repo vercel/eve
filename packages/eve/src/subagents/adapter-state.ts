@@ -27,6 +27,8 @@ export const SUBAGENT_ADAPTER_KIND = "subagent";
  */
 export interface SubagentAdapterState extends Record<string, unknown> {
   readonly callId: string;
+  /** Internal conversation prefix used while creating this child session. */
+  readonly parentHistory?: readonly import("ai").ModelMessage[];
   readonly parentContinuationToken: string;
   readonly parentSessionId: string;
   readonly subagentName: string;

@@ -6,6 +6,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import {
+  readWorkflowToolParentHistory,
   readWorkflowToolRunAdmission,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
@@ -22,6 +23,7 @@ import type { TaskInboundUpdate } from "#tasks/types.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
+  readonly parentHistory?: readonly import("ai").ModelMessage[];
   readonly message: string;
   readonly outputSchema?: JsonObject;
   readonly target: string;
@@ -66,6 +68,7 @@ export async function agent(
   validateAgentInput({ ...input, target });
   return await invokeAgent(ctx, {
     agentId: input.agentId,
+    ...(input.inheritHistory === true ? { parentHistory: readWorkflowToolParentHistory(ctx) } : {}),
     message: input.message,
     outputSchema: input.outputSchema,
     target,
@@ -195,7 +198,12 @@ async function nextAgentReply(
   }
 }
 
-export function validateAgentInput(input: InternalAgentInput): void {
+export function validateAgentInput(
+  input: InternalAgentInput | (AgentInput & { target: string }),
+): void {
+  if ("inheritHistory" in input && input.agentId !== undefined && input.inheritHistory === true) {
+    throw new TypeError("agent() cannot combine `agentId` with `inheritHistory`.");
+  }
   if (typeof input.target !== "string" || input.target.trim() === "") {
     throw new TypeError("agent() requires a non-empty agent name as its first argument.");
   }

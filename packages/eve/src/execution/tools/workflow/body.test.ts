@@ -20,7 +20,12 @@ it("binds workflow-only methods to the run context", async () => {
   const input = {
     callId: "call",
     input: {},
-    session: { id: "session", turn: { id: "turn", sequence: 1 } },
+    parentHistory: [{ content: "Earlier request", role: "user" as const }],
+    session: {
+      auth: { current: null, initiator: null },
+      id: "session",
+      turn: { id: "turn", sequence: 1 },
+    },
     stepIndex: 0,
     toolName: "deploy",
     workflowId: "workflow//test//execute",
@@ -35,6 +40,9 @@ it("binds workflow-only methods to the run context", async () => {
   mocks.agent.mockResolvedValue("reviewed");
   mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
     expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
+    expect(findWorkflowToolRunContext(ctx)?.parentHistory).toEqual([
+      { content: "Earlier request", role: "user" },
+    ]);
     expect(ctx.abortSignal).toBe(signal);
     const answer = await ctx.ask(question);
     const result = await ctx.agent(target, invocation);

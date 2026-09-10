@@ -19,6 +19,28 @@ const TestTurnAgent: RuntimeTurnAgent = {
 };
 
 describe("createSessionStep", () => {
+  it("keeps child-authored initial messages before inherited history", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: { config: {} },
+      turnAgent: {
+        ...TestTurnAgent,
+        initialMessages: [{ content: "Authored context", role: "user" }],
+      },
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      parentHistory: [{ content: "Parent context", role: "assistant" }],
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot?.session.history).toEqual([
+      { content: "Authored context", role: "user" },
+      { content: "Parent context", role: "assistant" },
+    ]);
+  });
+
   it("adds task_update guidance to a task-owned session system prompt", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {

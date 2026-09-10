@@ -17,6 +17,8 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 
 export interface AgentInput {
   readonly agentId?: string;
+  /** Seed a newly created local subagent with the parent history captured by this workflow. */
+  readonly inheritHistory?: boolean;
   readonly message: string;
   readonly outputSchema?: JsonObject;
 }

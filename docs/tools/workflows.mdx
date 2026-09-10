@@ -267,6 +267,19 @@ invocation identity, including repeated and parallel calls to the same subagent.
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
+Set `inheritHistory: true` to seed a new local subagent with the parent conversation captured before
+the workflow tool call:
+
+```ts
+const result = await ctx.agent("research", {
+  inheritHistory: true,
+  message: task,
+});
+```
+
+`inheritHistory` applies only when creating a local subagent. It cannot be combined with `agentId` or
+used with a remote agent.
+
 ## Report progress: `yield`
 
 A workflow body may be an async generator. Ordinary yields report progress in both execution
