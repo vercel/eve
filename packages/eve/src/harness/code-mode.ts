@@ -142,7 +142,8 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   if (name === CODE_MODE_TOOL_NAME) return false;
   // These names belong to the program's discovery helpers.
   if (name === SEARCH_TOOLS_NAME || name === DESCRIBE_TOOLS_NAME) return false;
-  // Discovery updates the parent context for the next model step's catalog.
+  // The sandbox pins the exact tool names on every resume, so a tool discovered
+  // mid-program could not join that program; discovery feeds the next one.
   if (name === "connection_search") return false;
   const definition = tools.get(name);
   if (definition === undefined) return false;
