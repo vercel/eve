@@ -5,7 +5,11 @@ import { performance } from "node:perf_hooks";
 import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
-import type { EveCliSetupStep, EveCliSetupTerminalResult } from "#cli/telemetry/index.js";
+import type {
+  EveCliSetupFailureCode,
+  EveCliSetupStep,
+  EveCliSetupTerminalResult,
+} from "#cli/telemetry/index.js";
 import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -26,7 +30,6 @@ import {
   runPackageManagerInstall,
   spawnPackageManager,
 } from "#setup/primitives/index.js";
-import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -42,13 +45,19 @@ import {
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
 import {
+  installProgressDetail,
+  INSTALL_OUTPUT_FALLBACK_LINES,
+  NPM_NOISE_LINE,
+  packageManagerInstallFailureCode,
+} from "./init-install.js";
+import {
   addAgentsToWorkspace,
   convertScaffoldToAgentWorkspace,
+  formatWorkspaceRootMutationWarning,
   type InitCliLogger,
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
-import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
 import {
   cleanupFreshInitTarget,
   workspaceFailureNote,
@@ -62,7 +71,6 @@ export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.j
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
-  confirmInitInNonEmptyDirectory: typeof confirmInitInNonEmptyDirectory;
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
@@ -79,7 +87,6 @@ export interface InitCommandDependencies {
 
 const defaultDependencies: InitCommandDependencies = {
   addAgentToProject,
-  confirmInitInNonEmptyDirectory,
   detectInvokingPackageManager,
   detectPackageManager,
   ensureChannel,
@@ -118,15 +125,6 @@ function uniqueWorkspaceRootMutations(
     });
   }
   return [...byKey.values()];
-}
-
-function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): string {
-  const target = mutation.kind === "package-json" ? "package.json" : "configuration";
-  const suffix =
-    mutation.nodeEngineOverride === undefined
-      ? ""
-      : ` (${formatNodeEngineOverrideWarning(mutation.nodeEngineOverride)})`;
-  return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
 }
 
 async function addToExistingProject(
@@ -285,6 +283,12 @@ type PreparedInitProject =
       workspaceRootMutations: WorkspaceRootMutation[];
     };
 
+type InitTerminalTracker = (
+  step: EveCliSetupStep,
+  result: EveCliSetupTerminalResult,
+  failureCode?: EveCliSetupFailureCode,
+) => void;
+
 type InitResult = {
   agentElapsedMs: number;
   agentLaunched: boolean;
@@ -305,28 +309,6 @@ type InitResult = {
       workspaceRootMutations: WorkspaceRootMutation[];
     }
 );
-
-function installProgressDetail(
-  packageManager: PackageManagerKind,
-  line: ProcessOutputLine,
-): string | undefined {
-  const text = line.text.trim();
-  if (text === "" || packageManager !== "npm") return text || undefined;
-
-  const manifest = /^npm silly fetch manifest (.+)$/u.exec(text);
-  if (manifest !== null) return `Resolving ${manifest[1]}`;
-
-  const failedRequest = /^npm http fetch \S+ \S+ attempt (\d+) failed with (\S+)$/u.exec(text);
-  if (failedRequest !== null) {
-    return `npm registry · attempt ${failedRequest[1]} failed: ${failedRequest[2]}`;
-  }
-
-  if (line.stream === "stdout" || /^npm (?:error|warn)\b/u.test(text)) return text;
-  return undefined;
-}
-
-const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
-const INSTALL_OUTPUT_FALLBACK_LINES = 20;
 
 function reportExistingProjectChanges(
   logger: InitCliLogger,
@@ -354,18 +336,22 @@ async function runInitSteps(input: {
   parentDirectory: string;
   target: string | undefined;
   trackStep?: (step: EveCliSetupStep) => void;
+  trackTerminal?: InitTerminalTracker;
 }): Promise<InitResult> {
-  const { dependencies, logger, options, parentDirectory, target, trackStep } = input;
+  const { dependencies, logger, options, parentDirectory, target, trackStep, trackTerminal } =
+    input;
   const debug = isLogLevelEnabled("debug");
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
 
   let progress = startCliLiveRow(logger);
+  let activeInitStep: EveCliSetupStep = "scaffold";
+  let installFailureCode: EveCliSetupFailureCode | undefined;
   progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
-    trackStep?.("scaffold");
+    trackStep?.(activeInitStep);
     progress.update(initTarget.kind === "fresh" ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
     const agentStartedAt = dependencies.now();
@@ -457,7 +443,8 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger);
     }
 
-    trackStep?.("install_dependencies");
+    activeInitStep = "install_dependencies";
+    trackStep?.(activeInitStep);
     progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
@@ -486,6 +473,7 @@ async function runInitSteps(input: {
     );
     const installElapsedMs = dependencies.now() - installStartedAt;
     if (!packageManagerInstallSucceeded(installResult)) {
+      installFailureCode = packageManagerInstallFailureCode(installResult);
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
       const failureOutput =
@@ -528,7 +516,8 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
-      trackStep?.("initialize_git");
+      activeInitStep = "initialize_git";
+      trackStep?.(activeInitStep);
       progress.update("Initializing Git repository");
       initLog.debug("initializing git repository");
       return {
@@ -541,6 +530,13 @@ async function runInitSteps(input: {
     }
 
     return { ...project, agentElapsedMs, agentLaunched, installElapsedMs };
+  } catch (error) {
+    trackTerminal?.(
+      activeInitStep,
+      "error",
+      activeInitStep === "install_dependencies" ? installFailureCode : undefined,
+    );
+    throw error;
   } finally {
     progress.stop();
   }
@@ -553,7 +549,7 @@ export async function runInitCommand(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
   trackStep?: (step: EveCliSetupStep) => void,
-  trackTerminal?: (step: EveCliSetupStep, result: EveCliSetupTerminalResult) => void,
+  trackTerminal?: InitTerminalTracker,
 ): Promise<void> {
   trackStep?.("resolve_target");
   if (
@@ -579,6 +575,7 @@ export async function runInitCommand(
       parentDirectory,
       target,
       trackStep,
+      trackTerminal,
     });
   } catch (error) {
     if (error instanceof WizardCancelledError) {

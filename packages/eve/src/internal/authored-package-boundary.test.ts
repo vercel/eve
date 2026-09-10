@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { resolvePackageDependencyPath } from "#internal/application/package.js";
 import {
   createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
@@ -12,6 +13,30 @@ import {
 const PACKAGE_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 describe("createGenerationPackageBoundaryPlugin", () => {
+  it("keeps eve imports portable", async () => {
+    const plugin = createGenerationPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: PACKAGE_ROOT,
+    });
+    const resolveId = plugin.resolveId as (
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) => Promise<unknown>;
+    const context: RolldownResolveContext = {
+      async resolve() {
+        throw new Error("framework imports should resolve before delegating");
+      },
+    };
+
+    await expect(
+      resolveId.call(context, "eve/tools", join(PACKAGE_ROOT, "agent/tools/probe.ts"), {
+        kind: "import-statement",
+      }),
+    ).resolves.toEqual({ external: true, id: "eve/tools" });
+  });
+
   it("resolves package-private imports from the importing dependency", async () => {
     const plugin = createGenerationPackageBoundaryPlugin({
       externalDependencies: [],
@@ -43,6 +68,36 @@ describe("createGenerationPackageBoundaryPlugin", () => {
 });
 
 describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
+  it("binds eve imports to the executing framework installation", async () => {
+    const plugin = createRuntimeLoaderPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: PACKAGE_ROOT,
+    });
+    const resolveId = plugin.resolveId as (
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) => Promise<unknown>;
+    const context: RolldownResolveContext = {
+      async resolve() {
+        throw new Error("framework imports should resolve before delegating");
+      },
+    };
+
+    await expect(
+      resolveId.call(
+        context,
+        "eve/tools",
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/tools/edit_file.js"),
+        { kind: "import-statement" },
+      ),
+    ).resolves.toEqual({
+      external: true,
+      id: resolvePackageDependencyPath("eve/tools"),
+    });
+  });
+
   it("resolves eve package imports through the published dist mapping", async () => {
     const plugin = createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: [],

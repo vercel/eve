@@ -89,6 +89,7 @@ describe("resolveTaskDeliveryContext", () => {
         context:
           '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
         phase: "pending",
+        rootTurnId: "turn_1",
       },
     );
   });
@@ -119,6 +120,7 @@ describe("resolveTaskDeliveryContext", () => {
       context:
         '[Task state]\n{"tasks":[{"name":"report_probe","output":{"data":{"result":"first"},"type":"result"},"status":"completed","taskId":"task_1"},{"name":"report_probe","output":{"data":{"result":"second"},"type":"result"},"status":"completed","taskId":"task_2"}]}',
       phase: "settled",
+      rootTurnId: "turn_1",
     });
   });
 

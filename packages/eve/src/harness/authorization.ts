@@ -31,9 +31,9 @@
  * nonce that re-derives it) from start to finish.
  */
 
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { SessionIdKey } from "#context/keys.js";
+import { ActivityRootTurnIdKey, SessionIdKey } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
@@ -306,6 +306,7 @@ export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHoo
 const PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
 
 export interface PendingAuthorizationState {
+  readonly activityRootTurnIds?: Readonly<Record<string, string>>;
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
@@ -314,11 +315,21 @@ export function setPendingAuthorization(
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
   const active = resolveActiveAuthorizationChallenges(value.challenges);
-  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
+  const pending = getPendingAuthorization(sessionState);
+  const previous = pending?.challenges ?? [];
   const superseded = getSupersededAuthorizationChallenges(sessionState, active);
+  const rootTurnId = contextStorage.getStore()?.get(ActivityRootTurnIdKey);
+  const activityRootTurnIds = { ...pending?.activityRootTurnIds };
+  for (const challenge of superseded)
+    delete activityRootTurnIds[authorizationAttemptKey(challenge)];
+  if (rootTurnId !== undefined) {
+    for (const challenge of active)
+      activityRootTurnIds[authorizationAttemptKey(challenge)] = rootTurnId;
+  }
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
+      ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
       challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
     },
   };
@@ -379,12 +390,12 @@ export function clearPendingAuthorization(
     if (pending !== undefined) {
       const completedAttemptIds = new Set(attemptIds);
       const challenges = pending.challenges.filter(
-        (challenge) => !completedAttemptIds.has(challenge.attemptId ?? challenge.name),
+        (challenge) => !completedAttemptIds.has(authorizationAttemptKey(challenge)),
       );
       if (challenges.length > 0) {
         return {
           ...sessionState,
-          [PENDING_AUTHORIZATION_KEY]: { challenges },
+          [PENDING_AUTHORIZATION_KEY]: pendingAuthorizationValue(pending, challenges),
         };
       }
     }
@@ -393,6 +404,27 @@ export function clearPendingAuthorization(
   const state = { ...sessionState };
   delete state[PENDING_AUTHORIZATION_KEY];
   return Object.keys(state).length > 0 ? state : undefined;
+}
+
+function pendingAuthorizationValue(
+  pending: PendingAuthorizationState,
+  challenges: readonly AuthorizationChallenge[],
+): PendingAuthorizationState {
+  const activityRootTurnIds = Object.fromEntries(
+    challenges.flatMap((challenge) => {
+      const key = authorizationAttemptKey(challenge);
+      const rootTurnId = pending.activityRootTurnIds?.[key];
+      return rootTurnId === undefined ? [] : [[key, rootTurnId]];
+    }),
+  );
+  return {
+    ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
+    challenges,
+  };
+}
+
+function authorizationAttemptKey(challenge: AuthorizationChallenge): string {
+  return challenge.attemptId ?? challenge.candidateId ?? challenge.name;
 }
 
 export function getPendingAuthorization(

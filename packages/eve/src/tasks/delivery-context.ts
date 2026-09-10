@@ -15,13 +15,19 @@ export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThi
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryId: string;
-}): { readonly context: string; readonly phase: "pending" | "settled" } | undefined {
+}):
+  | {
+      readonly context: string;
+      readonly phase: "pending" | "settled";
+      readonly rootTurnId: string;
+    }
+  | undefined {
   const entries = getSessionTaskIndex(input.state);
   const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
   const cohort = entries.filter((entry) => entry.createdByTurnId === delivered.createdByTurnId);
-  return projectTaskCohort(cohort);
+  return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
 }
 
 /** Returns model context for durable tasks launched by the active parent turn. */

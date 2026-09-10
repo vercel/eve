@@ -211,4 +211,48 @@ describe("buildAgentInfoResponse", () => {
       }),
     );
   });
+
+  it("never serializes BYOK or credential-shaped providerOptions values", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      name: "info-agent",
+    });
+    const model = manifest.config.model;
+    if (model === undefined) throw new Error("Expected a static compiled model.");
+    // The shipped BYOK scaffold places the owner's provider key under
+    // `gateway.byok`; a custom provider may carry other credential fields.
+    model.providerOptions = {
+      gateway: {
+        byok: { openai: [{ apiKey: "sk-canary-byok" }] },
+        serviceTier: "priority",
+      },
+      openai: {
+        apiKey: "sk-canary-direct",
+        headers: { authorization: "Bearer canary-header" },
+        reasoningEffort: "high",
+      },
+    };
+
+    const response = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "production",
+      },
+    );
+
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain("sk-canary-byok");
+    expect(serialized).not.toContain("sk-canary-direct");
+    expect(serialized).not.toContain("canary-header");
+    // Non-secret options survive for the dev TUI (`gateway.serviceTier`).
+    expect(response.agent.model.providerOptions).toEqual({
+      gateway: { serviceTier: "priority" },
+      openai: {
+        apiKey: "[redacted]",
+        headers: "[redacted]",
+        reasoningEffort: "high",
+      },
+    });
+  });
 });

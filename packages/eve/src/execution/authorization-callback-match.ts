@@ -5,6 +5,7 @@ import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {
   readonly authorization: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly result: { readonly name: string } & AuthorizationResult;
 }
 
@@ -40,7 +41,7 @@ export function matchAuthorizationCallbacks(
         ? candidate.attemptId === undefined
         : candidate.attemptId === callback.attemptId;
     });
-    const attemptKey = challenge?.attemptId ?? challenge?.name;
+    const attemptKey = challenge?.attemptId ?? challenge?.candidateId ?? challenge?.name;
     if (
       challenge === undefined ||
       attemptKey === undefined ||
@@ -53,6 +54,7 @@ export function matchAuthorizationCallbacks(
     matchedAttemptKeys.add(attemptKey);
     matches.push({
       authorization: challenge.challenge,
+      candidateId: challenge.candidateId,
       result: {
         attemptId: challenge.attemptId,
         callback: callback.callback,

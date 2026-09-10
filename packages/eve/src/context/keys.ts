@@ -135,6 +135,12 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
+/** Originating root turn that owns the current user-visible activity artifact. */
+export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
+/** Pending HITL request identities that keep the current activity artifact open. */
+export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
+  "eve.activityPendingBlockers",
+);
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

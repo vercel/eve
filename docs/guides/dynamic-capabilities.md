@@ -253,7 +253,42 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories, including [memory provider tools](../memory), may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve rejects a dynamic tool if a callback lacks durable metadata.
+
+### Create dynamic tools in a package
+
+Prefer an [extension](../extensions) for reusable eve integrations. Extensions contribute a namespaced set of capabilities that consumers can override. Author the final `defineTool()` calls in the extension source. Then build the package with `eve extension build` so eve transforms its callbacks.
+
+Use `defineDurableCallback` when a provider package must return dynamic `defineTool()` values directly. eve cannot transform callback code inside an installed dependency. Put every per-tool value in the helper's `closure`. The callback receives that snapshot as its first argument. The closure follows the same JSON-serializability rules as transformed captures.
+
+```ts title="provider-package/search.ts"
+import { defineDurableCallback, defineTool } from "eve/tools";
+import { z } from "zod";
+
+interface SearchInput {
+  query: string;
+}
+
+export function createSearchTool(baseUrl: string) {
+  return defineTool({
+    description: "Search the provider catalog.",
+    inputSchema: z.object({ query: z.string() }),
+    execute: defineDurableCallback({
+      closure: { baseUrl },
+      callback: async ({ baseUrl }, { query }: SearchInput) => {
+        const response = await fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}`);
+        return response.json();
+      },
+    }),
+  });
+}
+```
+
+Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+
+`closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
+
+eve-provided factories, including [memory provider tools](../memory), use the same durable callback mechanism.
 
 ### Identity and redeploys
 

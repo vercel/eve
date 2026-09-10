@@ -10,7 +10,12 @@ import {
   type OldSourceOffsetDynamicToolMetadata,
   type OldStepFunctionDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
-import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalContext,
+  type ApprovalResponseContext,
+} from "#approval/definition.js";
+import { defineDurableCallback } from "#public/tools/index.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
@@ -1572,6 +1577,117 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       "user-approval",
     );
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
+  });
+
+  it("rebinds every defineDurableCallback phase after a cold start", async () => {
+    const ctx = createCtx();
+    let provider = "original-provider";
+    const handler = vi.fn(() => ({
+      provider_tool: defineTool({
+        approval: {
+          request: defineDurableCallback({
+            callback: ({ status }: { status: "user-approval" }) => status,
+            closure: { status: "user-approval" },
+          }),
+          response: defineDurableCallback({
+            callback: ({ provider: snapshotted }: { provider: string }) => ({
+              reason: snapshotted,
+              status: "rejected" as const,
+            }),
+            closure: { provider },
+          }),
+        },
+        approvalKey: defineDurableCallback({
+          callback: (
+            { provider: snapshotted }: { provider: string },
+            input: Readonly<Record<string, unknown>>,
+          ) => `${snapshotted}:${String(input.operation)}`,
+          closure: { provider },
+        }),
+        description: "dependency-created provider tool",
+        execute: defineDurableCallback({
+          callback: (
+            { provider: snapshotted }: { provider: string },
+            input: Record<string, unknown>,
+          ) => ({ input, provider: snapshotted }),
+          closure: { provider },
+        }),
+        inputSchema: { type: "object" },
+        label: {
+          complete: defineDurableCallback({
+            callback: ({ provider: snapshotted }: { provider: string }) =>
+              `Completed ${snapshotted}`,
+            closure: { provider },
+          }),
+          delta: defineDurableCallback({
+            callback: ({ provider: snapshotted }: { provider: string }) => `Running ${snapshotted}`,
+            closure: { provider },
+          }),
+          start: defineDurableCallback({
+            callback: ({ provider: snapshotted }: { provider: string }) =>
+              `Starting ${snapshotted}`,
+            closure: { provider },
+          }),
+        },
+        toModelOutput: defineDurableCallback({
+          callback: ({ provider: snapshotted }: { provider: string }, output: unknown) => ({
+            type: "json" as const,
+            value: { output, provider: snapshotted },
+          }),
+          closure: { provider },
+        }),
+      }),
+    }));
+    const resolver = createResolver("session_provider", ["session.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      event: makeEvent("session.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+    provider = "provider-after-rebind";
+    simulateColdStart(ctx);
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    const [tool] = buildDynamicTools(ctx);
+    const approval = tool!.approval;
+    expect(approval).not.toBeTypeOf("function");
+    if (approval === undefined || typeof approval === "function") {
+      throw new Error("Expected approval request and response policies.");
+    }
+    expect(tool!.label?.start?.({ operation: "ping" })).toBe("Starting original-provider");
+    expect(tool!.label?.delta?.({ operation: "ping" }, { step: 1 })).toBe(
+      "Running original-provider",
+    );
+    expect(tool!.label?.complete?.({ operation: "ping" }, { ok: true })).toBe(
+      "Completed original-provider",
+    );
+    expect(tool!.approvalKey?.({ operation: "ping" })).toBe("original-provider:ping");
+    await expect(
+      approval.request(createApprovalContext({ toolName: "provider_tool" })),
+    ).resolves.toBe("user-approval");
+    await expect(approval.response!({} as ApprovalResponseContext)).resolves.toEqual({
+      reason: "original-provider",
+      status: "rejected",
+    });
+    await expect(tool!.execute!({ operation: "ping" }, executeOptions)).resolves.toEqual({
+      input: { operation: "ping" },
+      provider: "original-provider",
+    });
+    expect(tool!.toModelOutput!({ result: "found" })).toEqual({
+      type: "json",
+      value: { output: { result: "found" }, provider: "original-provider" },
+    });
   });
 
   it("replays label callbacks", () => {

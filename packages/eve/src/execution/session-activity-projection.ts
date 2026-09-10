@@ -1,5 +1,10 @@
 import type { ContextContainer } from "#context/container.js";
-import { ActivityObserverKey, TurnTaskDeliveryKey } from "#context/keys.js";
+import {
+  ActivityObserverKey,
+  ActivityPendingBlockersKey,
+  ActivityRootTurnIdKey,
+  TurnTaskDeliveryKey,
+} from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { submitActivity } from "#execution/submit-activity.js";
@@ -17,13 +22,19 @@ export async function observeSessionActivity(input: {
   const taskDelivery = input.ctx.get(TurnTaskDeliveryKey);
   if (
     observer.workIdentity === undefined &&
+    input.ctx.get(ActivityRootTurnIdKey) === undefined &&
     (taskDelivery === "pending" || taskDelivery === "settled")
   )
     return;
   await submitActivity({
     events: projectSessionActivity({
       event: input.event,
+      rootTurnId: input.ctx.get(ActivityRootTurnIdKey),
       sessionId: input.sessionId,
+      suppressRootSettlement:
+        taskDelivery === "initiating" ||
+        taskDelivery === "pending" ||
+        (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
       workIdentity: observer.workIdentity,
     }),
     sink: observer.sink,
@@ -32,7 +43,9 @@ export async function observeSessionActivity(input: {
 
 export function projectSessionActivity(input: {
   readonly event: MessageStreamEvent;
+  readonly rootTurnId?: string;
   readonly sessionId: string;
+  readonly suppressRootSettlement?: boolean;
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): readonly ActivityEventV1[] {
   const work = workFor(input);
@@ -51,6 +64,15 @@ export function projectSessionActivity(input: {
       work,
     });
   }
+  if (
+    input.suppressRootSettlement === true &&
+    work.kind === "root-turn" &&
+    (input.event.type === "turn.completed" ||
+      input.event.type === "turn.failed" ||
+      input.event.type === "turn.cancelled")
+  ) {
+    return events;
+  }
   events.push(
     ...projectActivityEvents({
       at: input.event.meta.at,
@@ -64,6 +86,7 @@ export function projectSessionActivity(input: {
 
 function workFor(input: {
   readonly event: MessageStreamEvent;
+  readonly rootTurnId?: string;
   readonly sessionId: string;
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): ActivityWorkIdentityV1 | undefined {
@@ -76,11 +99,12 @@ function workFor(input: {
     };
   }
   if (turnId === undefined) return undefined;
+  const rootTurnId = input.rootTurnId ?? turnId;
   return {
-    id: deriveRootTurnActivityWorkId({ sessionId: input.sessionId, turnId }),
+    id: deriveRootTurnActivityWorkId({ sessionId: input.sessionId, turnId: rootTurnId }),
     kind: "root-turn",
     rootSessionId: input.sessionId,
-    rootTurnId: turnId,
+    rootTurnId,
     sessionId: input.sessionId,
     turnId,
   };
