@@ -512,6 +512,33 @@ describe("normalizeMcpClientConnectionDefinition", () => {
     });
   });
 
+  describe("toolCall.toModelOutput validation", () => {
+    it("keeps one projection per operation name", () => {
+      const getReport = () => ({ type: "json" as const, value: { status: "ready" } });
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          toolCall: {
+            providedArguments: { tenantId: "acme" },
+            toModelOutput: { getReport },
+          },
+        }),
+        MSG,
+      );
+
+      expect(result.toolCall?.providedArguments).toEqual({ tenantId: "acme" });
+      expect(result.toolCall?.toModelOutput).toEqual({ getReport });
+    });
+
+    it("rejects a non-function projection", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { toModelOutput: { getReport: "summary" } } }),
+          MSG,
+        ),
+      ).toThrow(/toolCall\.toModelOutput\.getReport.*must be a function/);
+    });
+  });
+
   describe("tools (tool filter) validation", () => {
     it("accepts an allow filter", () => {
       const result = normalizeMcpClientConnectionDefinition(

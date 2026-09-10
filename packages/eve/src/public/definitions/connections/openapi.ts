@@ -106,6 +106,10 @@ export interface OpenAPIConnectionDefinition {
    * Use `providedArguments` for application-owned operation parameters. eve
    * removes configured keys from the model-facing input schema and adds their
    * resolved values immediately before building the HTTP request.
+   *
+   * Use `toModelOutput`, keyed by operation name, to shrink what the model
+   * sees of a large response. `action.result`, channel events, and hooks keep
+   * the full `{ status, statusText, body }` result.
    */
   toolCall?: ConnectionToolCallDefinition;
   /**

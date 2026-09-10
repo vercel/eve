@@ -2,6 +2,7 @@ import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import type {
+  ConnectionToModelOutputDefinition,
   ConnectionToolCallDefinition,
   ProvidedArgumentsDefinition,
 } from "#public/definitions/connections/tool-call.js";
@@ -52,7 +53,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   // canonical producer.
   "vercelConnect",
 ] as const;
-const KNOWN_TOOL_CALL_KEYS = ["providedArguments"] as const;
+const KNOWN_TOOL_CALL_KEYS = ["providedArguments", "toModelOutput"] as const;
 
 /**
  * Validates one authored MCP client connection module export at build time
@@ -131,28 +132,39 @@ function normalizeConnectionToolCall(
   );
   expectOnlyKnownKeys(toolCall, KNOWN_TOOL_CALL_KEYS, `${message} The "toolCall" field`);
 
-  if (toolCall.providedArguments === undefined) {
-    return {};
+  const result: {
+    -readonly [K in keyof ConnectionToolCallDefinition]: ConnectionToolCallDefinition[K];
+  } = {};
+
+  if (toolCall.providedArguments !== undefined) {
+    result.providedArguments = normalizeProvidedArguments(toolCall.providedArguments, message);
+  }
+  if (toolCall.toModelOutput !== undefined) {
+    result.toModelOutput = normalizeConnectionToModelOutput(toolCall.toModelOutput, message);
   }
 
+  return result;
+}
+
+function normalizeProvidedArguments(value: unknown, message: string): ProvidedArgumentsDefinition {
   const providedArguments = expectObjectRecord(
-    toolCall.providedArguments,
+    value,
     `${message} The "toolCall.providedArguments" field must be a plain object.`,
   );
 
-  for (const [key, value] of Object.entries(providedArguments)) {
-    if (typeof value === "function") {
+  for (const [key, entry] of Object.entries(providedArguments)) {
+    if (typeof entry === "function") {
       continue;
     }
     if (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as { then?: unknown }).then === "function"
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof (entry as { then?: unknown }).then === "function"
     ) {
       continue;
     }
     try {
-      parseJsonValue(value);
+      parseJsonValue(entry);
     } catch {
       throw new Error(
         `${message} The "toolCall.providedArguments.${key}" value must be JSON-serializable, a Promise, or a function.`,
@@ -160,7 +172,25 @@ function normalizeConnectionToolCall(
     }
   }
 
-  return { providedArguments: providedArguments as ProvidedArgumentsDefinition };
+  return providedArguments as ProvidedArgumentsDefinition;
+}
+
+function normalizeConnectionToModelOutput(
+  value: unknown,
+  message: string,
+): ConnectionToModelOutputDefinition {
+  const toModelOutput = expectObjectRecord(
+    value,
+    `${message} The "toolCall.toModelOutput" field must be a plain object.`,
+  );
+
+  for (const [key, entry] of Object.entries(toModelOutput)) {
+    if (typeof entry !== "function") {
+      throw new Error(`${message} The "toolCall.toModelOutput.${key}" value must be a function.`);
+    }
+  }
+
+  return toModelOutput as ConnectionToModelOutputDefinition;
 }
 
 /**

@@ -21,6 +21,8 @@ import {
 } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
+import type { ConnectionToolModelOutput } from "#public/definitions/connections/tool-call.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
   createAuthorizationExecution,
@@ -321,6 +323,36 @@ function readDiscoveredToolClosure(closure: JsonObject): {
   return { connectionName, toolName };
 }
 
+/**
+ * Applies the connection's per-operation projection to a result the model is
+ * about to see. `action.result`, channel events, and hooks are unaffected:
+ * they observe the executor output this receives.
+ */
+async function projectDiscoveredConnectionToolOutput(
+  closure: JsonObject,
+  output: unknown,
+): Promise<ToolModelOutput> {
+  const { connectionName, toolName } = readDiscoveredToolClosure(closure);
+  const project = readConnectionToolModelOutput(connectionName, toolName);
+  if (project === undefined) {
+    throw new Error(
+      `Connection "${connectionName}" no longer defines toolCall.toModelOutput for "${toolName}".`,
+    );
+  }
+  return await project(output);
+}
+
+function readConnectionToolModelOutput(
+  connectionName: string,
+  toolName: string,
+): ConnectionToolModelOutput | undefined {
+  const registry = loadContext().get(ConnectionRegistryKey);
+  const connection = registry
+    ?.getConnections()
+    .find((candidate) => candidate.connectionName === connectionName);
+  return connection?.toolCall?.toModelOutput?.[toolName];
+}
+
 async function executeDiscoveredConnectionTool(
   closure: JsonObject,
   input: Record<string, unknown>,
@@ -420,6 +452,8 @@ export async function resolveConnectionSearchDynamicTools() {
     const approval = registry.getConnectionApproval(connectionName);
 
     const closure = { connectionName, toolName };
+    const hasModelOutputProjection =
+      readConnectionToolModelOutput(connectionName, toolName) !== undefined;
     const discoveredTool = defineTool({
       description: result.description,
       inputSchema: (result.inputSchema ?? {
@@ -430,9 +464,23 @@ export async function resolveConnectionSearchDynamicTools() {
       async execute(input: Record<string, unknown>, executeCtx) {
         return await executeDiscoveredConnectionTool(closure, input, executeCtx);
       },
+      ...(hasModelOutputProjection
+        ? {
+            toModelOutput: async (output: unknown) =>
+              await projectDiscoveredConnectionToolOutput(closure, output),
+          }
+        : {}),
     });
     stampDurableDynamicToolCallbacks(discoveredTool, {
       execute: { callback: executeDiscoveredConnectionTool, closure },
+      ...(hasModelOutputProjection
+        ? {
+            toModelOutput: {
+              callback: projectDiscoveredConnectionToolOutput,
+              closure,
+            },
+          }
+        : {}),
       ...(approval === undefined
         ? {}
         : {

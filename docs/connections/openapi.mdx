@@ -92,6 +92,34 @@ eve removes configured keys from every operation's model-facing input schema and
 
 Use `headers` for transport-wide headers that are not operation inputs. Use `providedArguments` when the OpenAPI document declares the value as an operation parameter and it should remain outside model control. Approval policies continue to receive only the model-authored input.
 
+## Control result size
+
+An operation tool returns `{ status, statusText, body }` to the model. When one endpoint answers with far more than the model needs, project its model-facing result with `toolCall.toModelOutput`, keyed by the generated operation name:
+
+```ts title="agent/connections/reports.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+interface ReportResponse {
+  readonly status: number;
+  readonly body: { readonly id: string; readonly state: string; readonly rows: unknown[] };
+}
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  description: "Reporting API.",
+  toolCall: {
+    toModelOutput: {
+      getReport: (result: ReportResponse) => ({
+        type: "json",
+        value: { id: result.body.id, rowCount: result.body.rows.length, state: result.body.state },
+      }),
+    },
+  },
+});
+```
+
+This is the same [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput) contract authored tools use, and it has the same boundary: only the model sees the projection. `action.result`, channel events, and hooks still receive the complete response. Operations without an entry keep eve's default serialization. Keys are the same names [operation filters](#operation-filters) match — the `operationId`, or the deterministic name eve derives from the method and path.
+
 ## Operation filters
 
 Most OpenAPI specs describe far more than the model should use. Narrow generated tools with exactly one of `operations.allow` or `operations.block`:
