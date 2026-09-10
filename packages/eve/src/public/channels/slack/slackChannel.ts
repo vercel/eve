@@ -56,6 +56,7 @@ import {
 } from "#public/channels/slack/model-context.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
+  hydrateCopiedSlackMessage,
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
@@ -1309,7 +1310,8 @@ async function dispatchSlackMessage(input: {
     installationTeamId: input.installationTeamId,
     teamId: input.message.teamId,
   });
-  const author = input.message.author;
+  const message = await hydrateCopiedSlackMessage(thread, input.message);
+  const author = message.author;
   const channelState: SlackChannelState = {
     audience: "unknown",
     channelId: input.message.channelId,
@@ -1339,13 +1341,13 @@ async function dispatchSlackMessage(input: {
   let privateConversation: Promise<boolean> | undefined;
   const isDMOrPrivateChannel = () =>
     (privateConversation ??= isPrivateSlackConversation({
-      channelId: input.message.channelId,
-      raw: input.message.raw,
+      channelId: message.channelId,
+      raw: message.raw,
       request: slack.request,
     }));
   const isBotMentioned =
     input.kind === "app_mention" ||
-    (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));
+    (input.botUserId !== undefined && message.text.includes(`<@${input.botUserId}`));
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
     isBotMentioned: () => isBotMentioned,
@@ -1357,7 +1359,7 @@ async function dispatchSlackMessage(input: {
 
   let result;
   try {
-    result = await input.handler(ctx, input.message);
+    result = await input.handler(ctx, message);
   } catch (error) {
     logError(log, `${input.kind} handler failed`, error, {
       channelId: input.message.channelId,
@@ -1375,7 +1377,7 @@ async function dispatchSlackMessage(input: {
     kind: input.kind,
     isPrivateConversation,
     isMentioned: isBotMentioned,
-    message: input.message,
+    message,
     result,
     sessionOperations,
     thread,

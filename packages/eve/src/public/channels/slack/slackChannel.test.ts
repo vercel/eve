@@ -1789,6 +1789,59 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
+  it("passes a delayed copied-message unfurl to the mention handler", async () => {
+    const ts = "1700000000.000100";
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      if (String(request).includes("conversations.replies")) {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                attachments: [
+                  {
+                    is_msg_unfurl: true,
+                    message_blocks: [{ message: { text: "The copied report body" } }],
+                  },
+                ],
+                text: "<@U_BOT> :crosspost: <https://example.slack.com/archives/C012ABC/p1700000000000100>",
+                ts,
+              },
+            ],
+            ok: true,
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const onAppMention = vi.fn(() => null);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention,
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        text: "<@U_BOT> :crosspost: <https://example.slack.com/archives/C012ABC/p1700000000000100>",
+        ts,
+        type: "app_mention",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onAppMention).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        text: "<@U_BOT> :crosspost: <https://example.slack.com/archives/C012ABC/p1700000000000100>\nThe copied report body",
+      }),
+    );
+  });
+
   it("uses the app installation workspace for mention credentials", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({
