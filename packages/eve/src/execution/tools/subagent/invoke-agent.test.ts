@@ -93,6 +93,20 @@ describe("background agent invocation routing", () => {
 
     const result = agent(ctx, "research", { message: "Find it" });
     await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
+    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+      kind: "request",
+      from: expect.objectContaining({ execution: "background", runId: "run-1" }),
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:agent-reply",
+        kind: "agent-invoke",
+      },
+    });
+    const invocation = mocks.resumeHook.mock.calls[0]?.[1] as {
+      readonly request: { readonly input: object };
+    };
+    expect(invocation.request.input).not.toHaveProperty("parentHistory");
     controller.abort(new Error("task cancelled"));
 
     await expect(result).rejects.toThrow("task cancelled");

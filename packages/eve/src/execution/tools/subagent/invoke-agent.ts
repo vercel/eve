@@ -68,7 +68,7 @@ export async function agent(
   validateAgentInput({ ...input, target });
   return await invokeAgent(ctx, {
     agentId: input.agentId,
-    parentHistory: input.inheritHistory === true ? readWorkflowToolParentHistory(ctx) : undefined,
+    ...(input.inheritHistory === true ? { parentHistory: readWorkflowToolParentHistory(ctx) } : {}),
     message: input.message,
     outputSchema: input.outputSchema,
     target,
