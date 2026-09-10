@@ -422,15 +422,13 @@ export function buildSlackBinding(input: {
   ): Promise<SlackUploadFilesResult> {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
-    return uploadSlackFiles(
-      files.map((file) => ({ ...toSlackFileUpload(file), snippetType: options?.snippetType })),
-      {
-        ...createSlackApiOptions(input.botToken, context),
-        channelId: channelId || undefined,
-        initialComment: options?.initialComment,
-        threadTs: threadTs || undefined,
-      },
-    );
+    const uploads = files.map((file) => toSlackFileUpload(file, options?.snippetType));
+    return uploadSlackFiles(uploads, {
+      ...createSlackApiOptions(input.botToken, context),
+      channelId: channelId || undefined,
+      initialComment: options?.initialComment,
+      threadTs: threadTs || undefined,
+    });
   }
 
   function refreshMessages(): Promise<void> {
@@ -653,10 +651,11 @@ function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
   return {};
 }
 
-function toSlackFileUpload(file: FileUpload): SlackFileUpload {
+function toSlackFileUpload(file: FileUpload, snippetType?: string): SlackFileUpload {
   return {
     data: normalizeFileData(file.data),
     filename: file.filename,
+    snippetType,
   };
 }
 
