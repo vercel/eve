@@ -1,4 +1,5 @@
 import type { SessionContext } from "#context/session-context.js";
+import type { WorkflowHistory } from "#execution/tools/workflow/history.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
@@ -33,6 +34,11 @@ export interface WorkflowToolRunInput {
   readonly execution?: "background" | "blocking";
   readonly executeInput?: JsonValue;
   readonly hookToken: string;
+  /**
+   * Immutable completed parent prefix captured before this tool call. Older
+   * in-flight workflow runs omit it and intentionally receive an empty view.
+   */
+  readonly history?: WorkflowHistory;
   readonly input: JsonObject;
   readonly owner: WorkflowToolRunOwner;
   readonly resultKind?: "subagent" | "tool";

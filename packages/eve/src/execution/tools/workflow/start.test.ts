@@ -14,6 +14,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
 
 const input: Omit<WorkflowToolRunInput, "hookToken"> = {
   callId: "call-1",
+  history: [{ content: "Earlier request", role: "user" }],
   input: { service: "api" },
   owner: { inbox: "owner-inbox" },
   session: {

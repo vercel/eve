@@ -25,6 +25,18 @@ export interface DeployInput {
   readonly service: string;
 }
 
+export async function readHistoryWorkflow(
+  _input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<{ readonly lastContent: unknown; readonly length: number }> {
+  "use workflow";
+
+  return {
+    lastContent: ctx.history.at(-1)?.content,
+    length: ctx.history.length,
+  };
+}
+
 export async function deployServiceWorkflow(
   input: DeployInput,
   ctx: WorkflowToolContext,

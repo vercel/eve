@@ -43,3 +43,20 @@ export {
   type AgentInput,
 } from "#tools/workflow-definition.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+export type {
+  HistoryBinaryData,
+  HistoryContentPart,
+  HistoryCustomPart,
+  HistoryFileData,
+  HistoryFilePart,
+  HistoryImagePart,
+  HistoryMessage,
+  HistoryProviderReference,
+  HistoryReasoningPart,
+  HistoryTextPart,
+  HistoryToolApprovalRequestPart,
+  HistoryToolApprovalResponsePart,
+  HistoryToolCallPart,
+  HistoryToolResultPart,
+  WorkflowHistory,
+} from "#shared/history-message.js";

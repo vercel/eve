@@ -78,8 +78,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body.
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
-- In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, and `ask`.
-  `getToken` and `requireAuth` work inside a `"use step"` helper that receives `ctx` as a direct argument;
+- In the body, `ctx` has `session`, `history`, `callId`, `toolName`, `abortSignal`, `agent`, and `ask`.
+  `history` is an immutable copy of the completed conversation prefix captured before this tool call, so it excludes the calling tool exchange and does not provide live session access. `getToken` and `requireAuth` work inside a `"use step"` helper that receives `ctx` as a direct argument;
   they throw in the workflow body. `getSandbox` and `getSkill` remain unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
