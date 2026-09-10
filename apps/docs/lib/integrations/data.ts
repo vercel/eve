@@ -1876,6 +1876,49 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  context7: {
+    logo: "context7",
+    docsHref: "https://context7.com/docs/integrations/eve",
+    keywords: [
+      "mcp",
+      "documentation",
+      "libraries",
+      "frameworks",
+      "code examples",
+      "developer tools",
+    ],
+    authModes: [],
+    quickStart: `Create \`agent/connections/context7.ts\`. The API key is optional, so the connection can use Context7's anonymous limits when \`CONTEXT7_API_KEY\` is not set:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const apiKey = process.env.CONTEXT7_API_KEY;
+
+export default defineMcpClientConnection({
+  url: "https://mcp.context7.com/mcp",
+  description:
+    "Context7: up-to-date, version-specific library documentation and code examples.",
+  ...(apiKey
+    ? {
+        auth: {
+          getToken: async () => ({ token: apiKey }),
+        },
+      }
+    : {}),
+  tools: {
+    allow: ["resolve-library-id", "query-docs"],
+  },
+});
+\`\`\``,
+    configure: `For higher rate limits, create an API key in the [Context7 dashboard](https://context7.com/dashboard) and set it as a server-side environment variable:
+
+\`\`\`bash
+CONTEXT7_API_KEY=your_api_key
+\`\`\`
+
+When the key is present, eve sends it to Context7 as an \`Authorization: Bearer\` token. The explicit tool allowlist limits the connection to Context7's two read-only documentation tools.`,
+  },
   agentcard: {
     logo: "agentcard",
     docsHref: "/docs/connections/mcp",

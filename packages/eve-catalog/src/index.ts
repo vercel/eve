@@ -378,6 +378,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "context7",
+    name: "Context7",
+    kind: "connection",
+    tagline: "Up-to-date library documentation and code examples for coding agents.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Context7: up-to-date, version-specific library documentation and code examples.",
+      mcp: { url: "https://mcp.context7.com/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",

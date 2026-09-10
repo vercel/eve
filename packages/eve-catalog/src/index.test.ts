@@ -173,6 +173,12 @@ describe("integration catalog", () => {
     );
   });
 
+  it("uses Context7's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("context7")!.connection!.mcp!.url).toBe(
+      "https://mcp.context7.com/mcp",
+    );
+  });
+
   it("uses Natural's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
       "https://mcp.natural.com/mcp",

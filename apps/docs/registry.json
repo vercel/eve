@@ -548,6 +548,19 @@
       ]
     },
     {
+      "name": "connection/context7",
+      "type": "registry:item",
+      "title": "Context7",
+      "description": "Retrieve up-to-date, version-specific library documentation and code examples.",
+      "files": [
+        {
+          "path": "registry/connections/context7.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context7.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/vercel",
       "type": "registry:item",
       "title": "Vercel",

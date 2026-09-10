@@ -86,6 +86,16 @@ export const browserUseLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const context7Logo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect fill="#000" height="28" rx="4" width="28" />
+    <path
+      d="M10.572 15.257c0 2.246-.91 4.121-2.394 5.848h3.454v1.674H6.335v-1.59c1.62-1.832 2.246-3.326 2.246-5.932h1.991ZM17.428 15.257c0 2.246.91 4.121 2.394 5.848h-3.454v1.674h5.297v-1.59c-1.62-1.832-2.246-3.326-2.246-5.932h-1.991ZM10.572 12.744c0-2.246-.91-4.122-2.394-5.849h3.454V5.221H6.335v1.59c1.62 1.832 2.246 3.326 2.246 5.933h1.991ZM17.428 12.744c0-2.246.91-4.122 2.394-5.849h-3.454V5.221h5.297v1.59c-1.62 1.832-2.246 3.326-2.246 5.933h-1.991Z"
+      fill="#fff"
+    />
+  </svg>
+);
+
 export const githubLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -756,6 +766,7 @@ export const logos = {
   web: webLogo,
   buzz: BuzzLogo,
   "browser-use": browserUseLogo,
+  context7: context7Logo,
   github: githubLogo,
   slack: slackLogo,
   discord: discordLogo,

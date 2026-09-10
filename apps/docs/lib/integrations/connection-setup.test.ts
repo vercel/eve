@@ -30,6 +30,18 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Context7 connection setup", () => {
+  it("supports anonymous access with an optional bearer token", () => {
+    const integration = getIntegration("context7")!;
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/context7");
+    expect(integration.quickStart).toContain("const apiKey = process.env.CONTEXT7_API_KEY");
+    expect(integration.quickStart).toContain('allow: ["resolve-library-id", "query-docs"]');
+    expect(integration.configure).toContain("Authorization: Bearer");
+    expect(integration.configure).toContain("two read-only documentation tools");
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;

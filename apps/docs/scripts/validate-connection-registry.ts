@@ -94,7 +94,7 @@ for (const item of items) {
   }
 
   const slug = item.name.slice("connection/".length);
-  if (slug !== "browser-use") {
+  if (slug !== "browser-use" && slug !== "context7") {
     const creationType = CONNECT_CREATION_TYPES[slug];
     const connectionMethod = CONNECT_METHODS[slug];
     const principalType = CONNECT_PRINCIPAL_TYPES[slug];
@@ -145,6 +145,14 @@ for (const item of items) {
       if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
         throw new Error(
           'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
+        );
+      }
+      break;
+    }
+    case "context7": {
+      if (item.dependencies !== undefined || item.envVars !== undefined) {
+        throw new Error(
+          'Registry item "connection/context7" must keep its API key optional and avoid Vercel Connect.',
         );
       }
       break;
