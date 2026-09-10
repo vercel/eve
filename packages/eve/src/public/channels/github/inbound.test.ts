@@ -289,6 +289,51 @@ describe("GitHub inbound parsing", () => {
     ).toBeNull();
   });
 
+  it("extracts an approval reply outside the quoted prompt", () => {
+    expect(
+      extractGitHubCommentTrigger({
+        body: [
+          "> Approve tool call: approval_test",
+          "> ",
+          "> 1. Approve",
+          "> 2. Cancel",
+          "> ",
+          "> Answer by mentioning me in a reply, e.g. `@eve-gh-approval-repro Approve`.",
+          "",
+          "@eve-gh-approval-repro Approve",
+        ].join("\n"),
+        botName: "eve-gh-approval-repro",
+      }),
+    ).toEqual({
+      kind: "mention",
+      message: "Approve",
+      token: "@eve-gh-approval-repro",
+    });
+  });
+
+  it("does not dispatch when the bot mention is only quoted", () => {
+    const input = {
+      body: "  > @testbot Approve\n\nThanks for the prompt.",
+      botName: "testbot",
+    };
+
+    expect(extractGitHubCommentTrigger(input)).toBeNull();
+    expect(shouldDispatchGitHubComment(input)).toBe(false);
+  });
+
+  it("preserves quoted content after the bot mention", () => {
+    expect(
+      extractGitHubCommentTrigger({
+        body: "@testbot explain this:\n> error details",
+        botName: "testbot",
+      }),
+    ).toEqual({
+      kind: "mention",
+      message: "explain this:\n> error details",
+      token: "@testbot",
+    });
+  });
+
   it("ignores bot and hidden-marker comments in default dispatch", () => {
     expect(
       shouldDispatchGitHubComment({
