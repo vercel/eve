@@ -1,3 +1,4 @@
+import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "#public/index.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
@@ -47,11 +48,23 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
   const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
   const config = resolveSelfModificationConfig(options.config);
 
-  const resolve = () => {
+  const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
     const mode = resolveSelfModificationMode(config);
     if (mode === "local") return defineAgent({ description: localDescription, model });
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
+    try {
+      if (
+        !(await config.deployed.authorize({
+          channel: ctx.channel,
+          principal: ctx.session.auth.current,
+        }))
+      ) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
     return defineAgent({ description: deployedDescription, model });
   };
 

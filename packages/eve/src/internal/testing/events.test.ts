@@ -4,6 +4,7 @@ import {
   containsEventSequence,
   captureTurnEvents,
   filterEventsByType,
+  stampTestEvents,
   type WorkflowRunHandle,
 } from "#internal/testing/events.js";
 
@@ -83,6 +84,33 @@ describe("filterEventsByType", () => {
 });
 
 describe("captureTurnEvents", () => {
+  it("reads every buffered turn before requesting another chunk", async () => {
+    const turns = createTurns();
+    const stream = captureTurnEvents(createStaticRun(encodeEvents(turns.flat())));
+    try {
+      for (const turn of turns) {
+        await expect(stream.nextTurn()).resolves.toEqual(turn);
+      }
+    } finally {
+      stream.dispose();
+    }
+  });
+
+  it("preserves turns and UTF-8 at every two-chunk split", async () => {
+    const turns = createTurns();
+    const bytes = encodeEvents(turns.flat());
+    for (let split = 1; split < bytes.length; split += 1) {
+      const stream = captureTurnEvents(createStaticRun(bytes.slice(0, split), bytes.slice(split)));
+      try {
+        for (const turn of turns) {
+          await expect(stream.nextTurn(), `chunk split ${split}`).resolves.toEqual(turn);
+        }
+      } finally {
+        stream.dispose();
+      }
+    }
+  });
+
   it("throws when nextTurn is called after dispose", async () => {
     const encoder = new TextEncoder();
     const run = createStaticRun(
@@ -101,10 +129,35 @@ describe("captureTurnEvents", () => {
   });
 });
 
-function createStaticRun(bytes: Uint8Array): WorkflowRunHandle {
+function createTurns() {
+  return ["caf\u00e9", "done"].map((message, index) =>
+    stampTestEvents([
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message,
+          sequence: index,
+          stepIndex: 0,
+          turnId: `turn_${index}`,
+        },
+      },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-1", wait: "next-user-message" },
+      },
+    ]),
+  );
+}
+
+function encodeEvents(events: readonly unknown[]): Uint8Array {
+  return new TextEncoder().encode(events.map((event) => JSON.stringify(event) + "\n").join(""));
+}
+
+function createStaticRun(...chunks: Uint8Array[]): WorkflowRunHandle {
   const readable = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(bytes);
+      for (const chunk of chunks) controller.enqueue(chunk);
       controller.close();
     },
   });

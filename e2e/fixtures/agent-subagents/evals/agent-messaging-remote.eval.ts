@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-const MEMORABLE_FACT = "The tide station passphrase is HARBOR-LUMEN-4482.";
+const MEMORABLE_FACT = "The tide station passphrase is HARBOR-LUMEN-4482";
 
 /**
  * Cross-turn continuation of a remote child over a real HTTP hop: turn one

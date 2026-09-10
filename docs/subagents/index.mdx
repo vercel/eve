@@ -5,6 +5,16 @@ description: "Delegate work to root-agent copies or declared specialists with th
 
 eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
+## Completion batching
+
+eve automatically combines adjacent successful completions already queued from
+tasks launched in the same parent turn. Every result is retained, and the parent
+responds to the batch in one turn. No configuration is required.
+
+There is no debounce timer or waiting for unfinished tasks. Failures, input
+requests, explicit updates, user messages, and different task cohorts remain
+separate delivery boundaries.
+
 ## The built-in `agent` tool
 
 The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:
@@ -173,7 +183,7 @@ Each delegated subagent spins up its own child session and stream. The parent st
 
 A background task that was already admitted survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. Cancellation delivers the task's final notification to an active parent even if the task must be stopped forcibly. Parent-session finalization cancels remaining live tasks.
 
-Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call so completed earlier steps, tool results, and sandbox work remain available to the child. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
+Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call by default so completed earlier Workflow steps, tool results, and sandbox work remain available to the child. A declared subagent that opts into [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) can instead repeat the uncommitted calls and inline tool executions in its current batch. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
 
 ## Agent messaging
 

@@ -69,8 +69,9 @@ Instrumentation providers receive `channel.delivery.started` followed by
 `channel.delivery.failed` for every inbound channel operation. The lifecycle
 covers durable processing through the terminal state of the resulting turn, not
 messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
-Several deliveries can coalesce into one turn while retaining separate lifecycle
-pairs, and an adapter can consume a delivery without starting a turn.
+Adjacent queued messages with matching authenticated identities and authorization
+attributes can share a turn while retaining separate lifecycle pairs. An adapter
+can also consume a delivery without starting a turn.
 
 Each operation has a framework-owned `deliveryId` distinct from its optional
 platform request ID. Metadata-only providers receive identity, channel, session,

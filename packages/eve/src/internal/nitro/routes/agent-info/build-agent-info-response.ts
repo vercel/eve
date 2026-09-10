@@ -15,6 +15,7 @@ import {
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 export type AgentInfoResponse = AgentInfoResult;
@@ -61,7 +62,9 @@ export function buildAgentInfoResponse(
                 toChatGptEndpoint(input.chatgptAuth),
               ),
               id: manifest.config.model.id,
-              providerOptions: manifest.config.model.providerOptions,
+              providerOptions: sanitizeProviderOptionsForInfo(
+                manifest.config.model.providerOptions,
+              ),
               reasoning: manifest.config.reasoning,
               routing: manifest.config.model.routing,
               source:
@@ -221,6 +224,64 @@ export function buildAgentInfoResponse(
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],
     },
   };
+}
+
+/**
+ * `providerOptions` can carry deployment-owner credentials: the shipped BYOK
+ * scaffold places the provider `apiKey` under `gateway.byok`, and custom
+ * providers may accept credential-bearing fields such as `headers`. The info
+ * route is served to every caller the application's channel auth admits, so
+ * the inspection payload must never serialize credential material. Drop the
+ * BYOK block (its provider slug is already reported via `routing.byok`) and
+ * redact credential-shaped keys recursively, while keeping non-secret options
+ * such as `gateway.serviceTier` that the dev TUI reads.
+ */
+const CREDENTIAL_OPTION_KEY =
+  /^(api[-_]?key|access[-_]?token|auth|authorization|bearer|client[-_]?secret|credentials?|headers|password|private[-_]?key|secret|token)$/i;
+
+const REDACTED_CREDENTIAL = "[redacted]";
+
+function sanitizeProviderOptionsForInfo(
+  providerOptions: Record<string, JsonObject> | undefined,
+): Record<string, JsonObject> | undefined {
+  if (providerOptions === undefined) return undefined;
+  const sanitized: Record<string, JsonObject> = {};
+  for (const [provider, options] of Object.entries(providerOptions)) {
+    sanitized[provider] = redactCredentialOptions(options);
+  }
+  return sanitized;
+}
+
+function redactCredentialOptions(value: JsonValue): JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const redacted: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "byok") {
+      // BYOK entries are `{ apiKey }` credential objects; the provider slug is
+      // already exposed through `routing.byok`.
+      continue;
+    }
+    if (CREDENTIAL_OPTION_KEY.test(key)) {
+      redacted[key] = REDACTED_CREDENTIAL;
+      continue;
+    }
+    if (entry !== null && typeof entry === "object") {
+      if (Array.isArray(entry)) {
+        redacted[key] = entry.map((item) =>
+          item !== null && typeof item === "object" && !Array.isArray(item)
+            ? redactCredentialOptions(item)
+            : item,
+        );
+      } else {
+        redacted[key] = redactCredentialOptions(entry);
+      }
+      continue;
+    }
+    redacted[key] = entry;
+  }
+  return redacted;
 }
 
 function toModuleSource(

@@ -121,7 +121,7 @@ describe("packed package consumption", () => {
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/config.ts",
-      'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({ deployed: { source: { git: { directory: ".", repository: "github.com/acme/agent" } }, target: { branch: "main" }, credentials: { vercelConnect: { connector: "github/selfmod-acme-agent" } } } });\n',
+      'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({ deployed: { source: { git: { directory: ".", repository: "github.com/acme/agent" } }, target: { branch: "main" }, authorize: () => false, credentials: { vercelConnect: { connector: "github/selfmod-acme-agent" } } } });\n',
     );
     await writeAppFile(
       appRoot,
@@ -141,13 +141,7 @@ describe("packed package consumption", () => {
 
     await run(
       "pnpm",
-      [
-        "install",
-        "--ignore-scripts",
-        "--no-frozen-lockfile",
-        "--prefer-offline",
-        "--config.minimum-release-age=0",
-      ],
+      ["install", "--ignore-scripts", "--no-frozen-lockfile", "--prefer-offline"],
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));

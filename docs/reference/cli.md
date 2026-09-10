@@ -372,7 +372,7 @@ Runs all discovered evals when no eval ids are given; ids match exactly or by di
 | `--json`                 | flag   | off     | Output results as JSON                                        |
 | `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
 | `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
-| `--verbose`              | flag   | off     | Stream per-eval `t.log` lines to stdout                       |
+| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
 
 See [Evals](../evals/overview) for authoring evals.
 

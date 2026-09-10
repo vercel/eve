@@ -1,5 +1,46 @@
 # eve
 
+## 0.53.0
+
+### Minor Changes
+
+- 0f8caf4: Simplify workflow-tool delegation to `ctx.agent(target, input)`. eve now derives replay-stable invocation identities, so workflow authors no longer provide separate `key` and `target` fields, and inline output schemas infer the structured result type.
+
+### Patch Changes
+
+- 7090a95: chore(eve): update AI SDK dependencies
+- 67ee820: Fix loading eve-owned authored modules, including the self-modification extension, from workspace-linked installations. Package builds now also preserve eve self-imports without unresolved-import warnings.
+- 8c1430c: Allow `Ctrl+C` to interrupt a pending dev TUI turn cancellation and arm the next press to exit.
+- 2b2ad19: Add an experimental `workflow.modelCallsPerStep` agent option for batching sequential model and inline tool cycles into fewer Workflow checkpoints. Raising it above one reduces checkpoint overhead while widening the retry and replay unit.
+- 86e13ff: Update Workflow packages to use released Windows read retries while preserving session inbox metadata negotiation.
+
+## 0.52.5
+
+### Patch Changes
+
+- 1a9556c: Preserve framework announcements in conversation history so changing task and skill snapshots append to earlier model requests instead of replacing their context. Unchanged announcements are skipped until history is cleared or compacted, and completed compaction is retained if the next model request fails.
+- a24b68c: Export `defineDurableCallback` so provider packages can create replayable dynamic tools outside eve's authored-source transform.
+- d630b21: Retry transient Windows file-sharing errors when reading local workflow state while still surfacing persistent access errors and malformed state. Preserve pending tasks that fit the compaction budget and keep explicitly configured `mockModel()` responders during step-scoped dynamic model selection when authored-model mocking is enabled.
+- cf1510f: Redact BYOK credentials and credential-shaped provider options from `/eve/v1/info` responses while preserving non-secret provider settings.
+- 1a9556c: Remove the instruction that forced silence while background tasks were pending. This prevents that instruction from carrying into later user turns and suppressing their answers.
+- 3bbf8e5: Only batch adjacent queued deliveries when their full auth contexts match, preventing one sender's input from running under another sender's auth. Anonymous deliveries stay separate; matching authenticated follow-ups still batch with their attachments and context in order.
+- 71fbdb8: Classify CLI setup and onboarding failures into bounded, privacy-preserving categories, including package-manager startup and pnpm workspace-probe failures. Telemetry continues to exclude error messages and command output.
+- ee02527: Print each eval session's workflow run ID when `eve eval --verbose` runs, including primary and secondary sessions.
+- 51c4719: Keep experimental channel activity grouped with the user request that originated it across background task reporting, human approval and question resumes, and authorization callbacks.
+
+## 0.52.4
+
+### Patch Changes
+
+- 97fccac: Dynamic tools with non-durable presentation labels now remain available and fall back to their tool names.
+- d74fdb4: Add a Datadog eval reporter that creates one LLM Observability Experiment per eve eval run and submits eval assertion metrics through the optional `dd-trace` package. Opted-in eval inputs are pushed as versioned dataset records and linked to their experiment rows. The integration is tested against the public dataset and external Experiment APIs in `dd-trace@6.13.0`.
+- 8946bd5: Enable configured deployments to edit an agent source checkout and publish changes as draft GitHub pull requests. Registry setup installs official registry items in the disposable checkout, provisions a repository-scoped Vercel Connect GitHub connector, and can continue without secrets in headless environments; manual and self-hosted deployments can use a fine-grained GitHub PAT.
+- dc73dee: Keep sandbox template and session keys stable across unrelated agent changes when bootstrap has no skill or workspace seed files. Existing affected sandboxes switch to the corrected key on first use after upgrading.
+- b3ce510: Only suppress a response when the empty-delivery marker is the entire response, apart from surrounding whitespace. Replies that quote or explain the marker are now delivered and retained in conversation history.
+- 22046b2: Combine adjacent queued successful sibling completions into one parent turn, reducing redundant model calls while retaining every result. Batching happens automatically without waiting for unfinished tasks.
+- 6d12a70: Forward inherited activity observation when background tasks start local or remote subagents, so their tool activity appears beneath the task row.
+- f85de0d: Workflow tools can use the same requester-scoped `ctx.getToken` and `ctx.requireAuth` as ordinary tools inside step helpers, automatically waiting for sign-in and retrying the interrupted step. In background workflows, these APIs require a supporting session driver; older conversations fail before calling the auth provider with an instruction to start a new session.
+
 ## 0.52.3
 
 ### Patch Changes

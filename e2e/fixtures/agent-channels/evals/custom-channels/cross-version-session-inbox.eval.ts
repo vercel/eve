@@ -7,7 +7,10 @@ import { defineEval } from "eve/evals";
 import type { EveEvalContext } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { postChannel } from "./shared";
+import {
+  DEPLOYMENT_PENDING_CODE,
+  DEPLOYMENT_REVISION_HEADER,
+} from "../../agent/lib/deployment-revision";
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
 const OLD_EVE_VERSION = "0.30.8";
@@ -26,7 +29,7 @@ const TOOL_NAME = "wait-for-cancellation";
 const execFileAsync = promisify(execFile);
 const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
-type MessageResponse = { ok: boolean; sessionId?: string };
+type MessageResponse = { ok: boolean; sessionId?: string; eveVersion: string };
 
 /**
  * Proves the complete mixed-version codec boundary through the real Workflow
@@ -53,6 +56,8 @@ export default defineEval({
     }
 
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
+    const oldRevision = crypto.randomUUID();
+    const currentRevision = crypto.randomUUID();
     const links = await Promise.all([
       snapshotLink(FIXTURE_EVE_LINK),
       snapshotLink(CONFIG_EVE_LINK),
@@ -74,18 +79,21 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${OLD_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, "eve@0.30.8");
+      await deployToAlias(t, alias, "eve@0.30.8", oldRevision, oldEvePackage);
       await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
 
       const sessionRef = crypto.randomUUID();
-      const started = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
+      const started = await postToDeployment(t, oldRevision, {
         message: ACTIVE_TURN_MESSAGE,
         sessionRef,
       });
       await t.require(
         started,
         satisfies(
-          (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+          (value: MessageResponse) =>
+            value.ok === true &&
+            typeof value.sessionId === "string" &&
+            value.eveVersion === OLD_EVE_VERSION,
           "eve@0.30.8 starts the durable session",
         ),
       );
@@ -104,10 +112,10 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${CURRENT_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, `eve@${currentEveVersion}`);
+      await deployToAlias(t, alias, `eve@${currentEveVersion}`, currentRevision, currentEvePackage);
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
-      const replacement = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
+      const replacement = await postToDeployment(t, currentRevision, {
         message: `Reply with exactly ${FOLLOW_UP_TOKEN}.`,
         sessionRef,
         turnPolicy: "queue",
@@ -115,7 +123,10 @@ export default defineEval({
       await t.require(
         replacement,
         satisfies(
-          (value: MessageResponse) => value.ok === true && value.sessionId === sessionId,
+          (value: MessageResponse) =>
+            value.ok === true &&
+            value.sessionId === sessionId &&
+            value.eveVersion === currentEveVersion,
           "the current producer targets the existing eve@0.30.8 session",
         ),
       );
@@ -188,8 +199,15 @@ async function readPackageVersion(packagePath: string): Promise<string> {
 }
 
 /** Builds the fixture and repoints the run-scoped alias at the fresh deployment. */
-async function deployToAlias(t: EveEvalContext, alias: string, phase: string): Promise<void> {
-  await execFileAsync("pnpm", ["exec", "eve", "build"], {
+async function deployToAlias(
+  t: EveEvalContext,
+  alias: string,
+  phase: string,
+  revision: string,
+  evePackagePath: string,
+): Promise<void> {
+  // pnpm's dependency synchronization can repair the intentionally replaced links.
+  await execFileAsync(process.execPath, [resolve(evePackagePath, "bin", "eve.js"), "build"], {
     ...EXEC_OPTIONS,
     env: {
       ...process.env,
@@ -204,11 +222,22 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
     process.env.EVE_E2E_MODEL === undefined
       ? []
       : ["--env", `EVE_E2E_MODEL=${process.env.EVE_E2E_MODEL}`];
+  const revisionArgs = ["--env", `EVE_E2E_DEPLOYMENT_REVISION=${revision}`];
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
     "pnpm",
-    ["exec", "vc", "deploy", "--prebuilt", "--yes", "--target=preview", ...modelArgs, ...tokenArgs],
+    [
+      "exec",
+      "vc",
+      "deploy",
+      "--prebuilt",
+      "--yes",
+      "--target=preview",
+      ...modelArgs,
+      ...revisionArgs,
+      ...tokenArgs,
+    ],
     EXEC_OPTIONS,
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
@@ -222,6 +251,35 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
     ["exec", "vc", "alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
     EXEC_OPTIONS,
   );
+}
+
+async function postToDeployment(
+  t: EveEvalContext,
+  revision: string,
+  body: unknown,
+): Promise<MessageResponse> {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const response = await t.target.fetch("/cross-version-webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [DEPLOYMENT_REVISION_HEADER]: revision,
+      },
+      body: JSON.stringify(body),
+      signal: t.signal,
+    });
+    const result = (await response.json()) as MessageResponse & { code?: string };
+    if (response.status === 409 && result.code === DEPLOYMENT_PENDING_CODE) {
+      await t.sleep(1_000);
+      continue;
+    }
+    if (!response.ok) {
+      throw new Error(`Cross-version message failed (${response.status}).`);
+    }
+    return result;
+  }
+  throw new Error("Timed out waiting for the cross-version message's deployment.");
 }
 
 /** Waits until the alias exposes the marker from the expected deployment. */

@@ -17,19 +17,71 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 
 export interface AgentInput {
   readonly agentId?: string;
-  readonly key: string;
   readonly message: string;
   readonly outputSchema?: JsonObject;
-  readonly target: string;
 }
 
-/** Context supplied only to a defineWorkflowTool executor, inside its durable run. */
+type JsonSchemaProperties = Readonly<Record<string, JsonObject>>;
+type JsonSchemaRequiredKeys<
+  TProperties extends JsonSchemaProperties,
+  TRequired,
+> = TRequired extends readonly string[] ? Extract<TRequired[number], keyof TProperties> : never;
+type Simplify<TValue> = { [TKey in keyof TValue]: TValue[TKey] };
+type JsonSchemaObjectOutput<TProperties extends JsonSchemaProperties, TRequired> = Simplify<
+  {
+    -readonly [TKey in JsonSchemaRequiredKeys<TProperties, TRequired>]-?: JsonSchemaOutput<
+      TProperties[TKey]
+    >;
+  } & {
+    -readonly [
+      TKey in Exclude<keyof TProperties, JsonSchemaRequiredKeys<TProperties, TRequired>>
+    ]?: JsonSchemaOutput<TProperties[TKey]>;
+  }
+>;
+
+type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue }
+  ? Extract<TValue, JsonValue>
+  : TSchema extends { readonly enum: readonly (infer TValue)[] }
+    ? Extract<TValue, JsonValue>
+    : TSchema extends {
+          readonly type: "object";
+          readonly properties: infer TProperties extends JsonSchemaProperties;
+          readonly required?: infer TRequired;
+        }
+      ? JsonSchemaObjectOutput<TProperties, TRequired>
+      : TSchema extends {
+            readonly type: "array";
+            readonly items: infer TItems extends JsonObject;
+          }
+        ? JsonSchemaOutput<TItems>[]
+        : TSchema extends { readonly type: "string" }
+          ? string
+          : TSchema extends { readonly type: "integer" | "number" }
+            ? number
+            : TSchema extends { readonly type: "boolean" }
+              ? boolean
+              : TSchema extends { readonly type: "null" }
+                ? null
+                : JsonValue;
+
+interface WorkflowAgent {
+  <const TOutputSchema extends JsonObject>(
+    target: string,
+    input: AgentInput & { readonly outputSchema: TOutputSchema },
+  ): Promise<JsonSchemaOutput<TOutputSchema>>;
+  (target: string, input: AgentInput): Promise<JsonValue>;
+}
+
+/**
+ * Context supplied to a workflow tool. Pass it directly to a step helper for
+ * getToken/requireAuth; those capabilities throw in the workflow body itself.
+ */
 export type WorkflowToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName"
+  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
-  /** Invoke a visible subagent. The key must be unique within this workflow run. */
-  agent(input: AgentInput): Promise<JsonValue>;
+  /** Invoke a visible subagent by its model-visible name. */
+  agent: WorkflowAgent;
   /** Ask the human on the session's channel; awaiting the answer suspends the run. */
   ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
 };

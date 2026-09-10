@@ -58,6 +58,11 @@ const config: NextConfig = {
   async redirects() {
     return [
       {
+        source: "/nights",
+        destination: "/eves",
+        permanent: true,
+      },
+      {
         source: "/docs",
         destination: "/docs/getting-started",
         permanent: true,

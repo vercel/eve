@@ -4,6 +4,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
+import { discoverAgent } from "#discover/discover-agent.js";
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
+
 import { SELF_MODIFICATION_CONFIG_PATH } from "./git-workspace.js";
 
 const runFile = promisify(execFile);
@@ -11,9 +14,11 @@ const GENERATED_MARKER = "// eve-self-modification: generated-v1";
 
 export interface SelfModificationSetupValues {
   readonly branch: string;
+  readonly channelNames: readonly string[];
   readonly connector: string;
   readonly directory: string;
   readonly repository: string;
+  readonly vercelBackend: boolean;
 }
 export interface DetectedGitRepository {
   readonly branch?: string;
@@ -24,6 +29,7 @@ export interface DetectedGitRepository {
 }
 export interface SelfModificationSetupOperations {
   attachConnector(connector: string): Promise<void>;
+  detectChannelNames(): Promise<readonly string[]>;
   detectGitRepository(): Promise<DetectedGitRepository>;
   findOrCreateConnector(name: string): Promise<string>;
   readConfig(): Promise<string | undefined>;
@@ -38,6 +44,29 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
   if (values === undefined) {
     return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n`;
   }
+  const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
+  const channelCases = (values.vercelBackend ? channelNames : [])
+    .map(
+      (name) => `      case ${JSON.stringify(`channel:${name}`)}:
+        // Authorize trusted principals for this channel before returning true.
+        return false;`,
+    )
+    .join("\n");
+  const httpCase = values.vercelBackend
+    ? `        case "http": {
+          const projectId = process.env.VERCEL_PROJECT_ID;
+          return (
+            projectId !== undefined &&
+            projectId.length > 0 &&
+            principal?.authenticator === "oidc" &&
+            (principal.issuer === "https://oidc.vercel.com" ||
+              principal.issuer?.startsWith("https://oidc.vercel.com/") === true) &&
+            principal.attributes.project_id === projectId
+          );
+        }
+`
+    : "";
+  const switchCases = `${httpCase}${channelCases}`;
   const body = `import { defineSelfModificationConfig } from "eve/self-modification/config";
 
 export default defineSelfModificationConfig({
@@ -51,6 +80,13 @@ export default defineSelfModificationConfig({
     target: { branch: ${JSON.stringify(values.branch)} },
     credentials: {
       vercelConnect: { connector: ${JSON.stringify(values.connector)} },
+    },
+    authorize: ({ channel, principal }) => {
+      switch (channel.kind) {
+${switchCases}        default:
+          // Add another branch when you add a trusted channel.
+          return false;
+      }
     },
   },
 });
@@ -89,6 +125,12 @@ export function defaultSelfModificationSetupOperations(
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
   return {
+    async detectChannelNames() {
+      const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
+      return discovered.manifest.channels.map((source) =>
+        stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, ""),
+      );
+    },
     async detectGitRepository() {
       const remote = await gitOutput(appRoot, ["config", "--get", "remote.origin.url"]);
       const repository = remote === undefined ? undefined : parseGitHubRemote(remote);

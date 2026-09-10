@@ -13,13 +13,18 @@ const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
 const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 const TASK_STATE_LABEL = "[Task state]\n";
 
-function respond(request: MockModelRequest): MockModelResponse | string {
+function respond(
+  request: MockModelRequest,
+): MockModelResponse | Promise<MockModelResponse | string> | string {
+  if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
+    return batchingBenchmark(request);
+  }
   if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
     const taskState = latestTaskState(request.userMessages);
     if (taskState !== undefined) return handleRedundantReviewWake(taskState);
   }
 
-  // Framework agent-list notes are model context, not scenario turns.
+  // Framework announcements are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
     return "TASK-UPDATE-RECEIVED";
@@ -261,6 +266,34 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
   return "TASK-FANOUT-STARTED";
 }
 
+async function batchingBenchmark(request: MockModelRequest): Promise<MockModelResponse | string> {
+  const message = [...request.userMessages]
+    .reverse()
+    .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
+  if (message === "TASK-BATCHING-QUESTION") return "56";
+  if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
+  if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
+
+  // Keep the first completion's model call active while the burst arrives.
+  // This is fixture inference time, not a runtime debounce or settlement wait.
+  const completionMessages = request.userMessages.filter(
+    (entry) => entry.startsWith("Background task ") && entry.includes(" is completed."),
+  );
+  if (completionMessages.length === 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  const state = latestTaskState(request.userMessages);
+  if (state === undefined) return "TASK-FANOUT-STARTED";
+  // Script perfect compliance so the eval measures delivery cost, not model obedience.
+  if (state.tasks.some((task) => task.status === "pending")) return EMPTY_DELIVERY_SENTINEL;
+  const results = state.tasks.flatMap((task) =>
+    task.output?.type === "result" && typeof task.output.data === "string"
+      ? [task.output.data]
+      : [],
+  );
+  return JSON.stringify({ report: "TASK-BATCHING-REPORT", results: results.sort() });
+}
+
 const FAN_IN_CALL_IDS = ["task-fan-in-1", "task-fan-in-2"] as const;
 
 function fanInTasks(request: MockModelRequest): MockModelResponse | string {
@@ -410,7 +443,7 @@ function hasTaskNotification(
 }
 
 function isScenarioMessage(message: string): boolean {
-  return !message.startsWith("[Agents]");
+  return !/^(?:\[Agents\]|\[Task state\]|Background task (?:reporting|control))/u.test(message);
 }
 
 function scenarioUserMessageCount(request: MockModelRequest): number {
@@ -509,12 +542,12 @@ function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
       toolCalls: [
         {
           id: "child-task-exclusivity-send-a",
-          input: { agentId, message: "Return BUSY-WORKER-A." },
+          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-A." },
           name: "busy-worker",
         },
         {
           id: "child-task-exclusivity-send-b",
-          input: { agentId, message: "Return BUSY-WORKER-B." },
+          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-B." },
           name: "busy-worker",
         },
       ],

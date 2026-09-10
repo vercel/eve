@@ -95,8 +95,13 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
 );
-/** Framework-authored task state supplied to the model without altering user-message history. */
-export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
+/** Last framework announcements recorded in the retained session history. */
+export interface HistoryState {
+  readonly availableSkills?: string;
+  readonly taskState?: string;
+  readonly deliveryInstruction?: string;
+}
+export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
   readonly channelType?: string;
@@ -130,6 +135,12 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
+/** Originating root turn that owns the current user-visible activity artifact. */
+export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
+/** Pending HITL request identities that keep the current activity artifact open. */
+export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
+  "eve.activityPendingBlockers",
+);
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

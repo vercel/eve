@@ -1,7 +1,7 @@
 import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel";
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { NightsGalaxy } from "./nights-galaxy";
+import { NightsGalaxy } from "../nights/nights-galaxy";
 
 const title = "eve eves";
 const description =
@@ -16,9 +16,13 @@ const ogImage = {
 export const metadata: Metadata = {
   title,
   description,
+  alternates: {
+    canonical: "/eves",
+  },
   openGraph: {
     title,
     description,
+    url: "/eves",
     images: [ogImage],
   },
   twitter: {

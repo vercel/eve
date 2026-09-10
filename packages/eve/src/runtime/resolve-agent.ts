@@ -245,7 +245,10 @@ function createResolvedAgentConfig(
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
-          : { world: manifest.config.experimental.workflow.world },
+          : {
+              modelCallsPerStep: manifest.config.experimental.workflow.modelCallsPerStep,
+              world: manifest.config.experimental.workflow.world,
+            },
     };
   }
 

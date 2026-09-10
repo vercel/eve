@@ -258,8 +258,15 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["world"], message);
+  expectOnlyKnownKeys(record, ["modelCallsPerStep", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.modelCallsPerStep !== undefined) {
+    normalizedDefinition.modelCallsPerStep = expectPositiveInteger(
+      record.modelCallsPerStep,
+      message,
+    );
+  }
 
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);

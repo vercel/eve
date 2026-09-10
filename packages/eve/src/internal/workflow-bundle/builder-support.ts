@@ -8,7 +8,7 @@ import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { resolveWorkflowModulePath } from "#internal/application/package.js";
+import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
   applyWorkflowTransform,
   getImportPath,
@@ -269,6 +269,9 @@ export function createEvePackageImportsPlugin(
   workingDir: string,
   options: { workflowCondition?: boolean } = {},
 ): WorkflowRolldownPlugin {
+  // Production builds from eve's package root. Fixtures that build from another
+  // directory still need eve's own modules, e.g. the step wrapper the transform injects.
+  const roots = [...new Set([workingDir, resolvePackageRoot()])];
   return {
     name: "eve-package-imports",
     resolveId(source: string) {
@@ -276,16 +279,20 @@ export function createEvePackageImportsPlugin(
 
       if (compiledSubpath !== undefined) {
         if (options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js") {
-          return resolveFirstExistingPath([
-            join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-            join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
-          ]);
+          return resolveFirstExistingPath(
+            roots.flatMap((root) => [
+              join(root, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
+              join(root, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+            ]),
+          );
         }
 
-        return resolveFirstExistingPath([
-          join(workingDir, ".generated", "compiled", compiledSubpath),
-          join(workingDir, "dist", "src", "compiled", compiledSubpath),
-        ]);
+        return resolveFirstExistingPath(
+          roots.flatMap((root) => [
+            join(root, ".generated", "compiled", compiledSubpath),
+            join(root, "dist", "src", "compiled", compiledSubpath),
+          ]),
+        );
       }
 
       const sourceSubpath = source.match(/^#(.+)\.js$/)?.[1];
@@ -295,10 +302,12 @@ export function createEvePackageImportsPlugin(
       }
 
       return resolveFirstExistingPath(
-        WORKFLOW_SOURCE_EXTENSIONS.flatMap((extension) => [
-          join(workingDir, "src", `${sourceSubpath}${extension}`),
-          join(workingDir, "dist", "src", `${sourceSubpath}${extension}`),
-        ]),
+        roots.flatMap((root) =>
+          WORKFLOW_SOURCE_EXTENSIONS.flatMap((extension) => [
+            join(root, "src", `${sourceSubpath}${extension}`),
+            join(root, "dist", "src", `${sourceSubpath}${extension}`),
+          ]),
+        ),
       );
     },
   };

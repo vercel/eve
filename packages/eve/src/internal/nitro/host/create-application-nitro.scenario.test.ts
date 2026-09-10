@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,12 +29,14 @@ import {
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
 } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
+import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
 const createNitroMock = vi.fn();
 const registerScheduleTaskHandlers = vi.fn();
+const createTemporaryDirectory = useTemporaryDirectories();
 
 vi.mock("nitro/builder", () => ({
   createNitro: createNitroMock,
@@ -198,6 +200,7 @@ describe("application Nitro creation", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    createNitroMock.mockReset();
   });
 
   afterEach(() => {
@@ -582,6 +585,16 @@ describe("application Nitro creation", () => {
     const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = await createPreparedHost();
+    const sourceRoot = await realpath(await createTemporaryDirectory("eve-extension-trace-deps-"));
+    for (const name of ["zod", "sharp"]) {
+      const packageRoot = join(sourceRoot, "node_modules", name);
+      await mkdir(join(packageRoot, "lib"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name, version: "1.0.0", main: "./lib/index.js" }),
+      );
+      await writeFile(join(packageRoot, "lib", "index.js"), "module.exports = {};\n");
+    }
     preparedHost.compileResult.manifest.extensionMounts = [
       {
         externalDependencies: ["zod", "sharp"],
@@ -590,7 +603,7 @@ describe("application Nitro creation", () => {
         namespace: "layout",
         packageName: "layout-extension",
         packageNamespace: "layout-extension",
-        sourceRoot: process.cwd(),
+        sourceRoot,
       },
     ];
     preparedHost.compileResult.manifest.config = {
@@ -611,8 +624,8 @@ describe("application Nitro creation", () => {
       id: "zod",
     });
     expect(createNitroMock.mock.calls[0]?.[0].traceOpts.nft.paths).toEqual({
-      zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/),
-      sharp: expect.stringMatching(/sharp[/\\](?:lib[/\\]index\.js|dist[/\\]index\.cjs)$/),
+      zod: join(sourceRoot, "node_modules", "zod", "lib", "index.js"),
+      sharp: join(sourceRoot, "node_modules", "sharp", "lib", "index.js"),
     });
   });
 

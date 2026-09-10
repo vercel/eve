@@ -177,6 +177,13 @@ const EXTERNAL_PACKAGES = new Set([
 ]);
 
 function isExternalPackageSpecifier(source) {
+  // Public self-imports must remain bare in the published package. Resolving
+  // them during a clean build would target output that does not exist yet;
+  // resolving them during an incremental build could consume stale output.
+  if (source === "eve" || source.startsWith("eve/")) {
+    return true;
+  }
+
   // All `#*` subpath imports stay external so the published dist keeps
   // the bare-specifier shape the runtime resolves at load time. Source
   // files routinely depend on a 1:1 mapping (workflow

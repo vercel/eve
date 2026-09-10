@@ -10,6 +10,7 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import {
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+  WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
 } from "#execution/wire/session-inbox-contract.js";
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
@@ -138,6 +139,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     const hook = createHook<SessionInboxPayload>({
       metadata: {
         [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
+        [WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY]: true,
       },
       token,
     });

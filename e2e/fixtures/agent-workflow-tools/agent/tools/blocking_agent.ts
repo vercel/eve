@@ -7,10 +7,8 @@ export default defineWorkflowTool({
   async execute({ service }, ctx) {
     "use workflow";
 
-    return await ctx.agent({
-      key: "blocking-child",
+    return await ctx.agent("workflow-marker", {
       message: `${service}:blocking`,
-      target: "workflow-marker",
     });
   },
 });

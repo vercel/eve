@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -10,6 +11,7 @@ import {
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
@@ -166,7 +168,10 @@ async function waitForNextSessionAction(input: {
     input.bufferedDeliveries.length > 0
   ) {
     return {
-      delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
+      delivery: takeBufferedTurnDelivery(
+        input.bufferedDeliveries,
+        getSessionTaskCohorts(input.stateCursor.sessionState.snapshot?.session.state),
+      ),
       kind: "delivery",
     };
   }
@@ -267,20 +272,27 @@ function isCancelledTaskDeliveryId(
   );
 }
 
-function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
+function takeBufferedTurnDelivery(
+  bufferedDeliveries: DeliverHookPayload[],
+  cohorts: ReadonlyMap<string, string>,
+): DeliverHookPayload {
   const first = bufferedDeliveries.shift();
   if (first === undefined) {
     throw new Error("Cannot take a turn delivery from an empty buffer.");
   }
 
+  const cohort = completionCohort(first, cohorts);
+  const authenticated = first.auth != null && first.auth.principalType !== "anonymous";
   const turnDeliveries = [first];
   let caller = first.caller;
   while (bufferedDeliveries.length > 0) {
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
-      first.taskDeliveryId !== undefined ||
-      next.taskDeliveryId !== undefined ||
+      ((first.taskDeliveryId !== undefined || next.taskDeliveryId !== undefined) &&
+        (cohort === undefined || completionCohort(next, cohorts) !== cohort)) ||
+      (first.taskDeliveryId === undefined &&
+        (!authenticated || !jsonValuesEqual(first.auth, next.auth))) ||
       (caller !== undefined && next.caller !== undefined)
     ) {
       break;
@@ -295,4 +307,14 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
   }
 
   return coalesceDeliveries(turnDeliveries);
+}
+
+/** Only successful sibling notifications can share their existing cohort context. */
+function completionCohort(
+  delivery: DeliverHookPayload,
+  cohorts: ReadonlyMap<string, string>,
+): string | undefined {
+  const suffix = ":ready:completed";
+  if (delivery.caller !== undefined || !delivery.taskDeliveryId?.endsWith(suffix)) return undefined;
+  return cohorts.get(delivery.taskDeliveryId.slice(0, -suffix.length));
 }

@@ -63,9 +63,6 @@ function logger(): InitCliLogger & { messages: string[]; errors: string[] } {
 function dependencies(
   gitResult: GitInitResult = { kind: "initialized" },
 ): InitCommandDependencies & {
-  confirmInitInNonEmptyDirectory: ReturnType<
-    typeof vi.fn<InitCommandDependencies["confirmInitInNonEmptyDirectory"]>
-  >;
   detectInvokingPackageManager: ReturnType<
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
@@ -88,7 +85,6 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
-    confirmInitInNonEmptyDirectory: vi.fn(async () => ({ kind: "current-directory" })),
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
@@ -447,7 +443,6 @@ describe("runInitCommand", () => {
     await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
     await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
-    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
@@ -889,7 +884,6 @@ describe("runInitCommand", () => {
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "exec",
       "eve",
@@ -1262,10 +1256,11 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("prints a spawn failure when installation produces no child output", async () => {
+  it("categorizes a missing package manager without collecting process output", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-spawn-fail-"));
     const output = logger();
     const deps = dependencies();
+    const terminalEvents: Array<{ failureCode?: string; result: string; step: string }> = [];
     deps.runPackageManagerInstall.mockResolvedValue({
       kind: "installed",
       result: {
@@ -1275,11 +1270,28 @@ describe("runInitCommand", () => {
       },
     });
 
-    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
-      "Failed to install dependencies",
-    );
+    await expect(
+      runInitCommand(
+        output,
+        parentDirectory,
+        "my-agent",
+        {},
+        deps,
+        undefined,
+        (step, result, failureCode) => {
+          terminalEvents.push({ failureCode, result, step });
+        },
+      ),
+    ).rejects.toThrow("Failed to install dependencies");
 
     expect(output.errors).toEqual(["pnpm was not found. Install it before running this step."]);
+    expect(terminalEvents).toEqual([
+      {
+        step: "install_dependencies",
+        result: "error",
+        failureCode: "package_manager_not_found",
+      },
+    ]);
   });
 
   it("preserves an existing host after install failure and prints the retry command", async () => {

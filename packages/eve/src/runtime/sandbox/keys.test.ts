@@ -15,6 +15,7 @@ import {
   createRuntimeSandboxKeys,
   createRuntimeSandboxTemplateKey,
 } from "#runtime/sandbox/keys.js";
+import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 
 const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
@@ -92,6 +93,22 @@ async function deriveSessionKey(input?: {
     },
   });
   return keys.sessionKey;
+}
+
+async function deriveBootstrapKeys(
+  templatePlan: Extract<RuntimeSandboxTemplatePlan, { kind: "bootstrap" }> = {
+    kind: "bootstrap",
+    sourceHash: "sandbox-source-v1",
+  },
+) {
+  return await createRuntimeSandboxKeys({
+    backendName: "vercel",
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    nodeId: "__root__",
+    sessionId: "session_1",
+    sourceId: "sandbox.ts",
+    templatePlan,
+  });
 }
 
 /**
@@ -177,6 +194,50 @@ describe("createRuntimeSandboxKeys", () => {
     );
 
     expect(first).not.toBe(second);
+  });
+
+  it("keeps unseeded bootstrap template and session keys stable across unrelated source changes", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    const metadata = createMetadataFixture("1.0.0");
+    const first = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
+    const second = await withBundledMetadata(
+      {
+        ...metadata,
+        discovery: { ...metadata.discovery, sourceGraphHash: "f".repeat(64) },
+      },
+      () => deriveBootstrapKeys(),
+    );
+
+    expect(first.templateKey).not.toBeNull();
+    expect(second).toEqual(first);
+  });
+
+  it("does not use missing compile metadata as unseeded bootstrap content", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    const metadata = createMetadataFixture(resolveInstalledPackageInfo().version);
+    const withMetadata = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
+    const withoutMetadata = await withBundledMetadata(undefined, () => deriveBootstrapKeys());
+
+    expect(withoutMetadata).toEqual(withMetadata);
+  });
+
+  it.each([
+    { sourceHash: "sandbox-source-v2" },
+    { revalidationKey: "bootstrap-v2" },
+    { contentHash: CONTENT_HASH },
+  ])("rotates both bootstrap keys when sandbox inputs change: %j", async (change) => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    await withBundledMetadata(createMetadataFixture("1.0.0"), async () => {
+      const first = await deriveBootstrapKeys();
+      const second = await deriveBootstrapKeys({
+        kind: "bootstrap",
+        sourceHash: "sandbox-source-v1",
+        ...change,
+      });
+
+      expect(second.templateKey).not.toBe(first.templateKey);
+      expect(second.sessionKey).not.toBe(first.sessionKey);
+    });
   });
 });
 

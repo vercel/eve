@@ -1,7 +1,6 @@
 import { CONDITIONAL_DELIVERY_INSTRUCTION } from "#shared/empty-delivery.js";
 import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
@@ -22,7 +21,6 @@ const POLICIES = {
   normal: { allowsEmptyDelivery: false },
   pending: {
     allowsEmptyDelivery: true,
-    instruction: TASK_DELIVERY_PENDING_INSTRUCTION,
   },
   settled: {
     allowsEmptyDelivery: false,
@@ -40,7 +38,6 @@ export function resolveDeliveryPolicy(input: {
 }): DeliveryPolicy {
   // These runs have an explicit output consumer, so silence would violate the call contract.
   if (input.hasOutputSchema || input.isChild) return POLICIES.normal;
-  // Partial cohort results are withheld until the parent can report the cohort once.
   if (input.taskDeliveryPhase === "pending") return POLICIES.pending;
   // A complete cohort owes its caller the consolidated result and must not disappear silently.
   if (input.taskDeliveryPhase === "settled") return POLICIES.settled;

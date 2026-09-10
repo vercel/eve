@@ -258,8 +258,8 @@ export function createCliProgram(
           (step) => {
             telemetry.trackSetupStep({ flow: "init", step });
           },
-          (step, result) => {
-            telemetry.trackSetupTerminal({ flow: "init", step, result });
+          (step, result, failureCode) => {
+            telemetry.trackSetupTerminal({ flow: "init", step, result, failureCode });
           },
         );
       },
@@ -621,7 +621,7 @@ export function createCliProgram(
     .option("--json", "Output results as JSON")
     .option("--junit <path>", "Write JUnit XML results to a file")
     .option("--skip-report", "Skip eval-defined reporters (e.g. Braintrust)")
-    .option("--verbose", "Stream per-eval t.log lines to stdout")
+    .option("--verbose", "Stream per-eval logs and workflow run IDs to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());
       await runEvalCommand(evalIds, options, logger, applicationContext.root);

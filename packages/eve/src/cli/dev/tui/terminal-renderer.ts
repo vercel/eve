@@ -487,6 +487,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
+  /** Carries a pending-cancel interrupt into the next prompt as the first exit press. */
+  #armExitOnNextPrompt = false;
   readonly #onExitRequest?: () => void;
   #caretVisible = true;
   #spinnerIndex = 0;
@@ -715,7 +717,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#promptPlaceholderActive = true;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    this.#exitArmed = false;
+    this.#exitArmed = this.#armExitOnNextPrompt;
+    this.#armExitOnNextPrompt = false;
     // A draft typed during the turn carries into the prompt; an explicit
     // initial draft (`eve dev --input`) wins over it. Queued messages the
     // runner never drained (an interrupted or failed turn) fold back in
@@ -3212,6 +3215,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       case "ctrl-c":
       case "escape": {
+        // Once a direct cancellation is pending, Ctrl+C is the hard escape
+        // hatch. Esc remains cooperative and repeated Ctrl+C presses can still
+        // pop queued messages into a steer payload.
+        if (key.type === "ctrl-c" && this.#messageQueue.view().cancelling) {
+          this.#interrupted = true;
+          this.#armExitOnNextPrompt = true;
+          this.#turnIndicator = { kind: "idle" };
+          this.#status = "Interrupted";
+          this.#resolveStreamInterrupt?.();
+          this.#paint();
+          break;
+        }
         // Esc and Ctrl+C drive steering and cancellation: pop the oldest
         // queued message and cancel the running turn so the runner submits it
         // as the replacement turn; with nothing queued, cancel immediately.
