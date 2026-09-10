@@ -15,7 +15,6 @@ export async function resolveWorkspaceSubagentDefinition(input: {
   readonly registries: readonly AgentSourceRegistry[];
   readonly source: LocalSubagentSourceRef;
 }): Promise<Extract<NormalizedSubagentConfig, { readonly kind: "remote" }>> {
-  if (input.definition.description.trim().length > 0) return input.definition;
   const workspaceContext = await findEveProjectContext(input.source.rootPath);
   if (workspaceContext?.kind !== "workspace-member") {
     throw new Error(
@@ -23,13 +22,16 @@ export async function resolveWorkspaceSubagentDefinition(input: {
     );
   }
   const member = workspaceContext.workspace.members.find(
-    (candidate) => relative(workspaceContext.workspace.root, candidate.appRoot) === input.path,
+    (candidate) =>
+      relative(workspaceContext.workspace.root, candidate.appRoot).replaceAll("\\", "/") ===
+      input.path,
   );
   if (member === undefined) {
     throw new Error(
       `Workspace subagent "${input.source.logicalPath}" targets unknown workspace member ${JSON.stringify(input.path)}.`,
     );
   }
+  if (input.definition.description.trim().length > 0) return input.definition;
   const { resolveDiscoveryProject } = await import("#discover/project.js");
   const project = await resolveDiscoveryProject(member.appRoot);
   const peer = await discoverAgent({ agentRoot: project.agentRoot, appRoot: project.appRoot });

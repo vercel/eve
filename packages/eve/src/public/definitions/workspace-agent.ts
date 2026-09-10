@@ -1,8 +1,7 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
-import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER, type HeadersValue } from "#client/types.js";
-import type { OutboundAuthFn } from "#public/agents/auth.js";
+import type { HeadersValue } from "#client/types.js";
+import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
   defineRemoteAgent,
   type RemoteAgentDefinition,
@@ -60,16 +59,11 @@ function isBrandedWorkspaceSubagent(value: unknown): value is BrandedWorkspaceSu
 
 function defaultWorkspaceAgentTransport(path: string): WorkspaceAgentTransport {
   const name = path.slice(path.lastIndexOf("/") + 1);
+  const auth = vercelOidc();
   return {
     auth: async () => {
       requireVercelWorkspaceEnvironment();
-      const token = await getVercelOidcToken({});
-      return {
-        headers: {
-          authorization: `Bearer ${token}`,
-          [VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER]: token,
-        },
-      };
+      return auth();
     },
     url: () => {
       requireVercelWorkspaceEnvironment();

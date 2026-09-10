@@ -65,4 +65,25 @@ describe("Vercel workspace subagent compilation", () => {
       }),
     ]);
   });
+
+  it("rejects an unknown peer even with a description override", async () => {
+    const app = await scenarioApp({
+      installDependencies: true,
+      name: "workspace-subagent-unknown-peer",
+      files: workspaceFiles(
+        [
+          'import { defineWorkspaceAgent } from "eve";',
+          "export default defineWorkspaceAgent({",
+          '  description: "Research urgent support escalations.",',
+          '  path: "agents/missing",',
+          "});",
+          "",
+        ].join("\n"),
+      ),
+    });
+
+    await expect(
+      compileAgent({ startPath: join(app.appRoot, "agents", "support") }),
+    ).rejects.toThrow('targets unknown workspace member "agents/missing"');
+  });
 });
