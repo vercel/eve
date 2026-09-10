@@ -60,7 +60,7 @@ describe("self-modification integration setup", () => {
 
     const plan = await prepareLocalSelfModificationSetup(ctx.prepare, effects);
     await expect(applySelfModificationSetup(plan, ctx.apply, effects)).resolves.toEqual({
-      facts: [{ label: "Self-modification", value: "local editing" }],
+      facts: [],
     });
     expect(effects.findOrCreateConnector).not.toHaveBeenCalled();
     expect(effects.writeConfig).not.toHaveBeenCalled();
