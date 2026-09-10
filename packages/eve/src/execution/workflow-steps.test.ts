@@ -1492,7 +1492,11 @@ describe("turnStep", () => {
   });
 
   it("prepares resumed-session history before dynamic runtime refresh", async () => {
-    const hidden = { content: "HIDE_FROM_RUNTIME_REFRESH", role: "user" as const };
+    const hidden = {
+      content: "HIDE_FROM_RUNTIME_REFRESH",
+      kind: "user" as const,
+      role: "user" as const,
+    };
     mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
       messages.filter((message) => message !== hidden),
     );
@@ -1541,7 +1545,7 @@ describe("turnStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
     const session = createStubSession({
       history: [
-        { content: "first", role: "user" },
+        { content: "first", kind: "user", role: "user" },
         hidden,
         { content: "second", role: "assistant" },
       ],
@@ -1592,7 +1596,7 @@ describe("turnStep", () => {
     });
 
     const expectedView = [
-      { content: "first", role: "user" },
+      { content: "first", kind: "user", role: "user" },
       { content: "second", role: "assistant" },
     ];
     expect(toolHandler.mock.calls[0]?.[1]).toMatchObject({ messages: expectedView });
@@ -1633,7 +1637,9 @@ describe("turnStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    installSessionStoreMocks([createStubSession({ history: [{ content: "raw", role: "user" }] })]);
+    installSessionStoreMocks([
+      createStubSession({ history: [{ content: "raw", kind: "user", role: "user" }] }),
+    ]);
     mockIdentityHistoryViewProjector.mockImplementation(() => {
       throw new Error("projection failed");
     });
@@ -1874,7 +1880,7 @@ describe("turnStep", () => {
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const announcement = "Available skills\n- policy: Tenant policy";
     const session = createStubSession({
-      history: [{ role: "user", content: announcement }],
+      history: [{ role: "user", content: announcement, kind: "user" }],
     });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
@@ -1944,8 +1950,8 @@ describe("turnStep", () => {
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
     expect(result.sessionState.snapshot?.session.history).toEqual([
-      { role: "user", content: announcement },
-      { content: "thread=unset; user=cancel this turn", role: "user" },
+      { role: "user", content: announcement, kind: "user" },
+      { content: "thread=unset; user=cancel this turn", kind: "user", role: "user" },
     ]);
   });
 
@@ -1994,6 +2000,7 @@ describe("turnStep", () => {
           { text: "thread=unset; user=look at this", type: "text" },
           expect.objectContaining({ filename: "diagram.png", type: "file" }),
         ],
+        kind: "user",
         role: "user",
       },
     ]);
@@ -2434,7 +2441,8 @@ describe("turnStep", () => {
     });
   });
 
-  it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
+  it("marks task-owned deliveries even when task state is unavailable", async () => {
+    const observedInputs: unknown[] = [];
     const observedTaskDeliveries: unknown[] = [];
     const observedActivityRoots: unknown[] = [];
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
@@ -2462,7 +2470,8 @@ describe("turnStep", () => {
     });
     installSessionStoreMocks([session, session, session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => {
+      return async (stepSession, stepInput): Promise<StepResult> => {
+        observedInputs.push(stepInput);
         observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
         observedActivityRoots.push(contextStorage.getStore()?.get(ActivityRootTurnIdKey));
         return { next: { done: true, output: "ok" }, session: stepSession };
@@ -2506,6 +2515,13 @@ describe("turnStep", () => {
 
     expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
     expect(observedActivityRoots).toEqual(["turn-parent", "turn-parent", "turn_0"]);
+    expect(observedInputs[0]).toMatchObject({
+      frameworkMessageKind: "execution.background_task",
+    });
+    expect(observedInputs[1]).toMatchObject({
+      frameworkMessageKind: "execution.background_task",
+    });
+    expect(observedInputs[2]).not.toHaveProperty("frameworkMessageKind");
   });
 
   it.each(["none", "initiating"] as const)("sets initiating task phase (%s)", async (phase) => {
@@ -3027,7 +3043,11 @@ describe("turnStep", () => {
       principal: { type: "app" } as const,
       resume: { nonce: "n1" },
     };
-    const hidden = { content: "HIDE_FROM_AUTH_CONTINUATION", role: "user" as const };
+    const hidden = {
+      content: "HIDE_FROM_AUTH_CONTINUATION",
+      kind: "user" as const,
+      role: "user" as const,
+    };
     mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
       messages.filter((message) => message !== hidden),
     );
@@ -3035,7 +3055,7 @@ describe("turnStep", () => {
       (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
     );
     const session = createStubSession({
-      history: [{ content: "visible", role: "user" }, hidden],
+      history: [{ content: "visible", kind: "user", role: "user" }, hidden],
       state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
     });
     installSessionStoreMocks([session]);
@@ -3117,7 +3137,7 @@ describe("turnStep", () => {
     expect(instructionHandler).toHaveBeenCalledTimes(2);
     for (const call of instructionHandler.mock.calls) {
       expect(call[1]).toMatchObject({
-        messages: [{ content: "visible", role: "user" }],
+        messages: [{ content: "visible", kind: "user", role: "user" }],
       });
     }
     expect(persistedSession?.history).toContain(hidden);

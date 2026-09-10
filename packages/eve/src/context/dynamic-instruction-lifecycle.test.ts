@@ -110,7 +110,7 @@ describe("dispatchDynamicInstructionEvent", () => {
 
     expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
     expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
-      { role: "user", content: "Dynamic user context." },
+      { role: "user", content: "Dynamic user context.", kind: "context.instruction" },
     ]);
     expect([...ctx.entries()].map(([key]) => key.name)).not.toContain(
       "eve.pendingDynamicInstructionUserMessages",
@@ -147,8 +147,8 @@ describe("dispatchDynamicInstructionEvent", () => {
 
     expect(snapshots).toEqual([["Static user."], ["Static user.", "Session user."]]);
     expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
-      { content: "Session user.", role: "user" },
-      { content: "Turn user.", role: "user" },
+      { content: "Session user.", role: "user", kind: "context.instruction" },
+      { content: "Turn user.", role: "user", kind: "context.instruction" },
     ]);
   });
 
@@ -293,7 +293,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     });
     expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
     expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
-      { content: "user context", role: "user" },
+      { content: "user context", kind: "context.instruction", role: "user" },
     ]);
 
     result = "throw";

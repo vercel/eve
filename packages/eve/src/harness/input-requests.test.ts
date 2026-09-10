@@ -34,7 +34,7 @@ function createHarnessSession(): HarnessSession {
       threshold: 0.8,
     },
     continuationToken: "test",
-    history: [{ content: "previous", role: "user" }],
+    history: [{ content: "previous", kind: "user", role: "user" }],
     sessionId: "sess-test",
   };
 }
@@ -183,7 +183,7 @@ describe("resolvePendingInput", () => {
     });
 
     expect(result.outcome).toBe("unresolved");
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(true);
 
     const deferred = consumeDeferredStepInput({ session: result.session });
@@ -789,7 +789,7 @@ describe("resolvePendingInput", () => {
     // The message runs as an ordinary turn; the approval stays answerable.
     expect(result.outcome).toBe("continue");
     expect(result.rejectedActions).toBeUndefined();
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(false);
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
@@ -1075,7 +1075,7 @@ describe("pending input batch collection", () => {
     expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
     // Only the answered batch's withheld output is restored.
     expect(answered.messages).toEqual([
-      { content: "previous", role: "user" },
+      { content: "previous", kind: "user", role: "user" },
       batchOutput("call-2", "ask_question"),
       {
         content: [
@@ -1125,7 +1125,7 @@ describe("pending input batch collection", () => {
 
     expect(first.outcome).toBe("resolved");
     expect(first.messages).toEqual([
-      { content: "previous", role: "user" },
+      { content: "previous", kind: "user", role: "user" },
       batchOutput("call-1", "bash"),
       {
         content: [
@@ -1263,7 +1263,7 @@ describe("pending input batch collection", () => {
     const result = resolvePendingInput({ session, stepInput: { message: "keep going" } });
 
     expect(result.outcome).toBe("continue");
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(false);
     expect(getPendingInputRequestIds(result.session.state)).toEqual(
       new Set(["approval-1", "question-1"]),
@@ -1330,7 +1330,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.limitContinuation).toEqual({ granted: true });
     // The prompt is harness-authored — no tool call exists in model history,
     // so resolution must not append a tool message.
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
   });
 
   it("resolves a stop answer as not granted", () => {
@@ -1343,7 +1343,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(result.limitContinuation).toEqual({ granted: false });
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
   });
 
   it("keeps the prompt pending and queues a plain follow-up message", () => {
@@ -1354,7 +1354,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     expect(result.outcome).toBe("unresolved");
     expect(result.limitContinuation).toBeUndefined();
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(true);
 
     const deferred = consumeDeferredStepInput({ session: result.session });

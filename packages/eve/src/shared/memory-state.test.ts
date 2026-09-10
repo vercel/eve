@@ -137,9 +137,9 @@ describe("memory record state", () => {
     expect(
       projectMemoryHistory({ locks: readMemoryLocks(second.state), messages: second.history }),
     ).toEqual([
-      { content: "first note", role: "user" },
-      { content: "new profile", role: "user" },
-      { content: "second note", role: "user" },
+      { content: "first note", kind: "memory.load", role: "user" },
+      { content: "new profile", kind: "memory.load", role: "user" },
+      { content: "second note", kind: "memory.load", role: "user" },
     ]);
   });
 
@@ -171,7 +171,7 @@ describe("memory record state", () => {
         locks: { profile: lock("user_2", "session") },
         messages: sessionVisible.history,
       }),
-    ).toEqual([{ content: "sticky", role: "user" }]);
+    ).toEqual([{ content: "sticky", kind: "memory.load", role: "user" }]);
   });
 
   it("canonicalizes private records independently", () => {

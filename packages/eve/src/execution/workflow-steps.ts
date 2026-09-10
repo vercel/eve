@@ -47,7 +47,7 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
+import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
 import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
@@ -76,6 +76,8 @@ import { createDurableSessionState, readDurableSession } from "#execution/durabl
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
+  getBackgroundTaskDelivery,
+  markBackgroundTaskStepInput,
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
@@ -180,7 +182,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
     ctx.set(AuthKey, input.input.auth ?? null);
   }
-
+  const backgroundTaskDelivery = getBackgroundTaskDelivery(input.input);
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
@@ -249,7 +251,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           : defaultDeliverResult(payload);
 
         if (result !== undefined && result !== null) {
-          results.push(result);
+          results.push(
+            backgroundTaskDelivery === undefined ? result : markBackgroundTaskStepInput(result),
+          );
         }
       }
     } catch (error) {
@@ -265,14 +269,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   let taskRootTurnId: string | undefined;
-  if (
-    resolved !== undefined &&
-    rawInput.input?.kind === "deliver" &&
-    rawInput.input.taskDeliveryId !== undefined
-  ) {
+  if (resolved !== undefined && backgroundTaskDelivery !== undefined) {
     const taskContext = resolveTaskDeliveryContext({
       state: durableSession.state,
-      taskDeliveryId: rawInput.input.taskDeliveryId,
+      taskDeliveryId: backgroundTaskDelivery.taskDeliveryId,
     });
     if (taskContext !== undefined) {
       ctx.set(TurnTaskDeliveryKey, taskContext.phase);
@@ -525,7 +525,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             let emissionState = getHarnessEmissionState(schemaSession.state);
             if (isHarnessBetweenTurns(schemaSession)) {
               prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
-              let instructionMessages: readonly import("ai").ModelMessage[] = [];
+              let instructionMessages: readonly UserModelMessage[] = [];
               const traceContext = await prepareWorkflowPreambleTrace({
                 emissionState,
                 instrumentation,

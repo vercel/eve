@@ -1,9 +1,9 @@
-import type { ModelMessage } from "ai";
 import { z } from "#compiled/zod/index.js";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { TODO_COMPACTION_PRESERVATION_LABEL } from "#harness/compaction-prompt.js";
+import { createFrameworkUserMessage, type UserModelMessage } from "#harness/messages.js";
 
 // ---------------------------------------------------------------------------
 // Durable context key
@@ -47,7 +47,7 @@ function formatTodoSummary(state: TodoState): string | undefined {
  * compacts message history, so the agent keeps its task list across
  * compaction. Returns `undefined` when there is no list to preserve.
  */
-export function getTodoCompactionMessage(): ModelMessage | undefined {
+export function getTodoCompactionMessage(): UserModelMessage | undefined {
   const state = loadContext().get(TodoStateKey);
   if (
     state === undefined ||
@@ -57,7 +57,7 @@ export function getTodoCompactionMessage(): ModelMessage | undefined {
   }
   const summary = formatTodoSummary(state);
   if (summary === undefined) return undefined;
-  return { content: summary, role: "user" };
+  return createFrameworkUserMessage("context.state", summary);
 }
 
 function formatTodoResult(state: TodoState): object {

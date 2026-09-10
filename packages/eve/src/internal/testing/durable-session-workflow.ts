@@ -3,8 +3,6 @@
  * `readDurableSession` round-trip from inside a real workflow runtime.
  * The workflow test-time bundle builder discovers this directory.
  */
-import type { ModelMessage } from "ai";
-
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import {
@@ -20,10 +18,14 @@ function buildSyntheticSession(input: {
   marker: string;
   historyDepth: number;
 }): HarnessSession {
-  const history: ModelMessage[] = Array.from({ length: input.historyDepth }, (_, index) => ({
-    content: `${input.marker} message ${index}`,
-    role: "user",
-  }));
+  const history: HarnessSession["history"] = Array.from(
+    { length: input.historyDepth },
+    (_, index) => ({
+      content: `${input.marker} message ${index}`,
+      kind: "user",
+      role: "user",
+    }),
+  );
 
   return {
     agent: {

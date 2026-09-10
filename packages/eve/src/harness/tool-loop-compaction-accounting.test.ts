@@ -2,6 +2,7 @@ import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
@@ -173,8 +174,8 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: { recentWindowSize: 0, threshold: 100 },
         history: [
-          ...recalled.history,
-          { content: `ordinary ${"conversation ".repeat(100)}`, role: "user" },
+          ...validateHarnessModelMessages(recalled.history),
+          { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
         ],
         state: recalled.state,
       }),
@@ -182,9 +183,9 @@ describe("tool-loop structured compaction accounting", () => {
     );
 
     expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
-    expect(vi.mocked(generateText).mock.calls[0]?.[0].prompt).not.toContain(
-      "PRIVATE_MEMORY_SENTINEL",
-    );
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0].messages?.[0]?.content;
+    if (typeof prompt !== "string") throw new Error("Expected the compaction prompt text.");
+    expect(prompt).not.toContain("PRIVATE_MEMORY_SENTINEL");
     expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
     expect(JSON.stringify(result.session.history)).toContain("eve.memory");
   });
@@ -290,6 +291,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(second.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(second.session.history[1]).toEqual({
@@ -339,7 +341,7 @@ describe("tool-loop structured compaction accounting", () => {
           recentWindowSize: 10,
           threshold: 101,
         },
-        history: [{ content: "Previous exact prompt", role: "user" }],
+        history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
     });
 
@@ -355,6 +357,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(result.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(result.session.history[1]).toEqual({

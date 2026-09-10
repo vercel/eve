@@ -24,6 +24,7 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
+import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -344,6 +345,6 @@ export const DynamicInstructionResolveMessagesKey = new ContextKey<readonly Mode
 );
 
 /** User-role results waiting to be committed immediately after a preamble. */
-export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly ModelMessage[]>(
+export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly UserModelMessage[]>(
   "eve.pendingDynamicInstructionUserMessages",
 );

@@ -164,9 +164,15 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
 import {
+  createFrameworkUserMessage,
+  createUserMessage,
+  frameworkMessageKindForStepInput,
   normalizeModelMessages,
   normalizeUserContent,
   resolveAssistantStepText,
+  type HarnessModelMessage,
+  type UserModelMessage,
+  validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
@@ -843,7 +849,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         resolvedCoordination.outcome === "resolved"
           ? {
               ...pending.session,
-              history: [...resolvedCoordination.messages],
+              history: validateHarnessModelMessages(resolvedCoordination.messages),
             }
           : pending.session;
 
@@ -859,7 +865,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             projectHistory(parkedSession.history, parkedSession.state),
           );
         }
-        let instructionMessages: ModelMessage[] = [];
+        let instructionMessages: UserModelMessage[] = [];
         try {
           const traceContext = await preparePreambleTrace();
           emissionState = await emitTurnPreamble(
@@ -874,7 +880,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             store === undefined ? [] : drainDynamicInstructionUserMessages(store);
           parkedSession = {
             ...parkedSession,
-            history: [...parkedSession.history, ...instructionMessages],
+            history: validateHarnessModelMessages([
+              ...parkedSession.history,
+              ...instructionMessages,
+            ]),
           };
           session = parkedSession;
           return failBoundaryEvent(error, {
@@ -887,7 +896,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
         parkedSession = {
           ...parkedSession,
-          history: [...parkedSession.history, ...instructionMessages],
+          history: validateHarnessModelMessages([...parkedSession.history, ...instructionMessages]),
         };
         emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
@@ -961,24 +970,31 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const clientContext =
       pending.deferredContext === true ? undefined : readClientContext(effectiveStepInput);
     const activeClientContext = clientContext ?? storedClientContext?.messages;
-    const ephemeralContextMessages: ModelMessage[] =
-      activeClientContext?.map((content) => ({ content, role: "user" })) ?? [];
-    const preparedTurnInput: ModelMessage[] = [];
+    const ephemeralContextMessages: UserModelMessage[] =
+      activeClientContext?.map((content) =>
+        createFrameworkUserMessage("context.instruction", content),
+      ) ?? [];
+    const preparedTurnInput: UserModelMessage[] = [];
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
-        preparedTurnInput.push({ content: entry, role: "user" });
+        preparedTurnInput.push(createFrameworkUserMessage("context.instruction", entry));
       }
     }
+    const frameworkMessageKind = frameworkMessageKindForStepInput(effectiveStepInput);
     const normalizedTurnContent = normalizeUserContent(effectiveStepInput?.message);
     const stagedTurnContent =
       normalizedTurnContent !== undefined && !pending.deferredMessage && !pending.consumedMessage
         ? await stageAttachmentsToSandbox(normalizedTurnContent)
         : undefined;
     if (stagedTurnContent !== undefined) {
-      preparedTurnInput.push({ content: stagedTurnContent, role: "user" });
+      preparedTurnInput.push(
+        frameworkMessageKind === undefined
+          ? createUserMessage("user", stagedTurnContent)
+          : createFrameworkUserMessage(frameworkMessageKind, stagedTurnContent),
+      );
     }
 
-    let instructionMessages: ModelMessage[] = [];
+    let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
     if (emit && hasStepInput(input)) {
       if (store !== undefined) {
@@ -1006,7 +1022,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
         session = {
           ...pending.session,
-          history: [...(memoryCommit?.history ?? pending.session.history), ...instructionMessages],
+          history: validateHarnessModelMessages([
+            ...(memoryCommit?.history ?? pending.session.history),
+            ...instructionMessages,
+          ]),
           state: memoryCommit?.state ?? pending.session.state,
         };
         return failBoundaryEvent(error, {
@@ -1027,16 +1046,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = setHarnessEmissionState(
       {
         ...pending.session,
-        history: [...committedHistory, ...instructionMessages],
+        history: validateHarnessModelMessages([...committedHistory, ...instructionMessages]),
         state: memoryCommit?.state ?? pending.session.state,
       },
       emissionState,
     );
-    let messages: ModelMessage[] = [
+    let messages: HarnessModelMessage[] = validateHarnessModelMessages([
       ...(memoryCommit?.history ?? pending.messages.slice(0, historyLength)),
       ...instructionMessages,
       ...(memoryCommit === undefined ? pending.messages.slice(historyLength) : []),
-    ];
+    ]);
 
     // A resolved session-limit continuation prompt grants a fresh token
     // budget or ends the session; see session-limit-enforcement.
@@ -1079,7 +1098,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         store: agentStore,
       });
       if (announcement !== undefined) {
-        messages.push({ content: announcement, role: "user" });
+        messages.push(createFrameworkUserMessage("context.state", announcement));
       }
     }
 
@@ -1098,7 +1117,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     messages = [...messages, ...preparedTurnInput];
 
-    const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
+    const createModelMessages = (
+      durableMessages: readonly HarnessModelMessage[],
+    ): HarnessModelMessage[] => {
       if (turnClientContext === undefined || turnClientContext.messages.length === 0) {
         return [...durableMessages];
       }
@@ -1109,11 +1130,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
       return [
         ...durableMessages.slice(0, insertionIndex),
-        ...turnClientContext.messages.map((content) => ({ content, role: "user" as const })),
+        ...turnClientContext.messages.map((content) =>
+          createFrameworkUserMessage("context.instruction", content),
+        ),
         ...durableMessages.slice(insertionIndex),
       ];
     };
-    let projectedMessages = projectHistory(createModelMessages(messages), session.state);
+    let projectedMessages = validateHarnessModelMessages(
+      projectHistory(createModelMessages(messages), session.state),
+    );
 
     // --- Model + tools ------------------------------------------------------
 
@@ -1185,8 +1210,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session = setTurnClientContextState(session, turnClientContext);
       }
     }
-    projectedMessages = normalizeModelMessages(
-      projectHistory(createModelMessages(messages), session.state),
+    projectedMessages = validateHarnessModelMessages(
+      normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
     );
 
     if (emit) {
@@ -1248,7 +1273,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
-      currentMessages.add(pendingApprovals, { cacheFriendly: false });
+      currentMessages.add(pendingApprovals, "context.state", {
+        cacheFriendly: false,
+      });
     }
     const promptMessages = currentMessages.history;
 
@@ -1326,7 +1353,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // from the step's prompt messages, so the note exists only on this
       // call's wire request.
       const callMessages = opts.trailingUserNote
-        ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
+        ? [...modelMessages, createFrameworkUserMessage("execution.retry", opts.trailingUserNote)]
         : [...modelMessages];
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
@@ -2376,7 +2403,7 @@ async function handleStepResult(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly durableModelPromptMessageCount?: number;
-  readonly promptMessages: readonly ModelMessage[];
+  readonly promptMessages: readonly HarnessModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
   readonly coordinationTools: HarnessToolMap;
@@ -2472,7 +2499,7 @@ async function handleStepResult(input: {
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
-  // Keep outcomes from resumed work ahead of the synthetic pending-approval
+  // Keep outcomes from resumed work ahead of the framework pending-approval
   // message; only the unresolved assistant response belongs to the parked batch.
   const pendingResponseStart = responseMessages.findIndex((message) => message.role !== "tool");
   const committedResponseMessages =
@@ -2480,13 +2507,13 @@ async function handleStepResult(input: {
       ? responseMessages
       : responseMessages.slice(0, pendingResponseStart);
   const pendingResponseMessages = responseMessages.slice(committedResponseMessages.length);
-  const parkedInputHistory: ModelMessage[] = [
+  const parkedInputHistory: HarnessModelMessage[] = validateHarnessModelMessages([
     ...promptMessages,
     ...committedResponseMessages,
     ...(pendingApprovals === undefined
       ? []
-      : [{ content: pendingApprovals, role: "user" as const }]),
-  ];
+      : [createFrameworkUserMessage("context.state", pendingApprovals)]),
+  ]);
   const advertisedCoordinationTools = getAdvertisedTools({
     session: baseSession,
     tools: input.coordinationTools,
@@ -2538,7 +2565,7 @@ async function handleStepResult(input: {
               turnId: emissionState.turnId,
             },
             responseMessages,
-            session: { ...baseSession, history: [...promptMessages] },
+            session: { ...baseSession, history: validateHarnessModelMessages(promptMessages) },
           }),
           advanceStep(emissionState),
         ),
@@ -2692,7 +2719,7 @@ async function handleStepResult(input: {
       session: setHarnessEmissionState(
         {
           ...baseSession,
-          history: authorizationHistory,
+          history: validateHarnessModelMessages(authorizationHistory),
           state: setPendingAuthorization(baseSession.state, { challenges }),
         },
         emissionState,
@@ -2707,7 +2734,10 @@ async function handleStepResult(input: {
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
   const continuationMessages = responseMessages;
-  const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
+  const updatedHistory: HarnessModelMessage[] = validateHarnessModelMessages([
+    ...promptMessages,
+    ...continuationMessages,
+  ]);
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
   // A `final_output` call is terminal even when the model emits it alongside
@@ -2786,7 +2816,7 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
  */
 function persistStructuredAssistantTurn(
   session: HarnessSession,
-  history: readonly ModelMessage[],
+  history: readonly HarnessModelMessage[],
   structured: JsonValue,
 ): HarnessSession {
   return {
@@ -2822,7 +2852,7 @@ async function emitStructuredResult(
 async function finishTaskTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly ModelMessage[];
+  readonly history: readonly HarnessModelMessage[];
   readonly result: HarnessStepResult;
   readonly schema: JsonObject | undefined;
   readonly session: HarnessSession;
@@ -2872,7 +2902,7 @@ async function finishTaskTurn(input: {
 async function finishConversationTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly ModelMessage[];
+  readonly history: readonly HarnessModelMessage[];
   readonly result: HarnessStepResult;
   readonly schema: JsonObject | undefined;
   readonly session: HarnessSession;
@@ -2996,7 +3026,10 @@ async function continuePendingWorkflowInterrupt(input: {
 
   const unwrapped = await unwrapWorkflowSandboxResult(continuationOutput, continuationSecurity);
   const finalOutput = unwrapped.status === "interrupted" ? unwrapped.interrupt : unwrapped.output;
-  const baseMessages = [...input.session.history, ...pending.responseMessages];
+  const baseMessages = validateHarnessModelMessages([
+    ...input.session.history,
+    ...pending.responseMessages,
+  ]);
   const replacedMessages = replaceWorkflowToolResult(
     baseMessages,
     (interrupt as { outerToolCallId?: string }).outerToolCallId,
@@ -3032,10 +3065,10 @@ async function continuePendingWorkflowInterrupt(input: {
 }
 
 function replaceWorkflowToolResult(
-  messages: readonly ModelMessage[],
+  messages: readonly HarnessModelMessage[],
   outerToolCallId: string | undefined,
   output: unknown,
-): ModelMessage[] {
+): HarnessModelMessage[] {
   if (outerToolCallId === undefined) return [...messages];
   const outputValue =
     typeof output === "string"
@@ -3050,7 +3083,7 @@ function replaceWorkflowToolResult(
       },
     );
     return { ...message, content };
-  }) as ModelMessage[];
+  }) as HarnessModelMessage[];
 }
 
 async function parkOnWorkflowInterrupt(input: {
@@ -3058,7 +3091,7 @@ async function parkOnWorkflowInterrupt(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly interrupt: WorkflowSandboxInterrupt;
-  readonly promptMessages: readonly ModelMessage[];
+  readonly promptMessages: readonly HarnessModelMessage[];
   readonly responseMessages: readonly ModelMessage[];
   readonly tools: HarnessToolMap;
   readonly usedCalls: number;
@@ -3118,7 +3151,10 @@ function createNextCompactionConfig(
   return next;
 }
 
-function replaceSessionHistory(session: HarnessSession, history: ModelMessage[]): HarnessSession {
+function replaceSessionHistory(
+  session: HarnessSession,
+  history: HarnessModelMessage[],
+): HarnessSession {
   contextStorage.getStore()?.delete(HistoryStateKey);
   return {
     ...session,
@@ -3147,26 +3183,27 @@ async function maybeCompact(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly force?: boolean;
   readonly historyProjector?: HistoryViewProjector;
-  readonly messages: ModelMessage[];
+  readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
-  readonly promptMessages?: readonly ModelMessage[];
+  readonly promptMessages?: readonly HarnessModelMessage[];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
 }): Promise<{
   readonly compacted: boolean;
-  readonly messages: ModelMessage[];
+  readonly messages: HarnessModelMessage[];
   readonly session: HarnessSession;
 }> {
   const { emit, emissionState } = input;
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
-  const projectedPromptMessages =
-    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages;
+  const projectedPromptMessages = validateHarnessModelMessages(
+    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
+  );
   const needsSummary =
     input.force === true || shouldCompact(projectedPromptMessages, session.compaction);
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
@@ -3207,9 +3244,10 @@ async function maybeCompact(input: {
   }
 
   const canonical = canonicalizeMemoryRecords(messages);
-  const ordinary =
+  const ordinary = validateHarnessModelMessages(
     input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
-    canonical.ordinary;
+      canonical.ordinary,
+  );
   const compactedOrdinary = needsSummary
     ? await compactMessages(
         [...ordinary],
@@ -3222,7 +3260,7 @@ async function maybeCompact(input: {
         input.force === true,
       )
     : [...ordinary];
-  messages = [...canonical.memory, ...compactedOrdinary];
+  messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
 
   if (input.onCompaction) {
     for (const msg of input.onCompaction()) {
@@ -3247,7 +3285,7 @@ async function maybeCompact(input: {
     if (ctx !== undefined) {
       const commit = drainMemoryCommit(ctx);
       if (commit !== undefined) {
-        messages = [...commit.history];
+        messages = validateHarnessModelMessages(commit.history);
         session = { ...session, state: commit.state };
       }
     }

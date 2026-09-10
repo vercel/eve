@@ -1,4 +1,6 @@
-import type { ModelMessage } from "ai";
+import type { HarnessModelMessage } from "#harness/messages.js";
+
+import { createFrameworkUserMessage } from "#harness/messages.js";
 
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -35,7 +37,7 @@ interface RuntimeTurnAgentBase {
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
-  readonly initialMessages?: readonly ModelMessage[];
+  readonly initialMessages?: readonly HarnessModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -107,7 +109,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     id,
     initialMessages: agent.instructions
       .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
-      .map((entry) => ({ content: entry.content.trim(), role: "user" as const })),
+      .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,

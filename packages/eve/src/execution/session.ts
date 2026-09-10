@@ -1,5 +1,6 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import type {
   HarnessSession,
   SessionAgent,
@@ -281,7 +282,7 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: durable.history,
+    history: validateHarnessModelMessages(durable.history),
     sessionId: durable.sessionId,
   };
 

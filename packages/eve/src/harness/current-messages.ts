@@ -1,33 +1,45 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type { HistoryState } from "#context/keys.js";
 
+import {
+  createFrameworkUserMessage,
+  type FrameworkMessageKind,
+  type HarnessModelMessage,
+} from "#harness/messages.js";
+
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
 }
 
 interface CurrentMessagesOptions {
   readonly historyState?: HistoryState;
-  readonly currentTurnMessages?: readonly ModelMessage[];
-  readonly projectedMessages?: readonly ModelMessage[];
+  readonly currentTurnMessages?: readonly HarnessModelMessage[];
+  readonly projectedMessages?: readonly HarnessModelMessage[];
 }
+
+const ANNOUNCEMENT_KINDS = {
+  availableSkills: "context.state",
+  deliveryInstruction: "context.instruction",
+  taskState: "context.state",
+} as const satisfies Record<keyof HistoryState, FrameworkMessageKind>;
 
 /** Builds the model view and durable history for one step. */
 export function createCurrentMessages(
-  history: readonly ModelMessage[],
+  history: readonly HarnessModelMessage[],
   options: CurrentMessagesOptions = {},
 ): {
-  readonly history: readonly ModelMessage[];
+  readonly history: readonly HarnessModelMessage[];
   readonly historyState: HistoryState;
-  readonly nonSystemMessages: readonly ModelMessage[];
+  readonly nonSystemMessages: readonly HarnessModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
-  add(message: string, options?: AddCurrentMessageOptions): void;
+  add(message: string, kind: FrameworkMessageKind, options?: AddCurrentMessageOptions): void;
   addAnnouncements(announcements: HistoryState): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
   const historyState = { ...options.historyState };
   const systemMessages: SystemModelMessage[] = [];
-  const nonSystemMessages: ModelMessage[] = [];
+  const nonSystemMessages: HarnessModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
   let currentTurnInsertionIndex: number | undefined;
 
@@ -50,9 +62,13 @@ export function createCurrentMessages(
   const canAppendUserMessages =
     currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
-  function add(message: string, { cacheFriendly = true }: AddCurrentMessageOptions = {}): boolean {
+  function add(
+    message: string,
+    kind: FrameworkMessageKind,
+    { cacheFriendly = true }: AddCurrentMessageOptions = {},
+  ): boolean {
     if (cacheFriendly && canAppendUserMessages) {
-      const entry = { role: "user" as const, content: message };
+      const entry = createFrameworkUserMessage(kind, message);
       nonSystemMessages.splice(userInsertionIndex, 0, entry);
       durableMessages.splice(historyInsertionIndex, 0, entry);
       userInsertionIndex += 1;
@@ -70,7 +86,7 @@ export function createCurrentMessages(
         const message = announcements[key];
         if (message === undefined || message.length === 0 || historyState[key] === message)
           continue;
-        if (add(message)) historyState[key] = message;
+        if (add(message, ANNOUNCEMENT_KINDS[key])) historyState[key] = message;
       }
     },
     addSystem(messages) {
