@@ -24,7 +24,8 @@ describe("postSessionCallbackRequest", () => {
   it.each(["task.update", "turn.completed", "turn.failed"])(
     "logs %s HTTP failures with correlation fields and a redacted destination",
     async (kind) => {
-      const response = new Response("private response body", { status: 404 });
+      const canary = "CALLBACK_SECRET_CANARY_9f31";
+      const response = new Response(`${canary} response body`, { status: 404 });
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
 
       await expect(
@@ -35,12 +36,12 @@ describe("postSessionCallbackRequest", () => {
             taskId: "task-1",
             sessionId: "child-session",
             subagentName: "research",
-            message: "private update",
-            output: "private result",
-            error: "private failure",
-            token: "private-body-token",
+            message: `${canary} update`,
+            output: `${canary} result`,
+            error: `${canary} failure`,
+            token: `${canary}-body-token`,
           },
-          url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/private-token?secret=query#fragment",
+          url: `https://user:password@agent.example.com/eve/v1/eve/v1/callback/${canary}-token?secret=query#fragment`,
         }),
       ).resolves.toBe(response);
 
@@ -59,7 +60,7 @@ describe("postSessionCallbackRequest", () => {
         }),
       );
       const logged = JSON.stringify(errorSpy.mock.calls);
-      for (const secret of ["private", "password", "user:", "secret=query", "fragment"]) {
+      for (const secret of [canary, "password", "user:", "secret=query", "fragment"]) {
         expect(logged).not.toContain(secret);
       }
     },

@@ -167,6 +167,31 @@ describe("taskRunWorkflow", () => {
     });
   });
 
+  it("deduplicates report redelivery without collapsing distinct reports with the same text", async () => {
+    queueCommand({ kind: "ready" });
+    const report = {
+      kind: "report" as const,
+      from: bufferedAgentRequest.from,
+      reportId: "yield:0",
+      update: { kind: "eve:task-message", message: "Export task-1: EXPORT-PROGRESS" },
+    };
+    queueOwnerRequest(report);
+    queueOwnerRequest(structuredClone(report));
+    queueOwnerRequest({ ...report, reportId: "yield:1" });
+    queueCommand({ kind: "complete", data: "EXPORT-COMPLETE" });
+
+    await taskRunWorkflow(workflowInput);
+
+    expect(mocks.wakeTaskMessageParentStep).toHaveBeenCalledTimes(2);
+    expect(mocks.wakeTaskParentStep).toHaveBeenCalledOnce();
+    expect(
+      mocks.wakeTaskMessageParentStep.mock.calls.map(([input]) => input.message.messageIndex),
+    ).toEqual([0, 1]);
+    expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("persists auth requests and answers before forwarding and acknowledging each event", async () => {
     queueCommand({ kind: "ready" });
     queueOwnerRequest(authorizationRequest("a"));
@@ -554,6 +579,7 @@ describe("taskRunWorkflow", () => {
           value: {
             kind: "report",
             from: bufferedAgentRequest.from,
+            reportId: "yield:0",
             update: { kind: "eve:task-message", message: "Review the export" },
           },
         },

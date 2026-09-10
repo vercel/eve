@@ -71,6 +71,7 @@ export type WorkflowToolRunOutcome =
 
 export interface WorkflowToolRunReport {
   readonly from: WorkflowToolRunRef;
+  readonly reportId: string;
   readonly update: JsonValue;
 }
 

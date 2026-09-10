@@ -96,7 +96,11 @@ describe("workflow-tool task reports", () => {
   it("maps postMessage to a distinct parent delivery", () => {
     expect(
       workflowToolRunReportToTaskPayload(
-        { from, update: { kind: "eve:task-message", message: "Review this output." } },
+        {
+          from,
+          reportId: "yield:0",
+          update: { kind: "eve:task-message", message: "Review this output." },
+        },
         "task-1",
         2,
       ),
@@ -111,7 +115,11 @@ describe("workflow-tool task reports", () => {
 
   it("keeps untagged yields as progress", () => {
     expect(
-      workflowToolRunReportToTaskPayload({ from, update: { progress: 0.5 } }, "task-1", 1),
+      workflowToolRunReportToTaskPayload(
+        { from, reportId: "yield:1", update: { progress: 0.5 } },
+        "task-1",
+        1,
+      ),
     ).toEqual({
       callId: "call-1",
       kind: "task-update",

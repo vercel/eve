@@ -10,6 +10,7 @@ import {
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
+import { createCompactionSummaryError } from "#harness/compaction-summary-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -227,15 +228,21 @@ export async function compactMessages(
     }
   }
 
+  const request = findLastRealUserMessage(conversation);
+  const requestContext = typeof request?.content === "string" ? request.content : undefined;
+  let summaryAttempt = 0;
   while (true) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
 
     const summaryPrompt = createCompactionPrompt({
       messages: older,
       previousCheckpoint,
+      requestContext:
+        request !== undefined && !older.includes(request) ? requestContext : undefined,
       transcriptBudgetTokens: config.threshold,
     });
 
+    summaryAttempt += 1;
     const result = await generateText({
       abortSignal,
       headers,
@@ -247,10 +254,17 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    if (result.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
-      );
+    const empty = result.text.trim().length === 0;
+    if (empty || result.finishReason === "content-filter") {
+      throw createCompactionSummaryError({
+        empty,
+        finishReason: result.finishReason,
+        rawFinishReason: result.rawFinishReason,
+        providerMetadata: result.providerMetadata,
+        summaryAttempt,
+        olderMessageCount: older.length,
+        recentMessageCount: recent.length,
+      });
     }
 
     const summaryHead: ModelMessage[] = [

@@ -18,6 +18,22 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 
 import { join } from "node:path";
 
 const roots = ["e2e/fixtures", "apps/fixtures"];
+const requestedFixture = process.env.EVE_E2E_FIXTURE || undefined;
+const requestedModel = process.env.EVE_E2E_MODEL_NAME || undefined;
+const repetitions = Number(process.env.EVE_E2E_REPETITIONS || "1");
+const shards = Number(process.env.EVE_E2E_SHARDS || "1");
+if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 500) {
+  throw new Error("EVE_E2E_REPETITIONS must be an integer from 1 to 500.");
+}
+if (!Number.isInteger(shards) || shards < 1 || shards > 10 || repetitions * shards > 500) {
+  throw new Error("Use 1-10 EVE_E2E_SHARDS and at most 500 total repetitions per model.");
+}
+if (
+  (repetitions > 1 && (requestedFixture === undefined || requestedModel === undefined)) ||
+  (shards > 1 && repetitions <= 1)
+) {
+  throw new Error("Repeated validation requires an explicit fixture, model, and repetitions.");
+}
 
 const registry = JSON.parse(readFileSync("e2e/matrix.json", "utf8"));
 const models = validateNamedEntries(registry.models, "models", ["id"]);
@@ -56,17 +72,32 @@ if (fixtures.length === 0) {
   process.exit(1);
 }
 
-const modelMatrix = fixtures.flatMap(({ name, dir, modelMatrix, additionalModels }) =>
-  uniqueModels([
-    ...(modelMatrix === "full" ? models : models.slice(0, 1)),
-    ...additionalModels,
-  ]).map((model) => ({
-    name,
-    dir,
-    model_name: model.name,
-    model_id: model.id,
-  })),
-);
+const modelMatrix = fixtures
+  .filter(({ name }) => requestedFixture === undefined || name === requestedFixture)
+  .flatMap(({ name, dir, modelMatrix, additionalModels }) =>
+    uniqueModels([
+      ...(modelMatrix === "full" ? models : models.slice(0, 1)),
+      ...additionalModels,
+    ]).map((model) => ({
+      name,
+      dir,
+      model_name: model.name,
+      model_id: model.id,
+    })),
+  )
+  .filter((leg) => requestedModel === undefined || leg.model_name === requestedModel)
+  .flatMap((leg) =>
+    shards === 1
+      ? [leg]
+      : Array.from({ length: shards }, (_, index) => ({
+          ...leg,
+          repetition_shard: index + 1,
+          job_suffix: ` [repetition shard ${index + 1}]`,
+        })),
+  );
+if (modelMatrix.length === 0) {
+  throw new Error("No model-suite jobs matched the requested fixture and model.");
+}
 
 const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
 for (const world of worlds) {

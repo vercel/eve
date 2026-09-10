@@ -156,22 +156,10 @@ export async function waitForTaskNotification(
   observedTurns: readonly EveEvalTurn[] = [],
 ): Promise<{ readonly session: TaskEvalSessionDriver; readonly turn: EveEvalTurn }> {
   let session = initialSession;
-  const expected = `Background task ${taskId} (`;
-  const matches = (turn: EveEvalTurn) =>
-    turn.events.some(
-      (event) =>
-        event.type === "message.received" &&
-        messageText(event.data.message).includes(expected) &&
-        messageText(event.data.message).includes(` is ${status}.`),
-    );
+  const matches = (turn: EveEvalTurn) => hasTaskNotification(turn.events, taskId, status);
   const observed = observedTurns.find(matches);
   if (observed !== undefined) return { session, turn: observed };
-  const recorded = session.events.some(
-    (event) =>
-      event.type === "message.received" &&
-      messageText(event.data.message).includes(expected) &&
-      messageText(event.data.message).includes(` is ${status}.`),
-  );
+  const recorded = hasTaskNotification(session.events, taskId, status);
   if (recorded) {
     const turn = observedTurns.at(-1);
     if (turn === undefined) {
@@ -210,42 +198,61 @@ export async function waitForTaskStatus(
   session: TaskEvalSessionDriver,
   verificationMessage: string,
   taskId: string,
-  status: string,
+  status: "cancelled" | "completed" | "failed",
 ): Promise<EveEvalTurn> {
-  let currentSession = session;
   const timeoutMs = 30_000;
   const deadline = performance.now() + timeoutMs;
-  let attempt = 0;
-  while (performance.now() < deadline) {
-    const followed = await sendAndFollowQueuedTurn(
-      t,
-      `${verificationMessage} ${taskId}`,
-      currentSession,
-    );
-    for (const [turnIndex, observed] of followed.observedTurns.entries()) {
-      observed
-        .noFailedActions()
-        .label(`task status attempt ${attempt + 1}, turn ${turnIndex + 1} has no failed actions`);
-    }
-    const turn = followed.turn;
-    currentSession = followed.session;
-    const inspected = turn.toolCalls.find((call) => call.name === "task_cancel");
-    if (taskStatus(inspected?.output, taskId) === status) {
-      await t.require(
-        inspected?.output,
-        satisfies(
-          (output) => taskStatus(output, taskId) === status,
-          `task_cancel preserves ${status} task ${taskId}`,
-        ),
-      );
-      return turn;
-    }
-    attempt += 1;
-    await t.sleep(100);
-  }
-  throw new Error(
-    `Task ${taskId} did not reach "${status}" within ${timeoutMs / 1_000} seconds (${attempt} verification attempts).`,
+  // A correlated send can advance past a notification while returning the committed task view.
+  const terminalRecorded = session.events.some(
+    (event) =>
+      event.type === "action.result" &&
+      event.data.status === "completed" &&
+      event.data.result.kind === "tool-result" &&
+      event.data.result.toolName === "task_cancel" &&
+      taskStatus(event.data.result.output, taskId) === status,
   );
+  const terminalSession =
+    terminalRecorded || hasTaskNotification(session.events, taskId, status)
+      ? session
+      : (await waitForTaskNotification(t, session, taskId, status)).session;
+  if (performance.now() >= deadline) {
+    throw new Error(
+      `Task ${taskId} did not reach "${status}" within ${timeoutMs / 1_000} seconds.`,
+    );
+  }
+  const followed = await sendAndFollowQueuedTurn(
+    t,
+    `${verificationMessage} ${taskId}`,
+    terminalSession,
+  );
+  for (const [turnIndex, observed] of followed.observedTurns.entries()) {
+    observed
+      .noFailedActions()
+      .label(`task status verification, turn ${turnIndex + 1} has no failed actions`);
+  }
+  const inspected = followed.turn.toolCalls.find((call) => call.name === "task_cancel");
+  await t.require(
+    inspected?.output,
+    satisfies(
+      (output) => taskStatus(output, taskId) === status,
+      `task_cancel preserves ${status} task ${taskId}`,
+    ),
+  );
+  return followed.turn;
+}
+
+function hasTaskNotification(
+  events: EveEvalTurn["events"],
+  taskId: string,
+  status: "cancelled" | "completed" | "failed",
+): boolean {
+  const expected = `Background task ${taskId} (`;
+  const expectedStatus = status === "failed" ? " failed." : ` is ${status}.`;
+  return events.some((event) => {
+    if (event.type !== "message.received") return false;
+    const headline = messageText(event.data.message).split("\n", 1)[0] ?? "";
+    return headline.startsWith(expected) && headline.endsWith(expectedStatus);
+  });
 }
 
 function messageText(message: unknown): string {

@@ -7,7 +7,9 @@ const model = mockModel({
   respond(request) {
     if (
       request.messages.some(
-        (entry) => entry.role === "system" && entry.text.includes("CONTEXT CHECKPOINT COMPACTION"),
+        (entry) =>
+          entry.role === "system" &&
+          entry.text.startsWith("Summarize the supplied conversation record."),
       )
     ) {
       return "Recorded the earlier evidence. Continue with the latest request.";

@@ -43,6 +43,9 @@ With `--verbose`, eve prefixes each line with its eval ID. It streams authored `
 
 Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
 
+Captured event streams retain events observed before a timeout or transport
+failure, even when the interrupted turn never reaches a completion boundary.
+
 ## CI
 
 A solid CI invocation is strict and machine-reportable:

@@ -78,6 +78,7 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: MessageStreamEvent[] = [];
+  readonly #observedEvents: MessageStreamEvent[] = [];
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #traceContexts: RuntimeTraceContext[] = [];
@@ -162,7 +163,7 @@ export class EvalSessionDriver implements EveEvalSession {
     if (this.#pendingInputRequests.length !== 1 || matching.length !== 1) {
       this.#failRequirement(
         "requireInputRequest",
-        `expected exactly one pending input request matching ${formatInputRequestFilter(filter)}, found ${matching.length} match(es) across ${this.#pendingInputRequests.length} pending request(s)`,
+        `expected exactly one pending input request matching ${JSON.stringify(filter)}, found ${matching.length} match(es) across ${this.#pendingInputRequests.length} pending request(s)`,
       );
     }
 
@@ -282,8 +283,8 @@ export class EvalSessionDriver implements EveEvalSession {
   snapshot(): EveEvalSessionResult {
     const sessionId = this.sessionId;
     return {
-      derived: deriveRunFacts(this.#events, { sessionId }),
-      events: [...this.#events],
+      derived: deriveRunFacts(this.#observedEvents, { sessionId }),
+      events: [...this.#observedEvents],
       primary: this.#primary,
       sessionId,
       state: this.#session?.state,
@@ -292,6 +293,7 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   #observeEvent(sessionId: string, event: MessageStreamEvent): void {
+    this.#observedEvents.push(event);
     if (event.type !== "session.started" && event.type !== "turn.started") return;
     const traceContext = event.data.trace;
     if (traceContext === undefined) return;
@@ -662,10 +664,6 @@ export class EvalSessionManager {
 function attachSignal(input: SendTurnPayload, signal: AbortSignal | undefined): SendTurnPayload {
   if (signal === undefined) return input;
   return input.signal === undefined ? { ...input, signal } : input;
-}
-
-function formatInputRequestFilter(filter: EveEvalInputRequestMatchOptions): string {
-  return JSON.stringify(filter);
 }
 
 function inputRequirementFailed(
