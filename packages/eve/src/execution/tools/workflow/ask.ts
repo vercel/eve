@@ -1,13 +1,13 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type {
-  WorkflowToolAskApproval,
   WorkflowToolAskRequest,
   WorkflowToolRunOwner,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { WorkflowToolRunCodeModeContext } from "#execution/tools/workflow/types.js";
+import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
@@ -73,30 +73,26 @@ export function readWorkflowToolRunAdmission(ctx: object): WorkflowToolRunContex
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
 export function ask(ctx: object, request: ToolInputRequest): Hook<ToolInputResponse> {
-  return send(ctx, { kind: "ask", request });
+  return requestInput(ctx, () => ({ kind: "ask", request }));
 }
 
 /**
- * Asks the person to approve a nested tool call. The owner renders it as the
- * tool-approval card for `approval.toolName`, so channels show the same prompt
- * a direct call would; the answer arrives like any other `ask` answer.
+ * Sends any input request to the owner and returns its answer hook. `ask` is
+ * the authored convenience (a question about this run's own tool); framework
+ * bodies build the full `InputRequest` themselves, keyed by the hook token the
+ * owner uses as `requestId` to route the answer back.
  */
-export function askApproval(
+export function requestInput(
   ctx: object,
-  request: ToolInputRequest,
-  approval: WorkflowToolAskApproval,
+  build: (requestId: string) => WorkflowToolAskRequest | InputRequest,
 ): Hook<ToolInputResponse> {
-  return send(ctx, { approval, kind: "ask", request });
-}
-
-function send(ctx: object, request: WorkflowToolAskRequest): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {
     kind: "request",
     from: context.from,
     replyTo: answer.token,
-    request,
+    request: build(answer.token),
   });
   return answer;
 }

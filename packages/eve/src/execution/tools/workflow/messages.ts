@@ -30,22 +30,10 @@ export interface WorkflowToolAuthorizationRequest {
   readonly kind: "authorization-request";
 }
 
-/**
- * A question authored with `ask()` from `eve/workflow`, before owner
- * normalization. With `approval` set, the owner renders it as a tool-approval
- * request for that nested call instead of a question about the run's own tool
- * (framework `code_mode` asking before an approval-gated nested call).
- */
+/** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
 export interface WorkflowToolAskRequest {
   readonly kind: "ask";
   readonly request: ToolInputRequest;
-  readonly approval?: WorkflowToolAskApproval;
-}
-
-export interface WorkflowToolAskApproval {
-  readonly callId: string;
-  readonly input: JsonObject;
-  readonly toolName: string;
 }
 
 /**

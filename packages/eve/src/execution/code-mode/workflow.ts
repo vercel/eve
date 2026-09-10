@@ -4,7 +4,7 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import {
   ask,
-  askApproval,
+  requestInput,
   readCodeModeRunContext,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
@@ -198,7 +198,15 @@ async function approveNestedCall(
         resolution: approvalDenied("the approval policy", nestedCall.toolName, decision.reason),
       };
     case "required": {
-      const answer = await askApproval(ctx, decision.request, decision.action);
+      // The answer routes back by request id; `action` only attributes the
+      // card to the nested call so channels render it as a tool approval.
+      const answer = await requestInput(ctx, (requestId) => ({
+        ...decision.request,
+        action: { ...decision.action, kind: "tool-call" },
+        kind: "tool-approval",
+        options: decision.request.options === undefined ? undefined : [...decision.request.options],
+        requestId,
+      }));
       if (answer.optionId !== "approve") {
         return { status: "denied", resolution: approvalDenied("the user", nestedCall.toolName) };
       }

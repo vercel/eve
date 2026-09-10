@@ -23,7 +23,7 @@ const evaluateApproval =
   >();
 const invokeAgent = vi.fn<(...args: any[]) => Promise<unknown>>();
 const ask = vi.fn<(...args: any[]) => Promise<unknown>>();
-const askApproval = vi.fn<(...args: any[]) => Promise<unknown>>();
+const requestInput = vi.fn<(...args: any[]) => Promise<unknown>>();
 const executeWorkflowBody =
   vi.fn<
     (
@@ -45,7 +45,8 @@ vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({
 }));
 vi.mock("#execution/tools/workflow/ask.js", () => ({
   ask: (_ctx: unknown, ...args: unknown[]) => ask(...args),
-  askApproval: (_ctx: unknown, ...args: unknown[]) => askApproval(...args),
+  requestInput: (_ctx: unknown, build: (requestId: string) => unknown) =>
+    requestInput(build("approval-hook")),
   readWorkflowToolRunRef: () => ({
     callId: "outer",
     runId: "outer-run",
@@ -139,7 +140,7 @@ beforeEach(() => {
   evaluateApproval.mockReset();
   invokeAgent.mockReset();
   ask.mockReset();
-  askApproval.mockReset();
+  requestInput.mockReset();
   executeWorkflowBody.mockReset();
 });
 
@@ -584,7 +585,7 @@ describe("codeModeWorkflow", () => {
       evaluateApproval
         .mockResolvedValueOnce(approvalRequired)
         .mockResolvedValueOnce({ status: "not-required" });
-      askApproval.mockResolvedValueOnce({ optionId: "approve" });
+      requestInput.mockResolvedValueOnce({ optionId: "approve" });
       executeTool
         .mockResolvedValueOnce({
           status: "completed",
@@ -603,10 +604,13 @@ describe("codeModeWorkflow", () => {
         toolName: "gated",
       };
       expect(evaluateApproval.mock.calls[0]).toEqual([nestedCall]);
-      expect(askApproval).toHaveBeenCalledExactlyOnceWith(
-        approvalRequired.request,
-        approvalRequired.action,
-      );
+      // The body sends a complete tool-approval request attributed to the nested call.
+      expect(requestInput).toHaveBeenCalledExactlyOnceWith({
+        ...approvalRequired.request,
+        action: { ...approvalRequired.action, kind: "tool-call" },
+        kind: "tool-approval",
+        requestId: "approval-hook",
+      });
       expect(executeTool.mock.calls[0]).toEqual([nestedCall]);
       expect(ask).not.toHaveBeenCalled();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
@@ -638,7 +642,7 @@ describe("codeModeWorkflow", () => {
         .mockResolvedValueOnce(parked(call("tool", "gated", {})))
         .mockResolvedValueOnce(completed("recovered"));
       evaluateApproval.mockResolvedValueOnce(approvalRequired);
-      askApproval.mockResolvedValueOnce({ optionId: "cancel" });
+      requestInput.mockResolvedValueOnce({ optionId: "cancel" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
       expect(executeTool).not.toHaveBeenCalled();
@@ -666,7 +670,7 @@ describe("codeModeWorkflow", () => {
       executeTool.mockResolvedValueOnce({ status: "completed", output: "GATED" });
 
       await expect(codeModeWorkflow(program, context())).resolves.toBe("done");
-      expect(askApproval).not.toHaveBeenCalled();
+      expect(requestInput).not.toHaveBeenCalled();
       expect(executeTool).toHaveBeenCalledOnce();
       expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
         sessionState: { sessionId: "s1" },
@@ -691,7 +695,7 @@ describe("codeModeWorkflow", () => {
         evaluateApproval.mockResolvedValueOnce(decision);
 
         await expect(codeModeWorkflow(program, context())).resolves.toBe("recovered");
-        expect(askApproval).not.toHaveBeenCalled();
+        expect(requestInput).not.toHaveBeenCalled();
         expect(executeTool).not.toHaveBeenCalled();
         expect(runProgram.mock.calls[1]?.[0]).toMatchObject({
           resume: { resolutions: [{ status: "failed", error: expect.stringContaining(message) }] },
@@ -720,7 +724,7 @@ describe("codeModeWorkflow", () => {
         .mockResolvedValueOnce(parked(call("tool", "add", {})))
         .mockResolvedValueOnce(completed("done"));
       evaluateApproval.mockResolvedValueOnce({ ...approvalRequired, approvalKey: "gated_wf" });
-      askApproval.mockResolvedValueOnce({ optionId: "approve" });
+      requestInput.mockResolvedValueOnce({ optionId: "approve" });
       executeWorkflowBody.mockResolvedValueOnce({
         outcome: { status: "completed", output: "planned" },
         reportCount: 0,

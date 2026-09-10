@@ -204,39 +204,19 @@ function normalizeInputRequest(
 }
 
 function normalizeAskRequest(
-  { approval, request: authored }: WorkflowToolAskRequest,
+  { request: authored }: WorkflowToolAskRequest,
   from: WorkflowToolRunRef,
   requestId: string,
 ): InputRequest {
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
-  // The answer routes back to the run's hook by request id, so the owner turn
-  // never dispatches `action`; it exists for rendering and attribution.
-  const normalized: InputRequest =
-    approval === undefined
-      ? {
-          action: {
-            callId: from.callId,
-            input: from.input,
-            kind: "tool-call",
-            toolName: from.toolName,
-          },
-          kind: "question",
-          prompt: authored.prompt,
-          requestId,
-        }
-      : {
-          action: {
-            callId: approval.callId,
-            input: approval.input,
-            kind: "tool-call",
-            toolName: approval.toolName,
-          },
-          kind: "tool-approval",
-          prompt: authored.prompt,
-          requestId,
-        };
+  const normalized: InputRequest = {
+    action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
+    kind: "question",
+    prompt: authored.prompt,
+    requestId,
+  };
   if (authored.allowFreeform !== undefined) normalized.allowFreeform = authored.allowFreeform;
   if (authored.display !== undefined) normalized.display = authored.display;
   if (authored.options !== undefined) normalized.options = [...authored.options];
