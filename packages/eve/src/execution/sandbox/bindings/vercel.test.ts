@@ -46,11 +46,13 @@ function createMockDetachedCommand(
 
 function createMockSandbox(input: {
   name: string;
+  persistent?: boolean;
   snapshotId?: string;
   status?: string;
   tags?: Record<string, string>;
 }) {
   const files = new Map<string, Buffer>();
+  let persistent = input.persistent ?? true;
   let tags = input.tags;
   return {
     currentSnapshotId: input.snapshotId ?? "",
@@ -60,6 +62,9 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
+    get persistent() {
+      return persistent;
+    },
     readFile: vi.fn(async (file: { path: string }): Promise<object | null> => {
       const content = files.get(file.path);
       return content === undefined ? null : Readable.from([content]);
@@ -80,11 +85,18 @@ function createMockSandbox(input: {
     get tags() {
       return tags;
     },
-    update: vi.fn().mockImplementation(async (params: { tags?: Record<string, string> }) => {
-      if (params.tags !== undefined) {
-        tags = params.tags;
-      }
-    }),
+    update: vi
+      .fn()
+      .mockImplementation(
+        async (params: { persistent?: boolean; tags?: Record<string, string> }) => {
+          if (params.persistent !== undefined) {
+            persistent = params.persistent;
+          }
+          if (params.tags !== undefined) {
+            tags = params.tags;
+          }
+        },
+      ),
     writeFiles: vi.fn(
       async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
         for (const file of nextFiles) {
@@ -191,7 +203,7 @@ describe("createVercelSandbox", () => {
         image: VERCEL_EVE_SANDBOX_IMAGE,
         name: "template-key",
         networkPolicy: "allow-all",
-        persistent: false,
+        persistent: true,
         ports: [3000],
         projectId: "prj_123",
         teamId: "team_123",
@@ -529,10 +541,40 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "template-key",
-        persistent: false,
+        persistent: true,
       }),
     );
     expect(freshTemplate.snapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes an existing non-persistent template record persistent before reusing it", async () => {
+    const existingTemplate = createMockSandbox({
+      name: "template-key",
+      persistent: false,
+      snapshotId: "framework-snapshot",
+      status: "stopped",
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockResolvedValue(existingTemplate),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.prewarm({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        seedFiles: [],
+        templateKey: "template-key",
+      }),
+    ).resolves.toEqual({ reused: true });
+
+    expect(existingTemplate.update).toHaveBeenCalledWith({ persistent: true });
+    expect(existingTemplate.snapshot).not.toHaveBeenCalled();
+    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
   });
 
   it("reports a reuse when an existing template already carries a framework snapshot", async () => {
@@ -672,7 +714,7 @@ describe("createVercelSandbox", () => {
     const [templateArgs, sessionArgs] = create.mock.calls;
     expect(templateArgs?.[0]).toMatchObject({
       name: "template-key",
-      persistent: false,
+      persistent: true,
       timeout: 30 * 60 * 1_000,
     });
     expect(sessionArgs?.[0]).toMatchObject({
@@ -794,7 +836,7 @@ describe("createVercelSandbox", () => {
     expect(templateArgs?.[0]).toMatchObject({
       name: "template-key",
       networkPolicy: "allow-all",
-      persistent: false,
+      persistent: true,
       ports: [3000, 4000],
       resources: { vcpus: 2 },
       timeout: 600_000,
@@ -1045,12 +1087,44 @@ describe("createVercelSandbox", () => {
     });
     expect(create.mock.calls[1]?.[0]).toMatchObject({
       name: "template-key",
-      persistent: false,
+      persistent: true,
     });
     expect(create.mock.calls[2]?.[0]).toMatchObject({
       name: "session-key",
       source: { snapshotId: "template-key-snapshot", type: "snapshot" },
     });
+  });
+
+  it("does not invalidate the shared template for an ambiguous session-create 404", async () => {
+    const templateSandbox = createMockSandbox({
+      name: "template-key",
+      snapshotId: "template-snapshot",
+    });
+    const imageNotFoundError = Object.assign(new Error("Image not found"), {
+      response: { status: 404 },
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockRejectedValueOnce(imageNotFoundError),
+        get: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+          if (name === "template-key") return templateSandbox;
+          return null;
+        }),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.create({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        sessionKey: "session-key",
+        templateKey: "template-key",
+      }),
+    ).rejects.toThrow('Failed to create sandbox session "session-key": Image not found');
+
+    expect(templateSandbox.delete).not.toHaveBeenCalled();
   });
 
   it("rebuilds a Vercel template when the named sandbox disappears during prewarm", async () => {
@@ -1141,6 +1215,52 @@ describe("createVercelSandbox", () => {
 
     const state = await handle.captureState();
     expect(state.metadata).toEqual({ sandboxName: "persisted-sandbox-name" });
+  });
+
+  it("replaces a persisted session whose snapshot is unavailable", async () => {
+    const templateSandbox = createMockSandbox({
+      name: "template-key",
+      snapshotId: "template-snapshot",
+    });
+    const staleSession = createMockSandbox({ name: "persisted-sandbox-name", status: "stopped" });
+    const replacementSession = createMockSandbox({ name: "session-key" });
+    const snapshotUnavailableError = Object.assign(new Error("Cannot resume sandbox"), {
+      response: { status: 410 },
+    });
+    vi.mocked(staleSession.runCommand).mockRejectedValueOnce(snapshotUnavailableError);
+
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValueOnce(replacementSession),
+        get: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+          if (name === "template-key") return templateSandbox;
+          if (name === "persisted-sandbox-name") return staleSession;
+          if (name === "session-key") return null;
+          return null;
+        }),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    const handle = await backend.create({
+      existingMetadata: { sandboxName: "persisted-sandbox-name" },
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    expect(staleSession.delete).toHaveBeenCalledTimes(1);
+    expect(templateSandbox.delete).not.toHaveBeenCalled();
+    expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "session-key",
+        persistent: true,
+        source: { snapshotId: "template-snapshot", type: "snapshot" },
+      }),
+    );
+    expect((await handle.captureState()).metadata).toEqual({ sandboxName: "session-key" });
   });
 
   it("stops the session sandbox on shutdown so no VM outlives the server", async () => {
@@ -1389,7 +1509,7 @@ describe("createVercelSandbox", () => {
     const [templateArgs, sessionArgs] = create.mock.calls;
     expect(templateArgs?.[0]).toMatchObject({
       name: "template-key",
-      persistent: false,
+      persistent: true,
     });
     expect(sessionArgs?.[0]).toMatchObject({
       name: "session-key",
