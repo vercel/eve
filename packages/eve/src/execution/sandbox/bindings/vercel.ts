@@ -307,9 +307,6 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
       }),
     });
   } else {
-    if (!sandbox.persistent) {
-      await sandbox.update({ persistent: true });
-    }
     await ensureVercelSandboxTags(sandbox, tags);
   }
 

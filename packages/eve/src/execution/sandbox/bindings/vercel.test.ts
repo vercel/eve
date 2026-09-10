@@ -46,13 +46,11 @@ function createMockDetachedCommand(
 
 function createMockSandbox(input: {
   name: string;
-  persistent?: boolean;
   snapshotId?: string;
   status?: string;
   tags?: Record<string, string>;
 }) {
   const files = new Map<string, Buffer>();
-  let persistent = input.persistent ?? true;
   let tags = input.tags;
   return {
     currentSnapshotId: input.snapshotId ?? "",
@@ -62,9 +60,6 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
-    get persistent() {
-      return persistent;
-    },
     readFile: vi.fn(async (file: { path: string }): Promise<object | null> => {
       const content = files.get(file.path);
       return content === undefined ? null : Readable.from([content]);
@@ -85,18 +80,11 @@ function createMockSandbox(input: {
     get tags() {
       return tags;
     },
-    update: vi
-      .fn()
-      .mockImplementation(
-        async (params: { persistent?: boolean; tags?: Record<string, string> }) => {
-          if (params.persistent !== undefined) {
-            persistent = params.persistent;
-          }
-          if (params.tags !== undefined) {
-            tags = params.tags;
-          }
-        },
-      ),
+    update: vi.fn().mockImplementation(async (params: { tags?: Record<string, string> }) => {
+      if (params.tags !== undefined) {
+        tags = params.tags;
+      }
+    }),
     writeFiles: vi.fn(
       async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
         for (const file of nextFiles) {
@@ -545,36 +533,6 @@ describe("createVercelSandbox", () => {
       }),
     );
     expect(freshTemplate.snapshot).toHaveBeenCalledTimes(1);
-  });
-
-  it("makes an existing non-persistent template record persistent before reusing it", async () => {
-    const existingTemplate = createMockSandbox({
-      name: "template-key",
-      persistent: false,
-      snapshotId: "framework-snapshot",
-      status: "stopped",
-    });
-    const sandboxModule = {
-      Sandbox: {
-        create: vi.fn(),
-        get: vi.fn().mockResolvedValue(existingTemplate),
-      },
-    };
-    const backend = createTestVercelSandbox({
-      loadSandboxModule: async () => sandboxModule as never,
-    });
-
-    await expect(
-      backend.prewarm({
-        runtimeContext: { appRoot: "/tmp/test-app-root" },
-        seedFiles: [],
-        templateKey: "template-key",
-      }),
-    ).resolves.toEqual({ reused: true });
-
-    expect(existingTemplate.update).toHaveBeenCalledWith({ persistent: true });
-    expect(existingTemplate.snapshot).not.toHaveBeenCalled();
-    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
   });
 
   it("reports a reuse when an existing template already carries a framework snapshot", async () => {
