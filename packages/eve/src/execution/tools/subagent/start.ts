@@ -49,6 +49,10 @@ export async function startSubagent(input: {
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
+  /** The backing agent reports as this task, rather than as a separate child work item. */
+  readonly taskActivityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -94,7 +98,7 @@ export async function startSubagent(input: {
         localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        activityObserver: input.activityObserver,
+        activityObserver: input.taskActivityObserver ?? input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -114,6 +118,7 @@ export async function startSubagent(input: {
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         activityObserver: input.activityObserver,
+        taskActivityObserver: input.taskActivityObserver,
         session: input.session,
         taskId: input.taskId,
       });

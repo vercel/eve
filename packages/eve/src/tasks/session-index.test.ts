@@ -52,6 +52,31 @@ describe("session task index", () => {
     expect(findSessionTaskEntry(session.state, "task_other")).toBeUndefined();
   });
 
+  it("keeps activity identity in the persisted task index", () => {
+    const activityWorkIdentity = {
+      callId: "call-1",
+      id: "work:task",
+      kind: "task" as const,
+      name: "research",
+      parentId: "work:root",
+      rootSessionId: "root-session",
+      rootTurnId: "root-turn",
+    };
+    const session = recordSessionTask(createSession(), {
+      activityWorkIdentity,
+      taskInboxToken: "task:token-1",
+      createdByTurnId: "turn-1",
+      metadata,
+      taskId: "task_a",
+      taskRunId: "run-1",
+    });
+
+    const restoredState = JSON.parse(JSON.stringify(session.state));
+    expect(findSessionTaskEntry(restoredState, "task_a")?.activityWorkIdentity).toEqual(
+      activityWorkIdentity,
+    );
+  });
+
   it("keeps subagent metadata in the persisted task index", () => {
     const subagentMetadata = {
       agentId: "ag_worker",

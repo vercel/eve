@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  appendTaskViewStep,
   deliverTaskInputResponsesStep,
   formatTaskNotification,
   projectTaskActivity,
@@ -9,6 +10,14 @@ import {
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { getWritable } from "#compiled/@workflow/core/index.js";
+import { submitActivity } from "#execution/submit-activity.js";
+
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getWritable: vi.fn(),
+}));
+vi.mock("#execution/submit-activity.js", () => ({ submitActivity: vi.fn() }));
 
 vi.mock("#execution/wire/session-inbox-resume.js", () => ({ resumeSessionInbox: vi.fn() }));
 vi.mock("#execution/tools/workflow/answer.js", () => ({
@@ -54,6 +63,32 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
     },
   },
 ];
+
+describe("appendTaskViewStep", () => {
+  it("waits for best-effort activity submission before the step finishes", async () => {
+    const submission = Promise.withResolvers<void>();
+    const submitted = Promise.withResolvers<void>();
+    const releaseLock = vi.fn();
+    vi.mocked(getWritable).mockReturnValue({
+      getWriter: () => ({ write: vi.fn().mockResolvedValue(undefined), releaseLock }),
+    } as never);
+    vi.mocked(submitActivity).mockImplementation(() => {
+      submitted.resolve();
+      return submission.promise;
+    });
+    let finished = false;
+    const appended = appendTaskViewStep({ view: notificationCases[0]!.view }).then(() => {
+      finished = true;
+    });
+    await submitted.promise;
+    await Promise.resolve();
+    expect(releaseLock).toHaveBeenCalledOnce();
+    expect(finished).toBe(false);
+    submission.resolve();
+    await appended;
+    expect(finished).toBe(true);
+  });
+});
 
 describe("projectTaskActivity", () => {
   afterEach(() => vi.unstubAllGlobals());

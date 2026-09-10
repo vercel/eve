@@ -17,6 +17,7 @@ import {
   type BackgroundToolExecutor,
 } from "#harness/background-tools.js";
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -54,6 +55,11 @@ import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel
 
 const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
 
+type ActivityBackgroundTask = BackgroundTask & {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
+};
+type ActivityBackgroundTaskDraft = Omit<ActivityBackgroundTask, "taskRunId">;
+
 interface BackgroundToolExecutionRecord {
   claim?: {
     readonly operationId: string;
@@ -64,7 +70,7 @@ interface BackgroundToolExecutionRecord {
     readonly operationId: string;
   };
   settled: boolean;
-  task?: BackgroundTask;
+  task?: ActivityBackgroundTask;
 }
 
 interface BackgroundToolStepResult {
@@ -318,7 +324,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       readonly toolInput: unknown;
     };
     readonly record: BackgroundToolExecutionRecord;
-  }): Promise<{ readonly receipt?: { readonly agentId: string }; readonly task: BackgroundTask }> {
+  }): Promise<{
+    readonly receipt?: { readonly agentId: string };
+    readonly task: ActivityBackgroundTask;
+  }> {
     const workflow =
       input.input.definition.workflowId === undefined
         ? undefined
@@ -401,7 +410,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       throw new Error(`Background workflow tool "${input.input.definition.name}" has no input.`);
     }
 
-    const task = prepareBackgroundTask(taskInput);
+    const task: ActivityBackgroundTaskDraft = {
+      ...prepareBackgroundTask(taskInput),
+      activityWorkIdentity:
+        workflow.resultKind === "subagent" ? taskInput.activityObserver?.workIdentity : undefined,
+    };
     if (
       workflow.resultKind === "subagent" &&
       subagentProjection !== undefined &&

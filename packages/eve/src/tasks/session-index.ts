@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
@@ -30,6 +31,7 @@ export { SESSION_TASKS_STATE_KEY } from "#tasks/session-task-cohorts.js";
  * `taskId` only, and lookup verifies ownership through this index.
  */
 export interface SessionTaskIndexEntry {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly taskId: string;
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
@@ -90,6 +92,9 @@ const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
 ]);
 
 const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
+  activityWorkIdentity: z
+    .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
+    .optional(),
   taskInboxToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
