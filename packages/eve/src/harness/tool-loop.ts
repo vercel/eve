@@ -26,6 +26,7 @@ import {
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  StaticModelReferenceKey,
   TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import {
@@ -38,10 +39,8 @@ import {
   prepareMemoryCompaction,
   prepareMemoryPreamble,
 } from "#context/memory-lifecycle.js";
-import {
-  getActiveDynamicModelSelection,
-  isDynamicModelSelectionError,
-} from "#context/dynamic-model-lifecycle.js";
+import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
+import { getEffectiveModelSelection } from "#context/effective-model.js";
 import {
   buildDynamicTools,
   buildResponseAuthorizationTools,
@@ -369,7 +368,7 @@ function buildGatewayAttributionHeaders(
   return headers;
 }
 
-async function resolveActiveRuntimeModel(input: {
+async function resolveEffectiveRuntimeModel(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly ctx: ReturnType<typeof contextStorage.getStore>;
   readonly session: HarnessSession;
@@ -388,19 +387,12 @@ async function resolveActiveRuntimeModel(input: {
     };
   }
 
-  const selected = getActiveDynamicModelSelection(input.ctx);
+  const selected = getEffectiveModelSelection(input.ctx);
 
   if (selected === null) {
-    const reference = input.session.agent.modelReference;
-    if (input.session.agent.dynamicModel === true || reference === undefined) {
-      throw new Error(
-        "Dynamic model selection is required before model-dependent work begins. Add a matching resolver handler that returns a concrete model.",
-      );
-    }
-    return {
-      model: await input.config.resolveModel(reference),
-      session: input.session,
-    };
+    throw new Error(
+      "Dynamic model selection is required before model-dependent work begins. Add a matching resolver handler that returns a concrete model.",
+    );
   }
 
   return {
@@ -416,6 +408,7 @@ function updateSessionModelReference(
   session: HarnessSession,
   modelReference: RuntimeModelReference,
 ): HarnessSession {
+  if (session.agent.modelReference === modelReference) return session;
   return {
     ...session,
     agent: {
@@ -508,6 +501,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
+    if (store !== undefined && !store.has(StaticModelReferenceKey)) {
+      store.setVirtualContext(
+        StaticModelReferenceKey,
+        session.agent.dynamicModel === true ? null : (session.agent.modelReference ?? null),
+      );
+    }
     const parent = store?.get(ParentSessionKey);
     const callback = store?.get(SessionCallbackKey);
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
@@ -618,7 +617,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (session.history.length > 0) {
         try {
           const ctx = contextStorage.getStore();
-          const resolvedModel = await resolveActiveRuntimeModel({ config, ctx, session });
+          const resolvedModel = await resolveEffectiveRuntimeModel({ config, ctx, session });
           session = resolvedModel.session;
 
           const compacted = await maybeCompact({
@@ -1162,7 +1161,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Direct harness unit tests may run without an ambient context.
     const ctx = store;
-    let resolvedModel: Awaited<ReturnType<typeof resolveActiveRuntimeModel>>;
+    let resolvedModel: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
     try {
       if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
         await config.dispatchDynamicModelEvent({
@@ -1178,7 +1177,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           messages: projectedMessages,
         });
       }
-      resolvedModel = await resolveActiveRuntimeModel({
+      resolvedModel = await resolveEffectiveRuntimeModel({
         config,
         ctx,
         session,

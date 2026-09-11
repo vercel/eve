@@ -14,6 +14,16 @@ import {
 } from "./setup.js";
 
 describe("self-modification setup", () => {
+  it("recognizes default local configurations", () => {
+    expect(renderSelfModificationConfig()).toContain("local: { enabled: true }");
+    expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
+    expect(
+      classifySelfModificationConfig(
+        'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n',
+      ),
+    ).toBe("local");
+  });
+
   it("renders a generated Connect-backed deployed configuration", () => {
     const source = renderSelfModificationConfig({
       branch: "release/production",

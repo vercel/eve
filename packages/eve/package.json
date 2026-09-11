@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.54.2",
+  "version": "0.54.3",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -85,6 +85,12 @@
       "types": "./dist/src/public/next/index.d.ts",
       "import": "./dist/src/public/next/index.js",
       "default": "./dist/src/public/next/index.js"
+    },
+    "./vercel": {
+      "eve-source": "./src/public/vercel/index.ts",
+      "types": "./dist/src/public/vercel/index.d.ts",
+      "import": "./dist/src/public/vercel/index.js",
+      "default": "./dist/src/public/vercel/index.js"
     },
     "./nuxt": {
       "types": "./dist/src/public/nuxt/index.d.ts",

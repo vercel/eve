@@ -201,7 +201,15 @@ export function createServiceConfigRecord(
 ): Record<string, VercelServiceConfig> {
   if (services === undefined) return {};
   if (!isNamedServiceArray(services)) return services;
-  return Object.fromEntries(services.map(({ name, ...service }) => [name, service]));
+
+  const record: Record<string, VercelServiceConfig> = {};
+  for (const { name, ...service } of services) {
+    if (Object.hasOwn(record, name)) {
+      throw new Error(`Duplicate Vercel service name ${JSON.stringify(name)}.`);
+    }
+    record[name] = service;
+  }
+  return record;
 }
 
 export function hasServices(

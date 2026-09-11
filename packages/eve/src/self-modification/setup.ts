@@ -11,6 +11,8 @@ import { SELF_MODIFICATION_CONFIG_PATH } from "./git-workspace.js";
 
 const runFile = promisify(execFile);
 const GENERATED_MARKER = "// eve-self-modification: generated-v1";
+const LEGACY_LOCAL_CONFIG =
+  'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n';
 
 export interface SelfModificationSetupValues {
   readonly branch: string;
@@ -42,7 +44,7 @@ export function connectorName(owner: string, repo: string): string {
 
 export function renderSelfModificationConfig(values?: SelfModificationSetupValues): string {
   if (values === undefined) {
-    return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n`;
+    return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({\n  local: { enabled: true },\n});\n`;
   }
   const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
   const channelCases = (values.vercelBackend ? channelNames : [])
@@ -99,7 +101,7 @@ export function classifySelfModificationConfig(
   source: string | undefined,
 ): "missing" | "local" | "generated" | "authored" {
   if (source === undefined) return "missing";
-  if (source === renderSelfModificationConfig()) return "local";
+  if (source === renderSelfModificationConfig() || source === LEGACY_LOCAL_CONFIG) return "local";
   const [marker, ...body] = source.split("\n");
   const match = /^\/\/ eve-self-modification: generated-v1 digest:([a-f0-9]{64})$/u.exec(
     marker ?? "",
