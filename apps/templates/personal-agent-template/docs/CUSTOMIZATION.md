@@ -132,7 +132,7 @@ Reach the agent over iMessage via [Sendblue](https://chat-sdk.dev/adapters/vendo
 
 1. Create a Sendblue account and copy API credentials + assigned number from the [dashboard](https://dashboard.sendblue.com) (or `@sendblue/cli`: `sendblue setup`, `sendblue show-keys`, `sendblue lines`)
 2. Set `SENDBLUE_*` env vars on the **eve** service — see [Environment](./ENVIRONMENT.md#sendblue-imessage-optional)
-3. Point the Sendblue receive webhook at `https://<your-domain>/_eve_internal/eve/eve/v1/sendblue/webhook`
+3. Point the Sendblue receive webhook at `https://<your-domain>/eve/v1/sendblue/webhook`
 4. Users add their E.164 phone number in **Settings → Profile**, then message the Sendblue number from that phone
 
 Phone linking uses the internal API (`GET /api/internal/phone/link`) — `INTERNAL_API_SECRET` must be set.

@@ -115,7 +115,7 @@ openssl rand -base64 32
 Add it to every Vercel environment:
 
 ```bash
-printf '%s' "<generated-secret>" | vercel env add BETTER_AUTH_SECRET production preview development
+printf '%s' "<generated-secret>" | vercel env add BETTER_AUTH_SECRET production,preview,development
 ```
 
 Pull the value locally if needed:
@@ -158,8 +158,8 @@ Use the `3001` callback only if you run local dev on port 3001. Add custom-domai
 Copy the Vercel App client ID and client secret, then add them:
 
 ```bash
-printf '%s' "<client-id>" | vercel env add NEXT_PUBLIC_VERCEL_APP_CLIENT_ID production preview development
-printf '%s' "<client-secret>" | vercel env add VERCEL_APP_CLIENT_SECRET production preview development
+printf '%s' "<client-id>" | vercel env add NEXT_PUBLIC_VERCEL_APP_CLIENT_ID production,preview,development
+printf '%s' "<client-secret>" | vercel env add VERCEL_APP_CLIENT_SECRET production,preview,development
 ```
 
 Pull the updated values locally:
@@ -192,7 +192,7 @@ BETTER_AUTH_URL -> VERCEL_PROJECT_PRODUCTION_URL -> VERCEL_URL -> http://localho
 You usually do not need `BETTER_AUTH_URL` for the first Vercel deployment. Set it explicitly when you use a custom production domain:
 
 ```bash
-printf '%s' "https://<your-custom-domain>" | vercel env add BETTER_AUTH_URL production preview development
+printf '%s' "https://<your-custom-domain>" | vercel env add BETTER_AUTH_URL production,preview,development
 ```
 
 `VERCEL_PROJECT_PRODUCTION_URL` and `VERCEL_URL` are Vercel system env vars. See [system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables).
@@ -273,10 +273,10 @@ vercel connect attach <connector-uid> --yes
 Set the matching environment variable to each connector UID:
 
 ```bash
-printf '%s' "<slack-connector-uid>" | vercel env add SLACK_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add NOTION_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add LINEAR_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add SENTRY_CONNECTOR production preview development
+printf '%s' "<slack-connector-uid>" | vercel env add SLACK_CONNECTOR production,preview,development
+printf '%s' "<connector-uid>" | vercel env add NOTION_CONNECTOR production,preview,development
+printf '%s' "<connector-uid>" | vercel env add LINEAR_CONNECTOR production,preview,development
+printf '%s' "<connector-uid>" | vercel env add SENTRY_CONNECTOR production,preview,development
 vercel env pull .env.local --yes
 ```
 

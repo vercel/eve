@@ -82,14 +82,14 @@ Used for:
 
 Reach the agent over iMessage via [Sendblue](https://chat-sdk.dev/adapters/vendor-official/sendblue). Set these on the **eve** service (and `BETTER_AUTH_URL` on both services so the agent can resolve phone links):
 
-| Variable                       | Required    | Description                                                                             |
-| ------------------------------ | ----------- | --------------------------------------------------------------------------------------- |
-| `SENDBLUE_API_KEY`             | Yes         | API key ID from the [Sendblue dashboard](https://dashboard.sendblue.com)                |
-| `SENDBLUE_API_SECRET`          | Yes         | API secret key                                                                          |
-| `SENDBLUE_FROM_NUMBER`         | Yes         | Your Sendblue line in E.164 format (e.g. `+15551234567`)                                |
-| `SENDBLUE_WEBHOOK_SECRET`      | Recommended | Shared secret verified via the `sb-signing-secret` header                               |
-| `SENDBLUE_STATUS_CALLBACK_URL` | No          | Delivery status callbacks for outbound messages                                         |
-| `SENDBLUE_ALLOWED_SERVICES`    | No          | Comma-separated list; defaults to `iMessage` only. Use `iMessage,SMS,RCS` to accept all |
+| Variable                       | Required | Description                                                                             |
+| ------------------------------ | -------- | --------------------------------------------------------------------------------------- |
+| `SENDBLUE_API_KEY`             | Yes      | API key ID from the [Sendblue dashboard](https://dashboard.sendblue.com)                |
+| `SENDBLUE_API_SECRET`          | Yes      | API secret key                                                                          |
+| `SENDBLUE_FROM_NUMBER`         | Yes      | Your Sendblue line in E.164 format (e.g. `+15551234567`)                                |
+| `SENDBLUE_WEBHOOK_SECRET`      | Yes      | Shared secret verified via the `sb-signing-secret` header                               |
+| `SENDBLUE_STATUS_CALLBACK_URL` | No       | Delivery status callbacks for outbound messages                                         |
+| `SENDBLUE_ALLOWED_SERVICES`    | No       | Comma-separated list; defaults to `iMessage` only. Use `iMessage,SMS,RCS` to accept all |
 
 Setup:
 
@@ -97,7 +97,7 @@ Setup:
 2. Set the env vars above on the **eve** Vercel service.
 3. Configure the Sendblue **receive webhook** to:
 
-   `https://<your-domain>/_eve_internal/eve/eve/v1/sendblue/webhook`
+   `https://<your-domain>/eve/v1/sendblue/webhook`
 
 4. Users add their personal phone number (E.164) in **Settings → Profile** before messaging the Sendblue number.
 

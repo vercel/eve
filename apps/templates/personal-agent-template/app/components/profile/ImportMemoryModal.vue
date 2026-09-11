@@ -106,7 +106,8 @@ defineShortcuts({
       </ol>
 
       <p class="text-xs leading-relaxed text-dimmed">
-        Importing memory is additive. You can do it for all your other AI providers.
+        Imported content replaces existing memory in populated categories. Categories omitted from
+        an import remain unchanged.
       </p>
 
       <UTextarea

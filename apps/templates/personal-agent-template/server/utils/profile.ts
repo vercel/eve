@@ -80,13 +80,14 @@ export async function updateProfileForUser(userId: string, patch: UserProfilePat
     await db.update(schema.user).set({ name: patch.name.trim() }).where(eq(schema.user.id, userId));
   }
 
+  const profilePatch: { timezone?: string; locale?: string; bio?: string } = {};
+  if (patch.timezone !== undefined) profilePatch.timezone = patch.timezone;
+  if (patch.locale !== undefined) profilePatch.locale = patch.locale;
+  if (patch.bio !== undefined) profilePatch.bio = patch.bio;
+
   await db
     .update(schema.userProfiles)
-    .set({
-      ...(patch.timezone !== undefined ? { timezone: patch.timezone } : {}),
-      ...(patch.locale !== undefined ? { locale: patch.locale } : {}),
-      ...(patch.bio !== undefined ? { bio: patch.bio } : {}),
-    })
+    .set(profilePatch)
     .where(eq(schema.userProfiles.userId, userId));
 
   if (patch.phoneNumber !== undefined) {

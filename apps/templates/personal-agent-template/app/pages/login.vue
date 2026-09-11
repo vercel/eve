@@ -105,7 +105,7 @@ async function handleSubmit() {
               />
             </UFormField>
 
-            <p v-if="error" class="text-sm text-error">
+            <p v-if="error" class="text-sm text-error" role="alert">
               {{ error }}
             </p>
 

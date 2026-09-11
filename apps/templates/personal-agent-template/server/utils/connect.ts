@@ -27,11 +27,12 @@ function userSubjects(userId: string): ConnectTokenSubject[] {
 }
 
 function tokenParams(def: ConnectorDef, subject: ConnectTokenSubject, installationId?: string) {
-  return {
+  const params: { subject: ConnectTokenSubject; scopes?: string[]; installationId?: string } = {
     subject,
-    ...(def.scopes.length ? { scopes: def.scopes } : {}),
-    ...(installationId ? { installationId } : {}),
   };
+  if (def.scopes.length) params.scopes = [...def.scopes];
+  if (installationId) params.installationId = installationId;
+  return params;
 }
 
 function isMissingGrantError(error: unknown) {
@@ -178,10 +179,9 @@ export async function revokeConnection(
 
   for (const subject of userSubjects(userId)) {
     try {
-      await revokeToken(def.connector, {
-        subject,
-        ...(installationId ? { installationId } : {}),
-      });
+      const params: { subject: ConnectTokenSubject; installationId?: string } = { subject };
+      if (installationId) params.installationId = installationId;
+      await revokeToken(def.connector, params);
       return;
     } catch (error) {
       lastError = error;

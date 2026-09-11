@@ -140,7 +140,7 @@ else
 
   # Register the app via the OAuth Apps API. The name and slug must be globally
   # unique, so the slug is derived from the project id. The email/profile/
-  # offline_access scopes are requested up front, and both callback forms are
+  # offline_access, openid scopes are requested up front, and both callback forms are
   # registered: the local URL (redirectUris) and the linked project + path
   # (projectRedirectUris), which covers the project's production and preview domains.
   CLIENT_ID=""
@@ -149,7 +149,7 @@ else
   APP_NAME="${PROJECT_SLUG:-$APP_SLUG}"
 
   echo "  Registering OAuth app \"$APP_NAME\" via the Vercel API..."
-  APP_JSON=$(node -e 'const [name,slug,projectId]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,slug,scopes:["email","profile","offline_access"],redirectUris:["http://localhost:3000/api/auth/callback/vercel"],projectRedirectUris:[{projectId,path:"/api/auth/callback/vercel"}]}))' "$APP_NAME" "$APP_SLUG" "$PROJECT_ID" \
+  APP_JSON=$(node -e 'const [name,slug,projectId]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,slug,scopes:["openid","email","profile","offline_access"],redirectUris:["http://localhost:3000/api/auth/callback/vercel"],projectRedirectUris:[{projectId,path:"/api/auth/callback/vercel"}]}))' "$APP_NAME" "$APP_SLUG" "$PROJECT_ID" \
     | vercel api "/oauth-apps" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || APP_JSON=""
   CLIENT_ID=$(printf '%s' "$APP_JSON" | json_field clientId)
 

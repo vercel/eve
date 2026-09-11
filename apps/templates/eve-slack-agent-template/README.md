@@ -4,9 +4,10 @@ This is a Slack agent template for [eve](https://eve.dev).
 
 ## Getting Started
 
-First, link the project and pull environment variables:
+First, install dependencies, link the project, and pull environment variables:
 
 ```bash
+pnpm install
 vercel link
 vercel env pull
 ```

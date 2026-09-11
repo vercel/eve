@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const EVE_URL = "https://vercel.com/eve";
 const GITHUB_REPOSITORY_URL = "https://github.com/vercel/eve";
-const GITHUB_URL = `${GITHUB_REPOSITORY_URL}/tree/main/eve-chat-template`;
+const GITHUB_URL = `${GITHUB_REPOSITORY_URL}/tree/main/apps/templates/eve-chat-template`;
 const COPY_PROMPT = `You are helping me bootstrap and deploy my own eve chat agent from the Vercel eve chat template.
 
 Source template:
@@ -45,7 +45,10 @@ const DEPLOY_URL = (() => {
       "envDescription",
       "Choose a strong password to protect your agent (16+ characters recommended).",
     ],
-    ["envLink", `${GITHUB_REPOSITORY_URL}/blob/main/eve-chat-template/docs/setup-and-deploy.md`],
+    [
+      "envLink",
+      `${GITHUB_REPOSITORY_URL}/blob/main/apps/templates/eve-chat-template/docs/setup-and-deploy.md`,
+    ],
     ["from", "templates"],
     ["project-name", "eve Chat Template"],
     ["repository-name", "eve-chat-template"],

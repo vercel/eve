@@ -27,7 +27,7 @@
     "@comark/nuxt": "^0.6.2",
     "@github-tools/sdk": "^1.11.1",
     "@libsql/client": "^0.17.4",
-    "@nuxt/ui": "^4.10.0",
+    "@nuxt/ui": "^4.11.1",
     "@nuxthub/core": "^0.10.8",
     "@shikijs/langs": "^4.4.3",
     "@vercel/analytics": "^2.0.1",

@@ -10,7 +10,8 @@ export function isSendblueConfigured() {
   return Boolean(
     process.env.SENDBLUE_API_KEY?.trim() &&
     process.env.SENDBLUE_API_SECRET?.trim() &&
-    process.env.SENDBLUE_FROM_NUMBER?.trim(),
+    process.env.SENDBLUE_FROM_NUMBER?.trim() &&
+    process.env.SENDBLUE_WEBHOOK_SECRET?.trim(),
   );
 }
 
@@ -18,7 +19,7 @@ export function getSendblueAdapter() {
   if (!adapter) {
     if (!isSendblueConfigured()) {
       throw new Error(
-        "Sendblue is not configured. Set SENDBLUE_API_KEY, SENDBLUE_API_SECRET, and SENDBLUE_FROM_NUMBER.",
+        "Sendblue is not configured. Set SENDBLUE_API_KEY, SENDBLUE_API_SECRET, SENDBLUE_FROM_NUMBER, and SENDBLUE_WEBHOOK_SECRET.",
       );
     }
 
@@ -31,7 +32,7 @@ export function getSendblueAdapter() {
 export function verifySendblueWebhook(request: Request) {
   const secret = process.env.SENDBLUE_WEBHOOK_SECRET?.trim();
   if (!secret) {
-    return true;
+    return false;
   }
 
   const headerValue = request.headers.get(WEBHOOK_SECRET_HEADER);

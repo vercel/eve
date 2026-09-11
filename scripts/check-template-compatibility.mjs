@@ -63,6 +63,7 @@ try {
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });
+    run("pnpm", ["exec", "eve", "build"], { cwd: destination });
     run("pnpm", ["build"], { cwd: destination });
   }
 } finally {

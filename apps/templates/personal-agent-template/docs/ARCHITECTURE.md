@@ -44,7 +44,7 @@ flowchart TB
 | `web`          | `/`                  | Nuxt UI + Nitro API |
 | `eve`          | `/_eve_internal/eve` | Eve agent runtime   |
 
-Configured in [`vercel.json`](../vercel.json).
+The [`eve/nuxt`](https://eve.dev/docs/guides/frontend/nuxt) module generates this service configuration during the Vercel build; [`vercel.json`](../vercel.json) contains only the schema declaration.
 
 ## Project structure
 
