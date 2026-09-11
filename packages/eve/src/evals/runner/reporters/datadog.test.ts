@@ -460,7 +460,20 @@ describe("Datadog", () => {
       recordExpectedOutputs: true,
     });
     const reporter = Datadog(config);
-    const result = makeEvalResult();
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "session-123",
+            primary: true,
+          },
+        ],
+      },
+    });
 
     await reporter.onRunStart([makeEval()], makeTarget());
     await reporter.onEvalComplete(result);
@@ -499,6 +512,14 @@ describe("Datadog", () => {
         output: "actual output",
         expectedOutput: "helpful onboarding answer",
         datasetRecordId: "record-1",
+        metadata: expect.objectContaining({
+          eveRuntimeTraceLinks: [
+            expect.objectContaining({
+              traceId: "0123456789abcdef0123456789abcdef",
+              spanId: "0123456789abcdef",
+            }),
+          ],
+        }),
       }),
     );
     expect(lines.join("\n")).toContain("Datadog dataset URL: https://dd.test/dataset");
