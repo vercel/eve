@@ -72,15 +72,14 @@ export default defineTaskEval({
     later.turn.calledSubagent("busy-worker", { count: 1, status: "completed" });
     const steeredTaskId = requireBackgroundTaskId(later.turn);
     await t.require(steeredTaskId, equals(admittedTaskId));
-    const pending = await waitForTaskInput(t, later.session, "hold");
-    await t.require(pending.request.requestId, equals(held.request.requestId));
-    const approved = await pending.session.respond([
-      { requestId: pending.request.requestId, optionId: "approve" },
+    // Steering retains the existing request; it does not publish a replacement approval.
+    const approved = await later.session.respond([
+      { requestId: held.request.requestId, optionId: "approve" },
     ]);
     approved.expectOk();
     const completed = await waitForCompletedTask(
       t,
-      pending.session,
+      later.session,
       "CHILD-TASK-EXCLUSIVITY-VERIFY",
       steeredTaskId,
     );
