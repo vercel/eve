@@ -3,6 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { createProcessOutputBuffer } from "#setup/primitives/process-output.js";
+
 import {
   ChatGptInvalidStoredSessionError,
   getDefaultChatGptCredentialStore,
@@ -51,7 +53,8 @@ export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promi
   if (owner === "codex") {
     if (state.kind === "unavailable") throw new Error(state.reason);
     try {
-      await (options.codexLogin ?? loginWithCodex)(options.signal);
+      const log = options.log ?? ((message: string) => process.stdout.write(`${message}\n`));
+      await (options.codexLogin ?? ((signal) => loginWithCodex(signal, log)))(options.signal);
       await assertChatGptAuthReady(
         broker,
         "Codex login completed without a usable ChatGPT session.",
@@ -121,18 +124,28 @@ async function assertChatGptAuthReady(broker: CodexTokenBroker, message: string)
   if (refreshed.kind !== "ready") throw new Error(message);
 }
 
-async function loginWithCodex(signal?: AbortSignal): Promise<void> {
+async function loginWithCodex(
+  signal: AbortSignal | undefined,
+  log: (message: string) => void,
+): Promise<void> {
   const child = spawn("codex", ["login"], {
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
     ...(signal !== undefined && { signal }),
   });
-  await new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) resolve();
-      else reject(new Error(`codex login failed (${signal ?? code ?? "unknown"}).`));
+  const output = createProcessOutputBuffer(({ text }) => log(text));
+  child.stdout.on("data", (chunk: Buffer) => output.write("stdout", chunk));
+  child.stderr.on("data", (chunk: Buffer) => output.write("stderr", chunk));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => {
+        if (code === 0) resolve();
+        else reject(new Error(`codex login failed (${signal ?? code ?? "unknown"}).`));
+      });
     });
-  });
+  } finally {
+    output.flush();
+  }
 }
 
 type LoginOptions = ChatGptAuthOptions & {

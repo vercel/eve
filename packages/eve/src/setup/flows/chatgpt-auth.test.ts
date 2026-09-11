@@ -1,3 +1,7 @@
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +19,7 @@ import {
 } from "#public/models/openai/chatgpt/token-broker.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 
+vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 vi.mock("node:timers/promises", () => ({
   setTimeout: (ms: number, _value: unknown, options: { signal: AbortSignal }) =>
     new Promise<void>((resolve, reject) => {
@@ -31,7 +36,10 @@ vi.mock("node:timers/promises", () => ({
     }),
 }));
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.mocked(spawn).mockReset();
+});
 
 function setup() {
   let credentials: ChatGptCredentials | undefined;
@@ -124,6 +132,39 @@ describe("ChatGPT device sign-in", () => {
     expect(options.store.update).not.toHaveBeenCalled();
     expect(options.open).not.toHaveBeenCalled();
     expect(broker.credentialOwner()).toBe("codex");
+  });
+
+  it("pipes Codex login output through the parent logger", async () => {
+    const options = setup();
+    let signedIn = false;
+    const restart = vi.fn();
+    const appServer: CodexAppServer = {
+      restart,
+      getAuthStatus: vi.fn(async () =>
+        signedIn ? { authMethod: "chatgpt", authToken: "codex-token" } : { authMethod: "chatgpt" },
+      ),
+    };
+    const broker = createCodexTokenBroker({ appServer, store: options.store });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), { stdout, stderr });
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const login = ensureChatGptAuth({ ...options, broker });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    stdout.write("Starting local login server.\nOpen the browser");
+    stderr.write("Waiting for authentication.\n");
+    signedIn = true;
+    child.emit("close", 0, null);
+    await login;
+
+    expect(spawn).toHaveBeenCalledWith("codex", ["login"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(options.log).toHaveBeenCalledWith("Starting local login server.");
+    expect(options.log).toHaveBeenCalledWith("Waiting for authentication.");
+    expect(options.log).toHaveBeenCalledWith("Open the browser");
+    expect(restart).toHaveBeenCalledOnce();
   });
 
   it("does not fall back when app-server fails for a reason other than a missing binary", async () => {
