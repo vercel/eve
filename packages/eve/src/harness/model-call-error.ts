@@ -167,6 +167,10 @@ function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>):
 export function extractModelCallErrorDetails(error: unknown): JsonObject {
   const signals = readModelCallErrorSignals(error);
   const details: Record<string, JsonValue> = {};
+  if (error instanceof ContentFilteredModelResponseError) {
+    details.finishReason = "content-filter";
+    appendJsonField(details, "generationId", error.generationId);
+  }
 
   appendJsonField(details, "apiErrorMessage", signals.apiErrorMessage);
   appendJsonField(details, "gatewayName", signals.gatewayName);
@@ -218,6 +222,17 @@ export class EmptyModelResponseError extends Error {
   constructor(options?: { cause?: unknown }) {
     super("The model did not return a response. Please try again.", options);
     this.name = "EmptyModelResponseError";
+  }
+}
+
+/** Provider filtering is a completed rejection, not an empty response to reissue. */
+export class ContentFilteredModelResponseError extends Error {
+  readonly generationId?: string;
+
+  constructor(generationId?: string) {
+    super("The model provider filtered this response.");
+    this.name = "ContentFilteredModelResponseError";
+    this.generationId = generationId;
   }
 }
 

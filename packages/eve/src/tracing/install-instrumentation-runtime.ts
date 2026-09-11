@@ -93,6 +93,7 @@ export function installInstrumentationRuntime(input: {
     }),
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
     instrumentationProviders: input.instrumentationProviders,
+    memoryOperations: otelRuntime !== undefined || input.providers.some(hasMemoryOperationHandler),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     ownsAgentSpans: otelRuntime !== undefined,
     prepareSessionTrace,
@@ -108,6 +109,14 @@ export function installInstrumentationRuntime(input: {
       return shutdown;
     },
   });
+}
+
+function hasMemoryOperationHandler(provider: InstrumentationProviderDefinition): boolean {
+  return (
+    provider.events?.["memory.operation.started"] !== undefined ||
+    provider.events?.["memory.operation.completed"] !== undefined ||
+    provider.events?.["memory.operation.failed"] !== undefined
+  );
 }
 
 function isSpanProcessor(processor: SpanProcessor | "auto"): processor is SpanProcessor {

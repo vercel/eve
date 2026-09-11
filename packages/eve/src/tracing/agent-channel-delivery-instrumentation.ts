@@ -54,7 +54,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
     if (!isSampledTrace(turn?.context ?? session.context)) return;
-    const inputAttribute = input.recordInputs ? contentAttribute(event.input, false) : undefined;
+    const inputAttribute = input.recordInputs ? contentAttribute(event.input) : undefined;
     const state: Record<string, JsonValue> = {};
     if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;
     if (event.delivery.requestTraceContext !== undefined) {

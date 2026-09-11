@@ -1,4 +1,5 @@
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
+import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -499,7 +500,7 @@ export interface InstrumentationActionStartedEvent {
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
-  /** Whether this action owns a workflow body that may invoke nested agents. */
+  /** Whether this action owns a durable workflow body. */
   readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
@@ -580,6 +581,9 @@ export interface InstrumentationProviderDefinition {
     readonly "model.call.started"?: InstrumentationEventHandler<InstrumentationModelCallStartedEvent>;
     readonly "model.call.completed"?: InstrumentationEventHandler<InstrumentationModelCallCompletedEvent>;
     readonly "model.call.failed"?: InstrumentationEventHandler<InstrumentationModelCallFailedEvent>;
+    readonly "memory.operation.started"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationStartedEvent>;
+    readonly "memory.operation.completed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationCompletedEvent>;
+    readonly "memory.operation.failed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationFailedEvent>;
     readonly "input.requested"?: InstrumentationEventHandler<InstrumentationInputRequestedEvent>;
     readonly "input.resolved"?: InstrumentationEventHandler<InstrumentationInputResolvedEvent>;
     readonly "session.completed"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
@@ -625,6 +629,8 @@ export type InstrumentationCorrelatedEvent =
   | InstrumentationInputResolvedEvent
   | InstrumentationActionStartedEvent
   | InstrumentationActionTerminalEvent
+  | memory.InstrumentationMemoryOperationStartedEvent
+  | memory.InstrumentationMemoryOperationTerminalEvent
   | InstrumentationModelCallStartedEvent
   | InstrumentationModelCallTerminalEvent
   | InstrumentationToolCallStartedEvent
@@ -658,7 +664,8 @@ export type InstrumentationExecutionOperation =
       readonly idempotencyKey: string;
       readonly scope: InstrumentationAttemptScope;
       readonly type: "model.call";
-    };
+    }
+  | memory.InstrumentationMemoryExecutionOperation;
 
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {

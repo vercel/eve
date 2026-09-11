@@ -54,6 +54,7 @@ export interface AgentActionTraceState {
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
   readonly inputAttribute?: string;
+  readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
@@ -63,11 +64,12 @@ export interface AgentActionTraceState {
   readonly startTimeMs: number;
   readonly stepIndex: number;
   readonly turnId: string;
+  readonly workflowName?: string;
 }
 
 export interface AgentInvocationTraceState extends Omit<
   AgentActionTraceState,
-  "inputAttribute" | "kind"
+  "inputAttribute" | "isWorkflowTool" | "kind" | "workflowName"
 > {
   readonly kind: "remote-agent-call" | "subagent-call";
   readonly parentActionCallId: string;

@@ -833,7 +833,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
       .discriminatedUnion("kind", [
         z
           .object({
-            action: z.enum(["self-agent", "task-cancel", "task-update"]),
+            action: z.enum(["self-agent", "task-cancel"]),
             kind: z.literal("dispatch"),
           })
           .strict(),

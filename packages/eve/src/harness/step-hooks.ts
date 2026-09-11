@@ -490,7 +490,7 @@ function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): 
   return undefined;
 }
 
-function readGatewayGenerationId(
+export function readGatewayGenerationId(
   providerMetadata: ProviderMetadata | undefined,
 ): string | undefined {
   const generationId = readGatewayMetadata(providerMetadata)?.generationId;

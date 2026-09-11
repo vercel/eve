@@ -171,6 +171,24 @@ export type RuntimeActionRequest =
   | RuntimeToolCallActionRequest
   | RuntimeWorkflowToolCallActionRequest;
 
+const RUNTIME_WORKFLOW_TOOL_ACTION = Symbol.for("eve:runtime-workflow-tool-action");
+
+/** Marks an in-process tool action without changing its serialized protocol shape. */
+export function markRuntimeWorkflowToolAction(
+  action: RuntimeToolCallActionRequest,
+): RuntimeToolCallActionRequest {
+  Object.defineProperty(action, RUNTIME_WORKFLOW_TOOL_ACTION, { value: true });
+  return action;
+}
+
+/** Reads the in-process marker or the older explicit protocol action kind. */
+export function isRuntimeWorkflowToolAction(action: RuntimeActionRequest): boolean {
+  return (
+    action.kind === "workflow-tool-call" ||
+    (action.kind === "tool-call" && Reflect.get(action, RUNTIME_WORKFLOW_TOOL_ACTION) === true)
+  );
+}
+
 /** Internal agent dispatch request owned by a workflow task. */
 export type RuntimeAgentDispatchRequest =
   | RuntimeRemoteAgentDispatchRequest

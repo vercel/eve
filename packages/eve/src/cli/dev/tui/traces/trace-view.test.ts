@@ -51,7 +51,9 @@ function conversationSpans(): LocalTraceSpan[] {
   const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
     "gen_ai.request.model": "gpt-5",
     "agent.usage.input_tokens": 1234,
-    "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+    "gen_ai.input.messages": JSON.stringify([
+      { parts: [{ content: "hi", type: "text" }], role: "user" },
+    ]),
     "ai.prompt.system": "You are a test assistant.",
     "ai.response.text": "reply",
   });
@@ -207,7 +209,9 @@ describe("renderTraceViewer", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
     const step = span("b".repeat(16), "agent.step", 10, 300, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 100, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": "reply",
       "agent.usage.input_tokens": 10,
     });
@@ -250,7 +254,7 @@ describe("renderTraceViewer", () => {
   it("skips payload keys in the drawer since the cards already carry them", () => {
     const frame = render(viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }));
     const body = frame.rows.map(stripAnsi).join("\n");
-    expect(body).not.toContain("ai.prompt.messages");
+    expect(body).not.toContain("gen_ai.input.messages");
     expect(body).not.toContain("ai.response.text");
     expect(body).toContain("agent.usage.input_tokens 1234");
   });

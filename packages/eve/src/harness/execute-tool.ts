@@ -9,10 +9,8 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 /**
  * Runtime-owned action metadata attached to one harness-visible tool.
  *
- * `task-control` marks the parent-side background task tools
- * (`task_cancel`, `task_update`): they carry no child
- * address of their own — the dispatch step resolves targets through the
- * session task index by tool name.
+ * `task-control` marks `task_cancel`: it carries no child address of its
+ * own — the dispatch step resolves targets through the session task index.
  */
 export type HarnessRuntimeActionDefinition = { readonly kind: "task-control" };
 

@@ -31,7 +31,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { AGENT_SPAN_NAMES, workflowInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 export interface AgentActionInstrumentation {
@@ -78,7 +78,8 @@ export function createAgentActionInstrumentation(input: {
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
-      inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
+      inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
+      isWorkflowTool: event.isWorkflowTool === true,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -115,6 +116,11 @@ export function createAgentActionInstrumentation(input: {
 
   const startSpan = (state: AgentActionTraceState): Span => {
     const invocation = isAgentInvocation(state.kind);
+    const workflowName = state.kind === "tool-call" ? state.workflowName : undefined;
+    const spanName =
+      workflowName === undefined
+        ? AGENT_SPAN_NAMES.action
+        : workflowInvocationSpanName(workflowName);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
         AGENT_SPAN_NAMES.action,
@@ -128,11 +134,20 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes("agent.action"),
+            ...agentSpanNamingAttributes(
+              spanName,
+              workflowName === undefined ? undefined : "invoke_workflow",
+            ),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               sessionId: state.sessionId,
             }),
+            ...(workflowName === undefined
+              ? undefined
+              : {
+                  "gen_ai.operation.name": "invoke_workflow",
+                  "gen_ai.workflow.name": workflowName,
+                }),
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,
@@ -146,6 +161,7 @@ export function createAgentActionInstrumentation(input: {
         contextFromActionState(state),
       ),
     );
+    if (workflowName !== undefined) updateSpanName(span, spanName);
     if (!invocation && state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
     }
@@ -234,7 +250,7 @@ export function createAgentActionInstrumentation(input: {
         setAgentUsage(span, event.usage);
       }
       if (input.recordOutputs && !isAgentInvocation(state.kind)) {
-        const result = contentAttribute(event.output.output, false);
+        const result = contentAttribute(event.output.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
       }
     }
@@ -287,6 +303,11 @@ function isAgentInvocation(kind: InstrumentationActionKind): boolean {
   return kind === "subagent-call" || kind === "remote-agent-call";
 }
 
+function updateSpanName(span: Span, name: string): void {
+  const updateName = Reflect.get(span, "updateName");
+  if (typeof updateName === "function") Reflect.apply(updateName, span, [name]);
+}
+
 function recordActionError(span: Span, error: unknown, errorType?: string): void {
   if (error instanceof Error || error === undefined) {
     recordError(span, error, errorType);
@@ -304,7 +325,7 @@ function recordActionError(span: Span, error: unknown, errorType?: string): void
 
 function serializedErrorDetail(error: unknown): string | undefined {
   if (typeof error === "string") return textContentAttribute(error);
-  const serialized = contentAttribute(error, false);
+  const serialized = contentAttribute(error);
   if (typeof error !== "object" || error === null || Array.isArray(error)) return serialized;
   const message = Reflect.get(error, "message");
   if (typeof message !== "string") return serialized;

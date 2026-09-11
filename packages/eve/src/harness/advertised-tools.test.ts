@@ -103,23 +103,23 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
   });
 
-  it("keeps the task tools in the root session", () => {
+  it("keeps root-session tools in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
+      ["root_only", createAvailableTool("root_only", ["root-session"])],
+      ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "root_only"]);
   });
 
   it("exposes delegated-task-child tools from persisted session ownership", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
+      ["root_only", createAvailableTool("root_only", ["root-session"])],
+      ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
@@ -127,19 +127,22 @@ describe("getAdvertisedTools for definition arrays", () => {
       tools,
     });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "child_only"]);
   });
 
-  it("removes task_update from sessions without task ownership", () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
-    ]) satisfies HarnessToolMap;
+  it.each([{}, { rootSessionId: "root-session" }])(
+    "removes delegated-task-child tools from sessions without task ownership (%j)",
+    (session) => {
+      const tools = new Map([
+        ["add", createTool("add")],
+        ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
+      ]) satisfies HarnessToolMap;
 
-    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+      const advertisedTools = getAdvertisedTools({ session, tools });
 
-    expect([...advertisedTools.keys()]).toEqual(["add"]);
-  });
+      expect([...advertisedTools.keys()]).toEqual(["add"]);
+    },
+  );
 });
 
 function createTool(name: string): HarnessToolDefinition {
@@ -165,14 +168,13 @@ function createBuiltInAgentTool(): HarnessToolDefinition {
   };
 }
 
-function createTaskControlTool(
+function createAvailableTool(
   name: string,
   availability: NonNullable<HarnessToolDefinition["behavior"]>["availability"],
 ): HarnessToolDefinition {
   return {
     ...createTool(name),
     behavior: { availability },
-    runtimeAction: { kind: "task-control" },
   };
 }
 

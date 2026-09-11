@@ -1,12 +1,12 @@
-import { defineEval, type EveEvalTurn } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
+import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 import {
-  completeReport,
+  completedAt,
+  modelSteps,
   QUESTION,
   sendQuestion,
   startWarehouseLookups,
-  TASK_COUNT,
   waitForPartialCompletion,
   waitForReport,
 } from "./reporting.js";
@@ -14,62 +14,44 @@ import {
 function pendingResponseEval() {
   return defineEval({
     description:
-      "After a partial completion, the parent answers a user while sibling tasks are running, then reports all results.",
+      "A real parent answers Alice after one child completes while sibling approvals remain pending, then reports the whole cohort including a nested lookup.",
     tags: ["real-model", "pending-response"],
     async test(t) {
       const run = await startWarehouseLookups(t);
       await waitForPartialCompletion(t, run);
-
       const question = await sendQuestion(t, run);
-      question.messageIncludes(/\b56\b/u);
-      question.usedNoTools();
-
       const report = await waitForReport(t, run);
-      t.check(report, completeReport());
-      t.notEvent("compaction.requested");
 
-      await t.require(
-        run.childSessionIds.size,
-        satisfies(
-          (count) => count === TASK_COUNT,
-          "all child sessions are available for timing checks",
-        ),
-      );
-      const children = await Promise.all(
-        [...run.childSessionIds].map((sessionId) => t.target.watchTurn(sessionId).result()),
-      );
-      const settledAt = Math.max(...children.map(completedAt));
+      const first = run.completedChildren.get("first");
+      const last = run.completedChildren.get("third");
+      if (first === undefined || last === undefined)
+        throw new Error("Missing completed warehouse children.");
       const received = question.events.find(
-        (event) => event.type === "message.received" && event.data.message.includes(QUESTION),
+        (event) => event.type === "message.received" && event.data.message === QUESTION,
       );
       const answered = question.events.find(
-        (event) =>
-          event.type === "message.completed" &&
-          event.data.finishReason !== "tool-calls" &&
-          /\b56\b/u.test(event.data.message ?? ""),
+        (event) => event.type === "message.completed" && event.data.message?.trim() === "56",
       );
+      const reportStep = report.events.find((event) => event.type === "step.started");
       const askedAt = Date.parse(received?.meta.at ?? "");
       const answeredAt = Date.parse(answered?.meta.at ?? "");
-      t.check(
-        askedAt < settledAt,
-        satisfies(Boolean, "the user question reached the parent before cohort settlement"),
+      const reportAt = Date.parse(reportStep?.meta.at ?? "");
+      t.check(completedAt(first) <= askedAt, equals(true)).label(
+        "the user question follows actual child completion",
       );
-      t.check(
-        answeredAt < settledAt,
-        satisfies(Boolean, "the user received an answer before cohort settlement"),
+      t.check(answeredAt < completedAt(last), equals(true)).label(
+        "the user answer precedes the nested child's completion",
       );
-      t.log(
-        `user reply=${JSON.stringify(question.message)} asked=${askedAt} answered=${answeredAt} settled=${settledAt}`,
+      t.check(completedAt(last) <= reportAt, equals(true)).label(
+        "the cohort model turn starts only after the last child completes",
       );
+      t.check(modelSteps(run.parentTurns), equals(2)).label(
+        "only the user answer and final cohort report invoke the parent model",
+      );
+      t.notEvent("compaction.requested");
       t.noFailedActions();
     },
   });
 }
 
 export default Array.from({ length: 20 }, pendingResponseEval);
-
-function completedAt(turn: EveEvalTurn): number {
-  const event = turn.events.find((entry) => entry.type === "turn.completed");
-  if (event === undefined) throw new Error("Missing child completion event for timing check.");
-  return Date.parse(event.meta.at);
-}

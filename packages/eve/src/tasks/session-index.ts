@@ -5,6 +5,7 @@ import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 import {
+  getTaskCohortId,
   SESSION_TASKS_STATE_KEY,
   SESSION_TASKS_STATE_VERSION,
 } from "#tasks/session-task-cohorts.js";
@@ -37,6 +38,8 @@ export interface SessionTaskIndexEntry {
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
+  /** Immutable join target; absent on the task that starts a cohort. */
+  readonly cohortId?: string;
   readonly executor?: TaskExecutorBinding;
   readonly metadata: TaskMetadata;
 }
@@ -93,6 +96,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   taskInboxToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
+  cohortId: z.string().min(1).optional(),
   executor: z
     .strictObject({
       data: z.record(z.string(), z.custom<JsonValue>()),
@@ -206,15 +210,32 @@ export function findSessionTaskEntry(
 }
 
 /**
- * Records one task, replacing any entry with the same id so replayed
- * creation for the same originating call stays idempotent.
+ * Joins the indexed cohort that still has unreported/nonterminal work. Cached
+ * terminal siblings remain members until the whole cohort settles. Membership
+ * and creation provenance survive replay, even after that cohort has settled.
  */
 export function recordSessionTask(
   session: HarnessSession,
-  entry: SessionTaskIndexEntry,
+  entry: Omit<SessionTaskIndexEntry, "cohortId">,
 ): HarnessSession {
-  const existing = getSessionTaskIndex(session.state);
-  const tasks = [...existing.filter((candidate) => candidate.taskId !== entry.taskId), entry];
+  const tasks = [...getSessionTaskIndex(session.state)];
+  const index = tasks.findIndex((candidate) => candidate.taskId === entry.taskId);
+  const previous = tasks[index];
+  if (previous !== undefined) {
+    tasks[index] = {
+      ...entry,
+      cohortId: previous.cohortId,
+      createdByStepIndex: previous.createdByStepIndex,
+      createdByTurnId: previous.createdByTurnId,
+      terminalView: previous.terminalView ?? entry.terminalView,
+    };
+  } else {
+    const pending = tasks.find((candidate) => candidate.terminalView === undefined);
+    tasks.push({
+      ...entry,
+      cohortId: pending === undefined ? undefined : getTaskCohortId(pending),
+    });
+  }
   return {
     ...session,
     state: {

@@ -51,6 +51,10 @@ import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-
 import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
+  createMemoryInstrumentation,
+  type MemoryInstrumentation,
+} from "#instrumentation/memory.js";
+import {
   ChannelInstrumentationKey,
   ConversationIdKey,
   OtelTraceEnabledKey,
@@ -154,6 +158,7 @@ export interface InstrumentationRuntime {
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
   readonly instrumentationProviders?: boolean;
+  readonly memoryOperations?: boolean;
   readonly ownsAgentSpans?: boolean;
   readonly prepareSessionTrace?: (
     event: InstrumentationSessionStartedEvent,
@@ -194,6 +199,7 @@ export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation 
       | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName">
       | Omit<ChannelDeliveryTerminalInstrumentation, "hooks">,
   ) => Promise<void>;
+  readonly memory?: MemoryInstrumentation;
   readonly prepareExecution: () => SessionInstrumentation;
   readonly preparePreamble: InstrumentationStepScope<never>["preparePreamble"];
 }
@@ -256,6 +262,20 @@ export function bindInstrumentationRuntime(
       },
     });
   };
+  const memory: MemoryInstrumentation | undefined =
+    runtime.memoryOperations === true
+      ? createMemoryInstrumentation({
+          resolveContext: () => {
+            const sessionContext = readSessionContext();
+            return {
+              hooks: bindHooks(sessionContext),
+              rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+            };
+          },
+          runInContext: runtime.runInContext,
+          sessionId: boundSession.sessionId,
+        })
+      : undefined;
   const prepareExecution = (): SessionInstrumentation => {
     const executionRuntime = captureExecutionRuntime();
     return {
@@ -497,6 +517,7 @@ export function bindInstrumentationRuntime(
         hooks: baseHooks,
         policyAgentName: boundSession.agentName,
       }),
+    memory,
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),
   };

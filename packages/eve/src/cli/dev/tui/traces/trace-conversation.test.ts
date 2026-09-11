@@ -50,13 +50,13 @@ function weatherTurn(): LocalTraceSpan[] {
   });
   const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
   const messages = JSON.stringify([
-    { role: "user", content: "weather in nyc?" },
-    { role: "assistant", content: "hi" },
-    { role: "user", content: "weather in sf?" },
+    { role: "user", parts: [{ type: "text", content: "weather in nyc?" }] },
+    { role: "assistant", parts: [{ type: "text", content: "hi" }] },
+    { role: "user", parts: [{ type: "text", content: "weather in sf?" }] },
   ]);
   const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
     "gen_ai.request.model": "claude-test",
-    "ai.prompt.messages": messages,
+    "gen_ai.input.messages": messages,
     "ai.response.text": "Let me check.",
     "agent.usage.input_tokens": 6200,
     "agent.usage.output_tokens": 50,
@@ -100,6 +100,38 @@ describe("buildConversationItems", () => {
     expect(items[2]?.name).toBe("get_weather");
     expect(items[2]?.args).toBe('{"city":"sf"}');
     expect(items[2]?.result).toBe('{"temperatureF":72}');
+  });
+
+  it.each([
+    { error: false, result: '{"deployed":true}', statusCode: 0 },
+    { error: true, result: undefined, statusCode: 2 },
+  ])("keeps $error workflow invocations as tool cards", ({ error, result, statusCode }) => {
+    const workflow = span(
+      "e".repeat(16),
+      "invoke_workflow deploy",
+      2500,
+      3250,
+      "b".repeat(16),
+      {
+        "agent.action.name": "deploy",
+        "gen_ai.operation.name": "invoke_workflow",
+        "gen_ai.tool.call.arguments": '{"service":"api"}',
+        "gen_ai.tool.call.result": result,
+        "gen_ai.workflow.name": "deploy",
+      },
+      statusCode,
+    );
+    const items = buildConversationItems(trace([...weatherTurn(), workflow]));
+    const item = items.find((candidate) => candidate.span.spanId === workflow.spanId);
+
+    expect(item).toMatchObject({
+      args: '{"service":"api"}',
+      durationMs: 750,
+      error,
+      kind: "tool",
+      name: "deploy",
+      result,
+    });
   });
 
   it("renders provider-executed tool results as tool cards after the assistant", () => {
@@ -176,7 +208,9 @@ describe("buildConversationItems", () => {
       7000,
       childStep.spanId,
       {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "delegated task" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "delegated task", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "delegated reply",
       },
     );
@@ -222,7 +256,9 @@ describe("buildConversationItems", () => {
     });
     const step1 = span("b".repeat(16), "agent.step", 10, 20, turn.spanId, {});
     const dispatch = span("c".repeat(16), "ai.streamText.doStream", 12, 18, step1.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "run the subagent" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "run the subagent", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": "Dispatching.",
     });
     const parentAction = span("e".repeat(16), "agent.action", 20, 30, step1.spanId, {
@@ -245,7 +281,9 @@ describe("buildConversationItems", () => {
     );
     const childStep = span("1".repeat(16), "agent.step", 32, 40, childTurn.spanId, {});
     const childModel = span("2".repeat(16), "ai.streamText.doStream", 34, 38, childStep.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "delegated task" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "delegated task", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": "delegated reply",
     });
     const step2 = span("3".repeat(16), "agent.step", 50, 60, turn.spanId, {});
@@ -269,7 +307,9 @@ describe("buildConversationItems", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
     });
     const items = buildConversationItems(trace([turn, step, model]));
     expect(items).toEqual([]);
@@ -284,7 +324,11 @@ describe("buildConversationItems", () => {
       20,
       2000,
       step.spanId,
-      { "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]) },
+      {
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
+      },
       2,
     );
     const items = buildConversationItems(trace([turn, step, model]));
@@ -296,7 +340,9 @@ describe("buildConversationItems", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "agent.usage.input_tokens": 100,
       "agent.usage.output_tokens": 10,
     });
@@ -309,7 +355,9 @@ describe("buildConversationItems", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 50, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "agent.usage.input_tokens": 10,
     });
     const action = span(
@@ -395,7 +443,9 @@ describe("renderConversationItem", () => {
     });
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
       "gen_ai.request.model": "claude-test",
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": "reply",
       "agent.usage.input_tokens": 100,
     });
@@ -425,7 +475,9 @@ describe("renderConversationItem", () => {
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 50, step.spanId, {
       "ai.prompt.system": "You are a test assistant. Be brief.",
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
     });
     const items = buildConversationItems(trace([turn, step, model]));
     expect(items[0]?.kind).toBe("system");
@@ -453,7 +505,9 @@ describe("renderConversationItem", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 50, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.reasoning": "let me think about this",
       "ai.response.text": "here is my answer",
     });

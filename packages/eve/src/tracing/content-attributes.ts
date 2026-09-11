@@ -19,7 +19,6 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.approval.request",
   "ai.documents",
   "ai.prompt",
-  "ai.prompt.messages",
   "ai.prompt.system",
   "ai.prompt.toolChoice",
   "ai.prompt.tools",
@@ -51,6 +50,7 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.response.tool_results",
   "ai.toolCall.args",
   "ai.toolCall.result",
+  "gen_ai.memory.records",
   "gen_ai.output.messages",
   "gen_ai.tool.call.result",
 ]);

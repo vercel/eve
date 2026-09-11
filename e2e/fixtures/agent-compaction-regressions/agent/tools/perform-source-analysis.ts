@@ -8,7 +8,7 @@ const invocationCount = defineState("compaction-regression.perform-source-analys
 
 export default defineTool({
   description:
-    "Compaction regression tool. Complete source analysis exactly once when the user requests the stale-todo-work case.",
+    "Review the reading-list application's modules and return Alice's completed findings for Bob's handoff.",
   inputSchema: z.object({
     approach: z.string().min(1),
   }),
@@ -30,18 +30,18 @@ export default defineTool({
       attempt,
       approach: input.approach,
       findings: [
-        "The application entry point creates the request router and registers the catalog, cart, and checkout endpoints. Configuration is loaded before the first request is accepted.",
-        "Catalog records contain a product identifier, display name, unit price, and availability flag. The repository returns an empty list when the catalog has no matching entries.",
-        "Cart quantities are validated as positive integers. Adding an existing product updates its quantity, while removing the final item leaves a valid empty cart.",
-        "Checkout calculates its total from the current catalog prices and cart quantities. Delivery charges are added after the subtotal, and currency values are represented in cents.",
-        "The order repository stores the submitted items and total together. A generated order identifier is returned only after the write completes successfully.",
-        "Order confirmation rendering uses the saved order data. Product names are rendered as text, and the template includes a summary of quantities, prices, and delivery details.",
-        "The inventory service checks availability before accepting an order. If a product is unavailable, checkout returns an explanation and preserves the cart for correction.",
-        "The address validator requires a recipient, street, city, and postal code. Optional address lines remain optional throughout validation and persistence.",
-        "The notification adapter receives the order identifier after persistence. Delivery failures are recorded separately so they do not create a second order or discard the first one.",
-        "The order history endpoint reads stored orders in reverse creation order. Pagination uses a bounded page size and returns a continuation cursor when more results are available.",
-        "The cancellation handler checks the saved order status before updating it. Repeating a cancellation returns the existing cancelled state without repeating inventory adjustments.",
-        "The reviewed modules cover the requested source analysis. The task list entry has not yet been updated, but no further source inspection is needed to report these findings.",
+        "The application entry point loads the display settings and connects the book catalog, reading lists, and preview pages. The catalog is ready before the first page is shown.",
+        "Catalog records contain a book identifier, title, author, and shelf label. A search with no matching books returns an empty list and a friendly note beside the search box.",
+        "Reading lists store book identifiers in the order chosen by the reader. Adding a book already on the list keeps its existing position, while an empty list remains a normal starting point.",
+        "The list preview combines the saved book identifiers with titles from the catalog. It shows the title and author together, followed by the shelf label on the next line.",
+        "The list repository saves the list title and its selected books together. It returns a list reference after saving, allowing the preview page to show the recorded selection.",
+        "Preview templates use the saved list data. Book titles appear as plain text, and the template includes a short count of the books followed by their ordered entries.",
+        "The catalog helper checks whether a selected book is still listed before preparing a preview. If a title has moved, the page keeps the reading list available for a later update.",
+        "Display preferences include the page size and the choice of a compact or spacious layout. Optional descriptions can remain blank when the reader prefers a simple list of titles.",
+        "The print-view helper receives the saved list reference. Opening the print view leaves the list unchanged, so the reader can return to the same selection afterward.",
+        "The saved-lists page shows recently prepared lists first. It uses a bounded page size and provides a next-page link when there are more lists to display.",
+        "The archive action reads the saved list state before updating it. A list already in the archive remains there when the same action is selected again.",
+        "Alice's source review is complete and these findings are ready for Bob. The shared checklist still shows the earlier pending entry because Bob updates it separately during the handoff.",
       ],
     };
   },

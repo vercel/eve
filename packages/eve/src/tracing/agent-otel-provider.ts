@@ -20,7 +20,6 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
-  messagesContentAttribute,
   systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
@@ -34,6 +33,7 @@ import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
+import { createAgentMemoryInstrumentation } from "#tracing/agent-memory-instrumentation.js";
 import {
   readGatewayCost,
   setAgentInvocationUsage,
@@ -144,6 +144,11 @@ export function createAgentOtelInstrumentation(
         ? undefined
         : { context: step.context, spanContext: step.span.spanContext() };
     },
+    tracer: input.tracer,
+  });
+  const memory = createAgentMemoryInstrumentation({
+    recordOutputs,
+    stateStore: input.stateStore,
     tracer: input.tracer,
   });
   const { ensureSessionContext, prepareSessionTrace, prepareTurnTrace } =
@@ -382,8 +387,6 @@ export function createAgentOtelInstrumentation(
       attempt.context,
     );
     if (recordInputs && event.input !== undefined) {
-      const messages = messagesContentAttribute(event.input.messages);
-      if (messages !== undefined) span.setAttribute("ai.prompt.messages", messages);
       const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
       if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
       const system = systemPromptAttribute(event.input.instructions);
@@ -445,7 +448,7 @@ export function createAgentOtelInstrumentation(
           .filter((part) => part.type === "tool-call")
           .map((part) => ({ callId: part.callId, input: part.input, toolName: part.toolName }));
         if (toolCalls.length > 0) {
-          const json = contentAttribute(toolCalls, false);
+          const json = contentAttribute(toolCalls);
           if (json !== undefined) state.span.setAttribute("ai.response.tool_calls", json);
         }
         // Provider-executed tools (e.g. web_search) run inside the model call,
@@ -533,6 +536,7 @@ export function createAgentOtelInstrumentation(
           await tools.actionStarted(event);
         },
         ...approvals,
+        ...memory.events,
         "step.attempt.completed": onStepTerminal,
         "step.attempt.failed": onStepTerminal,
         "step.attempt.metadata": onStepMetadata,
@@ -557,6 +561,7 @@ export function createAgentOtelInstrumentation(
     prepareSessionTrace,
     prepareTurnTrace,
     async runInContext(operation, execute) {
+      if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const scope = attemptScopes.get(operation.scope.attemptId) ?? operation.scope;
       const contexts = executionContexts.get(scope);
       let parent =

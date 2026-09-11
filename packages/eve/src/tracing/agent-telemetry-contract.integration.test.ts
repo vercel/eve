@@ -639,7 +639,7 @@ describe("exported agent telemetry contract", () => {
         "  invoked from external via channel.request",
         "  invoke_agent parent",
         "    agent.step",
-        "      agent.action coordinate",
+        "      invoke_workflow coordinate",
         "        agent.action child role=caller",
         "        agent.approval approved",
         "        execute_tool coordinate",
@@ -957,6 +957,9 @@ function normalizeTraceForest(
 }
 
 function spanLabel(span: LocalTraceSpan): string {
+  if (span.attributes["gen_ai.operation.name"] === "invoke_workflow") {
+    return span.name;
+  }
   if (span.name === "agent.action") {
     const role = span.attributes["agent.invocation.role"] === "caller" ? " role=caller" : "";
     return `agent.action ${String(span.attributes["agent.action.name"])}${role}`;
