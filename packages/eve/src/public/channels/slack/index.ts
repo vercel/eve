@@ -76,6 +76,19 @@ export {
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
+  decodeFreeformActionId,
+  decodeHitlActionId,
+  renderInputRequestBlocks,
+  renderInputRequestPostParts,
+  type DecodedSlackInputInteraction,
+  type SlackInputRequestPostPart,
+  type SlackInputRequestRenderOptions,
+  type SlackInputRequestRoute,
+} from "#public/channels/slack/hitl.js";
+
+export type { InputRequest, InputRequestMetadata, InputOption } from "#shared/input.js";
+
+export {
   experimental_slackActivityPlan,
   experimental_slackActivityRenderer,
   experimental_slackActivityTree,

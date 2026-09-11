@@ -4,6 +4,7 @@ import type { InputRequest } from "#shared/input.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
+  decodeFreeformActionId,
   decodeHitlActionId,
   deriveHitlResponse,
   formatInputRequestFallbackText,
@@ -43,7 +44,7 @@ describe("private HITL routes", () => {
         ],
         requestId: "approval_abc123",
       }),
-      { channelId: "C123", threadTs: "111.222" },
+      { returnTo: { channelId: "C123", threadTs: "111.222" } },
     );
     const actionId = (blocks[0] as { actions: Array<{ action_id: string }> }).actions[0]!.action_id;
 
@@ -51,17 +52,45 @@ describe("private HITL routes", () => {
       button: true,
       kind: "tool-approval",
       requestId: "approval_abc123",
-      route: { channelId: "C123", threadTs: "111.222" },
+      returnTo: { channelId: "C123", threadTs: "111.222" },
     });
     expect(deriveHitlResponse({ actionId, value: "approve" })).toMatchObject({
       kind: "tool-approval",
       response: { optionId: "approve", requestId: "approval_abc123" },
-      route: { channelId: "C123", threadTs: "111.222" },
+      returnTo: { channelId: "C123", threadTs: "111.222" },
     });
   });
 });
 
 describe("deriveHitlResponse", () => {
+  it("decodes routed question button actions with the question kind", () => {
+    const actionId = (
+      renderInputRequestBlocks(
+        makeRequest({
+          options: [{ id: "yes", label: "Yes" }],
+          requestId: "question_123",
+        }),
+        { returnTo: { channelId: "C999", threadTs: "9.9" } },
+      )[0] as { actions: Array<{ action_id: string }> }
+    ).actions[0]!.action_id;
+
+    expect(actionId).toBe("eve_input:route:C999:9.9:question:question_123:button:0");
+    expect(decodeHitlActionId(actionId)).toEqual({
+      button: true,
+      kind: "question",
+      requestId: "question_123",
+      returnTo: { channelId: "C999", threadTs: "9.9" },
+    });
+  });
+
+  it("keeps normal non-routed question button action ids unchanged", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({ options: [{ id: "yes", label: "Yes" }] }),
+    );
+    expect((blocks[0] as { actions: Array<{ action_id: string }> }).actions[0]!.action_id).toBe(
+      `${HITL_ACTION_PREFIX}call_abc123:button:0`,
+    );
+  });
   it("keeps Slack classification outside the durable input response type", () => {
     const derived: NonNullable<ReturnType<typeof deriveHitlResponse>> = {
       kind: "tool-approval",
@@ -433,16 +462,21 @@ describe("renderInputRequestBlocks", () => {
     expect(freeformRequestIdFromActionId(HITL_FREEFORM_ACTION_PREFIX)).toBeUndefined();
   });
 
-  it("preserves the return route on a freeform question", () => {
+  it("decodes a routed freeform question while preserving its return route", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({ requestId: "question_freeform", options: undefined }),
-      { channelId: "C777", threadTs: "7.7" },
+      { returnTo: { channelId: "C777", threadTs: "7.7" } },
     );
     const actionId = (blocks[1] as { elements: Array<{ action_id: string }> }).elements[0]!
       .action_id;
 
-    expect(actionId).toBe("eve_input_freeform:route:C777:7.7:question_freeform");
-    expect(freeformRequestIdFromActionId(actionId)).toBe("question_freeform");
+    expect(decodeFreeformActionId(actionId)).toEqual({
+      button: false,
+      kind: "question",
+      requestId: "question_freeform",
+      returnTo: { channelId: "C777", threadTs: "7.7" },
+    });
+    expect(decodeFreeformActionId(`${HITL_FREEFORM_ACTION_PREFIX}route:missing`)).toBeNull();
   });
 
   it("truncates section-block prompts past the Slack 3000-char cap", () => {

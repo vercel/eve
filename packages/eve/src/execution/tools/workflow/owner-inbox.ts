@@ -10,6 +10,7 @@ import type {
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
+import { parseInputRequestMetadata } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundMessage, TaskInboundUpdate } from "#tasks/types.js";
@@ -219,6 +220,9 @@ function normalizeAskRequest(
   };
   if (authored.allowFreeform !== undefined) normalized.allowFreeform = authored.allowFreeform;
   if (authored.display !== undefined) normalized.display = authored.display;
+  if (authored.metadata !== undefined) {
+    normalized.metadata = parseInputRequestMetadata(authored.metadata);
+  }
   if (authored.options !== undefined) normalized.options = [...authored.options];
   return normalized;
 }

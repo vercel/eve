@@ -6,6 +6,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import { parseInputRequestMetadata } from "#shared/input.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
@@ -70,12 +71,16 @@ export function readWorkflowToolRunAdmission(
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
+  const normalizedRequest =
+    request.metadata === undefined
+      ? request
+      : { ...request, metadata: parseInputRequestMetadata(request.metadata) };
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {
     kind: "request",
     from: context.from,
     replyTo: answer.token,
-    request: { kind: "ask", request },
+    request: { kind: "ask", request: normalizedRequest },
   });
   return answer;
 }
