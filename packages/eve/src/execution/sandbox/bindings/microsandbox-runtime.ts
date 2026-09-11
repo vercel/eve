@@ -139,7 +139,7 @@ export class MicrosandboxVm {
   }
 
   async detach(): Promise<void> {
-    await this.#sandbox.detach().catch(() => {});
+    await this.#sandbox.detach();
   }
 
   /**
@@ -149,7 +149,7 @@ export class MicrosandboxVm {
    */
   async shutdown(): Promise<void> {
     await this.#sandbox.stop().catch(() => {});
-    await this.detach();
+    await this.detach().catch(() => {});
   }
 
   async stop(): Promise<void> {

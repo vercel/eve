@@ -9,6 +9,7 @@ import {
 } from "#execution/sandbox/bindings/local-backend-utils.js";
 import {
   MICROSANDBOX_METADATA_VERSION,
+  type MicrosandboxSessionMetadata,
   readSessionMetadata,
   readSessionMetadataRecord,
   readTemplateMetadata,
@@ -36,11 +37,13 @@ import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.
 import { withDevelopmentSandboxMetadataPathTag } from "#execution/sandbox/development-run.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type {
   SandboxBackendCreateInput,
   SandboxBackendHandle,
   SandboxBackendPrewarmInput,
   SandboxBackendPrewarmResult,
+  SandboxBackendSessionState,
 } from "#public/definitions/sandbox-backend.js";
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import type {
@@ -49,10 +52,22 @@ import type {
 } from "#public/sandbox/microsandbox-sandbox.js";
 import type { InternalSandboxSession } from "#shared/sandbox-session.js";
 
-const activeMicrosandboxSessionHandles = new Map<
-  string,
-  SandboxBackendHandle<MicrosandboxSessionUseOptions>
->();
+type ActiveMicrosandboxSessionHandle =
+  | {
+      readonly handle: SandboxBackendHandle<MicrosandboxSessionUseOptions>;
+      readonly kind: "active";
+    }
+  | {
+      readonly capturePromise: Promise<SandboxBackendSessionState>;
+      readonly handle: SandboxBackendHandle<MicrosandboxSessionUseOptions>;
+      readonly kind: "capturing";
+    }
+  | {
+      readonly kind: "opening";
+      readonly openingPromise: Promise<SandboxBackendHandle<MicrosandboxSessionUseOptions>>;
+    };
+
+const activeMicrosandboxSessionHandles = new Map<string, ActiveMicrosandboxSessionHandle>();
 
 export async function prewarmMicrosandboxTemplate(input: {
   readonly backendName: string;
@@ -180,109 +195,125 @@ export async function createMicrosandboxHandle(input: {
     input.createInput.sessionKey,
   );
   const activeSessionKey = createActiveMicrosandboxSessionKey(sessionRootPath, input.optionsHash);
-  const activeHandle = activeMicrosandboxSessionHandles.get(activeSessionKey);
-  if (activeHandle !== undefined) {
-    return activeHandle;
+  let capturedMetadata: MicrosandboxSessionMetadata | null = null;
+  for (;;) {
+    const active = activeMicrosandboxSessionHandles.get(activeSessionKey);
+    if (active === undefined) {
+      break;
+    }
+    if (active.kind === "active") {
+      return active.handle;
+    }
+    if (active.kind === "opening") {
+      return await active.openingPromise;
+    }
+    try {
+      capturedMetadata =
+        readSessionMetadataRecord((await active.capturePromise).metadata) ?? capturedMetadata;
+    } catch {
+      // The caller that initiated capture receives the failure. A concurrent
+      // opener falls back to the last durable metadata after the stale client
+      // has been detached and evicted.
+    }
   }
 
-  const metadataPath = resolveMicrosandboxMetadataPath(sessionRootPath);
-  const existingMetadata =
-    readSessionMetadataRecord(input.createInput.existingMetadata) ??
-    (await readSessionMetadata(metadataPath));
-  const sessionTags = withDevelopmentSandboxMetadataPathTag(input.createInput.tags, metadataPath);
+  return await reserveMicrosandboxHandleOpening(activeSessionKey, async () => {
+    const metadataPath = resolveMicrosandboxMetadataPath(sessionRootPath);
+    const existingMetadata =
+      capturedMetadata ??
+      readSessionMetadataRecord(input.createInput.existingMetadata) ??
+      (await readSessionMetadata(metadataPath));
+    const sessionTags = withDevelopmentSandboxMetadataPathTag(input.createInput.tags, metadataPath);
 
-  if (
-    existingMetadata?.optionsHash === input.optionsHash &&
-    ((await sandboxExists(module, existingMetadata.sandboxName)) ||
-      (existingMetadata.stateSnapshotName !== undefined &&
-        (await snapshotExists(module, existingMetadata.stateSnapshotName))))
-  ) {
-    const sandbox = await connectMicrosandbox({
-      metadata: existingMetadata,
-      metadataPath,
-      module,
-      options: input.options,
-      sessionKey: input.createInput.sessionKey,
-      tags: sessionTags,
-    });
-    if (sandbox !== null) {
-      return cacheHandle(
-        activeSessionKey,
-        createHandle(sandbox, input.backendName, input.optionsHash, () => {
-          activeMicrosandboxSessionHandles.delete(activeSessionKey);
-        }),
+    if (
+      existingMetadata?.optionsHash === input.optionsHash &&
+      ((await sandboxExists(module, existingMetadata.sandboxName)) ||
+        (existingMetadata.stateSnapshotName !== undefined &&
+          (await snapshotExists(module, existingMetadata.stateSnapshotName))))
+    ) {
+      const sandbox = await connectMicrosandbox({
+        metadata: existingMetadata,
+        metadataPath,
+        module,
+        options: input.options,
+        sessionKey: input.createInput.sessionKey,
+        tags: sessionTags,
+      });
+      if (sandbox !== null) {
+        return createManagedHandle(activeSessionKey, sandbox, input.backendName, input.optionsHash);
+      }
+    }
+
+    let snapshotName: string | null = null;
+    if (input.createInput.templateKey !== null) {
+      const templateRootPath = resolveMicrosandboxTemplateRootPath(
+        cacheDirectory,
+        input.createInput.templateKey,
       );
-    }
-  }
+      const templateMetadata = await readTemplateMetadata(
+        resolveMicrosandboxMetadataPath(templateRootPath),
+      );
 
-  let snapshotName: string | null = null;
-  if (input.createInput.templateKey !== null) {
-    const templateRootPath = resolveMicrosandboxTemplateRootPath(
-      cacheDirectory,
-      input.createInput.templateKey,
+      if (
+        templateMetadata === null ||
+        templateMetadata.optionsHash !== input.optionsHash ||
+        !(await snapshotExists(module, templateMetadata.snapshotName))
+      ) {
+        throw new SandboxTemplateNotProvisionedError({
+          backendName: input.backendName,
+          templateKey: input.createInput.templateKey,
+        });
+      }
+
+      snapshotName = templateMetadata.snapshotName;
+    }
+
+    const sandboxName = createProviderName(
+      "eve-sbx-ses",
+      `${input.createInput.sessionKey}:${randomUUID()}`,
     );
-    const templateMetadata = await readTemplateMetadata(
-      resolveMicrosandboxMetadataPath(templateRootPath),
-    );
-
-    if (
-      templateMetadata === null ||
-      templateMetadata.optionsHash !== input.optionsHash ||
-      !(await snapshotExists(module, templateMetadata.snapshotName))
-    ) {
-      throw new SandboxTemplateNotProvisionedError({
-        backendName: input.backendName,
-        templateKey: input.createInput.templateKey,
+    let sandbox: MicrosandboxVm;
+    try {
+      sandbox = await createPreparedMicrosandbox({
+        fromSnapshot: snapshotName ?? undefined,
+        module,
+        name: sandboxName,
+        networkPolicy: input.options.networkPolicy,
+        options: input.options,
+        sessionKey: input.createInput.sessionKey,
+        setupBaseRuntime: snapshotName === null,
+        tags: sessionTags,
       });
+    } catch (error) {
+      if (
+        snapshotName !== null &&
+        input.createInput.templateKey !== null &&
+        isMicrosandboxNotFoundError(error)
+      ) {
+        throw new SandboxTemplateNotProvisionedError({
+          backendName: input.backendName,
+          templateKey: input.createInput.templateKey,
+        });
+      }
+      throw error;
     }
 
-    snapshotName = templateMetadata.snapshotName;
-  }
-
-  const sandboxName = createProviderName(
-    "eve-sbx-ses",
-    `${input.createInput.sessionKey}:${randomUUID()}`,
-  );
-  let sandbox: MicrosandboxVm;
-  try {
-    sandbox = await createPreparedMicrosandbox({
-      fromSnapshot: snapshotName ?? undefined,
-      module,
-      name: sandboxName,
-      networkPolicy: input.options.networkPolicy,
-      options: input.options,
-      sessionKey: input.createInput.sessionKey,
-      setupBaseRuntime: snapshotName === null,
-      tags: sessionTags,
-    });
-  } catch (error) {
-    if (
-      snapshotName !== null &&
-      input.createInput.templateKey !== null &&
-      isMicrosandboxNotFoundError(error)
-    ) {
-      throw new SandboxTemplateNotProvisionedError({
-        backendName: input.backendName,
-        templateKey: input.createInput.templateKey,
-      });
-    }
-    throw error;
-  }
-
-  await sandbox.writeMetadata(metadataPath, input.optionsHash);
-  return cacheHandle(
-    activeSessionKey,
-    createHandle(sandbox, input.backendName, input.optionsHash, () => {
-      activeMicrosandboxSessionHandles.delete(activeSessionKey);
-    }),
-  );
+    await sandbox.writeMetadata(metadataPath, input.optionsHash);
+    return createManagedHandle(activeSessionKey, sandbox, input.backendName, input.optionsHash);
+  });
 }
 
 function createHandle(
   sandbox: MicrosandboxVm,
   backendName: string,
   optionsHash: string,
-  onShutdown?: () => void,
+  lifecycle: {
+    readonly assertActive: () => void;
+    readonly onEvict: () => void;
+    readonly runCapture: (
+      capture: () => Promise<SandboxBackendSessionState>,
+    ) => Promise<SandboxBackendSessionState>;
+  },
 ): SandboxBackendHandle<MicrosandboxSessionUseOptions> {
   const session = buildSandboxSession(
     createMicrosandboxInternalSession(sandbox),
@@ -301,12 +332,27 @@ function createHandle(
       });
     },
     async captureState() {
-      const metadata = await sandbox.captureState(optionsHash);
-      return {
-        backendName,
-        metadata: { ...metadata },
-        sessionKey: sandbox.id,
+      lifecycle.assertActive();
+      const capture = async (): Promise<SandboxBackendSessionState> => {
+        const metadata = await sandbox.captureState(optionsHash);
+        return {
+          backendName,
+          metadata: { ...metadata },
+          sessionKey: sandbox.id,
+        };
       };
+      if (isEveDevEnvironment()) {
+        return await capture();
+      }
+
+      const captureAndRelease = async () => {
+        try {
+          return await capture();
+        } finally {
+          await sandbox.detach();
+        }
+      };
+      return await lifecycle.runCapture(captureAndRelease);
     },
     async delete() {
       await sandbox.shutdown();
@@ -314,11 +360,14 @@ function createHandle(
       onShutdown?.();
     },
     async stop() {
-      await sandbox.stop();
-      onShutdown?.();
+      try {
+        await sandbox.stop();
+      } finally {
+        lifecycle.onEvict();
+      }
     },
     async shutdown() {
-      onShutdown?.();
+      lifecycle.onEvict();
       await sandbox.shutdown();
     },
   };
@@ -332,12 +381,83 @@ function createActiveMicrosandboxSessionKey(sessionRootPath: string, optionsHash
   return `${sessionRootPath}\0${optionsHash}`;
 }
 
-function cacheHandle(
+function createManagedHandle(
   key: string,
-  handle: SandboxBackendHandle<MicrosandboxSessionUseOptions>,
+  sandbox: MicrosandboxVm,
+  backendName: string,
+  optionsHash: string,
 ): SandboxBackendHandle<MicrosandboxSessionUseOptions> {
-  activeMicrosandboxSessionHandles.set(key, handle);
+  let handle: SandboxBackendHandle<MicrosandboxSessionUseOptions>;
+  handle = createHandle(sandbox, backendName, optionsHash, {
+    assertActive() {
+      const active = activeMicrosandboxSessionHandles.get(key);
+      if (
+        (active?.kind !== "active" && active?.kind !== "capturing") ||
+        active.handle !== handle
+      ) {
+        throw new Error("Cannot capture a Microsandbox session handle that is no longer active.");
+      }
+    },
+    onEvict() {
+      const active = activeMicrosandboxSessionHandles.get(key);
+      if (active?.kind === "active" && active.handle === handle) {
+        activeMicrosandboxSessionHandles.delete(key);
+      }
+    },
+    runCapture(capture) {
+      const active = activeMicrosandboxSessionHandles.get(key);
+      if (active?.kind === "capturing" && active.handle === handle) {
+        return active.capturePromise;
+      }
+      if (active?.kind !== "active" || active.handle !== handle) {
+        throw new Error("Cannot capture a Microsandbox session handle that is no longer active.");
+      }
+
+      let capturePromise!: Promise<SandboxBackendSessionState>;
+      capturePromise = (async () => {
+        try {
+          return await capture();
+        } finally {
+          const current = activeMicrosandboxSessionHandles.get(key);
+          if (
+            current?.kind === "capturing" &&
+            current.handle === handle &&
+            current.capturePromise === capturePromise
+          ) {
+            activeMicrosandboxSessionHandles.delete(key);
+          }
+        }
+      })();
+      activeMicrosandboxSessionHandles.set(key, { capturePromise, handle, kind: "capturing" });
+      return capturePromise;
+    },
+  });
   return handle;
+}
+
+function reserveMicrosandboxHandleOpening(
+  key: string,
+  openHandle: () => Promise<SandboxBackendHandle<MicrosandboxSessionUseOptions>>,
+): Promise<SandboxBackendHandle<MicrosandboxSessionUseOptions>> {
+  let openingPromise: Promise<SandboxBackendHandle<MicrosandboxSessionUseOptions>>;
+  openingPromise = openHandle().then(
+    (handle) => {
+      const active = activeMicrosandboxSessionHandles.get(key);
+      if (active?.kind === "opening" && active.openingPromise === openingPromise) {
+        activeMicrosandboxSessionHandles.set(key, { handle, kind: "active" });
+      }
+      return handle;
+    },
+    (error: unknown) => {
+      const active = activeMicrosandboxSessionHandles.get(key);
+      if (active?.kind === "opening" && active.openingPromise === openingPromise) {
+        activeMicrosandboxSessionHandles.delete(key);
+      }
+      throw error;
+    },
+  );
+  activeMicrosandboxSessionHandles.set(key, { kind: "opening", openingPromise });
+  return openingPromise;
 }
 
 export function clearActiveMicrosandboxSessionHandlesForTest(): void {
