@@ -6,6 +6,7 @@ import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
+  createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -817,6 +818,106 @@ describe("EveAgentStore session resume", () => {
     });
     expect(new URL(requests[0]!, "http://localhost").searchParams.get("startIndex")).toBeNull();
     expect(new URL(requests[1]!, "http://localhost").searchParams.get("startIndex")).toBe("2");
+  });
+});
+
+describe("EveAgentStore in-flight input responses", () => {
+  it.each(["send", "resume"] as const)(
+    "submits an approval during %s and replays the continuation",
+    async (mode) => {
+      const active = controlledStreamResponse();
+      const first = stampTestEvents([
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createInputRequestedEvent({
+          requests: [
+            {
+              requestId: "approval_1",
+              kind: "tool-approval",
+              display: "confirmation",
+              prompt: "Approve tool call: publish",
+              action: { kind: "tool-call", toolName: "publish", callId: "call_1", input: {} },
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createSessionWaitingEvent(),
+      ]);
+      const continuation = stampTestEvents([
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_2" }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Published.",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_2",
+        }),
+        createSessionWaitingEvent(),
+      ]).map((event) => ({
+        ...event,
+        meta: { ...event.meta, id: `${event.meta.id}_continuation` },
+      }));
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          mode === "send" ? startedResponse() : boundedStreamResponse(first.slice(0, -1)),
+        )
+        .mockResolvedValueOnce(active.response)
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(
+          boundedStreamResponse(continuation, first.length + continuation.length - 1),
+        )
+        .mockResolvedValueOnce(boundedStreamResponse([], first.length + continuation.length - 1));
+      const store = new EveAgentStore({
+        reducer: defaultMessageReducer(),
+        ...(mode === "resume"
+          ? { initialSession: { sessionId: "session_1", streamIndex: 0 } }
+          : {}),
+      });
+      const sending = mode === "send" ? store.send({ message: "Prepare a PR" }) : store.resume();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      if (mode === "send") for (const event of first.slice(0, -1)) active.emit(event);
+      await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+      const inputResponses = [{ requestId: "approval_1", optionId: "approve" }];
+      const approval = store.send({ inputResponses });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ inputResponses });
+      active.emit(first.at(-1)!);
+      active.close();
+      await Promise.all([sending, approval]);
+      expect(store.snapshot.status).toBe("ready");
+      expect(store.snapshot.events).toEqual([...first, ...continuation]);
+      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+        expect.objectContaining({ text: "Published." }),
+      );
+    },
+  );
+
+  it("preserves the active observer when an approval is rejected", async () => {
+    const active = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(active.response)
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: false, error: "Approval is no longer pending.", code: "invalid_input_response" },
+          { status: 409 },
+        ),
+      );
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const sending = store.send({ message: "Prepare a PR" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await expect(
+      store.send({ inputResponses: [{ requestId: "old", optionId: "approve" }] }),
+    ).rejects.toThrow("Approval is no longer pending.");
+    for (const event of turnEvents()) active.emit(event);
+    active.close();
+    await sending;
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.error).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 

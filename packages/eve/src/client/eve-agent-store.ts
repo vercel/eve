@@ -198,6 +198,9 @@ export class EveAgentStore<TData> {
 
   async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> {
     if (this.#activeTurn !== undefined) {
+      if (input.inputResponses !== undefined) {
+        return await this.#respondDuringTurn(this.#activeTurn, input);
+      }
       if (this.#status === "resuming") {
         throw new Error("eve session is resuming.");
       }
@@ -437,6 +440,36 @@ export class EveAgentStore<TData> {
     this.#status = "ready";
     this.#callbacks.onSessionChange?.(this.#session?.state);
     this.#publish();
+  }
+
+  async #respondDuringTurn<TOutput>(
+    turn: ActiveTurn,
+    input: SendTurnPayload<TOutput>,
+  ): Promise<void> {
+    const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
+    assertExclusiveTurnInput(preparedInput);
+    if (preparedInput.inputResponses === undefined) {
+      throw new Error("An in-flight input response requires inputResponses.");
+    }
+    await turn.response;
+    if (!this.#isActiveTurn(turn)) return await this.send(preparedInput);
+    const session = this.#session;
+    if (session === undefined)
+      throw new Error("Cannot answer an input request before the session starts.");
+    const { inputResponses, ...options } = preparedInput;
+    const observing = this.#resumePromise;
+    await session.respond(inputResponses, options);
+
+    // Keep one stream owner. The existing observer may stop at the preceding
+    // turn's boundary; replay after it settles to follow the accepted response.
+    await turn.completion;
+    await observing;
+    if (
+      !turn.abortController.signal.aborted &&
+      this.#activeTurn === undefined &&
+      this.#session === session
+    )
+      await this.resume();
   }
 
   async #sendFollowUp<TOutput>(turn: ActiveTurn, input: SendTurnPayload<TOutput>): Promise<void> {

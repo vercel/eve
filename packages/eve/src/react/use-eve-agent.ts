@@ -58,7 +58,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
     message: string | UserContent,
     options?: SendTurnOptions<TOutput>,
   ) => Promise<void>;
-  /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
+  /** Answers pending HITL input requests, including while following an in-flight turn. */
   readonly respond: <TOutput = unknown>(
     inputResponses: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,

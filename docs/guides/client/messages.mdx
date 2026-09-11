@@ -137,6 +137,11 @@ After eve accepts the reply, the durable stream emits `input.resolved`. Its `res
 
 `send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
+React's `useEveAgent().respond()` also accepts input responses while a turn stream
+is attached. It submits the response without steering or cancelling that turn,
+then follows the continuation. A rejected submission leaves the existing observer
+attached and rejects the returned promise so the UI can show the error beside the input.
+
 ## Single-use responses
 
 `MessageResponse` is single-use. Either aggregate it:
