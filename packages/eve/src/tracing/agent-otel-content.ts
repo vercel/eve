@@ -43,7 +43,7 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
     const json = semanticJsonAttribute(formatted.slice(start));
     if (json !== undefined) return json;
   }
-  return semanticJsonAttribute([]);
+  return truncateSingleSemanticMessage(formatted) ?? semanticJsonAttribute([]);
 }
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
@@ -134,6 +134,41 @@ function stringifyContent(value: unknown): string | undefined {
 function semanticJsonAttribute(value: unknown): string | undefined {
   const json = stringifyContent(value);
   return json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT ? json : undefined;
+}
+
+function truncateSingleSemanticMessage(
+  messages: readonly Record<string, unknown>[],
+): string | undefined {
+  const message = messages.at(-1);
+  if (message === undefined || typeof message.role !== "string") return undefined;
+  const text = semanticMessageText(message.parts);
+  const base =
+    typeof message.kind === "string"
+      ? { kind: message.kind, role: message.role }
+      : { role: message.role };
+  for (let length = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); length > 0; length -= 256) {
+    const json = semanticJsonAttribute([
+      {
+        ...base,
+        parts: [{ content: `${text.slice(0, length)}… [truncated]`, type: "text" }],
+      },
+    ]);
+    if (json !== undefined) return json;
+  }
+  return semanticJsonAttribute([{ ...base, parts: [{ content: "… [truncated]", type: "text" }] }]);
+}
+
+function semanticMessageText(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+  let text = "";
+  for (const part of parts) {
+    if (!isRecord(part) || part.type !== "text" || typeof part.content !== "string") continue;
+    const separator = text.length === 0 ? "" : "\n";
+    const remaining = CONTENT_ATTRIBUTE_LIMIT + 1 - text.length - separator.length;
+    if (remaining <= 0) break;
+    text += separator + part.content.slice(0, remaining);
+  }
+  return text;
 }
 
 function semanticParts(content: unknown): Record<string, unknown>[] {

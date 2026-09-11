@@ -84,6 +84,35 @@ describe("GenAI message attributes", () => {
     ]);
   });
 
+  it.each([
+    ["only", [{ content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1), role: "user" }], undefined],
+    [
+      "newest",
+      [
+        { content: "older message", role: "assistant" },
+        {
+          content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2),
+          kind: "context.state",
+          role: "user",
+        },
+      ],
+      "context.state",
+    ],
+  ] as const)("keeps a truncated %s message when it alone exceeds the cap", (_, messages, kind) => {
+    const attribute = genAiInputMessagesAttribute(messages);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      ...(kind === undefined ? {} : { kind }),
+      parts: [{ content: expect.stringMatching(/… \[truncated\]$/u), type: "text" }],
+      role: "user",
+    });
+    expect(attribute).not.toContain("older message");
+  });
+
   it("formats model input, output, and system instructions for inspectors", () => {
     expect(
       genAiInputMessagesAttribute([
