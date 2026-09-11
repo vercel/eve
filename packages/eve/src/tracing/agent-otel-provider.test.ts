@@ -637,7 +637,6 @@ describe("createAgentOtelInstrumentation", () => {
     expect(memory.attributes).toMatchObject({
       "agent.memory.phase": "turn.started",
       "agent.memory.slot": "profile",
-      "agent.session.id": "session-1",
       "agent.turn.id": "turn-1",
       "gen_ai.memory.record.count": 1,
       "gen_ai.memory.store.id": "memscope1_scope",
@@ -647,6 +646,7 @@ describe("createAgentOtelInstrumentation", () => {
     });
     expect(memory.attributes).not.toHaveProperty("agent.framework.name");
     expect(memory.attributes).not.toHaveProperty("agent.framework.version");
+    expect(memory.attributes).not.toHaveProperty("agent.session.id");
     expect(memory.attributes["gen_ai.memory.records"]).toBe(
       '[{"content":"The user prefers dark mode.","id":"preference"}]',
     );

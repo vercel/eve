@@ -16,7 +16,6 @@ export function memorySpanAttributes(
   const attributes: Record<string, string | number> = {
     "agent.memory.phase": event.phase,
     "agent.memory.slot": event.slot,
-    "agent.session.id": event.sessionId,
     "gen_ai.memory.store.id": event.storeId,
     "gen_ai.operation.name": event.operationName,
     ...agentSpanNamingAttributes(event.operationName, event.operationName),
