@@ -33,7 +33,7 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-A Connect-backed build generates a Slack app manifest for each Slack channel. The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, and interactivity. Add requirements for your authored handlers with `botEvents` and `botScopes`; eve deduplicates them against the baseline:
+A Connect-backed build generates a Slack app manifest for each Slack channel. The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, interactivity, and an App Home Messages tab. Configure the bot's presentation and add requirements for your authored handlers on `slackChannel()`; eve deduplicates events and scopes against the baseline:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -41,12 +41,17 @@ import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
+  botAlwaysOnline: true,
+  botBackgroundColor: "#000000",
+  botDescription: "Answers support questions.",
   botEvents: ["message.channels", "message.groups"],
+  botLongDescription: "Answers support questions using the team's knowledge base.",
+  botName: "Support agent",
   botScopes: ["channels:history", "groups:history"],
 });
 ```
 
-`botEvents` adds Slack Events API subscriptions, and `botScopes` adds bot OAuth scopes. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
+`botName`, `botDescription`, `botLongDescription`, `botBackgroundColor`, and `botAlwaysOnline` configure Slack's app and bot presentation. `botEvents` adds Slack Events API subscriptions, and `botScopes` adds bot OAuth scopes. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
 
 Function-form bot tokens receive `{ teamId }` when Slack supplies the app installation workspace. Use it to select an installation in a self-managed multi-workspace app. The id can differ from the actor or content workspace for Slack Connect events:
 
