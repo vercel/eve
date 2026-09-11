@@ -111,7 +111,7 @@ describe("buildVercelConnectRequirements", () => {
           format: "slack-app-manifest",
           path: "channels/slack.slack-app-manifest.json",
         },
-        triggers: [{ method: "POST", path: "/eve/v1/slack" }],
+        trigger: { method: "POST", path: "/eve/v1/slack" },
         uses: [{ kind: "channel", name: "slack", logicalPath: "channels/slack.ts" }],
       },
     ]);
