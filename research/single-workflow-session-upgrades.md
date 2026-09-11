@@ -25,6 +25,13 @@ hands the settled session to a successor run on that exact deployment. The publi
 stream, and `send()` / `respond()` APIs do not change, and no upgrade API, route, or channel
 operation is added.
 
+This is intentionally a deletion-heavy refactor, not an additive third execution mode. Large
+swaths of the current conversational orchestration are expected to disappear: the child-turn
+workflow, driver/child transport, private turn-control hooks, cross-run cancellation forwarding,
+turn execution cursor, and deployment-skew input and migration layers. The implementation must not
+preserve that topology behind compatibility interfaces; the deletion ledger below is a required
+outcome of the design, while shared turn and harness behavior stays intact.
+
 The tradeoff is explicit. Ordinary turns lose the cross-run overhead. The first eligible turn after
 a deployment pays for the handoff, and a session with live work stays on its current deployment
 until it is idle again. The first version ships with a known no-owner interval during handoff and
