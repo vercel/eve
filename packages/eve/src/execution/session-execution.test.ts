@@ -8,6 +8,13 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { turnStep, settleTurnStep } from "#execution/workflow-steps.js";
 import type { DeliverHookPayload } from "#channel/types.js";
+import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
+
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getWorkflowMetadata: () => ({ url: "https://parent.example" }),
+}));
+vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
 vi.mock("#execution/workflow-steps.js", () => ({
   turnStep: vi.fn(),
@@ -23,6 +30,57 @@ vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
 afterEach(() => vi.restoreAllMocks());
 
 describe("SessionExecution background task checkpoints", () => {
+  it("cancels an admitted workflow action when cancellation already arrived at the step boundary", async () => {
+    const sessionState = state("");
+    const inbox: SessionInbox = {
+      claimSessionHook: vi.fn(),
+      consumeNext: vi.fn(),
+      drain: vi
+        .fn()
+        .mockReturnValueOnce([{ kind: "cancel" }])
+        .mockReturnValue([]),
+      hasPending: vi.fn(async () => false),
+      hasReadyAuthorization: vi.fn(() => false),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      restore: vi.fn(),
+      sessionHookTokens: ["parent-inbox"],
+      setAuthorizationWindow: vi.fn(),
+    };
+    const execution = new SessionExecution({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      cancelledTaskIds: new Set(),
+      commandInbox: inbox,
+      mode: "conversation",
+      parentWritable: new WritableStream(),
+      seenTaskDeliveries: new Set(),
+      serializedContext: {},
+      sessionState,
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValue({
+        action: "park",
+        pendingCoordinationCallIds: ["hold-call"],
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
+      results: [],
+      pendingTasks: [],
+      sessionState,
+    });
+
+    await expect(
+      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start Alice's deployment" }] }),
+    ).resolves.toMatchObject({ cancelled: true, kind: "park" });
+    expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
+    expect(inbox.next).not.toHaveBeenCalledWith("runtime");
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
+  });
+
   it("retains background notifications for parked cohort routing while admitting user steering", async () => {
     const background: DeliverHookPayload = {
       kind: "deliver",

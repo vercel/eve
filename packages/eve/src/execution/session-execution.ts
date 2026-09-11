@@ -309,6 +309,7 @@ export class SessionExecution {
     | "cancel-turn"
   > {
     while (true) {
+      if (control.signal.aborted) return "cancel-turn";
       const buffered = control.takeRuntimeResult();
       if (buffered !== undefined) return buffered;
       const result = await this.input.commandInbox.next("runtime");
