@@ -61,6 +61,7 @@ export class TurnRouting {
     for (const delivery of this.bufferedDeliveries) {
       if (
         this.admittedDeliveries.has(delivery) &&
+        delivery.taskDeliveryId === undefined &&
         (delivery.turnPolicy ?? "steer") === "steer" &&
         (delivery.caller === undefined || delivery.caller.callId === this.caller?.callId)
       )
