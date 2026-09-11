@@ -220,6 +220,7 @@ export async function startProductionServer(
     port,
   });
   let output = "";
+  let captureStartupOutput = true;
   let closing = false;
   let startError: unknown;
 
@@ -236,11 +237,15 @@ export async function startProductionServer(
   });
 
   child.stdout?.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
+    if (captureStartupOutput) {
+      output += chunk.toString("utf8");
+    }
     process.stdout.write(chunk);
   });
   child.stderr?.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
+    if (captureStartupOutput) {
+      output += chunk.toString("utf8");
+    }
     process.stderr.write(chunk);
   });
 
@@ -274,6 +279,8 @@ export async function startProductionServer(
       getOutput: () => output,
       knownUrl,
     });
+    captureStartupOutput = false;
+    output = "";
 
     return {
       async close() {
