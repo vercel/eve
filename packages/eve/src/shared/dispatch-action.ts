@@ -20,10 +20,7 @@ export type PendingAgentDispatchAction = PendingDispatchAction & {
 
 /** Pending action that mutates the durable task lifecycle. */
 export type PendingTaskControlAction = PendingDispatchAction & {
-  readonly target: Extract<
-    PreparedDispatchTarget,
-    { readonly kind: "task-cancel" | "task-update" }
-  >;
+  readonly target: Extract<PreparedDispatchTarget, { readonly kind: "task-cancel" }>;
 };
 
 /** Pending action that runs a tool's execute body as a durable workflow. */

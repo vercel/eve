@@ -428,19 +428,6 @@
       ]
     },
     {
-      "name": "tool/task_update",
-      "type": "registry:item",
-      "title": "Task Update",
-      "description": "Report background-task progress to the parent agent.",
-      "files": [
-        {
-          "path": "registry/tools/task_update.ts",
-          "type": "registry:file",
-          "target": "agent/tools/task_update.ts"
-        }
-      ]
-    },
-    {
       "name": "tool/todo",
       "type": "registry:item",
       "title": "Todo",

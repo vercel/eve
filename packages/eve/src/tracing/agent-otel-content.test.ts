@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { FrameworkMessageKind } from "#harness/messages.js";
 import {
@@ -20,6 +20,41 @@ const FRAMEWORK_MESSAGE_KINDS = [
 ] as const satisfies readonly FrameworkMessageKind[];
 
 describe("GenAI message attributes", () => {
+  it.each([
+    ["Buffer", () => Buffer.alloc(64, 97)],
+    ["Uint8Array", () => new Uint8Array(64).fill(97)],
+    ["base64", () => "a".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)],
+    ["data URL", () => `data:image/png;base64,${"a".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)}`],
+  ] as const)("omits %s attachment payloads", (_, createData) => {
+    const data = createData();
+    const entries = Object.entries;
+    let binaryEnumerations = 0;
+    const spy = vi.spyOn(Object, "entries").mockImplementation((value) => {
+      if (value === data) binaryEnumerations += 1;
+      return entries(value);
+    });
+
+    let attribute: string | undefined;
+    try {
+      attribute = genAiInputMessagesAttribute([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Summarize file." },
+            { type: "file", mediaType: "application/octet-stream", filename: "test.bin", data },
+          ],
+        },
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(binaryEnumerations).toBe(0);
+    expect(attribute).toBe(
+      '[{"parts":[{"content":"Summarize file.","type":"text"},{"type":"file"}],"role":"user"}]',
+    );
+  });
+
   it("preserves every user-message kind in the GenAI input attribute", () => {
     expect(
       genAiInputMessagesAttribute([
@@ -47,6 +82,35 @@ describe("GenAI message attributes", () => {
         role: "user",
       },
     ]);
+  });
+
+  it.each([
+    ["only", [{ content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1), role: "user" }], undefined],
+    [
+      "newest",
+      [
+        { content: "older message", role: "assistant" },
+        {
+          content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2),
+          kind: "context.state",
+          role: "user",
+        },
+      ],
+      "context.state",
+    ],
+  ] as const)("keeps a truncated %s message when it alone exceeds the cap", (_, messages, kind) => {
+    const attribute = genAiInputMessagesAttribute(messages);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      parts: [{ content: expect.stringMatching(/… \[truncated\]$/u), type: "text" }],
+      role: "user",
+    });
+    expect(parsed[0]?.kind).toBe(kind);
+    expect(attribute).not.toContain("older message");
   });
 
   it("formats model input, output, and system instructions for inspectors", () => {

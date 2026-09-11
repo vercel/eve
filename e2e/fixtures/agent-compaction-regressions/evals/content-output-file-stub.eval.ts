@@ -31,8 +31,8 @@ export default defineEval({
     const turn = await t.send(
       [
         "[case: content-output-file-stub]",
-        "Call emit-compaction-content exactly once.",
-        "After compaction, report whether its completion evidence survived.",
+        "Alice is preparing a reading-list handoff for Bob. Please collect one review note and its attachment with emit-compaction-content.",
+        "After the conversation is summarized, confirm that the completed note and its attachment reference are still available.",
       ].join("\n"),
     );
 

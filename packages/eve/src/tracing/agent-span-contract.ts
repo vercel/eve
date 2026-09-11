@@ -18,6 +18,10 @@ export function agentInvocationSpanName(agentName: string | undefined): string {
   return agentName === undefined ? "invoke_agent" : `invoke_agent ${agentName}`;
 }
 
+export function workflowInvocationSpanName(workflowName: string): string {
+  return `invoke_workflow ${workflowName}`;
+}
+
 export interface AgentSamplingOperation {
   readonly name: string;
   readonly attributes?: Readonly<Record<string, string | number | boolean | undefined>>;

@@ -13,7 +13,7 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep, fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
@@ -398,7 +398,7 @@ describe("multi-agent callback routing", () => {
     }
   });
 
-  it.each(["session.completed", "task.update", "turn.completed", "turn.failed"] as const)(
+  it.each(["session.completed", "turn.completed", "turn.failed"] as const)(
     "logs %s delivery failures when the public route prefix is absent",
     async (kind) => {
       stubAgentRuntimeEnvironment(undefined);
@@ -423,15 +423,7 @@ describe("multi-agent callback routing", () => {
         [SessionCallbackKey.name]: sessionCallback,
       };
       const deliver = async () => {
-        if (kind === "task.update") {
-          await fireTaskUpdateCallbackStep({
-            callback: sessionCallback,
-            callId: "call-support",
-            message: "private progress",
-            updateEpoch: "turn-child",
-            updateIndex: 1,
-          });
-        } else if (kind === "session.completed") {
+        if (kind === "session.completed") {
           await fireSessionCallbackStep({
             output: "report done",
             serializedContext,

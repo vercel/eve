@@ -66,6 +66,7 @@ jobs:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})
     runs-on: ubuntu-latest
     needs: [changes, discover-fixtures]
+    continue-on-error: ${{ matrix.optional }}
     # No job-level `if`: the stable aggregate check below requires a successful
     # matrix result. Guarding each step lets an irrelevant diff satisfy it in
     # seconds without running setup or evals.

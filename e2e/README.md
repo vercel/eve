@@ -161,6 +161,8 @@ matrices from the registry:
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
   A fixture can add a narrowly scoped leg with `e2e.additionalModels` entries
   shaped as `{ "name": "short-check-name", "id": "provider/model" }`.
+  `e2e.optionalModels` can name selected model legs that should still run and
+  report failures without blocking the aggregate check.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
   workflow. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the

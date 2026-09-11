@@ -754,7 +754,7 @@ describe("dispatchCoordinationStep", () => {
           callId: "call-1",
           input: {},
           kind: "tool-call",
-          toolName: "task_update",
+          toolName: "task_cancel",
         },
       ],
       tasks: [],

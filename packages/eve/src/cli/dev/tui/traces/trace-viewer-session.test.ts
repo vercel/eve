@@ -84,7 +84,9 @@ describe("TraceViewerSession drag copy", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "copy me please" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "copy me please", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };
@@ -151,7 +153,9 @@ describe("TraceViewerSession background surfaces", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };
@@ -194,7 +198,9 @@ describe("TraceViewerSession background surfaces", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };

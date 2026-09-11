@@ -13,6 +13,7 @@ import {
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { instrumentMemoryOperation } from "#instrumentation/memory.js";
 import {
   bindInstrumentationRuntime,
   bindSessionInstrumentation,
@@ -528,6 +529,7 @@ describe("bindInstrumentationRuntime", () => {
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [authoredIntegration];
     const runtime = {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      memoryOperations: true,
       ownsAgentSpans: true,
     };
     const instrumentation = bindInstrumentationRuntime(runtime, createContext(), boundSession);
@@ -559,6 +561,92 @@ describe("bindInstrumentationRuntime", () => {
     } finally {
       globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = originalIntegrations;
     }
+  });
+
+  it("does not publish memory operations without a memory instrumentation provider", async () => {
+    const publish = vi.fn();
+    const execute = vi.fn(async () => ({ value: "recalled" }));
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish }),
+      createContext(),
+      boundSession,
+    );
+
+    const result = await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: false,
+        session: { sessionId: "session-1" },
+      },
+      async () =>
+        await instrumentMemoryOperation(
+          instrumentation?.memory,
+          {
+            idempotencyKey: "memory:search",
+            operationName: "search_memory",
+            phase: "turn.started",
+            slot: "profile",
+            storeId: "memscope1_scope",
+            turnId: "turn-1",
+          },
+          execute,
+        ),
+    );
+
+    expect(result).toBe("recalled");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("publishes memory operations with the effective session identity", async () => {
+    const publish = vi.fn();
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call-1",
+      rootSessionId: "conversation-root",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 0 },
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        memoryOperations: true,
+      },
+      ctx,
+      boundSession,
+    );
+
+    await instrumentMemoryOperation(
+      instrumentation?.memory,
+      {
+        idempotencyKey: "memory:search",
+        operationName: "search_memory",
+        phase: "turn.started",
+        slot: "profile",
+        storeId: "memscope1_scope",
+        turnId: "turn-1",
+      },
+      async () => ({
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+        recordCount: 1,
+        value: undefined,
+      }),
+    );
+
+    expect(publish.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        rootSessionId: "conversation-root",
+        sessionId: "session-1",
+        type: "memory.operation.started",
+      }),
+      expect.objectContaining({
+        recordCount: 1,
+        rootSessionId: "conversation-root",
+        sessionId: "session-1",
+        type: "memory.operation.completed",
+      }),
+    ]);
   });
 
   it("isolates concurrent step decisions and audiences", async () => {

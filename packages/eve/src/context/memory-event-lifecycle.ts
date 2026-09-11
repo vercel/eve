@@ -10,6 +10,7 @@ import {
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
+import type { MemoryInstrumentation } from "#instrumentation/memory.js";
 
 const log = createLogger("memory");
 
@@ -21,6 +22,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly messages?: readonly ModelMessage[];
   readonly nodeId: string;
+  readonly instrumentation?: MemoryInstrumentation;
 }): Promise<readonly ModelMessage[]> {
   let messages = input.messages ?? [];
   if (input.memories.length === 0) return messages;
@@ -31,6 +33,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
       appRoot: input.appRoot,
       ctx: input.ctx,
       event: input.event,
+      instrumentation: input.instrumentation,
       memories: input.memories,
       nodeId: input.nodeId,
     });
@@ -41,6 +44,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
       appRoot: input.appRoot,
       ctx: input.ctx,
       event: input.event,
+      instrumentation: input.instrumentation,
       memories: input.memories,
       messages,
       nodeId: input.nodeId,
@@ -50,6 +54,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
       abortSignal: input.abortSignal,
       ctx: input.ctx,
       event: input.event,
+      instrumentation: input.instrumentation,
       memories: input.memories,
       messages,
     });
@@ -59,6 +64,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
         abortSignal: input.abortSignal,
         ctx: input.ctx,
         event: input.event,
+        instrumentation: input.instrumentation,
         memories: input.memories,
         messages,
       });

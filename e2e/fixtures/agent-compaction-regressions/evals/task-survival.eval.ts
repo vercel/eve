@@ -9,7 +9,7 @@ export default defineEval({
     const turn = await t.send(
       [
         "[case: task-survival]",
-        "Inspect the repository, then confirm the requirements for the change.",
+        "Alice is updating the library's reading-list application. Please review the repository and confirm these requirements for Bob's handoff.",
         // Sized to a narrow window: long enough that a 280-char summarizer
         // input cap would destroy the tail sentinel, but short enough that
         // the task alone cannot cross the fixture's ~640-token threshold —

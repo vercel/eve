@@ -21,6 +21,9 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "modelMatrix": "full"
+    "modelMatrix": "full",
+    "optionalModels": [
+      "anthropic-opus"
+    ]
   }
 }

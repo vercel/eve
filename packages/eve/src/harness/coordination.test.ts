@@ -22,6 +22,7 @@ import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
@@ -66,6 +67,39 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       input: { skill: "research" },
       kind: "load-skill",
     });
+  });
+
+  it("preserves workflow identity without changing observable action data", () => {
+    const action = createRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { service: "api" },
+        toolCallId: "call-deploy",
+        toolName: "deploy",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "deploy",
+          {
+            description: "Deploy.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "deploy",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      callId: "call-deploy",
+      input: { service: "api" },
+      kind: "tool-call",
+      toolName: "deploy",
+    });
+    expect(JSON.stringify(action)).toBe(
+      '{"callId":"call-deploy","input":{"service":"api"},"kind":"tool-call","toolName":"deploy"}',
+    );
+    expect(isRuntimeWorkflowToolAction(action)).toBe(true);
   });
 
   it("uses the tool-authored label start callback without exposing it in event data", () => {
@@ -228,14 +262,14 @@ describe("createCoordinationRequestFromToolCall", () => {
   it("reserves runtime actions for task controls", () => {
     expect(
       createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, toolName: "task_update" },
+        toolCall: { ...toolCall, input: { taskIds: ["task-1"] }, toolName: "task_cancel" },
         tools: new Map([
           [
-            "task_update",
+            "task_cancel",
             {
-              description: "Update a task.",
+              description: "Cancel tasks.",
               inputSchema: jsonSchema({ type: "object" }),
-              name: "task_update",
+              name: "task_cancel",
               runtimeAction: { kind: "task-control" as const },
             },
           ],
@@ -245,9 +279,9 @@ describe("createCoordinationRequestFromToolCall", () => {
       kind: "runtime-action",
       request: {
         callId: "call-1",
-        input: { message: "research this" },
+        input: { taskIds: ["task-1"] },
         kind: "tool-call",
-        toolName: "task_update",
+        toolName: "task_cancel",
       },
     });
   });

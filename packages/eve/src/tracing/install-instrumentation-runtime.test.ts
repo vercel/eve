@@ -75,6 +75,7 @@ describe("installInstrumentationRuntime", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
     expect(runtime.instrumentationProviders).toBe(true);
+    expect(runtime.memoryOperations).toBe(true);
     expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({
       functionId: undefined,
@@ -100,6 +101,25 @@ describe("installInstrumentationRuntime", () => {
     expect(invocationFlush).toHaveBeenCalledOnce();
     expect(providerFlush).not.toHaveBeenCalled();
     expect(forceFlush).not.toHaveBeenCalled();
+  });
+
+  it("enables memory operations only for OTel or a provider that handles them", () => {
+    const withoutMemory = installInstrumentationRuntime({
+      collected: collectOtelPipeline([]),
+      frameworkVersion: "test",
+      providers: [{ events: { "turn.started": vi.fn() }, name: "turns" }],
+      serviceName: "weather",
+    });
+    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    const withMemory = installInstrumentationRuntime({
+      collected: collectOtelPipeline([]),
+      frameworkVersion: "test",
+      providers: [{ events: { "memory.operation.started": vi.fn() }, name: "memory" }],
+      serviceName: "weather",
+    });
+
+    expect(withoutMemory.memoryOperations).toBe(false);
+    expect(withMemory.memoryOperations).toBe(true);
   });
 
   it.each([

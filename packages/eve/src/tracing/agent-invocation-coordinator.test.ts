@@ -50,6 +50,10 @@ describe("agent invocation trace coordinator", () => {
         parentActionCallId: "workflow",
       }),
     ]);
+    await expect(readActionAnchor(serializedContext)).resolves.toMatchObject({
+      isWorkflowTool: true,
+      workflowName: "coordinate",
+    });
   });
 
   it("replays one invocation with the same caller coordinates", async () => {
@@ -141,6 +145,12 @@ describe("agent invocation trace coordinator", () => {
       expect(store.getAction(outerKey)?.kind).toBe(recorded ? kind : undefined);
       expect(store.findActionAnchor("session-1", "turn-1", "workflow")?.kind).toBe(
         recorded ? kind : undefined,
+      );
+      expect(store.findActionAnchor("session-1", "turn-1", "workflow")?.isWorkflowTool).toBe(
+        undefined,
+      );
+      expect(store.findActionAnchor("session-1", "turn-1", "workflow")?.workflowName).toBe(
+        undefined,
       );
       expect(store.findInvocations("session-1")).toHaveLength(0);
     });
@@ -281,11 +291,19 @@ async function readInvocations(serializedContext: Record<string, unknown>) {
   );
 }
 
+async function readActionAnchor(serializedContext: Record<string, unknown>) {
+  const context = await deserializeContext(serializedContext);
+  return contextStorage.run(context, () =>
+    new ContextAgentTraceStateStore().findActionAnchor("session-1", "turn-1", "workflow"),
+  );
+}
+
 function outerAction() {
   return {
     attemptIndex: 0,
     callId: "workflow",
     channelAudience: "private" as const,
+    isWorkflowTool: true,
     kind: "tool-call" as const,
     name: "coordinate",
     parent: {

@@ -164,32 +164,32 @@ describe("session callback route", () => {
     });
   });
 
-  it("retains the generic task progress callback", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const response = await handleSessionCallbackRequest(
-      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
-        body: JSON.stringify({
-          callId: "update-call",
-          updateIndex: 2,
-          updateEpoch: "turn-child",
-          kind: "task.update",
-          message: "Found three matching records.",
-          taskId: TASK_ID,
+  it.each([TASK_TOKEN, "invocation-reply"])(
+    "rejects obsolete child task.update callbacks on %s",
+    async (token) => {
+      const response = await handleSessionCallbackRequest(
+        new Request(`https://app.example.com/eve/v1/callback/${token}`, {
+          body: JSON.stringify({
+            callId: "update-call",
+            updateIndex: 2,
+            updateEpoch: "turn-child",
+            kind: "task.update",
+            message: "Found three matching records.",
+            taskId: TASK_ID,
+          }),
+          method: "POST",
         }),
-        method: "POST",
-      }),
-      createRouteContext({ token: TASK_TOKEN }),
-    );
+        createRouteContext({ token }),
+      );
 
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      kind: "task-update",
-      message: "Found three matching records.",
-    });
-  });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Unsupported callback kind.",
+        ok: false,
+      });
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["parent turn token", "turn-inbox", TASK_ID],

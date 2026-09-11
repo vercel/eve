@@ -254,16 +254,12 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.execute).toBeDefined();
   });
 
-  it("lowers compiled task-control tools from their framework definitions", async () => {
-    const node = await createNodeWithSourceOwnedTools({
-      names: ["task_cancel", "task_update"],
-    });
+  it("lowers task_cancel from its framework definition", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["task_cancel"] });
     const tools = createNodeHarnessTools({ node });
 
-    for (const name of ["task_cancel", "task_update"]) {
-      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
-      expect(tools.get(name)?.execute).toBeUndefined();
-    }
+    expect(tools.get("task_cancel")?.runtimeAction).toEqual({ kind: "task-control" });
+    expect(tools.get("task_cancel")?.execute).toBeUndefined();
     expect(tools.has("task_sleep")).toBe(false);
   });
 
@@ -307,10 +303,10 @@ describe("createNodeHarnessTools", () => {
 
   it("does not recreate task tools absent from the compiled graph", async () => {
     const tools = createNodeHarnessTools({
-      node: await createNodeWithSourceOwnedTools({ names: ["task_update"] }),
+      node: await createNodeWithSourceOwnedTools({ names: [] }),
     });
 
-    expect(tools.has("task_update")).toBe(true);
+    expect(tools.has("task_update")).toBe(false);
     expect(tools.has("task_cancel")).toBe(false);
   });
 });

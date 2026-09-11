@@ -13,7 +13,6 @@ import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -52,14 +51,6 @@ export async function createSessionStep(input: {
     bundle,
     input.dynamicSubagentAgentConfig,
   );
-  const taskUpdatesEnabled =
-    input.taskId !== undefined &&
-    effectiveAgent.turnAgent.tools.some(
-      (tool) =>
-        tool.kind === "authored-tool" &&
-        tool.behavior?.handling?.kind === "dispatch" &&
-        tool.behavior.handling.target.kind === "task-update",
-    );
 
   // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen
@@ -89,7 +80,6 @@ export async function createSessionStep(input: {
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
     taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
     workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,

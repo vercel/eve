@@ -7,13 +7,18 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 ## Completion batching
 
-eve automatically combines adjacent successful completions already queued from
-tasks launched in the same parent turn. Every result is retained, and the parent
-responds to the batch in one turn. No configuration is required.
+Overlapping background work owned by a session forms a cohort. Tasks launched in
+later user turns join the open cohort while earlier work is still pending or its
+successful results await delivery. eve holds successful completion notifications
+until every task in that cohort has completed, failed, or been cancelled, then
+delivers the successful results together in one parent turn. Partial completions
+do not invoke the parent model. Work started after the cohort settles forms a new
+cohort. No configuration or debounce timer is required.
 
-There is no debounce timer or waiting for unfinished tasks. Failures, input
-requests, explicit updates, user messages, and different task cohorts remain
-separate delivery boundaries.
+User messages, input requests, authorization events, failures, and cancellation
+are handled without waiting for the cohort. Child lifecycle events are processed
+before completion delivery so usage accounting and handle cleanup stay ordered.
+To follow work in progress, subscribe to the child session streams.
 
 ## The built-in `agent` tool
 
@@ -27,7 +32,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with updates or the final result. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -56,9 +61,9 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with updates, completion, failure, or cancellation. Human input requests surface separately on the parent session.
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
 
-A child running as a background task receives the framework `task_update` tool. It uses `task_update` to report progress to its parent. `task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
+`task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
