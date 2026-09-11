@@ -184,6 +184,12 @@ export type ResolvedToolDefinition = Readonly<
      * {@link Approval} for the shared callback contract.
      */
     readonly approval?: Approval;
+    /** Optional human-readable prompt for approval requests from this tool. */
+    readonly approvalPrompt?: (context: {
+      readonly callId: string;
+      readonly toolInput: Record<string, unknown>;
+      readonly toolName: string;
+    }) => string;
     /**
      * Optional function that derives a compound approval key from the tool
      * input. When present, the runtime records this key (instead of just

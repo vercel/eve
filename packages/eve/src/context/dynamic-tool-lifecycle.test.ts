@@ -1755,15 +1755,26 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       resolverSlug: "legacy",
       entryKey: "legacy:guarded",
     });
-    registerTestCallback("guarded", "approvalRequest", approval, {
+    const owner = {
       sessionId: ctx.require(SessionIdKey),
-      scope: "turn",
+      scope: "turn" as const,
       resolverSlug: "legacy",
       entryKey: "legacy:guarded",
-    });
+    };
+    registerTestCallback(
+      "guarded",
+      "approvalPrompt",
+      (_closure, ...args) => {
+        const context = args[0] as { toolInput: Record<string, unknown> };
+        return `Review ${String(context.toolInput.draftId)}?`;
+      },
+      owner,
+    );
+    registerTestCallback("guarded", "approvalRequest", approval, owner);
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
+          approvalPrompt: { closure: {} },
           approvalRequest: { closure: {} },
           execute: { closure: {} },
         },
@@ -1781,6 +1792,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     await expect(
       resolveApprovalPolicy(tool.approval)(createApprovalContext({ toolName: "guarded" })),
     ).resolves.toBe("user-approval");
+    expect(
+      tool.approvalPrompt?.({
+        callId: "call-1",
+        toolInput: { draftId: "draft-1" },
+        toolName: "guarded",
+      }),
+    ).toBe("Review draft-1?");
     getDynamicCallbackRegistry().delete("guarded");
   });
 

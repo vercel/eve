@@ -28,6 +28,11 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
   readonly execution?: "background";
+  readonly approvalPrompt?: (context: {
+    readonly callId: string;
+    readonly toolInput: TInput;
+    readonly toolName: string;
+  }) => string;
   execute(input: TInput, ctx: ToolContext, task?: TaskExec): TOutput | Promise<TOutput>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**

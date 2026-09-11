@@ -21,6 +21,21 @@ import type { TaskExec, TaskReceipt } from "#tools/task.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 
+/** Context passed to a tool's custom approval prompt callback. */
+export interface ApprovalPromptContext<TInput = Record<string, unknown>> {
+  /** Id of the tool call awaiting approval. */
+  readonly callId: string;
+  /** Validated input proposed for the tool call. */
+  readonly toolInput: TInput;
+  /** Final runtime name of the tool. */
+  readonly toolName: string;
+}
+
+/** Builds the human-readable prompt shown when a tool call requires approval. */
+export type ApprovalPrompt<TInput = Record<string, unknown>> = (
+  context: ApprovalPromptContext<TInput>,
+) => string;
+
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 export type { TaskExec, TaskExecutorBinding, TaskReceipt } from "#tools/task.js";
@@ -205,6 +220,11 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    */
   approval?: Approval<ApprovalContextInput<TInput>>;
   /**
+   * Optional human-readable prompt shown when this tool requires approval.
+   * When omitted, eve uses `Approve tool call: <toolName>`.
+   */
+  approvalPrompt?: ApprovalPrompt<ApprovalContextInput<TInput>>;
+  /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
    * model-facing {@link ToolModelOutput}.
@@ -228,6 +248,7 @@ export interface BackgroundToolDefinition<
     task: TaskExec,
   ): Promise<TOutput> | TOutput | AsyncIterable<unknown>;
   approval?: Approval<ApprovalContextInput<TInput>>;
+  approvalPrompt?: ApprovalPrompt<ApprovalContextInput<TInput>>;
   toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
@@ -282,6 +303,10 @@ export function defineTool<
     StandardSchemaV1.InferOutput<TSchema>,
     unknown
   >["approvalKey"];
+  approvalPrompt?: BackgroundToolDefinition<
+    StandardSchemaV1.InferOutput<TSchema>,
+    unknown
+  >["approvalPrompt"];
   toModelOutput?: BackgroundToolDefinition<
     unknown,
     BackgroundToolOutputFromExecuteReturn<TReturn>
@@ -309,6 +334,10 @@ export function defineTool<
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
+  approvalPrompt?: ToolDefinition<
+    StandardSchemaV1.InferOutput<TInputSchema>,
+    unknown
+  >["approvalPrompt"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -332,6 +361,7 @@ export function defineTool<
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
+  approvalPrompt?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalPrompt"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
@@ -355,6 +385,7 @@ export function defineTool<
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
+  approvalPrompt?: ToolDefinition<Record<string, unknown>, unknown>["approvalPrompt"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -372,6 +403,7 @@ export function defineTool<TReturn>(definition: {
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
+  approvalPrompt?: ToolDefinition<Record<string, unknown>, unknown>["approvalPrompt"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
@@ -394,6 +426,7 @@ export function stampToolDefinition<
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;
+    readonly approvalPrompt?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -410,6 +443,7 @@ export function stampToolDefinition<
       label: definition.label,
       approval: definition.approval,
       approvalKey: definition.approvalKey,
+      approvalPrompt: definition.approvalPrompt,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

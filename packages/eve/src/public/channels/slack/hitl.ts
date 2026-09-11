@@ -498,7 +498,7 @@ function renderToolInputContainerBlock(request: InputRequest): Record<string, un
     type: "container",
     title: { type: "plain_text", text: "Tool input" },
     is_collapsible: true,
-    default_collapsed: false,
+    default_collapsed: true,
     child_blocks: [{ type: "section", text: { type: "mrkdwn", text: details } }],
   };
 }
