@@ -3,6 +3,8 @@ import type { AppsManifestCreateArguments } from "@slack/web-api";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export interface SlackAppManifestOptions {
+  /** Display name used for the Slack bot. */
+  readonly botName?: string;
   /** Additional Slack bot OAuth scopes required by this channel. */
   readonly botScopes?: readonly string[];
   /** Additional Slack Events API bot events delivered to this channel. */
@@ -14,7 +16,7 @@ export interface SlackAppManifestBuildDefinition {
 }
 
 export function defineSlackAppManifest(
-  input: SlackAppManifestOptions & { readonly botName?: string },
+  input: SlackAppManifestOptions,
 ): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
