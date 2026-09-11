@@ -1,5 +1,15 @@
 # eve
 
+## 0.54.1
+
+### Patch Changes
+
+- ee11c23: Record model input once using the OpenTelemetry `gen_ai.input.messages` schema. Local traces no longer serialize the duplicate `ai.prompt.messages` payload, avoiding binary attachment traversal.
+- b27e9f2: Remove the `task_update` tool and its child-to-parent progress callbacks; use the child session's stream to follow progress. Successful results from overlapping background tasks now reach the parent together across launch turns, after child settlement updates usage and handles; user input, failures, and cancellation remain responsive.
+- b27e9f2: Report content-filtered model responses distinctly, including their finish reason and Gateway generation ID when available, instead of retrying them as empty responses. Filtered partial text is no longer delivered as a completed reply.
+- 0e2912f: Add OpenTelemetry GenAI spans for memory provider recall and capture operations.
+- b27e9f2: Fix `eve dev` silently stopping session updates during long periods of background work. The terminal now keeps listening while the prompt is open, so completion reports appear without another user message.
+
 ## 0.54.0
 
 ### Minor Changes
