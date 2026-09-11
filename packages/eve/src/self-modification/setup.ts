@@ -42,7 +42,7 @@ export function connectorName(owner: string, repo: string): string {
 
 export function renderSelfModificationConfig(values?: SelfModificationSetupValues): string {
   if (values === undefined) {
-    return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n`;
+    return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({\n  local: { enabled: true },\n});\n`;
   }
   const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
   const channelCases = (values.vercelBackend ? channelNames : [])

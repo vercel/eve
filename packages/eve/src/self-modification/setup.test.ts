@@ -14,6 +14,11 @@ import {
 } from "./setup.js";
 
 describe("self-modification setup", () => {
+  it("renders an explicitly enabled local configuration", () => {
+    expect(renderSelfModificationConfig()).toContain("local: { enabled: true }");
+    expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
+  });
+
   it("renders a generated Connect-backed deployed configuration", () => {
     const source = renderSelfModificationConfig({
       branch: "release/production",
