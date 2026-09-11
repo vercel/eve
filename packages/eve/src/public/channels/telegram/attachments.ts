@@ -95,8 +95,13 @@ export function createTelegramFetchFile(input: {
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
+    // Prefer the media type the channel already knows (from the attachment
+    // metadata, e.g. `image/jpeg` for photos) over the HTTP `content-type`
+    // header returned by Telegram's file endpoint, which is frequently
+    // `application/octet-stream` or unset. Using the latter breaks image
+    // recognition in vision models that key off the declared media type.
     const mediaType =
-      response.headers.get("content-type") ?? ref.mediaType ?? "application/octet-stream";
+      ref.mediaType ?? response.headers.get("content-type") ?? "application/octet-stream";
     const result: FetchFileResult = {
       bytes,
       filename: ref.filename,
