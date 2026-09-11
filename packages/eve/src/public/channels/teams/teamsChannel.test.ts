@@ -136,6 +136,31 @@ describe("teamsChannel", () => {
     });
   });
 
+  it.each([
+    ["channel", "public", "public"],
+    ["channel", "private", "private"],
+    ["channel", "everyone", "unknown"],
+    ["personal", "public", "private"],
+    ["groupChat", "public", "private"],
+  ] as const)(
+    "projects %s handler audience %s as %s",
+    async (conversationType, audience, expected) => {
+      const channel = teamsChannel({
+        credentials: { webhookVerifier: () => true },
+        onMessage: () => ({
+          audience: audience as "public",
+          auth: null,
+        }),
+      });
+
+      const { send } = await firePost(channel, messageActivity({ conversationType }));
+
+      expect(send.mock.calls[0]?.[1]).toMatchObject({
+        state: { audience: expected },
+      });
+    },
+  );
+
   it("dispatches verified personal messages with Teams state", async () => {
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
@@ -556,6 +581,38 @@ describe("teamsChannel", () => {
       state: { replyToActivityId: "ANCHOR" },
     });
   });
+
+  it.each([
+    ["channel", "public", "public"],
+    ["channel", "private", "private"],
+    ["channel", "everyone", "unknown"],
+    ["personal", "public", "private"],
+    ["groupChat", "public", "private"],
+  ] as const)(
+    "projects proactive %s audience %s as %s",
+    async (conversationType, audience, expected) => {
+      const channel = teamsChannel();
+      const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+      await channel.receive!(
+        {
+          target: {
+            audience: audience as "public",
+            conversationId: "CONV",
+            conversationType,
+            serviceUrl: "https://service.example/teams",
+          },
+          auth: null,
+          message: "Begin",
+        },
+        mockChannelContext(send),
+      );
+
+      expect(send.mock.calls[0]?.[1]).toMatchObject({
+        state: { audience: expected },
+      });
+    },
+  );
 });
 
 function messageActivity(input: { readonly conversationType: string }): Record<string, unknown> {

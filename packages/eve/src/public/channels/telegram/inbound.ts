@@ -200,7 +200,7 @@ function parseTelegramChat(value: unknown): TelegramChat | null {
     id,
     title: typeof value.title === "string" ? value.title : undefined,
     type,
-    username: typeof value.username === "string" ? value.username : undefined,
+    username: isNonEmptyString(value.username) ? value.username : undefined,
   };
 }
 

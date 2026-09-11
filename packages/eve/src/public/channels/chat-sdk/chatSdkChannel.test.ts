@@ -160,6 +160,35 @@ describe("chatSdkChannel", () => {
     expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
   });
 
+  it.each([
+    [{ isDM: false, channelVisibility: "unknown" }, "public", "public"],
+    [{ isDM: false, channelVisibility: "workspace" }, "private", "private"],
+    [{ isDM: true, channelVisibility: "workspace" }, "public", "private"],
+  ] as const)(
+    "combines $audience evidence with thread privacy as $expected",
+    (thread, audience, expected) => {
+      const bridge = chatSdkChannel({
+        adapters: { test: testAdapter() },
+        state: memoryState(),
+        userName: "bot",
+      });
+      const adapter = getAdapter(bridge.channel);
+      if (!adapter.state) throw new Error("Expected Chat SDK state.");
+      adapter.state.audience = audience;
+      adapter.state.thread = {
+        _type: "chat:Thread",
+        adapterName: "test",
+        channelId: CHANNEL_ID,
+        id: THREAD_ID,
+        ...thread,
+      };
+
+      expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+        audience: expected,
+      });
+    },
+  );
+
   it("mounts GET and POST webhook routes per Chat SDK adapter", () => {
     const bridge = chatSdkChannel({
       adapters: {
@@ -240,6 +269,27 @@ describe("chatSdkChannel", () => {
         },
       },
       title: "mention",
+    });
+  });
+
+  it("applies the channel default audience to bridge.send", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      audience: "private",
+      state: memoryState(),
+      userName: "bot",
+    });
+
+    bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
+      await bridge.send(message.text, { auth: AUTH, thread });
+    });
+
+    const { send } = await firePost(bridge.channel, "/eve/v1/test", {
+      text: "@bot hello",
+    });
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      state: { audience: "private" },
     });
   });
 
@@ -353,6 +403,143 @@ describe("chatSdkChannel", () => {
           isDM: false,
         },
       },
+    });
+  });
+
+  it("projects private audience for proactive receive with a DM thread id", async () => {
+    const adapter = testAdapter();
+    vi.spyOn(adapter, "isDM").mockReturnValue(true);
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
+
+    await bridge.channel.receive?.(
+      {
+        auth: AUTH,
+        message: "proactive DM",
+        target: { adapterName: "test", threadId: THREAD_ID },
+      },
+      mockChannelContext(send),
+    );
+
+    expect(adapter.isDM).toHaveBeenCalledWith(THREAD_ID);
+    const state = send.mock.calls[0]?.[1].state as ChatSdkChannelState;
+    expect(state.thread).toMatchObject({
+      channelVisibility: "workspace",
+      isDM: true,
+    });
+    expect(getAdapter(bridge.channel).instrumentation?.metadata?.(state)).toMatchObject({
+      audience: "private",
+    });
+  });
+
+  it("persists explicit audience evidence for proactive receive", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
+
+    await bridge.channel.receive?.(
+      {
+        auth: AUTH,
+        message: "proactive",
+        target: {
+          adapterName: "test",
+          audience: "private",
+          threadId: THREAD_ID,
+        },
+      },
+      mockChannelContext(send),
+    );
+
+    const state = send.mock.calls[0]?.[1].state as ChatSdkChannelState;
+    expect(state.audience).toBe("private");
+    expect(getAdapter(bridge.channel).instrumentation?.metadata?.(state)).toMatchObject({
+      audience: "private",
+    });
+  });
+
+  it("applies a default audience to proactive receive", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      audience: "private",
+      state: memoryState(),
+      userName: "bot",
+    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
+
+    await bridge.channel.receive?.(
+      {
+        auth: AUTH,
+        message: "proactive",
+        target: { adapterName: "test", threadId: THREAD_ID },
+      },
+      mockChannelContext(send),
+    );
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      state: { audience: "private" },
+    });
+  });
+
+  it("does not let proactive evidence widen a private default audience", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      audience: "private",
+      state: memoryState(),
+      userName: "bot",
+    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
+
+    await bridge.channel.receive?.(
+      {
+        auth: AUTH,
+        message: "proactive",
+        target: {
+          adapterName: "test",
+          audience: "public",
+          threadId: THREAD_ID,
+        },
+      },
+      mockChannelContext(send),
+    );
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      state: { audience: "private" },
+    });
+  });
+
+  it("lets explicit unknown evidence narrow a public default audience", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      audience: "public",
+      state: memoryState(),
+      userName: "bot",
+    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
+
+    await bridge.channel.receive?.(
+      {
+        auth: AUTH,
+        message: "proactive",
+        target: {
+          adapterName: "test",
+          audience: "unknown",
+          threadId: "opaque-thread",
+        },
+      },
+      mockChannelContext(send),
+    );
+
+    const state = send.mock.calls[0]?.[1].state as ChatSdkChannelState;
+    expect(state.audience).toBe("unknown");
+    expect(getAdapter(bridge.channel).instrumentation?.metadata?.(state)).toMatchObject({
+      audience: "unknown",
     });
   });
 
@@ -937,7 +1124,7 @@ class TestAdapter {
     return "workspace";
   }
 
-  isDM(): boolean {
+  isDM(_threadId: string): boolean {
     return false;
   }
 

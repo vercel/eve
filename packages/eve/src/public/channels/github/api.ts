@@ -10,6 +10,8 @@ import {
   type GitHubAuthApiOptions,
   type GitHubChannelCredentials,
 } from "#public/channels/github/auth.js";
+import { githubRepositoryAudience } from "#public/channels/github/privacy.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
@@ -398,7 +400,11 @@ export function createGitHubReaction(
 /** Fetches repository metadata, primarily to resolve `repository.id` for receive(). */
 export async function getGitHubRepository(
   input: GitHubResourceInput & { readonly auth?: boolean },
-): Promise<{ readonly id: number; readonly defaultBranch: string | undefined }> {
+): Promise<{
+  readonly audience: ChannelAudience;
+  readonly id: number;
+  readonly defaultBranch: string | undefined;
+}> {
   const response = await callGitHubApi({
     api: input.api,
     credentials: input.credentials,
@@ -410,7 +416,7 @@ export async function getGitHubRepository(
   const body = isObject(response.body) ? response.body : {};
   const id = typeof body.id === "number" ? body.id : 0;
   const defaultBranch = typeof body.default_branch === "string" ? body.default_branch : undefined;
-  return { defaultBranch, id };
+  return { audience: githubRepositoryAudience(body), defaultBranch, id };
 }
 
 function normalizeCommentBody(body: string | GitHubCommentBody): GitHubJsonObject {

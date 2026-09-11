@@ -146,15 +146,21 @@ describe("telegramChannel() inbound route", () => {
   });
 
   it.each([
-    ["private", "private"],
-    ["group", "private"],
-    ["supergroup", "private"],
-    [null, "unknown"],
-  ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
-    const adapter = withState(getAdapter(telegramChannel()), { chatType });
+    ["private", "named_private", "private"],
+    ["group", "named_group", "private"],
+    ["supergroup", "public_ops", "public"],
+    ["channel", "public_news", "public"],
+    ["supergroup", null, "private"],
+    ["channel", undefined, "private"],
+    [null, "public_but_unknown_type", "unknown"],
+  ] as const)(
+    "maps %s chats with username %s to the %s audience",
+    (chatType, chatUsername, audience) => {
+      const adapter = withState(getAdapter(telegramChannel()), { chatType, chatUsername });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
-  });
+      expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    },
+  );
 
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
     const channel = telegramChannel({
@@ -193,6 +199,7 @@ describe("telegramChannel() inbound route", () => {
       state: {
         chatId: "42",
         chatType: "private",
+        chatUsername: null,
         conversationId: null,
       },
       title: "Telegram run",
@@ -229,12 +236,15 @@ describe("telegramChannel() inbound route", () => {
       message: {
         message_id: 11,
         from: { id: 42, is_bot: false },
-        chat: { id: -1001, type: "supergroup" },
+        chat: { id: -1001, type: "supergroup", username: "public_ops" },
         text: "/ask@testbot hello",
       },
     });
     expect(mentioned.send).toHaveBeenCalledTimes(1);
     expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::11");
+    expect(mentioned.send.mock.calls[0]![1]).toMatchObject({
+      state: { chatType: "supergroup", chatUsername: "public_ops" },
+    });
     expect((mentioned.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
       "is_mentioned: true",
     );
@@ -740,7 +750,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBeNull();
   });
 
-  it("hydrates unknown group message posts and re-keys to the posted message id", async () => {
+  it("clears a stale public username when Telegram returns a restricted supergroup", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -752,7 +762,12 @@ describe("telegramChannel() default event handlers", () => {
     vi.stubGlobal("fetch", fetchMock);
     const adapter = withState(
       getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
-      { chatId: "-1001", chatType: null, conversationId: null },
+      {
+        chatId: "-1001",
+        chatType: "supergroup",
+        chatUsername: "public_ops",
+        conversationId: null,
+      },
     );
     const { accessor, writes } = captureAccessor("telegram:-1001::");
     const ctx = buildAdapterContext(adapter, accessor);
@@ -771,7 +786,9 @@ describe("telegramChannel() default event handlers", () => {
 
     expect(writes).toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
     expect(ctx.state.chatType).toBe("supergroup");
+    expect(ctx.state.chatUsername).toBeNull();
     expect(ctx.state.conversationId).toBe("77");
+    expect(adapter.instrumentation?.metadata?.(ctx.state)).toMatchObject({ audience: "private" });
   });
 
   it("preserves explicit conversation ids after Telegram identifies a private chat", async () => {
@@ -953,11 +970,52 @@ describe("telegramChannel().receive", () => {
           state: expect.objectContaining({
             chatId: "-1001",
             chatType,
+            chatUsername: null,
             conversationId: "88",
           }),
         }),
       );
     }
+  });
+
+  it("preserves a public username returned for a proactive initialMessage", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 88,
+            chat: { id: -1001, type: "supergroup", username: "public_ops" },
+          },
+        }),
+      ),
+    );
+    const channel = asCompiled<TelegramChannelState>(
+      telegramChannel({
+        api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+        credentials: { botToken: "bot-token" },
+      }),
+    );
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await channel.receive!(
+      {
+        target: { chatId: -1001, initialMessage: "Starting" },
+        auth: null,
+        message: "run",
+      },
+      mockChannelContext(send),
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      "-1001::88",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          chatType: "supergroup",
+          chatUsername: "public_ops",
+        }),
+      }),
+    );
   });
 
   it("leaves initialMessage sessions unanchored when Telegram omits the chat type", async () => {

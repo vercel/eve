@@ -87,6 +87,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   });
   const bridge = chatSdkChannel({
     adapters: { imessage },
+    audience: "private",
     concurrency: "concurrent",
     events: config.events,
     routes: { imessage: config.route ?? "/eve/v1/photon" },

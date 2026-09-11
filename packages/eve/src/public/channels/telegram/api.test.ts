@@ -62,12 +62,15 @@ describe("callTelegramApi", () => {
 });
 
 describe("sendTelegramMessage", () => {
-  it("extracts the posted message id and chat id from Telegram's response", async () => {
+  it("extracts the posted message id and chat metadata from Telegram's response", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           ok: true,
-          result: { message_id: 42, chat: { id: -1001 } },
+          result: {
+            message_id: 42,
+            chat: { id: -1001, type: "supergroup", username: "public_ops" },
+          },
         }),
       ),
     );
@@ -79,7 +82,12 @@ describe("sendTelegramMessage", () => {
       fetch: fetchMock,
     });
 
-    expect(posted).toMatchObject({ chatId: "-1001", id: "42" });
+    expect(posted).toMatchObject({
+      chatId: "-1001",
+      chatType: "supergroup",
+      chatUsername: "public_ops",
+      id: "42",
+    });
   });
 
   it("includes Telegram's error description when delivery fails", async () => {

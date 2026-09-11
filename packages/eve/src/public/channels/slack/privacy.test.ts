@@ -13,6 +13,9 @@ describe("Slack conversation privacy", () => {
     expect(readSlackConversationPrivacy({ channel_type: "im" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "mpim" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "group" })).toBe("private");
+    expect(readSlackConversationPrivacy({ channel_type: "channel", is_ext_shared: true })).toBe(
+      "private",
+    );
     expect(readSlackConversationPrivacy({})).toBe("unknown");
     await expect(
       isPrivateSlackConversation({
@@ -49,6 +52,14 @@ describe("Slack conversation privacy", () => {
     { response: { ok: true, channel: { is_private: true } }, label: "private channel" },
     { response: { ok: true, channel: { is_im: true } }, label: "DM" },
     { response: { ok: true, channel: { is_mpim: true } }, label: "group DM" },
+    {
+      response: { ok: true, channel: { is_ext_shared: true, is_private: false } },
+      label: "Slack Connect channel",
+    },
+    {
+      response: { ok: true, channel: { is_private: false, is_shared: true } },
+      label: "shared channel",
+    },
     { response: { ok: true, channel: {} }, label: "ambiguous response" },
     { response: { ok: false, error: "missing_scope" }, label: "failed response" },
   ])("treats a $label lookup as private", async ({ response }) => {

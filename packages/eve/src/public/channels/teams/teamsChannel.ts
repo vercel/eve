@@ -61,7 +61,7 @@ import { verifyTeamsRequest, type TeamsWebhookVerifier } from "#public/channels/
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("teams.channel");
 
@@ -96,6 +96,8 @@ export interface TeamsPendingApprovalCard {
 }
 
 export interface TeamsChannelState {
+  /** Audience evidence captured before the session is dispatched. */
+  audience?: ChannelAudience;
   /** Bot account captured from the inbound activity recipient. */
   bot: TeamsChannelAccount | null;
   channelId: string | null;
@@ -128,6 +130,8 @@ export interface TeamsChannelCredentials extends TeamsCredentials {
  * a new root that anchors non-personal threads.
  */
 export interface TeamsReceiveTarget {
+  /** Optional audience evidence for proactive receives. Omit to infer from conversation type. */
+  readonly audience?: ChannelAudience;
   /** Teams team/channel id, for channel conversations. */
   readonly channelId?: string;
   readonly conversationId: string;
@@ -146,6 +150,8 @@ export interface TeamsReceiveTarget {
 
 /** Result of an inbound Teams message hook. Return `null` to acknowledge without dispatching. */
 export type TeamsInboundResult = {
+  /** Optional audience evidence from the inbound message handler. */
+  readonly audience?: ChannelAudience;
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   /** Overrides the workflow run title without changing the message sent to the model. */
@@ -307,7 +313,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       credentials: config.credentials,
     }),
     metadata: (state) => ({
-      audience: teamsAudience(state.conversationType),
+      audience: teamsEffectiveAudience(teamsAudience(state.conversationType), state.audience),
       channelId: state.channelId,
       conversationType: state.conversationType,
       teamId: state.teamId,
@@ -406,6 +412,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
       const state: TeamsChannelState = {
         ...initialTeamsState(),
+        audience: teamsEffectiveAudience(teamsAudience(conversationType), receiveTarget.audience),
         channelId: readNonEmptyString(receiveTarget.channelId) ?? null,
         conversationId,
         conversationType,
@@ -440,6 +447,15 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 function teamsAudience(conversationType: string | null): ChannelAudience {
   if (conversationType === "personal" || conversationType === "groupChat") return "private";
   return "unknown";
+}
+
+function teamsEffectiveAudience(
+  platformAudience: ChannelAudience,
+  explicitAudience: unknown,
+): ChannelAudience {
+  if (platformAudience === "private") return "private";
+  const normalized = normalizeChannelAudience(explicitAudience);
+  return normalized === "unknown" ? platformAudience : normalized;
 }
 
 function rebuildTeamsContext(
@@ -636,6 +652,7 @@ async function dispatchMessage(input: {
     return;
   }
   if (result === null || result === undefined) return;
+  state.audience = teamsEffectiveAudience(teamsAudience(state.conversationType), result.audience);
 
   const fileParts = collectTeamsFileParts(input.activity.attachments, input.filesPolicy);
   const turnMessage = buildTeamsTurnMessage(input.activity.text, fileParts);
@@ -729,6 +746,7 @@ function stateFromActivity(
     replyToActivityId: teamsThreadRootActivityId(activity),
   });
   return {
+    audience: teamsAudience(activity.conversationType ?? activity.scope),
     bot: activity.recipient,
     channelId: activity.teamsChannelId ?? null,
     conversationId: activity.conversation.id,
@@ -791,6 +809,7 @@ function rejectInput(): null {
 
 function initialTeamsState(): TeamsChannelState {
   return {
+    audience: "unknown",
     bot: null,
     channelId: null,
     conversationId: null,

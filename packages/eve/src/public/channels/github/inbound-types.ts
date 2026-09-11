@@ -1,10 +1,12 @@
 import type { JsonObject } from "#shared/json.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /** GitHub conversation kinds represented by the channel state. */
 export type GitHubConversationKind = "issue" | "pull_request" | "review_thread";
 
 /** Stable repository identity normalized from webhook payloads. */
 export interface GitHubRepositoryRef {
+  readonly audience?: ChannelAudience;
   readonly fullName: string;
   readonly id: number;
   readonly name: string;

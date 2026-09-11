@@ -44,7 +44,14 @@ import {
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
-import { chatSdkInstrumentationMetadata } from "#public/channels/chat-sdk/audience.js";
+import {
+  chatSdkInstrumentationMetadata,
+  combineChatSdkAudienceEvidence,
+} from "#public/channels/chat-sdk/audience.js";
+import {
+  serializeChatSdkReceiveTarget,
+  serializeChatSdkThread,
+} from "#public/channels/chat-sdk/thread.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("chat-sdk.channel");
@@ -72,6 +79,8 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
 
 /** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
 export interface ChatSdkChannelState extends Record<string, unknown> {
+  /** Explicit audience evidence supplied before dispatch, when known. */
+  audience?: ChannelAudience;
   thread: SerializedThread | null;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
@@ -97,6 +106,8 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
  */
 export interface ChatSdkReceiveTarget {
   readonly adapterName?: string;
+  /** Optional audience evidence for proactive receives. Omit to infer from the thread. */
+  readonly audience?: ChannelAudience;
   readonly thread?: SerializedThread;
   readonly threadId?: string;
 }
@@ -143,6 +154,8 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
  * determines the eve continuation token and the persisted channel state.
  */
 export interface ChatSdkSendOptions {
+  /** Optional audience evidence from the active webhook. */
+  readonly audience?: ChannelAudience;
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
   readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
@@ -170,6 +183,8 @@ export interface ChatSdkChannelConfig<
 > extends Omit<ChatConfig<TAdapters>, "adapters"> {
   /** Map of Chat SDK adapter name to adapter instance. */
   readonly adapters: TAdapters;
+  /** Default audience evidence for every thread handled by this channel. */
+  readonly audience?: ChannelAudience;
   /**
    * Base route for generated adapter webhooks. Defaults to `/eve/v1`, so an
    * adapter named `slack` mounts at `/eve/v1/slack`.
@@ -284,6 +299,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
         thread: event.thread,
       },
+      config.audience,
     );
   });
 
@@ -330,10 +346,15 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
     }),
     async receive(input, { from }) {
-      const thread = serializeReceiveTarget(bot, input.target);
+      const thread = serializeChatSdkReceiveTarget(bot, input.target);
+      const state: ChatSdkChannelState = { thread };
+      const audience = combineChatSdkAudienceEvidence(config.audience, input.target.audience);
+      if (config.audience !== undefined || input.target.audience !== undefined) {
+        state.audience = audience;
+      }
       return from(thread.id).send(input.message, {
         auth: input.auth,
-        state: { thread },
+        state,
       });
     },
     events: mergedEvents,
@@ -343,7 +364,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     bot,
     channel,
     send(input, options) {
-      return bridgeSend(bot, input, options);
+      return bridgeSend(bot, input, options, config.audience);
     },
   };
 }
@@ -567,6 +588,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   input: ChatSdkSendInput,
   options: ChatSdkSendOptions,
+  defaultAudience: ChannelAudience | undefined,
 ): Promise<Session> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
@@ -574,11 +596,16 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
       "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
     );
   }
-  const thread = serializeThread(bot, options.thread, options.adapterName);
+  const thread = serializeChatSdkThread(bot, options.thread, options.adapterName);
   const payload = normalizeSendInput(input);
+  const state: ChatSdkChannelState = { thread };
+  const audience = combineChatSdkAudienceEvidence(defaultAudience, options.audience);
+  if (defaultAudience !== undefined || options.audience !== undefined) {
+    state.audience = audience;
+  }
   const deliveryOptions: MutableDeliveryOptions<ChatSdkChannelState> = {
     auth: options.auth ?? null,
-    state: { thread },
+    state,
   };
   if (options.callback !== undefined) deliveryOptions.callback = options.callback;
   if (options.mode !== undefined) deliveryOptions.mode = options.mode;
@@ -614,50 +641,6 @@ function threadFromState<TAdapters extends ChatSdkAdapters>(
     log.warn("failed to rebuild Chat SDK thread from channel state", { error });
     return null;
   }
-}
-
-function serializeReceiveTarget<TAdapters extends ChatSdkAdapters>(
-  bot: Chat<TAdapters>,
-  target: ChatSdkReceiveTarget,
-): SerializedThread {
-  if (target.thread) return target.thread;
-  if (!target.threadId) {
-    throw new Error("chatSdkChannel().receive requires target.thread or target.threadId.");
-  }
-  return serializeThread(bot, target.threadId, target.adapterName);
-}
-
-function serializeThread<TAdapters extends ChatSdkAdapters>(
-  bot: Chat<TAdapters>,
-  thread: SerializedThread | Thread | string,
-  adapterName?: string,
-): SerializedThread {
-  if (typeof thread === "string") {
-    const resolvedAdapterName = adapterName ?? inferAdapterName(thread);
-    const adapter = bot.getAdapter(resolvedAdapterName);
-    return {
-      _type: "chat:Thread",
-      adapterName: resolvedAdapterName,
-      channelId: adapter.channelIdFromThreadId(thread),
-      channelVisibility: adapter.getChannelVisibility?.(thread),
-      id: thread,
-      isDM: false,
-    };
-  }
-  if (isSerializedThread(thread)) return thread;
-  return thread.toJSON();
-}
-
-function isSerializedThread(value: SerializedThread | Thread): value is SerializedThread {
-  return "_type" in value && value._type === "chat:Thread";
-}
-
-function inferAdapterName(threadId: string): string {
-  const separator = threadId.indexOf(":");
-  if (separator <= 0) {
-    throw new Error("chatSdkChannel string thread references require options.adapterName.");
-  }
-  return threadId.slice(0, separator);
 }
 
 function adapterNames<TAdapters extends ChatSdkAdapters>(

@@ -73,6 +73,8 @@ export interface SlackMessage {
   readonly channelId: string;
   /** Slack team id, when the envelope carried one. */
   readonly teamId: string | undefined;
+  /** Whether Slack identified the conversation as externally shared. */
+  readonly isExtSharedChannel?: boolean;
   /** Author of the message. May be `undefined` for system events. */
   readonly author: SlackAuthor | undefined;
   /** File / image attachments on the inbound message. */
@@ -135,6 +137,7 @@ interface SlackMessageEvent {
  */
 export interface SlackEventCallback {
   readonly type: "event_callback";
+  readonly is_ext_shared_channel?: boolean;
   readonly team_id?: string;
   readonly authorizations?: readonly {
     readonly is_bot?: boolean;
@@ -181,7 +184,11 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "app_mention") return null;
-  return buildSlackMessage(event as SlackAppMentionEvent, envelope.team_id);
+  return buildSlackMessage(
+    event as SlackAppMentionEvent,
+    envelope.team_id,
+    envelope.is_ext_shared_channel,
+  );
 }
 
 /**
@@ -245,7 +252,11 @@ export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | 
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "message") return null;
-  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+  return buildSlackMessage(
+    event as SlackMessageEvent,
+    envelope.team_id,
+    envelope.is_ext_shared_channel,
+  );
 }
 
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
@@ -257,7 +268,7 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
   if (message.channel_type !== "im") return null;
   if (!isHumanMessage(message)) return null;
 
-  return buildSlackMessage(message, envelope.team_id);
+  return buildSlackMessage(message, envelope.team_id, envelope.is_ext_shared_channel);
 }
 
 function isHumanMessage(message: SlackMessageEvent): boolean {
@@ -293,6 +304,7 @@ export function slackMessageFromWebhookPayload(
     ts: payload.ts,
     threadTs: payload.threadTs,
     channelId: payload.channelId,
+    isExtSharedChannel: payload.isExtSharedChannel,
     teamId: payload.teamId,
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
@@ -303,6 +315,7 @@ export function slackMessageFromWebhookPayload(
 function buildSlackMessage(
   event: SlackAppMentionEvent | SlackMessageEvent,
   envelopeTeamId: string | undefined,
+  isExtSharedChannel?: boolean,
 ): SlackMessage | null {
   const channelId = typeof event.channel === "string" ? event.channel : "";
   const ts = typeof event.ts === "string" ? event.ts : "";
@@ -319,6 +332,7 @@ function buildSlackMessage(
     ts,
     threadTs,
     channelId,
+    isExtSharedChannel,
     teamId,
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),

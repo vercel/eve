@@ -158,6 +158,14 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
 }
 
 describe("linearChannel inbound Agent Session events", () => {
+  it("projects an explicit unknown audience into instrumentation metadata", () => {
+    const adapter = getAdapter(linearChannel());
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+      audience: "unknown",
+    });
+  });
+
   it("dispatches created events with auth, context, token, and state", async () => {
     const channel = linearChannel({
       credentials: { webhookSecret: SECRET },
