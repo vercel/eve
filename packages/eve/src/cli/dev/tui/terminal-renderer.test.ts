@@ -2377,7 +2377,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("keeps an editable startup draft inert and hands it to the first prompt", async () => {
+  it("queues startup messages until the agent is ready", async () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const requestStop = vi.fn();
@@ -2403,14 +2403,28 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     input.type(" tomorrow");
     input.enter();
-    expect(screen.snapshot()).toContain("weather tomorrow");
+    expect(screen.snapshot()).toContain("Queue 1/5");
+    expect(screen.snapshot()).toContain("└ weather tomorrow");
+    expect(screen.snapshot()).not.toContain("❯ weather tomorrow");
 
-    const draft = startupRenderer.finishStartupDraft();
-    expect(draft).toBe("weather tomorrow");
-    const prompt = startupRenderer.readPrompt({ initialDraft: draft });
+    input.type("and next week");
     input.enter();
-    await expect(prompt).resolves.toBe("weather tomorrow");
-    expect(requestStop).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("Queue 2/5");
+    expect(screen.snapshot()).toContain("│ weather tomorrow");
+    expect(screen.snapshot()).toContain("└ and next week");
+
+    const startup = startupRenderer.finishStartupDraft();
+    expect(startup).toEqual({
+      draft: "",
+      queuedPrompt: "weather tomorrow\n\nand next week",
+    });
+
+    const prompt = startupRenderer.readPrompt();
+    expect(screen.snapshot()).not.toContain("Queue 1/5");
+    input.ctrlC();
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow();
+    expect(requestStop).toHaveBeenCalledOnce();
     startupRenderer.shutdown();
   });
 

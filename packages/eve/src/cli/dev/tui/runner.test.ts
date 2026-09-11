@@ -1918,7 +1918,7 @@ describe("EveTUIRunner initial input", () => {
     const client = stubClient();
     vi.spyOn(client, "info").mockReturnValue(info.promise);
     const startup = {
-      finish: vi.fn(() => "typed while loading"),
+      finish: vi.fn(() => ({ draft: "typed while loading", queuedPrompt: undefined })),
       headerTip: "Use the /help command to see every command.",
     };
     const renderer = fakeRenderer();
@@ -1939,6 +1939,37 @@ describe("EveTUIRunner initial input", () => {
     expect(startup.finish).toHaveBeenCalledOnce();
     expect(renderer.readPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ initialDraft: "typed while loading" }),
+    );
+  });
+
+  it("sends startup messages queued while the agent builds", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = sessionYielding([{ type: "session.waiting" }]);
+    const startup = {
+      finish: vi.fn(() => ({
+        draft: "still editing",
+        queuedPrompt: "first message\n\nsecond message",
+      })),
+      headerTip: "Use the /help command to see every command.",
+    };
+    const renderer = fakeRenderer();
+    const runner = new EveTUIRunner({
+      session,
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      startup,
+    });
+
+    await runner.run();
+
+    expect(session.send).toHaveBeenCalledWith(
+      "first message\n\nsecond message",
+      expect.objectContaining({ turnPolicy: "queue" }),
+    );
+    expect(renderer.readPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "still editing" }),
     );
   });
 
