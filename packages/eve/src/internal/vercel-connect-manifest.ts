@@ -61,7 +61,7 @@ export function buildVercelConnectRequirements(manifest: {
   readonly channelRoutes: {
     readonly effective: readonly Pick<
       CompiledAgentManifest["channelRoutes"]["effective"][number],
-      "logicalPath" | "method" | "name" | "urlPath" | "vercelConnect"
+      "adapterKind" | "logicalPath" | "method" | "name" | "urlPath" | "vercelConnect"
     >[];
   };
 }): readonly VercelConnectRequirement[] {
@@ -79,7 +79,7 @@ export function buildVercelConnectRequirements(manifest: {
           target: { mode: "direct" as const, locator: vercelConnect.connector },
           connector: { type: vercelConnect.connectorType },
           access: { principalTypes: vercelConnect.principalTypes },
-          resource: { protocol: connection.protocol, url: connection.url },
+          interface: { protocol: connection.protocol, url: connection.url },
           uses: [
             {
               kind: "connection" as const,
@@ -99,7 +99,7 @@ export function buildVercelConnectRequirements(manifest: {
         return [];
       }
       const providerConfiguration =
-        vercelConnect.connectorType === "slack"
+        vercelConnect.connectorType === "slack" && channel.adapterKind === "slack"
           ? {
               format: SLACK_APP_MANIFEST_FORMAT,
               path: slackAppManifestPath(channel.logicalPath),
