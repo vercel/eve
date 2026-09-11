@@ -293,8 +293,6 @@ async function executeSetupCommand(
         if (input.onOnboardingScreen !== undefined) {
           modelInput.onScreen = (screen) => input.onOnboardingScreen?.({ screen });
         }
-        modelInput.withExclusiveTerminal = (task) =>
-          renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return {

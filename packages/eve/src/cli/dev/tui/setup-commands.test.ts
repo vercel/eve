@@ -241,39 +241,23 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("hands model-owned subprocesses both the terminal and suspended runtime", async () => {
-    const calls: string[] = [];
+  it("keeps model setup attached to the TUI panel", async () => {
     const renderer = fakePanelRenderer();
-    renderer.withInheritedStdio = async (task) => {
-      calls.push("terminal:release");
-      const result = await task();
-      calls.push("terminal:restore");
-      return result;
-    };
+    renderer.withInheritedStdio = vi.fn(async (task) => task());
+    const exclusiveCalls = vi.fn();
     const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      calls.push("runtime:suspend");
-      const result = await task();
-      calls.push("runtime:resume");
-      return result;
+      exclusiveCalls();
+      return task();
     };
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async (input) => {
-        await input.withExclusiveTerminal?.(async () => {
-          calls.push("codex");
-        });
-        return { kind: "cancelled" };
-      }),
-    });
+    const flows = fakeFlows();
 
     await run({ command: "model", flows, renderer, withExclusiveTerminal });
 
-    expect(calls).toEqual([
-      "terminal:release",
-      "runtime:suspend",
-      "codex",
-      "runtime:resume",
-      "terminal:restore",
-    ]);
+    expect(flows.runModelFlow).toHaveBeenCalledWith(
+      expect.not.objectContaining({ withExclusiveTerminal: expect.anything() }),
+    );
+    expect(renderer.withInheritedStdio).not.toHaveBeenCalled();
+    expect(exclusiveCalls).not.toHaveBeenCalled();
   });
 
   it("forwards an automatic provider entry to the model flow", async () => {
