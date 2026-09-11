@@ -201,6 +201,7 @@ describe("Datadog", () => {
     expect(submittedSpan).not.toHaveProperty("metadata.expectedOutput");
     expect(submittedSpan).not.toHaveProperty("metadata.expected");
     expect(submittedSpan).not.toHaveProperty("metadata.expected_output");
+    expect(submittedSpan).not.toHaveProperty("metadata.eveRuntimeTraceLinks");
     expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
       expect.objectContaining({ label: "gate_succeeded", value: 1 }),
       expect.objectContaining({ label: "similarity", value: 0.9 }),
@@ -218,6 +219,102 @@ describe("Datadog", () => {
       ]),
     );
   });
+
+  it("records deduplicated runtime trace links across sessions", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const evaluation = makeEval();
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "secondary-session",
+            primary: false,
+          },
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "primary-session",
+            primary: true,
+          },
+          {
+            traceId: "fedcba9876543210fedcba9876543210",
+            spanId: "fedcba9876543210",
+            traceFlags: 1,
+            sessionId: "secondary-session",
+            primary: false,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          eveRuntimeTraceLinks: [
+            {
+              relation: "eve_runtime",
+              traceId: "0123456789abcdef0123456789abcdef",
+              spanId: "0123456789abcdef",
+              sessionId: "primary-session",
+              primary: true,
+            },
+            {
+              relation: "eve_runtime",
+              traceId: "fedcba9876543210fedcba9876543210",
+              spanId: "fedcba9876543210",
+              sessionId: "secondary-session",
+              primary: false,
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it.each(["failed", "waiting"] as const)(
+    "records runtime trace links for %s evals",
+    async (status) => {
+      const { config, experiment } = makeConfig();
+      const reporter = Datadog(config);
+      const result = makeEvalResult({
+        result: {
+          ...makeEvalResult().result,
+          status,
+          traceContexts: [
+            {
+              traceId: "0123456789abcdef0123456789abcdef",
+              spanId: "0123456789abcdef",
+              traceFlags: 1,
+              sessionId: "session-123",
+              primary: true,
+            },
+          ],
+        },
+      });
+
+      await reporter.onRunStart([makeEval()], makeTarget());
+      await reporter.onEvalComplete(result);
+
+      expect(experiment.submitSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            eveRuntimeTraceLinks: [
+              expect.objectContaining({ relation: "eve_runtime", primary: true }),
+            ],
+          }),
+        }),
+      );
+    },
+  );
 
   it("redacts target URL secrets and execution errors by default", async () => {
     const { client, config, experiment } = makeConfig();
