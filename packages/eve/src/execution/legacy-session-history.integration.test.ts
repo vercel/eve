@@ -47,7 +47,7 @@ describe("pre-0.54 durable history", () => {
       ...state.snapshot,
       retained: "snapshot field",
       session: { ...projectToDurableSession(initial), history },
-    } as unknown as DurableSessionSnapshot;
+    } as DurableSessionSnapshot;
 
     const durable = await readDurableSession({ ...state, snapshot: legacySnapshot });
     const resumed = hydrateDurableSession({ durable, turnAgent });

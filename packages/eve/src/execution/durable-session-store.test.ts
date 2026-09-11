@@ -214,7 +214,7 @@ describe("durable-session-store cross-version contract", () => {
         ...state.snapshot!.session,
         history: [{ content: "Retained before eve 0.54.", role: "user" }],
       },
-    } as unknown as DurableSessionSnapshot;
+    } as DurableSessionSnapshot;
 
     const durableSession = await readDurableSession({ ...state, snapshot: legacySnapshot });
 
@@ -235,7 +235,7 @@ describe("durable-session-store cross-version contract", () => {
         history: [{ content: "Retained before eve 0.54.", role: "user" }],
       },
       version: DURABLE_SESSION_VERSION,
-    } as unknown as DurableSessionSnapshot;
+    } as DurableSessionSnapshot;
     const cancel = vi.fn();
     const stream = new ReadableStream<DurableSessionSnapshot>({
       cancel,
