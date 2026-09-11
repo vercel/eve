@@ -59,7 +59,8 @@ function createTestConfig(overrides?: Partial<ToolLoopHarnessConfig>): ToolLoopH
 }
 
 type MockAgentSettings = {
-  onStepFinish?: (step: unknown) => Promise<void> | void;
+  onStepStart?: (input: unknown) => Promise<void> | void;
+  onStepEnd?: (step: unknown) => Promise<void> | void;
   prepareStep?: (input: unknown) => Promise<unknown> | unknown;
 };
 
@@ -88,7 +89,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
     this: Record<string, unknown>,
     settings: MockAgentSettings,
   ) {
-    const { onStepFinish, prepareStep } = settings;
+    const { onStepEnd, onStepStart, prepareStep } = settings;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       const result = queue.shift();
@@ -96,8 +97,9 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
         throw new Error("No mock ToolLoopAgent result available.");
       }
 
+      let preparedMessages = options.messages;
       if (prepareStep) {
-        await prepareStep({
+        const prepared = await prepareStep({
           messages: options.messages,
           model: {},
           runtimeContext: {},
@@ -105,10 +107,19 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
           steps: [],
           toolsContext: {},
         });
+        if (
+          prepared !== null &&
+          typeof prepared === "object" &&
+          "messages" in prepared &&
+          Array.isArray(prepared.messages)
+        ) {
+          preparedMessages = prepared.messages;
+        }
       }
+      await onStepStart?.({ messages: preparedMessages });
 
-      if (onStepFinish) {
-        await onStepFinish(result);
+      if (onStepEnd) {
+        await onStepEnd(result);
       }
 
       return { ...result, responseMessages: getMockResponseMessages(result) };

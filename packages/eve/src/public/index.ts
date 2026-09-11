@@ -22,6 +22,11 @@ export {
 } from "#public/definitions/agent.js";
 export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export {
+  defineWorkspaceAgent,
+  type WorkspaceAgentDefinition,
+  type WorkspaceAgentTransport,
+} from "#public/definitions/workspace-agent.js";
+export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   type RemoteAgentUrl,

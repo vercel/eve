@@ -1503,6 +1503,9 @@ importers:
       just-bash:
         specifier: 3.1.0
         version: 3.1.0(supports-color@10.2.2)
+      just-secrets:
+        specifier: 0.0.2
+        version: 0.0.2
       marked:
         specifier: 'catalog:'
         version: 17.0.6
@@ -11870,6 +11873,10 @@ packages:
 
   just-bash@3.1.0:
     resolution: {integrity: sha512-/t28X8EH3+j/zvELGkNhlFV2g6hc3oHBzy6zPBnNq2nqUN0DGS9PsD889JfQ7F6ll08gqFoutiS+VJHK30wZpg==}
+
+  just-secrets@0.0.2:
+    resolution: {integrity: sha512-8Zh2rbEtvRQN6OJnHNO39g5E7MR80GpSxfezrAhre3wzhgCnmdK1oismE1qMW3S+aaIQ3REIoramtIqHVTDavA==}
+    engines: {node: '>=22'}
 
   jwa@2.0.1:
     resolution: {integrity: sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==}
@@ -27542,6 +27549,8 @@ snapshots:
       yaml: 2.9.0
     transitivePeerDependencies:
       - supports-color
+
+  just-secrets@0.0.2: {}
 
   jwa@2.0.1:
     dependencies:

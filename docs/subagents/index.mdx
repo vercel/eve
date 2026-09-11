@@ -67,6 +67,37 @@ export default defineAgent({
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
+### Vercel workspace peers
+
+In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
+
+```ts title="agents/foreman/agent/subagents/research.ts"
+import { defineWorkspaceAgent } from "eve";
+
+export default defineWorkspaceAgent({
+  name: "research",
+});
+```
+
+The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
+
+```ts title="agents/foreman/agent/subagents/research.ts"
+import { defineWorkspaceAgent } from "eve";
+import { bearer } from "eve/agents/auth";
+
+export default defineWorkspaceAgent({
+  name: "research",
+  transport: {
+    url: () => process.env.RESEARCH_AGENT_URL!,
+    auth: bearer(() => process.env.RESEARCH_AGENT_TOKEN!),
+  },
+});
+```
+
+An explicit transport replaces the environment default completely. The receiving peer must still accept the transport's credentials through its channel authentication policy. Set `forwardPrincipal: true` only when the peer trusts the caller to forward user identity, as described in [Remote agents](./guides/remote-agents#forward-the-callers-identity).
+
+Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. `eve dev` does not provide local workspace routing; configure an explicit transport to target a separately running peer.
+
 ### Conditional availability
 
 To expose a declared subagent only for certain sessions or turns, export
