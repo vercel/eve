@@ -430,20 +430,26 @@ describe("runInitCommand", () => {
     },
   );
 
-  it("refuses arbitrary non-empty current directories without prompting or writing", async () => {
+  it("reports a target conflict for arbitrary non-empty current directories", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-"));
     await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
     const output = logger();
     const deps = dependencies();
+    const terminalEvents: Array<{ failureCode?: string; result: string; step: string }> = [];
 
-    await expect(runInitCommand(output, projectPath, ".", {}, deps)).rejects.toThrow(
-      "Cannot initialize an agent in the non-empty directory",
-    );
+    await expect(
+      runInitCommand(output, projectPath, ".", {}, deps, undefined, (step, result, failureCode) => {
+        terminalEvents.push({ failureCode, result, step });
+      }),
+    ).rejects.toThrow("Cannot initialize an agent in the non-empty directory");
 
     await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
     await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(terminalEvents).toEqual([
+      { step: "resolve_target", result: "error", failureCode: "target_conflict" },
+    ]);
   });
 
   it.each([

@@ -58,6 +58,7 @@ import {
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
+import { InitTargetError } from "./init-telemetry.js";
 import {
   cleanupFreshInitTarget,
   workspaceFailureNote,
@@ -552,22 +553,22 @@ export async function runInitCommand(
   trackTerminal?: InitTerminalTracker,
 ): Promise<void> {
   trackStep?.("resolve_target");
-  if (
-    await addAgentsToWorkspace(
-      logger,
-      parentDirectory,
-      target,
-      options,
-      dependencies.validateModelSlug,
-    )
-  ) {
-    trackStep?.("handoff");
-    trackTerminal?.("handoff", "completed");
-    return;
-  }
-
   let result: InitResult;
   try {
+    if (
+      await addAgentsToWorkspace(
+        logger,
+        parentDirectory,
+        target,
+        options,
+        dependencies.validateModelSlug,
+      )
+    ) {
+      trackStep?.("handoff");
+      trackTerminal?.("handoff", "completed");
+      return;
+    }
+
     result = await runInitSteps({
       dependencies,
       logger,
@@ -581,6 +582,9 @@ export async function runInitCommand(
     if (error instanceof WizardCancelledError) {
       trackTerminal?.("resolve_target", "cancelled");
       return;
+    }
+    if (error instanceof InitTargetError) {
+      trackTerminal?.("resolve_target", "error", error.failureCode);
     }
     throw error;
   }

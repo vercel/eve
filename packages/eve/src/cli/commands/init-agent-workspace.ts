@@ -15,6 +15,8 @@ import { createPrompter } from "#setup/prompter.js";
 import { agentTemplateFiles } from "#setup/scaffold/create/project.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
+import { InitTargetError } from "./init-telemetry.js";
+
 export interface InitCommandOptions {
   agents?: readonly string[];
   channelWebNextjs?: boolean;
@@ -93,25 +95,39 @@ export async function addAgentsToWorkspace(
   const context = await findEveProjectContext(workspaceRoot);
   if (context?.kind !== "workspace") return false;
   if (options.channelWebNextjs === true) {
-    throw new Error("--channel-web-nextjs is not supported when adding a workspace agent.");
+    throw new InitTargetError(
+      "workspace_input",
+      "--channel-web-nextjs is not supported when adding a workspace agent.",
+    );
   }
   let names = options.agents;
   if (target !== undefined && names !== undefined) {
-    throw new Error("Pass either an agent name or --agents, not both.");
+    throw new InitTargetError(
+      "workspace_input",
+      "Pass either an agent name or --agents, not both.",
+    );
   }
   if (names === undefined && target !== undefined) names = [target];
   if (names === undefined) {
     if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-      throw new Error(
+      throw new InitTargetError(
+        "workspace_input",
         "This directory is an eve agent workspace. Pass an agent name, for example: eve init billing.",
       );
     }
     names = [await createPrompter().text({ message: "Name the new agent" })];
   }
-  validateAgentNames(names);
-  if (options.model !== undefined) {
-    const rejection = await validateModel(workspaceRoot, options.model);
-    if (rejection !== null) throw new Error(rejection);
+  try {
+    validateAgentNames(names);
+    if (options.model !== undefined) {
+      const rejection = await validateModel(workspaceRoot, options.model);
+      if (rejection !== null) throw new Error(rejection);
+    }
+  } catch (error) {
+    throw new InitTargetError(
+      "workspace_input",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   for (const name of names) await writeWorkspaceAgent(workspaceRoot, name, options);
   logger.log(
