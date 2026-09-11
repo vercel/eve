@@ -38,6 +38,10 @@ const followUpDelegation =
   "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
   "If whether the requested change should persist is genuinely ambiguous, ask one concise clarifying question.";
 
+const repairDelegation =
+  "If a change made by this subagent later fails or behaves incorrectly, explain the failure and offer to delegate a repair to this subagent. " +
+  "Do not start the repair without user confirmation.";
+
 const localIntegrationDelegation =
   "Delegate questions about which integrations, channels, connections, or capabilities are available to add: the subagent searches the eve registry and reports exact item addresses instead of guessing them.";
 
@@ -66,6 +70,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       mode === "local" ? localIntegrationDelegation : deployedIntegrationDelegation,
       mode === "local" ? localTraceDelegation : "",
       followUpDelegation,
+      repairDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
     if (mode === "local") return defineAgent({ description, model });
