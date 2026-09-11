@@ -316,7 +316,7 @@ A durable conversation produces one bounded trace per turn. Worker replacements 
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
-Model and `execute_tool` spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KB.
+Model, `execute_tool`, and memory spans omit their content by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models; call arguments and results for tools; and submitted or recalled memory records. Each captured value is capped at 32 KB.
 
 Step spans carry token counts under `agent.usage.*`, and cost when Vercel AI Gateway served the call. Model spans also expose `gen_ai.usage.*` token counters. The CLI sums step-level counters only, so model and delegated-call totals are not counted twice.
 
@@ -324,13 +324,13 @@ Step spans carry token counts under `agent.usage.*`, and cost when Vercel AI Gat
 
 eve sweeps the store when an activation's writes finish, when a session finishes, and when the dev server starts. An open conversation does not pin every completed turn's trace. Sweeps evict oldest-first past the bounds below, except that active traces, the newest traces, and anything written in the last five minutes are kept. A sweep can therefore exceed the size budget. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
 
-| Variable                     | Default              | Effect                                                                              |
-| ---------------------------- | -------------------- | ----------------------------------------------------------------------------------- |
-| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                       |
-| `EVE_TRACES_CONTENT`         | off                  | `on` captures model prompt/response and tool input/output attributes on local spans |
-| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                              |
-| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                     |
-| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                        |
+| Variable                     | Default              | Effect                                                                                              |
+| ---------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                                       |
+| `EVE_TRACES_CONTENT`         | off                  | `on` captures model prompt/response, tool input/output, and memory-record attributes on local spans |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                              |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                                     |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                        |
 
 ## `eve link`
 

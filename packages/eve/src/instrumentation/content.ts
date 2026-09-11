@@ -50,6 +50,10 @@ export function withInstrumentationDecision(
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "model.call.completed":
       return decision.recordOutputs ? event : Object.freeze({ ...event, content: undefined });
+    case "memory.operation.started":
+      return decision.recordInputs ? event : Object.freeze({ ...event, inputRecords: undefined });
+    case "memory.operation.completed":
+      return decision.recordOutputs ? event : Object.freeze({ ...event, outputRecords: undefined });
     case "step.attempt.metadata":
       return decision.recordOutputs
         ? event
@@ -59,6 +63,7 @@ export function withInstrumentationDecision(
           });
     case "action.failed":
     case "model.call.failed":
+    case "memory.operation.failed":
     case "session.failed":
     case "step.attempt.failed":
     case "tool.call.failed":

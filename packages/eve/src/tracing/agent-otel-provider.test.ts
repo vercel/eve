@@ -585,6 +585,72 @@ describe("createAgentOtelInstrumentation", () => {
     },
   );
 
+  it("exports and activates standard memory spans", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    const operation = {
+      idempotencyKey: "eve-memory-operation-v1:session-1:0:turn-1:turn.started:profile",
+      operationName: "search_memory" as const,
+      phase: "turn.started",
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      slot: "profile",
+      storeId: "memscope1_scope",
+      turnId: "turn-1",
+    };
+    await runtime.hooks.publish({ ...operation, type: "memory.operation.started" });
+    const contextWith = vi.spyOn(context, "with");
+    await runtime.runInContext(
+      {
+        idempotencyKey: operation.idempotencyKey,
+        sessionId: operation.sessionId,
+        turnId: operation.turnId,
+        type: "memory.operation",
+      },
+      async () => undefined,
+    );
+    const memoryContext = contextWith.mock.calls[0]?.[0];
+    contextWith.mockRestore();
+    await runtime.hooks.publish({
+      ...operation,
+      outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+      recordCount: 1,
+      type: "memory.operation.completed",
+    });
+    await completeTurn(runtime.hooks, "session-1", "turn-1");
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const memory = byName(spans, "search_memory")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
+    if (memoryContext === undefined) throw new Error("memory operation did not activate a context");
+    expect(memory.kind).toBe(SpanKind.CLIENT);
+    expect(memory.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(runtimeTrace.getSpan(memoryContext)?.spanContext().spanId).toBe(
+      memory.spanContext().spanId,
+    );
+    expect(memory.attributes).toMatchObject({
+      "agent.memory.phase": "turn.started",
+      "agent.memory.slot": "profile",
+      "agent.session.id": "session-1",
+      "agent.turn.id": "turn-1",
+      "gen_ai.memory.record.count": 1,
+      "gen_ai.memory.store.id": "memscope1_scope",
+      "gen_ai.operation.name": "search_memory",
+      "operation.name": "search_memory",
+      "resource.name": "search_memory",
+    });
+    expect(memory.attributes["gen_ai.memory.records"]).toBe(
+      '[{"content":"The user prefers dark mode.","id":"preference"}]',
+    );
+    await runtime.provider.shutdown();
+  });
+
   it("uses the pre-allocated trace seed for the first activation root", async () => {
     const runtime = createRuntime();
     const seed: InstrumentationTraceContext = {

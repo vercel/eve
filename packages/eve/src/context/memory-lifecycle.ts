@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { AlsContext } from "#context/container.js";
+import { instrumentMemoryOperation } from "#context/memory-instrumentation.js";
 import {
   PendingMemoryCommitKey,
   PreparedMemoryCompactionKey,
@@ -17,7 +18,15 @@ import type {
 } from "#protocol/message.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
-import { defaultNamespace, type MemoryScopeContext } from "#public/memory/index.js";
+import {
+  defaultNamespace,
+  type MemoryRecallResult,
+  type MemoryScopeContext,
+} from "#public/memory/index.js";
+import type {
+  InstrumentationMemoryOperation,
+  InstrumentationMemoryRecord,
+} from "#instrumentation/lifecycle.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
   applyMemoryRecallBatches,
@@ -98,17 +107,39 @@ export async function dispatchMemoryTurnStarted(input: {
             slot: memory.slot,
             turnId: turn.id,
           });
-          const result = await memory.provider.recall["turn.started"]({
-            ...callbackContext,
-            abortSignal: input.abortSignal ?? fallbackAbortSignal,
-            memory: { scope: lock.scope, slot: memory.slot },
-            messages: preRecallMessages,
-            operationId,
-            turn,
-          });
+          const result = await instrumentMemoryOperation(
+            input.ctx,
+            memoryInstrumentationOperation({
+              operationId,
+              operationName: "search_memory",
+              phase: "turn.started",
+              rootSessionId:
+                callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
+              sessionId: callbackContext.session.id,
+              slot: memory.slot,
+              storeId: lock.scope.key,
+              turnId: turn.id,
+            }),
+            async () => {
+              const result = await memory.provider.recall["turn.started"]({
+                ...callbackContext,
+                abortSignal: input.abortSignal ?? fallbackAbortSignal,
+                memory: { scope: lock.scope, slot: memory.slot },
+                messages: preRecallMessages,
+                operationId,
+                turn,
+              });
+              const messages = validateMemoryRecallResult(result, memory.slot);
+              return {
+                outputRecords: memoryRecords(result),
+                recordCount: messages.length,
+                value: messages,
+              };
+            },
+          );
           return {
             lock,
-            messages: validateMemoryRecallResult(result, memory.slot),
+            messages: result,
             operationId,
           };
         }),
@@ -169,24 +200,42 @@ export async function dispatchMemoryCompactionRequested(input: {
         const lock = locks[memory.slot];
         const capture = memory.provider.capture?.["compaction.requested"];
         if (lock === undefined || capture === undefined) return;
-        await capture({
-          ...callbackContext,
-          abortSignal: input.abortSignal ?? fallbackAbortSignal,
-          compaction: {
-            modelId: input.event.data.modelId,
-            usageInputTokens: input.event.data.usageInputTokens,
-          },
-          memory: { scope: lock.scope, slot: memory.slot },
-          messages: input.messages,
-          operationId: memoryOperationId({
+        const operationId = memoryOperationId({
+          phase: "compaction.requested",
+          sequence: input.event.data.sequence,
+          sessionId: callbackContext.session.id,
+          slot: memory.slot,
+          turnId: turn?.id ?? null,
+        });
+        await instrumentMemoryOperation(
+          input.ctx,
+          memoryInstrumentationOperation({
+            operationId,
+            operationName: "upsert_memory",
             phase: "compaction.requested",
-            sequence: input.event.data.sequence,
+            rootSessionId:
+              callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
             sessionId: callbackContext.session.id,
             slot: memory.slot,
-            turnId: turn?.id ?? null,
+            storeId: lock.scope.key,
+            turnId: turn?.id,
           }),
-          turn,
-        });
+          async () => {
+            await capture({
+              ...callbackContext,
+              abortSignal: input.abortSignal ?? fallbackAbortSignal,
+              compaction: {
+                modelId: input.event.data.modelId,
+                usageInputTokens: input.event.data.usageInputTokens,
+              },
+              memory: { scope: lock.scope, slot: memory.slot },
+              messages: input.messages,
+              operationId,
+              turn,
+            });
+            return { value: undefined };
+          },
+        );
       }),
   );
 }
@@ -222,18 +271,40 @@ export async function dispatchMemoryCompactionCompleted(input: {
             slot: memory.slot,
             turnId: turn?.id ?? null,
           });
-          const result = await recall({
-            ...callbackContext,
-            abortSignal: input.abortSignal ?? fallbackAbortSignal,
-            compaction: { modelId: input.event.data.modelId },
-            memory: { scope: lock.scope, slot: memory.slot },
-            messages: projected,
-            operationId,
-            turn,
-          });
+          const result = await instrumentMemoryOperation(
+            input.ctx,
+            memoryInstrumentationOperation({
+              operationId,
+              operationName: "search_memory",
+              phase: "compaction.completed",
+              rootSessionId:
+                callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
+              sessionId: callbackContext.session.id,
+              slot: memory.slot,
+              storeId: lock.scope.key,
+              turnId: turn?.id,
+            }),
+            async () => {
+              const result = await recall({
+                ...callbackContext,
+                abortSignal: input.abortSignal ?? fallbackAbortSignal,
+                compaction: { modelId: input.event.data.modelId },
+                memory: { scope: lock.scope, slot: memory.slot },
+                messages: projected,
+                operationId,
+                turn,
+              });
+              const messages = validateMemoryRecallResult(result, memory.slot);
+              return {
+                outputRecords: memoryRecords(result),
+                recordCount: messages.length,
+                value: messages,
+              };
+            },
+          );
           return {
             lock,
-            messages: validateMemoryRecallResult(result, memory.slot),
+            messages: result,
             operationId,
           };
         }),
@@ -276,20 +347,38 @@ export async function dispatchMemoryTurnCompleted(input: {
         const lock = locks[memory.slot];
         const capture = memory.provider.capture?.["turn.completed"];
         if (lock === undefined || capture === undefined) return;
-        await capture({
-          ...callbackContext,
-          abortSignal: input.abortSignal ?? fallbackAbortSignal,
-          memory: { scope: lock.scope, slot: memory.slot },
-          messages: projected,
-          operationId: memoryOperationId({
+        const operationId = memoryOperationId({
+          phase: "turn.completed",
+          sequence: input.event.data.sequence,
+          sessionId: callbackContext.session.id,
+          slot: memory.slot,
+          turnId: input.event.data.turnId,
+        });
+        await instrumentMemoryOperation(
+          input.ctx,
+          memoryInstrumentationOperation({
+            operationId,
+            operationName: "upsert_memory",
             phase: "turn.completed",
-            sequence: input.event.data.sequence,
+            rootSessionId:
+              callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
             sessionId: callbackContext.session.id,
             slot: memory.slot,
-            turnId: input.event.data.turnId,
+            storeId: lock.scope.key,
+            turnId: lock.turn.id,
           }),
-          turn: lock.turn,
-        });
+          async () => {
+            await capture({
+              ...callbackContext,
+              abortSignal: input.abortSignal ?? fallbackAbortSignal,
+              memory: { scope: lock.scope, slot: memory.slot },
+              messages: projected,
+              operationId,
+              turn: lock.turn,
+            });
+            return { value: undefined };
+          },
+        );
       }),
   );
 }
@@ -398,4 +487,35 @@ export function memoryOperationId(input: {
     input.phase,
     input.slot,
   ].join(":");
+}
+
+function memoryInstrumentationOperation(input: {
+  readonly operationId: string;
+  readonly operationName: InstrumentationMemoryOperation["operationName"];
+  readonly phase: string;
+  readonly rootSessionId: string;
+  readonly sessionId: string;
+  readonly slot: string;
+  readonly storeId: string;
+  readonly turnId?: string;
+}): InstrumentationMemoryOperation {
+  return {
+    idempotencyKey: input.operationId,
+    operationName: input.operationName,
+    phase: input.phase,
+    rootSessionId: input.rootSessionId,
+    sessionId: input.sessionId,
+    slot: input.slot,
+    storeId: input.storeId,
+    turnId: input.turnId,
+  };
+}
+
+function memoryRecords(result: MemoryRecallResult): readonly InstrumentationMemoryRecord[] {
+  if (result === null || result === undefined) return [];
+  return result.messages.map((message) =>
+    message.id === undefined
+      ? { content: message.content }
+      : { content: message.content, id: message.id },
+  );
 }

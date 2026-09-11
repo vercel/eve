@@ -72,4 +72,28 @@ describe("withoutDeclinedContent", () => {
     withoutDeclinedContent(attributes, { recordInputs: false, recordOutputs: false });
     expect(attributes).toEqual(ATTRIBUTES);
   });
+
+  it("redacts memory records by their GenAI operation direction", () => {
+    const searched = {
+      "gen_ai.memory.records": '[{"content":"Private preference"}]',
+      "gen_ai.operation.name": "search_memory",
+    };
+    const created = {
+      "gen_ai.memory.records": '[{"content":"Private preference"}]',
+      "gen_ai.operation.name": "create_memory",
+    };
+
+    expect(
+      withoutDeclinedContent(searched, { recordInputs: false, recordOutputs: true }),
+    ).toBeUndefined();
+    expect(withoutDeclinedContent(searched, { recordInputs: true, recordOutputs: false })).toEqual({
+      "gen_ai.operation.name": "search_memory",
+    });
+    expect(
+      withoutDeclinedContent(created, { recordInputs: true, recordOutputs: false }),
+    ).toBeUndefined();
+    expect(withoutDeclinedContent(created, { recordInputs: false, recordOutputs: true })).toEqual({
+      "gen_ai.operation.name": "create_memory",
+    });
+  });
 });

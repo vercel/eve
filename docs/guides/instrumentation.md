@@ -48,13 +48,13 @@ Use the `setup` callback to register your OTel provider (for example `registerOT
 
 Any OTel-compatible backend works (Braintrust, PostHog, Sentry, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification. The [Sentry integration](/integrations/sentry-instrumentation) provides a ready-to-install OTLP exporter that sends traces to Sentry without a Sentry SDK.
 
-Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
+Three more fields control what eve and the AI SDK record inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
-- `recordOutputs` records model outputs on spans. It defaults to `false`; set it to `true` to include output content.
+- `recordInputs` records full message history on each step span and records submitted memory records. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs and recalled memory records. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
+eve records metadata without model, tool, or memory-record content by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
 In the provider layout, eve stamps each span with `gen_ai.conversation.id`, which stays fixed across local and remote activations, including independent remote root workflows. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting. On Vercel, `vercel.session_id` additionally identifies the current Workflow run. See [Query exported traces](#query-exported-traces) for the cross-backend workflow.
 
@@ -108,14 +108,16 @@ The built-in OpenTelemetry provider preserves each span's OTel name and adds
 | `invoke_agent weather`                                                  | `invoke_agent`    | `invoke_agent weather` |
 | `execute_tool search`                                                   | `execute_tool`    | `execute_tool search`  |
 | `chat <model>`                                                          | `chat`            | `chat <model>`         |
+| `search_memory`, `upsert_memory`, `create_memory`, `delete_memory`      | Same as span name | Same as span name      |
 | `agent.step`, `agent.action`, `agent.approval`, `agent.channel.request` | Same as span name | Same as span name      |
 
-These attributes apply to eve-owned spans in local tracing and the
-[instrumentation provider layout](./instrumentation-providers). They do not
-rename Workflow, AI SDK, or other third-party spans, or change trace IDs,
-parenting, sampling, or session grouping. Legacy `instrumentation.ts` setup
-still owns its exporter configuration and [authored trace
-hierarchy](#authored-trace-hierarchy).
+The agent, tool, and model rows apply to eve-owned spans in local tracing and
+the [instrumentation provider layout](./instrumentation-providers). Memory
+spans use their standard names with the same attributes in every OpenTelemetry
+setup, including legacy `instrumentation.ts`. They do not rename Workflow, AI
+SDK, or other third-party spans, or change trace IDs, parenting, sampling, or
+session grouping. Legacy setup still owns its exporter configuration and
+[authored trace hierarchy](#authored-trace-hierarchy).
 
 In Datadog APM, `operation_name:invoke_agent resource_name:"invoke_agent weather"`
 selects named agent invocations. Operation-based dashboards and monitors may
@@ -137,6 +139,14 @@ that discard span events, including Sentry's [direct OTLP
 intake](https://docs.sentry.io/concepts/otlp/direct/traces/). These attributes
 remain available when model and tool content is redacted.
 
+## Memory spans
+
+eve records [OpenTelemetry GenAI memory spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#memory) for provider calls. Recalls at `turn.started` and `compaction.completed` use `search_memory`; capture handlers use `upsert_memory`. The built-in `fileMemory()` tools use `create_memory` for `save_memory` and `delete_memory` for `remove_memory`. They are client spans, following the GenAI memory convention for a call to a memory system.
+
+Every memory span includes `gen_ai.operation.name` and `gen_ai.memory.store.id`. The store ID is eve's opaque `memory.scope.key`, which identifies the resolved scope without exposing the namespace or scope values. Recall spans set `gen_ai.memory.record.count` to their result count. File-memory write and delete spans set it to one attempted record; they also set `gen_ai.memory.record.id` to the document's stable numeric index when known.
+
+`gen_ai.memory.records` contains full record content only when the matching direction is enabled: `recordOutputs` for recalls and `recordInputs` for creates. eve does not set `gen_ai.memory.query.text` because a memory provider receives structured conversation messages, not a standalone search-query string. The `agent.memory.slot` and `agent.memory.phase` attributes identify the eve slot and lifecycle boundary without adding either to the span name.
+
 ## Agent trace contract
 
 The provider layout and zero-config local tracing emit the following spans.
@@ -150,6 +160,10 @@ The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 | `agent.action`          | Durable action lifecycle, including dispatch and waiting |
 | `execute_tool <tool>`   | In-process tool execution beneath its action             |
 | `agent.approval`        | Approval waiting beneath its action                      |
+| `search_memory`         | Recall memory records before a turn or after compaction  |
+| `upsert_memory`         | Automatic memory capture                                 |
+| `create_memory`         | `fileMemory()` save operation                            |
+| `delete_memory`         | `fileMemory()` remove operation                          |
 | `agent.channel.request` | Optional HTTP request span in the provider layout        |
 
 For background tools and subagents, the AI SDK's `execute_tool` span ends when
@@ -373,7 +387,7 @@ Without an `instrumentation.ts`, `eve dev` records spans to disk with one bounde
 - [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
 
-Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
+Local traces omit model, tool, and memory-record content by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 

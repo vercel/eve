@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import type { MemoryInstrumentation } from "#context/memory-instrumentation.js";
+import { MemoryInstrumentationKey } from "#context/keys.js";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { fileMemory } from "#public/memory/file/provider.js";
 import type {
@@ -339,6 +342,58 @@ describe("fileMemory", () => {
     ).resolves.toBeUndefined();
     expect(reads).toBe(1);
   });
+
+  it("instruments file-memory creates and deletes with stable record identifiers", async () => {
+    const operations: unknown[] = [];
+    const results: unknown[] = [];
+    const instrumentation: MemoryInstrumentation = {
+      execute: async (operation, execute) => {
+        operations.push(operation);
+        const result = await execute();
+        results.push(result);
+        return result.value;
+      },
+    };
+    const ctx = new ContextContainer();
+    ctx.setVirtualContext(MemoryInstrumentationKey, instrumentation);
+    const tools = await resolveTools(fileMemory({ backend: inMemory() }));
+    const saveContext = memoryToolContext("save-1");
+    const removeContext = memoryToolContext("remove-1");
+
+    await contextStorage.run(ctx, async () => {
+      await tools.save_memory.execute({ text: "Prefers dark mode." }, saveContext);
+      await tools.remove_memory.execute({ index: 0 }, removeContext);
+    });
+
+    expect(operations).toEqual([
+      {
+        idempotencyKey: "memory.tool:session-1:turn-1:save-1",
+        inputRecords: [{ content: "Prefers dark mode." }],
+        operationName: "create_memory",
+        phase: "tool.save_memory",
+        recordCount: 1,
+        recordId: undefined,
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        slot: "facts",
+        storeId: "mem_scope",
+        turnId: "turn-1",
+      },
+      {
+        idempotencyKey: "memory.tool:session-1:turn-1:remove-1",
+        operationName: "delete_memory",
+        phase: "tool.remove_memory",
+        recordCount: 1,
+        recordId: "0",
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        slot: "facts",
+        storeId: "mem_scope",
+        turnId: "turn-1",
+      },
+    ]);
+    expect(results).toEqual([{ recordId: "0", value: undefined }, { value: undefined }]);
+  });
 });
 
 async function resolveTools(provider: MemoryProvider) {
@@ -398,6 +453,18 @@ function toolsContext(): MemoryToolsContext {
     },
     turn: { id: "turn-1", input: [], sequence: 1 },
   };
+}
+
+function memoryToolContext(callId: string) {
+  return {
+    abortSignal: signal,
+    callId,
+    session: {
+      auth: { current: null, initiator: null },
+      id: "session-1",
+      turn: { id: "turn-1", sequence: 1 },
+    },
+  } as never;
 }
 
 function operationContext() {

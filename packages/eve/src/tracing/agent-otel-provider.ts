@@ -31,9 +31,14 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext, markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
+import {
+  memorySpanAttributes,
+  setMemorySpanInputRecords,
+  updateMemorySpan,
+} from "#tracing/memory-span.js";
 import {
   readGatewayCost,
   setAgentInvocationUsage,
@@ -58,6 +63,9 @@ import type {
   InstrumentationStepAttemptStartedEvent,
   InstrumentationStepAttemptTerminalEvent,
   InstrumentationContextRunner,
+  InstrumentationMemoryOperation,
+  InstrumentationMemoryOperationStartedEvent,
+  InstrumentationMemoryOperationTerminalEvent,
   InstrumentationModelCallTerminalEvent,
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
@@ -114,6 +122,7 @@ export function createAgentOtelInstrumentation(
   // A lost serverless worker retries the whole turn step from entry.
   const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
   const modelSpans = new WeakMap<InstrumentationAttemptScope, Map<string, SpanState>>();
+  const memorySpans = new Map<string, SpanState>();
   const actions = createAgentActionInstrumentation({
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
@@ -206,6 +215,54 @@ export function createAgentOtelInstrumentation(
 
   const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
     await prepareTurnTrace(event);
+  };
+
+  const memoryParentContext = async (
+    event: InstrumentationMemoryOperation,
+  ): Promise<Context | undefined> => {
+    const active = context.active();
+    if (isAgentTraceContext(active)) return active;
+
+    const session = await input.stateStore.getSession(event.sessionId);
+    if (event.turnId !== undefined) {
+      const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
+      if (turn !== undefined) {
+        return withChannelAudience(contextFromSpanContext(turn.context), session?.channelAudience);
+      }
+    }
+    return session === undefined
+      ? undefined
+      : withChannelAudience(contextFromSpanContext(session.context), session.channelAudience);
+  };
+
+  const onMemoryOperationStarted = async (
+    event: InstrumentationMemoryOperationStartedEvent,
+  ): Promise<void> => {
+    if (memorySpans.has(event.idempotencyKey)) return;
+    const parent = await memoryParentContext(event);
+    const parentSpan = parent === undefined ? undefined : trace.getSpan(parent)?.spanContext();
+    if (parent === undefined || parentSpan === undefined || !isSampledTrace(parentSpan)) return;
+    const span = input.tracer.startSpan(
+      event.operationName,
+      {
+        attributes: memorySpanAttributes(event, input.frameworkVersion),
+        kind: SpanKind.CLIENT,
+      },
+      parent,
+    );
+    setMemorySpanInputRecords(span, event.inputRecords);
+    memorySpans.set(event.idempotencyKey, {
+      context: trace.setSpan(parent, span),
+      span,
+    });
+  };
+
+  const onMemoryOperationTerminal = (event: InstrumentationMemoryOperationTerminalEvent): void => {
+    const state = memorySpans.get(event.idempotencyKey);
+    if (state === undefined) return;
+    memorySpans.delete(event.idempotencyKey);
+    updateMemorySpan(state.span, event);
+    state.span.end();
   };
 
   const onStepStarted = async (event: InstrumentationStepAttemptStartedEvent): Promise<void> => {
@@ -533,6 +590,9 @@ export function createAgentOtelInstrumentation(
           await tools.actionStarted(event);
         },
         ...approvals,
+        "memory.operation.completed": onMemoryOperationTerminal,
+        "memory.operation.failed": onMemoryOperationTerminal,
+        "memory.operation.started": onMemoryOperationStarted,
         "step.attempt.completed": onStepTerminal,
         "step.attempt.failed": onStepTerminal,
         "step.attempt.metadata": onStepMetadata,
@@ -557,26 +617,43 @@ export function createAgentOtelInstrumentation(
     prepareSessionTrace,
     prepareTurnTrace,
     async runInContext(operation, execute) {
-      const scope = attemptScopes.get(operation.scope.attemptId) ?? operation.scope;
-      const contexts = executionContexts.get(scope);
+      const sessionId =
+        operation.type === "memory.operation" ? operation.sessionId : operation.scope.sessionId;
+      const session = await input.stateStore.getSession(sessionId);
+      const scope =
+        operation.type === "memory.operation"
+          ? undefined
+          : (attemptScopes.get(operation.scope.attemptId) ?? operation.scope);
+      const contexts = scope === undefined ? undefined : executionContexts.get(scope);
       let parent =
-        operation.type === "model.call"
-          ? contexts?.get(operation.idempotencyKey)
-          : tools.contextFor(operation.scope.attemptId, operation.idempotencyKey);
+        operation.type === "memory.operation"
+          ? memorySpans.get(operation.idempotencyKey)?.context
+          : operation.type === "model.call"
+            ? contexts?.get(operation.idempotencyKey)
+            : tools.contextFor(operation.scope.attemptId, operation.idempotencyKey);
       if (parent === undefined) {
-        const turn = await input.stateStore.getTurn(
-          operation.scope.sessionId,
-          operation.scope.turnId,
-        );
+        const turnId =
+          operation.type === "memory.operation" ? operation.turnId : operation.scope.turnId;
+        const turn =
+          turnId === undefined ? undefined : await input.stateStore.getTurn(sessionId, turnId);
         if (turn !== undefined) {
           parent = withChannelAudience(
             contextFromSpanContext(turn.context),
-            operation.scope.channelAudience,
+            operation.type === "memory.operation"
+              ? session?.channelAudience
+              : operation.scope.channelAudience,
           );
           if (!isSampledTrace(turn.context)) parent = suppressTracing(parent);
+        } else if (operation.type === "memory.operation") {
+          if (session !== undefined) {
+            parent = withChannelAudience(
+              contextFromSpanContext(session.context),
+              session.channelAudience,
+            );
+            if (!isSampledTrace(session.context)) parent = suppressTracing(parent);
+          }
         }
       }
-      const session = await input.stateStore.getSession(operation.scope.sessionId);
       const seed = resolveForwardedTraceSeed(contextStorage.getStore()?.get(SessionTraceSeedKey));
       const decision = seed?.decision ?? session?.decision;
       const effective =
@@ -584,7 +661,9 @@ export function createAgentOtelInstrumentation(
           ? undefined
           : applyLiveDeliveryAudienceCeiling(
               decision,
-              normalizeChannelAudience(operation.scope.channelAudience),
+              operation.type === "memory.operation"
+                ? normalizeChannelAudience(session?.channelAudience)
+                : normalizeChannelAudience(operation.scope.channelAudience),
               seed?.forwardedTracePolicy,
             );
       return parent === undefined

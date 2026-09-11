@@ -1,5 +1,10 @@
 import type { Telemetry, TelemetryOptions } from "ai";
-import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
+import {
+  SpanKind,
+  context as otelContext,
+  trace,
+  type Tracer,
+} from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationEvents } from "#public/instrumentation/index.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -48,11 +53,21 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import {
+  memorySpanAttributes,
+  setMemorySpanInputRecords,
+  updateMemorySpan,
+} from "#tracing/memory-span.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
+import type {
+  MemoryInstrumentation,
+  MemoryInstrumentationResult,
+} from "#context/memory-instrumentation.js";
 import {
   ChannelInstrumentationKey,
   ConversationIdKey,
+  MemoryInstrumentationKey,
   OtelTraceEnabledKey,
   ParentSessionKey,
   ParentTraceContextKey,
@@ -105,6 +120,8 @@ export interface InstrumentationStepScope<TSession> {
       | "sessionId"
     >,
   ) => HandleEventFn | undefined;
+  /** Runs a memory provider operation under its standard GenAI memory span. */
+  readonly instrumentMemory: MemoryInstrumentation["execute"];
   readonly prepareAttempt: (input: {
     readonly attemptIndex: number;
     readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -382,6 +399,54 @@ export function bindInstrumentationRuntime(
             recordOutputs: content.recordOutputs,
           };
         };
+        const instrumentMemory: MemoryInstrumentation = {
+          async execute(operation, execute) {
+            const { inputRecords, ...memory } = operation;
+            await hooks.publish(
+              Object.freeze({
+                ...memory,
+                inputRecords,
+                type: "memory.operation.started",
+              }),
+            );
+            try {
+              const result =
+                executionRuntime.ownsAgentSpans || executionRuntime.tracer === undefined
+                  ? await runtime.runInContext(
+                      {
+                        idempotencyKey: operation.idempotencyKey,
+                        sessionId: operation.sessionId,
+                        turnId: operation.turnId,
+                        type: "memory.operation",
+                      },
+                      execute,
+                    )
+                  : await executeLegacyMemoryOperation({
+                      content,
+                      execute,
+                      frameworkVersion: input.eveVersion,
+                      operation,
+                      tracer: executionRuntime.tracer,
+                    });
+              await hooks.publish(
+                Object.freeze({
+                  ...memory,
+                  outputRecords: result.outputRecords,
+                  recordCount: result.recordCount ?? operation.recordCount,
+                  recordId: result.recordId ?? operation.recordId,
+                  type: "memory.operation.completed",
+                }),
+              );
+              return result.value;
+            } catch (error) {
+              await hooks.publish(
+                Object.freeze({ ...memory, error, type: "memory.operation.failed" }),
+              );
+              throw error;
+            }
+          },
+        };
+        policyContext.context.setVirtualContext(MemoryInstrumentationKey, instrumentMemory);
         const run = () =>
           execute({
             createHandleEvent: (eventInput) =>
@@ -396,6 +461,7 @@ export function bindInstrumentationRuntime(
                 rootSessionId: sessionContext.parent?.rootSessionId,
                 sessionId: boundSession.sessionId,
               }),
+            instrumentMemory: instrumentMemory.execute,
             prepareAttempt: (attemptInput) => {
               const scope: InstrumentationAttemptScope = {
                 attemptId: `${boundSession.sessionId}:${attemptInput.turnId}:${attemptInput.stepIndex}:${attemptInput.attemptIndex}`,
@@ -500,6 +566,50 @@ export function bindInstrumentationRuntime(
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),
   };
+}
+
+async function executeLegacyMemoryOperation<T>(input: {
+  readonly content: { readonly recordInputs: boolean; readonly recordOutputs: boolean };
+  readonly execute: () => Promise<MemoryInstrumentationResult<T>>;
+  readonly frameworkVersion: string;
+  readonly operation: Parameters<MemoryInstrumentation["execute"]>[0];
+  readonly tracer: Tracer;
+}): Promise<MemoryInstrumentationResult<T>> {
+  const parent = otelContext.active();
+  if (trace.getSpan(parent) === undefined) return await input.execute();
+
+  const span = input.tracer.startSpan(
+    input.operation.operationName,
+    {
+      attributes: memorySpanAttributes(input.operation, input.frameworkVersion),
+      kind: SpanKind.CLIENT,
+    },
+    parent,
+  );
+  if (input.content.recordInputs) {
+    setMemorySpanInputRecords(span, input.operation.inputRecords);
+  }
+  const { inputRecords: _inputRecords, ...operation } = input.operation;
+  try {
+    const result = await otelContext.with(trace.setSpan(parent, span), input.execute);
+    updateMemorySpan(span, {
+      ...operation,
+      outputRecords: input.content.recordOutputs ? result.outputRecords : undefined,
+      recordCount: result.recordCount ?? input.operation.recordCount,
+      recordId: result.recordId ?? input.operation.recordId,
+      type: "memory.operation.completed",
+    });
+    return result;
+  } catch (error) {
+    updateMemorySpan(span, {
+      ...operation,
+      error: input.content.recordOutputs ? error : undefined,
+      type: "memory.operation.failed",
+    });
+    throw error;
+  } finally {
+    span.end();
+  }
 }
 
 export function bindSessionInstrumentation(input: {

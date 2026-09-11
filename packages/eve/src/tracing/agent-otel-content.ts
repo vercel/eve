@@ -98,6 +98,11 @@ export function genAiOutputMessagesAttribute(
   ]);
 }
 
+/** Serializes memory records using the OpenTelemetry GenAI memory-records schema. */
+export function genAiMemoryRecordsAttribute(records: readonly unknown[]): string | undefined {
+  return semanticJsonAttribute(records);
+}
+
 /**
  * Serializes provider-executed tool results, keeping the attribute valid
  * JSON under the cap: when the full payload is too big, each entry's input

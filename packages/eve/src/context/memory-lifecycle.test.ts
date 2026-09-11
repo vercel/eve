@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import type { MemoryInstrumentation } from "#context/memory-instrumentation.js";
 import {
   dispatchMemoryCompactionCompleted,
   dispatchMemoryCompactionRequested,
@@ -11,7 +12,13 @@ import {
   prepareMemoryCompaction,
   prepareMemoryPreamble,
 } from "#context/memory-lifecycle.js";
-import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
+import {
+  AuthKey,
+  MemoryInstrumentationKey,
+  SessionIdKey,
+  SessionKey,
+  TurnMemoryLocksKey,
+} from "#context/keys.js";
 import {
   defineMemory,
   type MemoryDefinition,
@@ -200,6 +207,65 @@ describe("memory lifecycle", () => {
     expect(namespace).not.toHaveBeenCalled();
     expect(recall).not.toHaveBeenCalled();
     expect(drainMemoryCommit(ctx)?.history).toEqual([]);
+  });
+
+  it("instruments recalls as memory searches with validated result records", async () => {
+    const ctx = createContext();
+    const operations: unknown[] = [];
+    const results: unknown[] = [];
+    const instrumentation: MemoryInstrumentation = {
+      execute: async (operation, execute) => {
+        operations.push(operation);
+        const result = await execute();
+        results.push(result);
+        return result.value;
+      },
+    };
+    ctx.setVirtualContext(MemoryInstrumentationKey, instrumentation);
+    prepareMemoryPreamble(ctx, { history: [], input: [] });
+
+    await contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchMemoryTurnStarted({
+          appRoot: "/app",
+          ctx,
+          event: turnStarted,
+          memories: [
+            memory("profile", {
+              provider: {
+                recall: {
+                  "turn.started": async () => ({
+                    messages: [{ content: "The user prefers dark mode.", id: "preference" }],
+                  }),
+                },
+              },
+              scope: "user_1",
+            }),
+          ],
+          nodeId: "__root__",
+        }),
+    );
+
+    expect(operations).toEqual([
+      {
+        idempotencyKey: "eve-memory-operation-v1:session_1:0:turn_0:turn.started:profile",
+        operationName: "search_memory",
+        phase: "turn.started",
+        rootSessionId: "session_1",
+        sessionId: "session_1",
+        slot: "profile",
+        storeId: expect.stringMatching(/^memscope1_/),
+        turnId: "turn_0",
+      },
+    ]);
+    expect(results).toEqual([
+      {
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+        recordCount: 1,
+        value: [{ content: "The user prefers dark mode.", itemKey: expect.any(String) }],
+      },
+    ]);
   });
 
   it("captures only the settled projected history for a successful turn", async () => {

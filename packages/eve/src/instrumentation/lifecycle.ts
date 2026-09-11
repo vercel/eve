@@ -41,6 +41,67 @@ export interface InstrumentationModelRef {
   readonly provider: string;
 }
 
+/** Standard GenAI memory operations that eve can identify from its lifecycle. */
+export type InstrumentationMemoryOperationName =
+  | "create_memory"
+  | "delete_memory"
+  | "search_memory"
+  | "upsert_memory";
+
+/** One memory record in the OpenTelemetry GenAI memory-records shape. */
+export interface InstrumentationMemoryRecord {
+  readonly content: string;
+  readonly id?: string;
+}
+
+/** Stable framework context for one memory operation. */
+export interface InstrumentationMemoryOperation {
+  readonly idempotencyKey: string;
+  readonly operationName: InstrumentationMemoryOperationName;
+  /**
+   * The operation phase that caused eve to call the memory provider.
+   *
+   * This is eve-specific context; `operationName` is the corresponding
+   * OpenTelemetry GenAI operation.
+   */
+  readonly phase: string;
+  /** The path-derived memory slot. */
+  readonly slot: string;
+  /** The opaque memory scope key, used as eve's memory-store identifier. */
+  readonly storeId: string;
+  readonly rootSessionId: string;
+  readonly sessionId: string;
+  readonly turnId?: string;
+  /** A record identity when one operation targets exactly one record. */
+  readonly recordId?: string;
+  /** The number of records the operation intends to change. */
+  readonly recordCount?: number;
+}
+
+export interface InstrumentationMemoryOperationStartedEvent extends InstrumentationMemoryOperation {
+  readonly type: "memory.operation.started";
+  /** Content. Absent unless this provider's trace policy records inputs. */
+  readonly inputRecords?: readonly InstrumentationMemoryRecord[];
+}
+
+export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperation {
+  readonly type: "memory.operation.completed";
+  /** The number of records the operation returned or changed, when known. */
+  readonly recordCount?: number;
+  /** Content. Absent unless this provider's trace policy records outputs. */
+  readonly outputRecords?: readonly InstrumentationMemoryRecord[];
+}
+
+export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperation {
+  readonly type: "memory.operation.failed";
+  /** Content. Absent unless this provider's trace policy records outputs. */
+  readonly error?: unknown;
+}
+
+export type InstrumentationMemoryOperationTerminalEvent =
+  | InstrumentationMemoryOperationCompletedEvent
+  | InstrumentationMemoryOperationFailedEvent;
+
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
   readonly inputTokenDetails?: {
@@ -580,6 +641,9 @@ export interface InstrumentationProviderDefinition {
     readonly "model.call.started"?: InstrumentationEventHandler<InstrumentationModelCallStartedEvent>;
     readonly "model.call.completed"?: InstrumentationEventHandler<InstrumentationModelCallCompletedEvent>;
     readonly "model.call.failed"?: InstrumentationEventHandler<InstrumentationModelCallFailedEvent>;
+    readonly "memory.operation.started"?: InstrumentationEventHandler<InstrumentationMemoryOperationStartedEvent>;
+    readonly "memory.operation.completed"?: InstrumentationEventHandler<InstrumentationMemoryOperationCompletedEvent>;
+    readonly "memory.operation.failed"?: InstrumentationEventHandler<InstrumentationMemoryOperationFailedEvent>;
     readonly "input.requested"?: InstrumentationEventHandler<InstrumentationInputRequestedEvent>;
     readonly "input.resolved"?: InstrumentationEventHandler<InstrumentationInputResolvedEvent>;
     readonly "session.completed"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
@@ -625,6 +689,8 @@ export type InstrumentationCorrelatedEvent =
   | InstrumentationInputResolvedEvent
   | InstrumentationActionStartedEvent
   | InstrumentationActionTerminalEvent
+  | InstrumentationMemoryOperationStartedEvent
+  | InstrumentationMemoryOperationTerminalEvent
   | InstrumentationModelCallStartedEvent
   | InstrumentationModelCallTerminalEvent
   | InstrumentationToolCallStartedEvent
@@ -658,6 +724,12 @@ export type InstrumentationExecutionOperation =
       readonly idempotencyKey: string;
       readonly scope: InstrumentationAttemptScope;
       readonly type: "model.call";
+    }
+  | {
+      readonly idempotencyKey: string;
+      readonly sessionId: string;
+      readonly turnId?: string;
+      readonly type: "memory.operation";
     };
 
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
