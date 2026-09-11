@@ -20,6 +20,11 @@ export type HarnessRuntimeActionDefinition = { readonly kind: "task-control" };
 export interface HarnessToolDefinition {
   readonly label?: InternalToolLabelDefinition;
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
+  readonly approvalPrompt?: (context: {
+    readonly callId: string;
+    readonly toolInput: Record<string, unknown>;
+    readonly toolName: string;
+  }) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
   readonly execute?: (input: any, options: ToolExecuteOptions, task?: TaskExec) => any;

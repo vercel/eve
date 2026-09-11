@@ -103,6 +103,11 @@ export function replayDynamicTools(
       approvalKeyReference === undefined
         ? undefined
         : lookupDurableDynamicCallback(owner, "approvalKey");
+    const approvalPromptReference = entry.callbacks.approvalPrompt;
+    const approvalPrompt =
+      approvalPromptReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "approvalPrompt");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
     const labelComplete = bindDynamicCallback(
@@ -188,6 +193,24 @@ export function replayDynamicTools(
                 );
               }
               return key;
+            },
+          }),
+      ...(approvalPromptReference === undefined
+        ? {}
+        : {
+            approvalPrompt: (context: {
+              readonly callId: string;
+              readonly toolInput: Record<string, unknown>;
+              readonly toolName: string;
+            }) => {
+              if (approvalPrompt === undefined) {
+                throw missingCallbackError(entry, "approvalPrompt");
+              }
+              return callDurableDynamicCallback(
+                approvalPrompt,
+                approvalPromptReference.closure,
+                context,
+              ) as string;
             },
           }),
       outputSchema: toOutputSchema(entry.outputSchema),

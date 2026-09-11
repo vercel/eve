@@ -55,6 +55,7 @@ async function transformAndEval(
         label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
+        approvalPrompt: entry.approvalPrompt as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),

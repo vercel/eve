@@ -148,6 +148,37 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
+  it("uses a tool's custom approval prompt", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          approvalId: "approval-1",
+          toolCall: {
+            input: { amount: 125, recipient: "Ada" },
+            toolCallId: "call-1",
+            toolName: "send_payment",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+      tools: new Map([
+        [
+          "send_payment",
+          {
+            approvalPrompt: ({ toolInput }) =>
+              `Send $${String(toolInput.amount)} to ${String(toolInput.recipient)}?`,
+            description: "Send a payment.",
+            inputSchema: {} as never,
+            name: "send_payment",
+          },
+        ],
+      ]),
+    });
+
+    expect(result[0]?.prompt).toBe("Send $125 to Ada?");
+  });
+
   it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
       content: [

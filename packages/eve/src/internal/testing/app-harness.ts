@@ -192,6 +192,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
         outputSchema:
           tool.outputSchema === undefined ? undefined : serializeOutputSchema(tool.outputSchema),
         approval: tool.approval,
+        approvalPrompt: tool.approvalPrompt,
         toModelOutput: tool.toModelOutput,
       })),
     });

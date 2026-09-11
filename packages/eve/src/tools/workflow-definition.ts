@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import {
   stampToolDefinition,
   type PublicToolDefinition,
+  type ApprovalPrompt,
   type BackgroundToolDefinition,
   type ToolContext,
   type ToolInputRequest,
@@ -97,6 +98,7 @@ export interface BlockingWorkflowToolDefinition<
   readonly execution?: never;
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  approvalPrompt?: ApprovalPrompt<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 

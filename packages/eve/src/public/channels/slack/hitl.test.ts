@@ -244,12 +244,42 @@ describe("renderInputRequestBlocks", () => {
       type: "container",
       title: { type: "plain_text", text: "Tool input" },
       is_collapsible: true,
-      default_collapsed: false,
+      default_collapsed: true,
     });
     expect(details.child_blocks).toHaveLength(1);
     expect(details.child_blocks[0]).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
     expect(details.child_blocks[0]?.text?.text).toContain('"collection": "org_members"');
     expect(details.child_blocks[0]?.text?.text).toContain('"_id": "qudw7ekkzulpgw3j"');
+  });
+
+  it("renders a custom approval prompt in the card while keeping tool input collapsed", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        action: {
+          kind: "tool-call",
+          callId: "call_payment",
+          toolName: "send_payment",
+          input: { amount: 125, recipient: "Ada" },
+        },
+        display: "confirmation",
+        kind: "tool-approval",
+        prompt: "Send $125 to Ada?",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
+        ],
+      }),
+    );
+
+    expect(blocks[0]).toMatchObject({
+      type: "card",
+      body: { type: "mrkdwn", text: "*Send $125 to Ada?*" },
+    });
+    expect(blocks[1]).toMatchObject({
+      type: "container",
+      default_collapsed: true,
+      title: { type: "plain_text", text: "Tool input" },
+    });
   });
 
   it("keeps long approval input details within the collapsible container section limit", () => {

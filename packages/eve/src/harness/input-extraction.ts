@@ -104,6 +104,7 @@ function extractQuestionRequests(input: {
 export function extractToolApprovalInputRequests(input: {
   readonly content: readonly ContentPart<ToolSet>[];
   readonly excludedCallIds?: ReadonlySet<string>;
+  readonly tools?: HarnessToolMap;
 }): InputRequest[] {
   return extractApprovalRequests(input);
 }
@@ -115,6 +116,7 @@ function extractApprovalRequests(input: {
   readonly content: readonly unknown[];
   readonly excludedCallIds?: ReadonlySet<string>;
   readonly includedRequestIds?: ReadonlySet<string>;
+  readonly tools?: HarnessToolMap;
 }): InputRequest[] {
   const requests: InputRequest[] = [];
   const toolCallsById = new Map<string, ToolCallDescriptor>();
@@ -157,6 +159,21 @@ function extractApprovalRequests(input: {
       continue;
     }
 
+    const toolInput =
+      typeof toolCall.input === "object" &&
+      toolCall.input !== null &&
+      !Array.isArray(toolCall.input)
+        ? (toolCall.input as Record<string, unknown>)
+        : {};
+    const prompt = input.tools?.get(toolCall.toolName)?.approvalPrompt?.({
+      callId: toolCall.toolCallId,
+      toolInput,
+      toolName: toolCall.toolName,
+    });
+    if (prompt !== undefined && typeof prompt !== "string") {
+      throw new Error(`Tool "${toolCall.toolName}" approvalPrompt must return a string.`);
+    }
+
     requests.push({
       action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
@@ -166,7 +183,7 @@ function extractApprovalRequests(input: {
         { id: "approve", label: "Approve" },
         { id: "cancel", label: "Cancel" },
       ],
-      prompt: `Approve tool call: ${toolCall.toolName}`,
+      prompt: prompt ?? `Approve tool call: ${toolCall.toolName}`,
       requestId: approval.approvalId,
     });
   }
@@ -203,6 +220,7 @@ export function extractHistoricalInputRequests(input: {
       ...extractApprovalRequests({
         content: message.content,
         includedRequestIds: input.requestIds,
+        tools: input.tools,
       }),
     ];
 

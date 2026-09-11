@@ -284,6 +284,7 @@ function createRegisteredHarnessToolDefinition(input: {
         ? { start: resolveWebSearchActivityLabel }
         : undefined),
     approvalKey: def.approvalKey,
+    approvalPrompt: def.approvalPrompt,
     behavior: input.behavior,
     description: def.description,
     execution: def.execution,
