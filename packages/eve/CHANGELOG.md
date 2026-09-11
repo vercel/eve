@@ -1,5 +1,20 @@
 # eve
 
+## 0.54.0
+
+### Minor Changes
+
+- 879d4e5: Advance `agent.trace.schema.version` from 3 to 4 and remove `agent.session` and `agent.channel.delivery`: update dashboards to use per-activation `invoke_agent` spans, linked to callers and grouped by `gen_ai.conversation.id`. Single turn-bound channel deliveries annotate their activation and link it to the active upstream request or function span; `traceChannelRequests` only adds an eve-owned server span as the link target. Other delivery lifecycles do not emit agent spans. Dispatch uses `agent.action` and `execute_tool`, preserves standard GenAI usage totals and trace-content restrictions, and rejects baggage overflow; settlement materializes spans without draining exporters, and conversation IDs remain available without instrumentation.
+
+### Patch Changes
+
+- f60c64b: Brand every user-role model message in `gen_ai.input.messages`. Real user input is `user`; framework-authored messages use namespaced provenance such as `context.instruction` and `execution.background_task`.
+- 84c9604: Make self-modification source edits more efficient by clarifying file and documentation discovery, guarded reads, edit selection, contract preservation, outbound request safety, registry scope, and concise completion reports. Memory providers can now be selected as a registry search category.
+- dea8cd8: The local dev TUI now reconnects idle session streams, so approvals and questions from long-running background tasks still interrupt the prompt after an earlier transport stream closes.
+- 47bd3d7: Preserve one observability conversation ID across local and remote agent dispatch, accepting incoming correlation only on callback-marked remote session creation. Apply the live delivery's trace-content ceiling to the selected caller context, including fallback when its action span is unavailable.
+- 6d0485b: Expose current and initiating principals in Agent Runs turn metadata, including channel-driven and resumed activations. Principal types remain bounded; IDs require a content-visible audience and a resolved trace policy permitting both input and output content, including any forwarded ceiling, and oversized IDs are omitted.
+- 9381078: Keep `agent.action` spans for background tools and subagents open until their tasks complete, fail, or are cancelled, and record the task's final outcome and policy-controlled error details instead of treating its receipt as completion.
+
 ## 0.53.1
 
 ### Patch Changes
