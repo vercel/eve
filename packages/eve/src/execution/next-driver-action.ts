@@ -17,6 +17,8 @@ import type { SettledTurn, StepResult } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 interface DurableStepResultFields {
+  /** Pre-step context plus only the observability continuation owned by background tasks. */
+  readonly backgroundTaskContext?: Record<string, unknown>;
   readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
   /** The guarded inline step deferred before mutating state. */

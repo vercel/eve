@@ -26,19 +26,23 @@ export default [
         "task.input.require.accepted-valid-batch",
         "task.input.answer.accepted-complete",
         "task.lifecycle.complete.accepted-nonterminal",
+        "task.parent.wake.noop-pending-cohort",
       ],
       dimensions: { transport: "local", parentPhase: "parked" },
     },
     async test(t) {
       const children = await startBlockedFanout(t, FANOUT_SIZE);
 
-      // Complete nine children, keeping the last child blocked.
-      // Each batch waits for the parent response before releasing the next.
+      // Child streams, not parent replies, acknowledge each release batch.
       for (const count of batches) await children.completeNext(count);
-      const intermediate = completionMetrics(children.completionTurns);
-      t.check(intermediate.visibleMessages, equals(0)).label("intermediate completions are silent");
+      await t.require(children.completedChildren.length, equals(FANOUT_SIZE - 1));
 
       const question = await children.send("TASK-BATCHING-QUESTION");
+      const intermediate = completionMetrics(children.completionTurns);
+      t.check(intermediate.modelSteps, equals(0)).label("no intermediate completion model steps");
+      t.check(completionMetrics(children.parentTurns).modelSteps, equals(1)).label(
+        "only the independent user question invokes the parent before settlement",
+      );
       t.check(question.message, equals("56")).label(
         "user question answered while a child is blocked",
       );
@@ -54,7 +58,16 @@ export default [
       );
 
       const total = completionMetrics(children.completionTurns);
-      t.check(total.visibleMessages, equals(1)).label("one visible final report");
+      t.check(
+        total,
+        equals({
+          parentTurns: 1,
+          modelSteps: 1,
+          silentMessages: 0,
+          visibleMessages: 1,
+          completionsPerTurn: [FANOUT_SIZE],
+        }),
+      ).label("one full-cohort model turn and visible report");
       t.log(
         `task-batching ${JSON.stringify({ schedule, children: FANOUT_SIZE, intermediate, total })}`,
       );

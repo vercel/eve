@@ -153,6 +153,8 @@ export default otelIntegration({
 });
 ```
 
+Custom destinations receive the schema v4 agent trace contract. Follow [Query exported traces](./instrumentation#query-exported-traces) to find activations and join sessions across traces.
+
 Add `agent/instrumentation/otel.ts` when you need process-wide settings or want to control which content eve writes to OpenTelemetry spans:
 
 ```ts title="agent/instrumentation/otel.ts"
@@ -217,7 +219,7 @@ Policies run in declaration order. A later policy sees the filtered span produce
 The provider layout adds two environment-specific defaults:
 
 - `local` records local traces during `eve dev`.
-- `agent-runs` exports to Vercel Agent Runs in production.
+- `agent-runs` exports to Vercel Agent Runs in preview and production deployments.
 
 Omitting these files preserves the defaults. Reconfigure a slot by exporting `localTraces()` or `agentRuns()` from the matching file. Disable one explicitly:
 
@@ -234,6 +236,9 @@ Providers can handle session, channel delivery, turn, model attempt, model call,
 An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
 
 Handlers for different providers run concurrently and are failure-isolated. Do not depend on provider execution order. Use `flush` to drain buffered records and `shutdown` to release resources.
+
+The [agent trace contract](./instrumentation#agent-trace-contract) defines span
+names, identities, and usage counters shared by the exporters and local viewers.
 
 ## What to read next
 

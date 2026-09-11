@@ -43,7 +43,7 @@ function span(attributes: Record<string, unknown>): unknown {
 describe("contentFilteringProcessor", () => {
   it("forwards the span untouched when the destination declined nothing", () => {
     const downstream = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" });
+    const original = span({ "gen_ai.input.messages": "what the user said" });
 
     contentFilteringProcessor(downstream).onEnd(original as never);
 
@@ -55,7 +55,7 @@ describe("contentFilteringProcessor", () => {
 
     contentFilteringProcessor(downstream, redactSpanInputs()).onEnd(
       span({
-        "ai.prompt.messages": "what the user said",
+        "gen_ai.input.messages": "what the user said",
         "ai.response.text": "what the model said",
       }) as never,
     );
@@ -68,7 +68,7 @@ describe("contentFilteringProcessor", () => {
   it("leaves the original span's attributes in place for the other destinations", () => {
     const kept = recordingProcessor();
     const declined = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" });
+    const original = span({ "gen_ai.input.messages": "what the user said" });
 
     contentFilteringProcessor(
       declined,
@@ -78,7 +78,7 @@ describe("contentFilteringProcessor", () => {
 
     expect((declined.ended[0] as { attributes: unknown }).attributes).toEqual({});
     expect((kept.ended[0] as { attributes: unknown }).attributes).toEqual({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
     });
   });
 
@@ -88,7 +88,7 @@ describe("contentFilteringProcessor", () => {
     contentFilteringProcessor(
       downstream,
       composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-    ).onEnd(span({ "ai.prompt.messages": "what the user said" }) as never);
+    ).onEnd(span({ "gen_ai.input.messages": "what the user said" }) as never);
 
     expect((downstream.ended[0] as { spanContext: () => unknown }).spanContext()).toEqual({
       spanId: "span",
@@ -122,7 +122,7 @@ describe("contentFilteringProcessor", () => {
   it("redacts initial attributes before onStart without exposing the original", () => {
     const downstream = recordingProcessor();
     const original = span({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
       "service.name": "weather",
     });
 
@@ -136,7 +136,7 @@ describe("contentFilteringProcessor", () => {
       "service.name": "weather",
     });
     expect((original as { attributes: unknown }).attributes).toHaveProperty(
-      "ai.prompt.messages",
+      "gen_ai.input.messages",
       "what the user said",
     );
   });
@@ -144,7 +144,7 @@ describe("contentFilteringProcessor", () => {
   it("reuses and refreshes one facade from onStart through onEnd", () => {
     const downstream = recordingProcessor();
     const original = span({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
       "service.name": "weather",
     }) as { attributes: Record<string, unknown> };
     const processor = contentFilteringProcessor(downstream, redactSpanInputs());
@@ -170,7 +170,7 @@ describe("contentFilteringProcessor", () => {
       spanContext(): unknown;
     };
     original = {
-      attributes: { "ai.prompt.messages": "what the user said" },
+      attributes: { "gen_ai.input.messages": "what the user said" },
       fluent() {
         return this;
       },
@@ -204,7 +204,7 @@ describe("contentFilteringProcessor", () => {
 
   it("continues refreshing after a processor freezes the facade", () => {
     const downstream = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" }) as {
+    const original = span({ "gen_ai.input.messages": "what the user said" }) as {
       attributes: Record<string, unknown>;
     };
     const processor = contentFilteringProcessor(downstream, redactSpanInputs());
@@ -226,7 +226,7 @@ describe("contentFilteringProcessor", () => {
       spanProcessors: [filtering as OpenTelemetrySpanProcessor],
     });
     const span = provider.getTracer("test").startSpan("test", {
-      attributes: { "ai.prompt.messages": "what the user said" },
+      attributes: { "gen_ai.input.messages": "what the user said" },
     });
 
     span.setAttribute("ai.response.text", "what the model said");
@@ -256,14 +256,14 @@ describe("contentFilteringProcessor", () => {
     ).onEnd(
       span({
         "agent.channel.audience": audience,
-        "ai.prompt.messages": "input",
+        "gen_ai.input.messages": "input",
         "ai.response.text": "output",
       }) as never,
     );
 
     const expected: Record<string, unknown> = { "agent.channel.audience": audience };
     if (retained) {
-      expected["ai.prompt.messages"] = "input";
+      expected["gen_ai.input.messages"] = "input";
       expected["ai.response.text"] = "output";
     }
     expect((downstream.ended[0] as { attributes: Record<string, unknown> }).attributes).toEqual(
@@ -282,14 +282,14 @@ describe("contentFilteringProcessor", () => {
     ).onEnd(
       span({
         "agent.channel.audience": "public",
-        "ai.prompt.messages": "private",
+        "gen_ai.input.messages": "private",
         "ai.settings.context.eve.channel.audience": "private",
       }) as never,
     );
 
     expect(
       (downstream.ended[0] as { attributes: Record<string, unknown> }).attributes,
-    ).not.toHaveProperty("ai.prompt.messages");
+    ).not.toHaveProperty("gen_ai.input.messages");
   });
 
   it("can drop an individual span", () => {
@@ -319,16 +319,16 @@ describe("contentFilteringProcessor", () => {
   });
 
   it("preserves local trace session release through the wrapper", async () => {
-    const releaseSession = vi.fn(async () => true);
+    const releaseConversation = vi.fn(async () => true);
     const downstream: SpanProcessor & {
-      releaseSession(sessionId: string): Promise<boolean>;
-    } = { ...recordingProcessor(), releaseSession };
+      releaseConversation(sessionId: string): Promise<boolean>;
+    } = { ...recordingProcessor(), releaseConversation };
     const processor = contentFilteringProcessor(
       downstream,
       composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-    ) as SpanProcessor & { releaseSession(sessionId: string): Promise<boolean> };
+    ) as SpanProcessor & { releaseConversation(sessionId: string): Promise<boolean> };
 
-    await expect(processor.releaseSession("session-1")).resolves.toBe(true);
-    expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+    await expect(processor.releaseConversation("session-1")).resolves.toBe(true);
+    expect(releaseConversation).toHaveBeenCalledExactlyOnceWith("session-1");
   });
 });

@@ -1,5 +1,49 @@
+import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
+
+export function agentActivationAttributes(input: {
+  readonly agentName?: string;
+  readonly frameworkVersion: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly turn: AgentTurnTraceState;
+}): Record<string, string | number | boolean | undefined> {
+  return {
+    "agent.framework.name": "eve",
+    "agent.framework.version": input.frameworkVersion,
+    "agent.name": input.agentName,
+    ...agentPrincipalAttributes(input.turn),
+    "agent.channel.delivery.id": input.turn.channelDelivery?.deliveryId,
+    "agent.channel.delivery.input": input.turn.channelDelivery?.inputAttribute,
+    "agent.channel.kind": input.turn.channelDelivery?.channelKind,
+    "agent.channel.name": input.turn.channelDelivery?.channelName,
+    "agent.channel.request.id": input.turn.channelDelivery?.requestId,
+    "agent.subagent.name": input.turn.subagentName,
+    "agent.turn.id": input.turnId,
+    "agent.turn.sequence": input.turn.sequence,
+    "gen_ai.agent.name": input.agentName,
+    "gen_ai.operation.name": "invoke_agent",
+    ...agentSpanNamingAttributes(agentInvocationSpanName(input.agentName), "invoke_agent"),
+    ...agentTraceIdentityAttributes({
+      rootSessionId: input.turn.rootSessionId,
+      sessionId: input.sessionId,
+    }),
+  };
+}
+
+export function agentPrincipalAttributes(turn: AgentTurnTraceState): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  setOptionalAttribute(attributes, "agent.principal.current.id", turn.currentPrincipal?.id);
+  setOptionalAttribute(attributes, "agent.principal.current.type", turn.currentPrincipal?.type);
+  setOptionalAttribute(attributes, "agent.principal.initiator.id", turn.initiatorPrincipal?.id);
+  setOptionalAttribute(attributes, "agent.principal.initiator.type", turn.initiatorPrincipal?.type);
+  return attributes;
+}
 
 /** Flattens merged runtime context into AI SDK-compatible span attributes. */
 export function runtimeContextAttributes(
@@ -38,4 +82,12 @@ function flattenContextAttribute(
       flattenContextAttribute(attributes, `${key}.${nestedKey}`, nestedValue);
     }
   }
+}
+
+function setOptionalAttribute(
+  attributes: Record<string, string>,
+  key: string,
+  value: string | undefined,
+): void {
+  if (value !== undefined) attributes[key] = value;
 }

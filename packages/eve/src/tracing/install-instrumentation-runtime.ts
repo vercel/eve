@@ -1,6 +1,8 @@
 import { trace } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
+import { contextStorage } from "#context/container.js";
+import { ConversationIdKey } from "#context/keys.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
@@ -13,9 +15,10 @@ import { createLogger, formatError } from "#internal/logging.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
-import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
+import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
+import { readConversationId } from "#tracing/conversation-context.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 
@@ -40,6 +43,7 @@ export function installInstrumentationRuntime(input: {
   const serialBefore: InstrumentationProviderDefinition[] = [];
   const serialAfter: InstrumentationProviderDefinition[] = [];
   let otelRuntime: RegisteredOtelPipeline | undefined;
+  let flushSettledInvocations: InstrumentationRuntime["flushSettledInvocations"];
   let prepareSessionTrace: InstrumentationRuntime["prepareSessionTrace"];
   let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
@@ -54,30 +58,34 @@ export function installInstrumentationRuntime(input: {
       idGenerator: otelRuntime.idGenerator,
       recordInputs: input.collected.settings.recordInputs,
       recordOutputs: input.collected.settings.recordOutputs,
+      samplesTrace: otelRuntime.samplesTrace,
       stateStore: new ContextAgentTraceStateStore(),
       tracer: trace.getTracer("eve.agent", input.frameworkVersion),
       tracePolicy: input.collected.settings.tracePolicy,
     });
     // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
+    flushSettledInvocations = async () => {
+      await agentOtel.hook.flush?.();
+    };
     prepareSessionTrace = agentOtel.prepareSessionTrace;
     prepareTurnTrace = agentOtel.prepareTurnTrace;
     runInContext = agentOtel.runInContext;
 
     const releasable = input.collected.pipeline.spanProcessors
       .filter(isSpanProcessor)
-      .filter(hasSessionRelease);
+      .filter(hasConversationRelease);
     if (releasable.length > 0) serialAfter.push(sessionReleaseProvider(releasable));
   }
 
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
   let shutdown: Promise<void> | undefined;
   return registerInstrumentationRuntime({
-    forceFlush: () =>
-      settleAll([
-        ...(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]),
-        ...allProviders.map((provider) => () => provider.flush?.()),
-      ]),
+    flushSettledInvocations,
+    forceFlush: async () => {
+      await settleAll(allProviders.map((provider) => () => provider.flush?.()));
+      await settleAll(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]);
+    },
     hooks: createInstrumentationHooks({
       parallel: input.providers,
       serialAfter,
@@ -85,6 +93,7 @@ export function installInstrumentationRuntime(input: {
     }),
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
     instrumentationProviders: input.instrumentationProviders,
+    memoryOperations: otelRuntime !== undefined || input.providers.some(hasMemoryOperationHandler),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     ownsAgentSpans: otelRuntime !== undefined,
     prepareSessionTrace,
@@ -93,13 +102,21 @@ export function installInstrumentationRuntime(input: {
     runInContext,
     samplesTrace: otelRuntime?.samplesTrace,
     shutdown: () => {
-      shutdown ??= settleAll([
-        ...(otelRuntime === undefined ? [] : [otelRuntime.shutdown]),
-        ...allProviders.map((provider) => () => provider.shutdown?.()),
-      ]);
+      shutdown ??= (async () => {
+        await settleAll(allProviders.map((provider) => () => provider.shutdown?.()));
+        await settleAll(otelRuntime === undefined ? [] : [otelRuntime.shutdown]);
+      })();
       return shutdown;
     },
   });
+}
+
+function hasMemoryOperationHandler(provider: InstrumentationProviderDefinition): boolean {
+  return (
+    provider.events?.["memory.operation.started"] !== undefined ||
+    provider.events?.["memory.operation.completed"] !== undefined ||
+    provider.events?.["memory.operation.failed"] !== undefined
+  );
 }
 
 function isSpanProcessor(processor: SpanProcessor | "auto"): processor is SpanProcessor {
@@ -110,12 +127,15 @@ function sessionReleaseProvider(
   processors: readonly LocalTracesProcessor[],
 ): InstrumentationProviderDefinition {
   const release = async (event: { readonly sessionId: string }): Promise<void> => {
-    await Promise.all(processors.map((processor) => processor.releaseSession(event.sessionId)));
+    const conversationId =
+      readConversationId(contextStorage.getStore()?.get(ConversationIdKey)) ?? event.sessionId;
+    if (conversationId !== event.sessionId) return;
+    await Promise.all(processors.map((processor) => processor.releaseConversation(conversationId)));
   };
   return {
     events: { "session.completed": release, "session.failed": release },
-    name: "eve.session-release",
-    stateNamespace: "internal:session-release",
+    name: "eve.conversation-release",
+    stateNamespace: "internal:conversation-release",
   };
 }
 

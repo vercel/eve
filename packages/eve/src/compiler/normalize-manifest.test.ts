@@ -205,7 +205,17 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it.each(["agent", "task_cancel", "task_update"])(
+  it("does not install task_update from the framework registry", async () => {
+    const compiled = await compileAgentManifest(manifest());
+
+    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
+    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
+      "tools/task_update.ts",
+    );
+  });
+
+  it.each(["agent", "task_cancel"])(
     "rejects overriding closed framework tool %s",
     async (toolName) => {
       const sourceRegistry = registry([

@@ -291,8 +291,6 @@ export async function runModelFlow(input: {
   initialStep?: "provider";
   onScreen?: (screen: "model_provider" | "model_settings") => void;
   signal?: AbortSignal;
-  /** Gives ChatGPT sign-in exclusive terminal ownership. */
-  withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Live ChatGPT identity shown in this configuration flow only. */
   chatGptAccountLabel?: string;
   deps?: Partial<ModelFlowDeps>;
@@ -506,7 +504,7 @@ export async function runModelFlow(input: {
     shouldAuthenticateChatGpt = true;
   }
   if (commitDraft && shouldAuthenticateChatGpt) {
-    await authenticateChatGpt(deps, input.withExclusiveTerminal, signal);
+    await authenticateChatGpt(deps, prompter, signal);
   }
 
   if (commitDraft && hasModelSettingsChanges(patch)) {
@@ -551,13 +549,21 @@ function routingForModelSelection(selection: string): ModelRouting {
 
 async function authenticateChatGpt(
   deps: ModelFlowDeps,
-  withExclusiveTerminal: (<T>(task: () => Promise<T>) => Promise<T>) | undefined,
+  prompter: Prompter,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  const authenticate = (): Promise<void> => deps.ensureChatGptAuth({ signal });
-  await (withExclusiveTerminal === undefined
-    ? authenticate()
-    : withExclusiveTerminal(authenticate));
+  const spinner = prompter.log.spinner?.("Waiting for ChatGPT sign-in in your browser…", {
+    kind: "external-action",
+    emphasis: "browser",
+  });
+  try {
+    await deps.ensureChatGptAuth({
+      signal,
+      log: (message) => prompter.log.info(message),
+    });
+  } finally {
+    spinner?.stop();
+  }
 }
 
 function hasModelSettingsChanges(patch: AgentModelSettingsPatch): boolean {

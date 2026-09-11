@@ -1,20 +1,14 @@
 import { defineTool } from "eve/tools";
+import { once } from "eve/tools/approval";
 import { z } from "zod";
 
-const PROBES = {
-  first: { delayMs: 10_000, result: "oranges" },
-  second: { delayMs: 40_000, result: "pears" },
-  third: { delayMs: 70_000, result: "apples" },
-} as const;
+const PROBES = { first: "oranges", second: "pears", third: "apples" } as const;
 
 export default defineTool({
-  description: "Look up the inventory item at one sample warehouse after its configured delay.",
+  description: "Look up the warehouse inventory item for a checklist entry.",
   inputSchema: z.strictObject({
     check: z.enum(["first", "second", "third"]),
   }),
-  async execute({ check }) {
-    const probe = PROBES[check];
-    await new Promise((resolve) => setTimeout(resolve, probe.delayMs));
-    return { result: probe.result };
-  },
+  approval: once(),
+  execute: ({ check }) => ({ result: PROBES[check] }),
 });

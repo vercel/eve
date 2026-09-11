@@ -19,8 +19,8 @@ import { createBootstrapGenerateResult } from "#runtime/agent/bootstrap-model-ut
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const MODEL_ID = "task-model-retry-fixture";
-const PRIOR_HISTORY: readonly ModelMessage[] = [
-  { content: "Complete the delegated task.", role: "user" },
+const PRIOR_HISTORY: HarnessSession["history"] = [
+  { content: "Complete the delegated task.", kind: "user", role: "user" },
   { content: "Prior durable work is complete.", role: "assistant" },
 ];
 

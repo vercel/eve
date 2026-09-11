@@ -1,6 +1,6 @@
 import {
   ROOT_CONTEXT,
-  SpanStatusCode,
+  SpanKind,
   type Context,
   type Span,
   type SpanContext,
@@ -9,20 +9,30 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
+  InstrumentationActionKind,
   InstrumentationActionStartedEvent,
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
+  InstrumentationSessionTransitionEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import type {
+  AgentActionTraceState,
+  AgentActionTraceTerminalState,
+  AgentInvocationTraceState,
+  AgentTraceStateStore,
+} from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { AGENT_SPAN_NAMES, workflowInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 export interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -30,8 +40,9 @@ export interface AgentActionInstrumentation {
     "action.completed" | "action.failed" | "action.started"
   >;
   deleteForSession(sessionId: string): void | PromiseLike<void>;
-  deleteForTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   failForAttempt(scope: InstrumentationAttemptScope, error: unknown): Promise<void>;
+  flushSettledInvocations(): Promise<void>;
+  flushForSessionTransition(event: InstrumentationSessionTransitionEvent): Promise<void>;
   contextFor(
     sessionId: string,
     turnId: string,
@@ -67,7 +78,8 @@ export function createAgentActionInstrumentation(input: {
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
-      inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
+      inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
+      isWorkflowTool: event.isWorkflowTool === true,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -83,6 +95,9 @@ export function createAgentActionInstrumentation(input: {
       turnId: event.scope.turnId,
     };
     await input.stateStore.setAction(event.idempotencyKey, state);
+    if (event.isWorkflowTool === true) {
+      await input.stateStore.setActionAnchor(event.idempotencyKey, state);
+    }
     const keys = byAttempt.get(event.scope.attemptId) ?? new Set<string>();
     keys.add(event.idempotencyKey);
     byAttempt.set(event.scope.attemptId, keys);
@@ -92,26 +107,7 @@ export function createAgentActionInstrumentation(input: {
     const state = await input.stateStore.getAction(event.idempotencyKey);
     if (state === undefined) return;
     try {
-      const span = startSpan(state);
-      span.setAttribute("agent.action.outcome", event.outcome);
-      if (event.type === "action.failed") {
-        if (event.errorCode !== undefined) {
-          span.setAttribute("agent.action.error.code", event.errorCode);
-          span.setAttribute("error.type", event.errorCode);
-        }
-        recordError(span, event.error);
-      } else if (event.output.type === "error") {
-        recordError(span, event.output.error);
-      } else {
-        if (event.usage !== undefined) {
-          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
-        }
-        if (input.recordOutputs) {
-          const result = contentAttribute(event.output.output, false);
-          if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
-        }
-      }
-      span.end(event.acceptedAtMs);
+      finishActionSpan(state, event);
     } finally {
       await input.stateStore.deleteAction(event.idempotencyKey);
       forget(event.idempotencyKey);
@@ -119,9 +115,15 @@ export function createAgentActionInstrumentation(input: {
   };
 
   const startSpan = (state: AgentActionTraceState): Span => {
+    const invocation = isAgentInvocation(state.kind);
+    const workflowName = state.kind === "tool-call" ? state.workflowName : undefined;
+    const spanName =
+      workflowName === undefined
+        ? AGENT_SPAN_NAMES.action
+        : workflowInvocationSpanName(workflowName);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "agent.action",
+        AGENT_SPAN_NAMES.action,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -129,18 +131,38 @@ export function createAgentActionInstrumentation(input: {
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
-            "agent.session.id": state.sessionId,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes("agent.action"),
+            ...agentSpanNamingAttributes(
+              spanName,
+              workflowName === undefined ? undefined : "invoke_workflow",
+            ),
+            ...agentTraceIdentityAttributes({
+              rootSessionId: state.rootSessionId,
+              sessionId: state.sessionId,
+            }),
+            ...(workflowName === undefined
+              ? undefined
+              : {
+                  "gen_ai.operation.name": "invoke_workflow",
+                  "gen_ai.workflow.name": workflowName,
+                }),
+            ...(invocation
+              ? {
+                  "gen_ai.agent.name": state.name,
+                  "agent.invocation.role": "caller",
+                }
+              : undefined),
           },
+          kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         contextFromActionState(state),
       ),
     );
-    if (state.inputAttribute !== undefined) {
+    if (workflowName !== undefined) updateSpanName(span, spanName);
+    if (!invocation && state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
     }
     return span;
@@ -154,8 +176,11 @@ export function createAgentActionInstrumentation(input: {
       const state = await input.stateStore.findAction(sessionId, callId);
       return state === undefined ? undefined : actionContext(state);
     },
-    deleteForSession: (sessionId) => input.stateStore.deleteActions(sessionId),
-    deleteForTurn: (sessionId, turnId) => input.stateStore.deleteActions(sessionId, turnId),
+    async deleteForSession(sessionId) {
+      await input.stateStore.deleteActions(sessionId);
+      await input.stateStore.deleteActionAnchors(sessionId);
+      await input.stateStore.deleteInvocations(sessionId);
+    },
     async failForAttempt(scope, error) {
       const keys = byAttempt.get(scope.attemptId);
       if (keys === undefined) return;
@@ -169,6 +194,16 @@ export function createAgentActionInstrumentation(input: {
         await input.stateStore.deleteAction(key);
       }
     },
+    flushSettledInvocations: () => flushInvocations(),
+    async flushForSessionTransition(event) {
+      const terminal =
+        event.type === "session.completed"
+          ? { outcome: "abandoned" as const }
+          : event.type === "session.failed"
+            ? { error: event.error, outcome: "failed" as const }
+            : undefined;
+      await flushInvocations(event.sessionId, terminal);
+    },
     events: {
       "action.completed": onTerminal,
       "action.failed": onTerminal,
@@ -176,11 +211,68 @@ export function createAgentActionInstrumentation(input: {
     },
   };
 
+  async function flushInvocations(
+    sessionId?: string,
+    fallback?: AgentActionTraceTerminalState,
+  ): Promise<void> {
+    for (const invocation of await input.stateStore.findInvocations(sessionId)) {
+      const terminal = invocation.terminal ?? fallback;
+      if (terminal === undefined) continue;
+      finishInvocationSpan(invocation, terminal);
+      await input.stateStore.deleteInvocation(
+        actionIdempotencyKey(invocation.sessionId, invocation.turnId, invocation.callId),
+      );
+    }
+  }
+
   function forget(idempotencyKey: string): void {
     for (const [attemptId, keys] of byAttempt) {
       keys.delete(idempotencyKey);
       if (keys.size === 0) byAttempt.delete(attemptId);
     }
+  }
+
+  function finishActionSpan(
+    state: AgentActionTraceState,
+    event: InstrumentationActionTerminalEvent,
+  ): void {
+    const span = startSpan(state);
+    span.setAttribute("agent.action.outcome", event.outcome);
+    if (event.type === "action.failed") {
+      if (event.errorCode !== undefined) {
+        span.setAttribute("agent.action.error.code", event.errorCode);
+      }
+      recordActionError(span, event.error, event.errorCode);
+    } else if (event.output.type === "error") {
+      recordActionError(span, event.output.error);
+    } else {
+      if (event.usage !== undefined) {
+        setAgentUsage(span, event.usage);
+      }
+      if (input.recordOutputs && !isAgentInvocation(state.kind)) {
+        const result = contentAttribute(event.output.output);
+        if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
+      }
+    }
+    span.end(event.acceptedAtMs);
+  }
+
+  function finishInvocationSpan(
+    state: AgentInvocationTraceState,
+    terminal: AgentActionTraceTerminalState,
+  ): void {
+    const span = startSpan(state);
+    span.setAttribute("agent.action.outcome", terminal.outcome);
+    if (terminal.usage !== undefined) {
+      setAgentUsage(span, terminal.usage);
+    }
+    if (terminal.outcome === "failed") {
+      recordError(
+        span,
+        input.recordOutputs && state.recordOutputs === true ? terminal.error : undefined,
+      );
+    }
+    span.end(terminal.acceptedAtMs);
   }
 }
 
@@ -207,9 +299,35 @@ function contextFromActionState(state: AgentActionTraceState): Context {
   );
 }
 
-function recordError(span: Span, error: unknown): void {
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
+function isAgentInvocation(kind: InstrumentationActionKind): boolean {
+  return kind === "subagent-call" || kind === "remote-agent-call";
+}
+
+function updateSpanName(span: Span, name: string): void {
+  const updateName = Reflect.get(span, "updateName");
+  if (typeof updateName === "function") Reflect.apply(updateName, span, [name]);
+}
+
+function recordActionError(span: Span, error: unknown, errorType?: string): void {
+  if (error instanceof Error || error === undefined) {
+    recordError(span, error, errorType);
+    return;
+  }
+  const detail = serializedErrorDetail(error);
+  if (detail === undefined) {
+    recordError(span, undefined, errorType);
+    return;
+  }
+  const normalized = new Error(detail);
+  if (errorType !== undefined) normalized.name = errorType;
+  recordError(span, normalized, errorType);
+}
+
+function serializedErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "string") return textContentAttribute(error);
+  const serialized = contentAttribute(error);
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return serialized;
+  const message = Reflect.get(error, "message");
+  if (typeof message !== "string") return serialized;
+  return textContentAttribute(serialized === undefined ? message : `${message}\n${serialized}`);
 }

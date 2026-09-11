@@ -1,27 +1,22 @@
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+import {
+  formatSubagentInput,
+  normalizeRequestedOutputSchema,
+  type SubagentParentContext,
+} from "#subagents/invocation.js";
 import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
-  RunInput,
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
-  SessionTraceContext,
+  RunInput,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
-
-/**
- * Pending task batch event metadata needed for child run lineage.
- */
-interface BatchEventMetadata {
-  readonly sequence: number;
-  readonly turnId: string;
-}
 
 export type SubagentInputSource =
   | {
@@ -69,7 +64,6 @@ export interface SubagentSandboxGraph {
 export function buildSubagentRunInput(input: {
   readonly action: RuntimeSubagentDispatchRequest;
   readonly auth: SessionAuthContext | null;
-  readonly batchEvent: BatchEventMetadata;
   /**
    * Parent's session capabilities. Forwarded verbatim so HITL
    * readiness flows transparently down through a subagent chain. Undefined
@@ -93,45 +87,26 @@ export function buildSubagentRunInput(input: {
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
-  /** Hook token owned by the workflow currently waiting for this child. */
-  readonly parentContinuationToken?: string;
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parent: SubagentParentContext;
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
   /** Owning task when this child starts from a background workflow tool. */
   readonly taskId?: string;
 }): SubagentRunInputBuild {
-  const {
-    action,
-    auth,
-    batchEvent,
-    capabilities,
-    channelMetadata,
-    initiatorAuth,
-    session,
-    source,
-  } = input;
+  const { action, auth, capabilities, channelMetadata, initiatorAuth, session, source } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
     `${session.sessionId}:${action.callId}`,
   );
 
-  // Denormalize the chain root onto the child's `parent` metadata so
-  // every descendant in a nested dispatch can attribute itself to the
-  // top user-facing session in a single hop. A subagent that itself
-  // dispatches more subagents reads the root from
-  // `session.rootSessionId` here; a top-level session carries no
-  // explicit root, so its own `sessionId` becomes the root for its
-  // children.
-  const rootSessionId = session.rootSessionId ?? session.sessionId;
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
-    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentContinuationToken: input.parent.continuationToken ?? session.continuationToken,
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
@@ -167,16 +142,9 @@ export function buildSubagentRunInput(input: {
     },
     limits: inheritedLimits,
     mode: "conversation",
-    parent: {
-      callId: action.callId,
-      rootSessionId,
-      sessionId: session.sessionId,
-      turn: {
-        id: batchEvent.turnId,
-        sequence: batchEvent.sequence,
-      },
-    },
-    parentTraceContext: input.parentTraceContext,
+    conversationId: input.parent.conversationId,
+    parent: input.parent.lineage,
+    parentTraceContext: input.parent.traceContext,
     activityObserver: input.activityObserver,
   };
   if (input.taskId !== undefined) runInput.taskId = input.taskId;

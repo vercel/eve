@@ -15,6 +15,7 @@ import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
 } from "#tracing/local-trace-span-processor.js";
+import { isAgentActivationSpan } from "#tracing/agent-span-contract.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
@@ -47,15 +48,15 @@ export interface LocalTraceSpan {
 export interface LocalTrace {
   readonly agentName?: string;
   readonly endTimeNs: bigint;
-  /** Session that opened the trace, which is the one the list shows. */
-  readonly sessionId?: string;
+  /** Conversation that owns the trace, which is the one the list shows. */
+  readonly conversationId?: string;
   /**
-   * Every session recorded in the trace, opener first.
+   * Every conversation identifier recorded in the trace.
    *
-   * A subagent child records into the trace its parent opened, so one
-   * trace can hold several sessions and any of their ids resolves to it.
+   * A logical conversation can contain separate root traces for the parent
+   * and child activations. Any matching conversation ID resolves to them.
    */
-  readonly sessionIds: readonly string[];
+  readonly conversationIds: readonly string[];
   readonly spans: readonly LocalTraceSpan[];
   readonly startTimeNs: bigint;
   readonly traceId: string;
@@ -183,15 +184,15 @@ export function compareLocalTraceSpans(left: LocalTraceSpan, right: LocalTraceSp
 export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSpan[]): LocalTrace {
   const ordered = [...spans].sort(compareLocalTraceSpans);
   const attributes = ordered.map((span) => span.attributes);
-  const sessionIds = distinctAttributes(attributes, "agent.session.id");
+  const conversationIds = distinctAttributes(attributes, "gen_ai.conversation.id");
   return {
     agentName: firstAttribute(attributes, "agent.name"),
     endTimeNs: ordered.reduce(
       (value, span) => (span.endTimeNs > value ? span.endTimeNs : value),
       0n,
     ),
-    sessionId: sessionIds[0],
-    sessionIds,
+    conversationId: conversationIds[0],
+    conversationIds,
     spans: ordered,
     startTimeNs: ordered.reduce(
       (value, span) => (span.startTimeNs < value ? span.startTimeNs : value),
@@ -234,11 +235,7 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
 }
 
 export function isAgentTurnSpan(span: LocalTraceSpan): boolean {
-  return (
-    span.name === "agent.turn" ||
-    (stringSpanAttribute(span, "gen_ai.operation.name") === "invoke_agent" &&
-      stringSpanAttribute(span, "agent.turn.id") !== undefined)
-  );
+  return isAgentActivationSpan(span);
 }
 
 /** Parses one OTLP/JSON segment file into spans belonging to `expectedTraceId`. */

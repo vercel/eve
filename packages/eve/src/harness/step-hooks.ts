@@ -1,5 +1,6 @@
 import type {
   ContentPart,
+  GenerateTextOnStepStartCallback,
   LanguageModelUsage,
   ModelMessage,
   PrepareStepFunction,
@@ -53,7 +54,7 @@ import { AuthKey } from "#context/keys.js";
 /**
  * The subset of `StepResult` that the harness reads after a step completes.
  *
- * Used by both the streaming (`onStepFinish` callback) and non-streaming
+ * Used by both the streaming (`onStepEnd` callback) and non-streaming
  * (`generateText` result) code paths.
  */
 export type HarnessStepResult = Pick<
@@ -93,7 +94,7 @@ interface StepHooksInput {
         readonly kind: "harness";
       };
   /**
-   * When `false`, `prepareStep` skips the `step.started` emission.
+   * When `false`, `onStepStart` skips the `step.started` emission.
    * Used by the harness recovery path to avoid emitting `step.started`
    * twice when retrying the same step with a degraded toolset.
    *
@@ -107,23 +108,30 @@ interface StepHooksInput {
  */
 interface StepHooks {
   /**
-   * `ToolLoopAgent` `onStepFinish` callback.
+   * `ToolLoopAgent` `onStepStart` callback.
+   *
+   * Emits the `step.started` event from the prepared step input.
+   */
+  readonly onStepStart: GenerateTextOnStepStartCallback<ToolSet>;
+
+  /**
+   * `ToolLoopAgent` `onStepEnd` callback.
    *
    * Emits `actions.requested`, `action.result`, and `step.completed` events
    * from the captured step result.
    */
-  readonly onStepFinish: (step: StepResult<ToolSet>) => Promise<void>;
+  readonly onStepEnd: (step: StepResult<ToolSet>) => Promise<void>;
 
   /**
    * `ToolLoopAgent` `prepareStep` callback.
    *
-   * Handles `step.started` emission and cache/provider metadata. Compaction
-   * happens in the tool-loop before `agent.stream()`.
+   * Handles cache/provider metadata. Compaction happens in the tool-loop
+   * before `agent.stream()`.
    */
   readonly prepareStep: PrepareStepFunction<ToolSet>;
 
   /**
-   * Promise that resolves when `onStepFinish` has completed.
+   * Promise that resolves when `onStepEnd` has completed.
    *
    * Await this after consuming the stream to ensure all step events
    * have been emitted before proceeding to post-step handling.
@@ -135,7 +143,7 @@ interface StepHooks {
    *
    * Never settles when the step does not finish — e.g. the AI SDK's
    * incomplete-stream rejection (`NoOutputGeneratedError`) skips
-   * `onStepFinish` entirely. Consumers must surface stream errors as
+   * `onStepEnd` entirely. Consumers must surface stream errors as
    * throws before awaiting this promise (`emitStreamContent` does), or
    * the await hangs.
    */
@@ -147,7 +155,7 @@ interface StepHooks {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds composable `prepareStep` and `onStepFinish` closures that
+ * Builds composable `onStepStart`, `prepareStep`, and `onStepEnd` closures that
  * own all step-internal work: emission, compaction, and prompt caching.
  *
  * The harness passes these hooks to `ToolLoopAgent` and reads the
@@ -164,27 +172,14 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   // -------------------------------------------------------------------------
   // prepareStep
   //
-  // Only handles step.started emission and cache/provider metadata. Compaction
-  // runs in the tool-loop before `agent.stream()` so the compacted messages
+  // Only handles cache/provider metadata. Compaction runs in the tool-loop
+  // before `agent.stream()` so the compacted messages
   // flow through the same `messages` variable the harness uses to rebuild
   // session history — no prepareStep snapshot required.
   // -------------------------------------------------------------------------
 
   const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages }) => {
     let processed = messages;
-
-    if (emit && input.emitStepStarted !== false) {
-      const identity: StepExecutionIdentity =
-        input.execution.kind === "model"
-          ? { modelId: input.execution.modelReference.id }
-          : { harnessId: input.execution.harnessId };
-      await emitStepStarted({
-        emit,
-        identity,
-        messages,
-        state: input.emissionState,
-      });
-    }
 
     if (
       input.execution.kind === "model" &&
@@ -219,10 +214,26 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     return stepResult;
   };
 
+  const onStepStart: GenerateTextOnStepStartCallback<ToolSet> = async ({ messages }) => {
+    if (emit && input.emitStepStarted !== false) {
+      const identity: StepExecutionIdentity =
+        input.execution.kind === "model"
+          ? { modelId: input.execution.modelReference.id }
+          : { harnessId: input.execution.harnessId };
+      await emitStepStarted({
+        emit,
+        identity,
+        messages,
+        state: input.emissionState,
+      });
+    }
+  };
+
   return {
-    onStepFinish: async (step: StepResult<ToolSet>): Promise<void> => {
+    onStepEnd: async (step: StepResult<ToolSet>): Promise<void> => {
       resolveStep(step);
     },
+    onStepStart,
     prepareStep,
     stepResult,
   };
@@ -493,7 +504,7 @@ function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): 
   return undefined;
 }
 
-function readGatewayGenerationId(
+export function readGatewayGenerationId(
   providerMetadata: ProviderMetadata | undefined,
 ): string | undefined {
   const generationId = readGatewayMetadata(providerMetadata)?.generationId;

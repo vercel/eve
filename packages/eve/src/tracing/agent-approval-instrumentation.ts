@@ -1,7 +1,5 @@
 import {
   ROOT_CONTEXT,
-  SpanStatusCode,
-  type Span,
   type SpanContext,
   type Tracer,
   trace,
@@ -16,6 +14,9 @@ import type {
 import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -78,7 +79,7 @@ export function createAgentApprovalInstrumentation(input: {
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
     };
-    const requestAttribute = contentAttribute(event.request, false);
+    const requestAttribute = contentAttribute(event.request);
     if (requestAttribute !== undefined) state["requestAttribute"] = requestAttribute;
     ctx.state.set(state);
   };
@@ -93,7 +94,7 @@ export function createAgentApprovalInstrumentation(input: {
       input.idGenerator.deriveSpanId(`approval:${event.idempotencyKey}`),
       () =>
         input.tracer.startSpan(
-          "agent.approval",
+          AGENT_SPAN_NAMES.approval,
           {
             attributes: {
               "agent.action.call_id": state.actionCallId,
@@ -103,11 +104,14 @@ export function createAgentApprovalInstrumentation(input: {
               "agent.approval.request_id": state.requestId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
-              "agent.session.id": state.sessionId,
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
               "agent.turn.id": state.turnId,
               ...agentSpanNamingAttributes("agent.approval"),
+              ...agentTraceIdentityAttributes({
+                rootSessionId: state.rootSessionId,
+                sessionId: state.sessionId,
+              }),
             },
             startTime: state.startTimeMs,
           },
@@ -124,7 +128,7 @@ export function createAgentApprovalInstrumentation(input: {
       span.setAttribute("agent.approval.request", state.requestAttribute);
     }
     if (event.response !== undefined) {
-      const response = contentAttribute(event.response, false);
+      const response = contentAttribute(event.response);
       if (response !== undefined) span.setAttribute("agent.approval.response", response);
     }
     if (event.outcome === "failed") recordError(span, event.error);
@@ -180,11 +184,4 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     stepIndex: state["stepIndex"],
     turnId: state["turnId"],
   };
-}
-
-function recordError(span: Span, error: unknown): void {
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

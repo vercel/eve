@@ -4,7 +4,7 @@ import { withoutDeclinedContent } from "#tracing/content-attributes.js";
 
 const ATTRIBUTES = {
   "agent.channel.delivery.input": '{"message":"private"}',
-  "ai.prompt.messages": "what the user said",
+  "gen_ai.input.messages": "what the user said",
   "ai.response.finish_reason": "stop",
   "ai.response.text": "what the model said",
   "gen_ai.request.model": "test-model",
@@ -46,7 +46,7 @@ describe("withoutDeclinedContent", () => {
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: true, recordOutputs: false }),
     ).toEqual({
       "agent.channel.delivery.input": '{"message":"private"}',
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",
       "gen_ai.tool.call.arguments": "{}",
@@ -71,5 +71,19 @@ describe("withoutDeclinedContent", () => {
     const attributes = { ...ATTRIBUTES };
     withoutDeclinedContent(attributes, { recordInputs: false, recordOutputs: false });
     expect(attributes).toEqual(ATTRIBUTES);
+  });
+
+  it("redacts recalled memory records as input content", () => {
+    const searched = {
+      "gen_ai.memory.records": '[{"content":"Private preference"}]',
+      "gen_ai.operation.name": "search_memory",
+    };
+
+    expect(withoutDeclinedContent(searched, { recordInputs: false, recordOutputs: true })).toEqual({
+      "gen_ai.operation.name": "search_memory",
+    });
+    expect(
+      withoutDeclinedContent(searched, { recordInputs: true, recordOutputs: false }),
+    ).toBeUndefined();
   });
 });

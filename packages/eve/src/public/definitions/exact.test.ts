@@ -40,6 +40,7 @@ describe("definition helper exact inputs", () => {
       experimental: {
         workflow: {
           modelCallsPerStep: 4,
+          retention: 0,
         },
       },
       limits: {
@@ -58,6 +59,7 @@ describe("definition helper exact inputs", () => {
 
     expect(agent.description).toBe("type-test");
     expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
+    expect(agent.experimental.workflow.retention).toBe(0);
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);

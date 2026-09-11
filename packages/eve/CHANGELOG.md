@@ -1,5 +1,47 @@
 # eve
 
+## 0.54.2
+
+### Patch Changes
+
+- 15e18d6: Treat recalled memory records as model input content when applying instrumentation trace policies.
+- 47b7a38: Emit OpenTelemetry GenAI `invoke_workflow` spans when a `defineWorkflowTool` run coordinates nested agents, using the path-derived tool name as `gen_ai.workflow.name`. Durable workflow tools without agent operations remain ordinary actions.
+
+## 0.54.1
+
+### Patch Changes
+
+- ee11c23: Record model input once using the OpenTelemetry `gen_ai.input.messages` schema. Local traces no longer serialize the duplicate `ai.prompt.messages` payload, avoiding binary attachment traversal.
+- b27e9f2: Remove the `task_update` tool and its child-to-parent progress callbacks; use the child session's stream to follow progress. Successful results from overlapping background tasks now reach the parent together across launch turns, after child settlement updates usage and handles; user input, failures, and cancellation remain responsive.
+- b27e9f2: Report content-filtered model responses distinctly, including their finish reason and Gateway generation ID when available, instead of retrying them as empty responses. Filtered partial text is no longer delivered as a completed reply.
+- 0e2912f: Add OpenTelemetry GenAI spans for memory provider recall and capture operations.
+- b27e9f2: Fix `eve dev` silently stopping session updates during long periods of background work. The terminal now keeps listening while the prompt is open, so completion reports appear without another user message.
+
+## 0.54.0
+
+### Minor Changes
+
+- 879d4e5: Advance `agent.trace.schema.version` from 3 to 4 and remove `agent.session` and `agent.channel.delivery`: update dashboards to use per-activation `invoke_agent` spans, linked to callers and grouped by `gen_ai.conversation.id`. Single turn-bound channel deliveries annotate their activation and link it to the active upstream request or function span; `traceChannelRequests` only adds an eve-owned server span as the link target. Other delivery lifecycles do not emit agent spans. Dispatch uses `agent.action` and `execute_tool`, preserves standard GenAI usage totals and trace-content restrictions, and rejects baggage overflow; settlement materializes spans without draining exporters, and conversation IDs remain available without instrumentation.
+
+### Patch Changes
+
+- f60c64b: Brand every user-role model message in `gen_ai.input.messages`. Real user input is `user`; framework-authored messages use namespaced provenance such as `context.instruction` and `execution.background_task`.
+- 84c9604: Make self-modification source edits more efficient by clarifying file and documentation discovery, guarded reads, edit selection, contract preservation, outbound request safety, registry scope, and concise completion reports. Memory providers can now be selected as a registry search category.
+- dea8cd8: The local dev TUI now reconnects idle session streams, so approvals and questions from long-running background tasks still interrupt the prompt after an earlier transport stream closes.
+- 47bd3d7: Preserve one observability conversation ID across local and remote agent dispatch, accepting incoming correlation only on callback-marked remote session creation. Apply the live delivery's trace-content ceiling to the selected caller context, including fallback when its action span is unavailable.
+- 6d0485b: Expose current and initiating principals in Agent Runs turn metadata, including channel-driven and resumed activations. Principal types remain bounded; IDs require a content-visible audience and a resolved trace policy permitting both input and output content, including any forwarded ceiling, and oversized IDs are omitted.
+- 9381078: Keep `agent.action` spans for background tools and subagents open until their tasks complete, fail, or are cancelled, and record the task's final outcome and policy-controlled error details instead of treating its receipt as completion.
+
+## 0.53.1
+
+### Patch Changes
+
+- 8c00b8e: Upload Slack responses longer than the native Markdown limit as Markdown snippets. Preserve upload errors for channel error logging instead of replacing them with a generic notice.
+- 11320e1: Enable the built-in Vercel Agent Runs instrumentation for Preview deployments as well as Production deployments.
+- 8c8888e: Normalize mixed provider-executed and local tool calls into replay-safe history so Gemini conversations can continue after the tool results are persisted.
+- 09df32c: Adds `experimental.workflow.retention` to `defineAgent`, which forwards a run's data-retention preference to the durable runtime. Set it to `0` to have a run's payloads, streams, and event log deleted as soon as the run finishes instead of kept for the world's default period.
+- 05d2047: Keep Vercel sandbox template records persistent and replace session sandboxes whose saved filesystem snapshot is no longer available. Ambiguous session creation failures no longer delete the shared template record.
+
 ## 0.53.0
 
 ### Minor Changes

@@ -185,22 +185,21 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.notices).toEqual([]);
   });
 
-  it("selects ChatGPT under Change provider through exclusive terminal auth", async () => {
+  it("keeps ChatGPT authentication inside the model flow panel", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
-    const ensureChatGptAuth = vi.fn(async () => {});
+    const stopSpinner = vi.fn();
+    prompter.log.spinner = vi.fn((message) => ({
+      stop: message.startsWith("Waiting for ChatGPT") ? stopSpinner : vi.fn(),
+    }));
+    const ensureChatGptAuth = vi.fn<ModelFlowDeps["ensureChatGptAuth"]>(async (options) => {
+      options?.log?.("Sign in to ChatGPT in your browser.");
+    });
     const deps = flowDeps({
       ensureChatGptAuth,
       runProviderFlow: vi.fn(async () => ({ kind: "chatgpt" }) as const),
     });
-    const exclusiveCalls: string[] = [];
-    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      exclusiveCalls.push("called");
-      return task();
-    };
 
-    await expect(
-      runModelFlow({ appRoot: APP_ROOT, prompter, deps, withExclusiveTerminal }),
-    ).resolves.toEqual({
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       accessChanged: true,
       modelMessage: `Model changed to ${pc.bold("chatgpt/gpt-5.6-sol")}. Live on your next prompt.`,
@@ -213,7 +212,12 @@ describe("runModelFlow", () => {
       "done",
     ]);
     expect(menuPaints).toHaveLength(1);
-    expect(exclusiveCalls).toEqual(["called"]);
+    expect(prompter.log.spinner).toHaveBeenCalledWith(
+      "Waiting for ChatGPT sign-in in your browser…",
+      { kind: "external-action", emphasis: "browser" },
+    );
+    expect(prompter.log.info).toHaveBeenCalledWith("Sign in to ChatGPT in your browser.");
+    expect(stopSpinner).toHaveBeenCalledOnce();
     expect(ensureChatGptAuth).toHaveBeenCalledOnce();
     expect(deps.applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,

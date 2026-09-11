@@ -20,7 +20,7 @@ describe("task model retry integration", () => {
       expect(outcome.result.attempt).toBe(2);
       expect(outcome.result.output).toBe("Recovered task output.");
       expect(outcome.result.historyBeforeModelCall).toEqual([
-        { content: "Complete the delegated task.", role: "user" },
+        { content: "Complete the delegated task.", kind: "user", role: "user" },
         { content: "Prior durable work is complete.", role: "assistant" },
       ]);
       expect(outcome.result.history).toContainEqual({

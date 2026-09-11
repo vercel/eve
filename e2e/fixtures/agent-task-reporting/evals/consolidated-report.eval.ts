@@ -1,9 +1,9 @@
 import { defineEval } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
+import { equals } from "eve/evals/expect";
 
 import {
-  completeReport,
-  requireStreamIndex,
+  compactWhilePending,
+  modelSteps,
   startWarehouseLookups,
   waitForPartialCompletion,
   waitForReport,
@@ -12,39 +12,16 @@ import {
 function reportingEval() {
   return defineEval({
     description:
-      "A stock eve agent acknowledges accepted background work and reports all results after compaction and task settlement.",
+      "A real parent retains a completed child's result across compaction while its siblings are gated, then reports the whole cohort including a nested lookup.",
     tags: ["real-model"],
     async test(t) {
       const run = await startWarehouseLookups(t);
       await waitForPartialCompletion(t, run);
-
-      const compaction = t.target.watchTurn(run.sessionId, {
-        startIndex: requireStreamIndex(run.session),
-      });
-      const response = await t.target.fetch(
-        `/eve/v1/session/${encodeURIComponent(run.sessionId)}/compact`,
-        {
-          body: "{}",
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        },
+      await compactWhilePending(t, run);
+      await waitForReport(t, run);
+      t.check(modelSteps(run.parentTurns), equals(1)).label(
+        "compaction does not admit partial successes; only the settled cohort invokes the parent model",
       );
-      await t.require(
-        response.status,
-        satisfies((status: number) => status === 202, "parent session accepts compaction"),
-      );
-      const compactedTurn = await compaction.result();
-      compactedTurn.event("compaction.requested", { count: 1 });
-      // A declined summary preserves history; the caller still needs the complete report.
-      compactedTurn
-        .event("compaction.completed", { count: 1 })
-        .soft()
-        .label("successful checkpoint");
-      compactedTurn.noFailedActions();
-      run.session = compaction.session;
-
-      const report = await waitForReport(t, run);
-      await t.require(report, completeReport());
       t.noFailedActions();
     },
   });

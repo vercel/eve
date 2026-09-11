@@ -18,7 +18,6 @@ import { disposeHook } from "#execution/hook-ownership.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
-import type { TaskInboundUpdate } from "#tasks/types.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
@@ -51,10 +50,7 @@ export type AgentInvocationEvent =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-export type AgentInvocationReply =
-  | AgentInvocationEvent
-  | RuntimeActionResultHookPayload
-  | TaskInboundUpdate;
+export type AgentInvocationReply = AgentInvocationEvent | RuntimeActionResultHookPayload;
 
 /** Invokes an agent from a workflow tool. */
 export async function agent(
@@ -148,14 +144,6 @@ export async function invokeAgent(
             stepIndex: reply.event.stepIndex,
             turnId: reply.event.turnId,
           },
-        });
-        continue;
-      }
-      if (reply.kind === "task-update") {
-        await resumeHookStep(owner.inbox, {
-          kind: "report",
-          from: run,
-          update: reply.message,
         });
         continue;
       }

@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.53.0",
+  "version": "0.54.2",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -185,11 +185,6 @@
       "types": "./dist/src/public/tools/task-cancel.d.ts",
       "import": "./dist/src/public/tools/task-cancel.js",
       "default": "./dist/src/public/tools/task-cancel.js"
-    },
-    "./tools/task_update": {
-      "types": "./dist/src/public/tools/task-update.d.ts",
-      "import": "./dist/src/public/tools/task-update.js",
-      "default": "./dist/src/public/tools/task-update.js"
     },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
@@ -519,6 +514,7 @@
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",
+    "just-secrets": "0.0.2",
     "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",

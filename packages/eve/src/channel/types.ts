@@ -522,6 +522,8 @@ export interface RunInput {
     readonly outputSchema?: JsonObject;
   };
   readonly mode: RunMode;
+  /** Observability correlation only; never grants delegated-session privileges. */
+  readonly conversationId?: string;
   readonly parent?: SessionParent;
   /**
    * Dispatching parent's open trace window. Handed down rather than looked up

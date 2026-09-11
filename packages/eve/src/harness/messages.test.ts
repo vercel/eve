@@ -3,9 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   coalesceDeliveries,
   coalesceTurnInputs,
+  createFrameworkUserMessage,
+  createUserMessage,
+  isFrameworkMessageKind,
+  isFrameworkUserMessage,
+  isUserMessageKind,
+  isUserModelMessage,
+  markFrameworkStepInput,
   normalizeModelMessages,
   normalizeUserContent,
   resolveAssistantStepText,
+  validateHarnessModelMessages,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -95,6 +103,29 @@ describe("coalesceTurnInputs", () => {
     const result = messages.reduce(coalesceTurnInputs);
 
     expect(result).toEqual({ message: "a\n\nb\n\nc" });
+  });
+
+  it("preserves a framework kind only when all merged message content shares it", () => {
+    expect(
+      coalesceTurnInputs(
+        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+      ),
+    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.background_task"));
+    expect(
+      coalesceTurnInputs(
+        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
+        {
+          message: "second",
+        },
+      ),
+    ).toEqual({ message: "first\n\nsecond" });
+    expect(
+      coalesceTurnInputs(
+        markFrameworkStepInput({ message: "first" }, "context.instruction"),
+        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+      ),
+    ).toEqual({ message: "first\n\nsecond" });
   });
 
   it("merges inputResponses from both payloads", () => {
@@ -254,6 +285,63 @@ describe("normalizeModelMessages", () => {
         visible,
       ]),
     ).toEqual([{ content: [toolCall], role: "assistant" }, visible]);
+  });
+});
+
+describe("createFrameworkUserMessage", () => {
+  it.each([
+    "context.instruction",
+    "context.state",
+    "context.compaction",
+    "memory.load",
+    "execution.background_task",
+    "execution.continuation",
+    "execution.retry",
+  ] as const)("recognizes %s as a framework message kind", (kind) => {
+    expect(isFrameworkMessageKind(kind)).toBe(true);
+  });
+
+  it("brands framework-authored user-role messages", () => {
+    const message = createFrameworkUserMessage(
+      "execution.background_task",
+      "Background task task_1 completed.",
+    );
+
+    expect(message).toEqual({
+      content: "Background task task_1 completed.",
+      kind: "execution.background_task",
+      role: "user",
+    });
+    expect(isFrameworkUserMessage(message)).toBe(true);
+    expect(isFrameworkUserMessage({ content: "A user message", role: "user" })).toBe(false);
+    expect(isFrameworkMessageKind("synthetic")).toBe(false);
+  });
+
+  it("brands real user messages with the user kind", () => {
+    const message = createUserMessage("user", "A user message");
+
+    expect(message).toEqual({ content: "A user message", kind: "user", role: "user" });
+    expect(isUserMessageKind("user")).toBe(true);
+    expect(isUserModelMessage(message)).toBe(true);
+    expect(isFrameworkUserMessage(message)).toBe(false);
+  });
+
+  it("recognizes unknown legacy provenance without treating it as framework-authored", () => {
+    const message = {
+      content: "A retained pre-0.54 message",
+      kind: "legacy.unknown",
+      role: "user",
+    } as const;
+
+    expect(isUserMessageKind(message.kind)).toBe(true);
+    expect(isUserModelMessage(message)).toBe(true);
+    expect(isFrameworkUserMessage(message)).toBe(false);
+  });
+
+  it("rejects unclassified user messages before history retention", () => {
+    expect(() =>
+      validateHarnessModelMessages([{ content: "A user message", role: "user" }]),
+    ).toThrow("Expected every user-role model message to have a kind.");
   });
 });
 

@@ -8,7 +8,10 @@ export {
   type DynamicSubagentDefinition,
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
+  type WorkspaceAgentDefinition,
+  type WorkspaceAgentTransport,
   defineAgent,
   defineDynamic,
   defineRemoteAgent,
+  defineWorkspaceAgent,
 } from "../../src/public/index.ts";

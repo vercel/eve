@@ -252,6 +252,7 @@ describe("task-owned agent settlement", () => {
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
+      serializedContext: {},
       result: {
         callId: "call-1",
         kind: "subagent-result",
@@ -344,6 +345,7 @@ describe("task-owned agent settlement", () => {
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
+      serializedContext: {},
       ownerId: "workflow-run-1",
       result: {
         callId: "call-1",

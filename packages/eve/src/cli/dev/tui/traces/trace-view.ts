@@ -191,7 +191,7 @@ function overlayRight(row: string, segment: string, width: number, margin: numbe
  * them in conversation mode so it stays metadata-focused.
  */
 const CONVERSATION_CONTENT_KEYS: ReadonlySet<string> = new Set([
-  "ai.prompt.messages",
+  "gen_ai.input.messages",
   "ai.prompt.system",
   "ai.response.reasoning",
   "ai.response.text",
@@ -261,8 +261,8 @@ function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions
   if (state.trace?.agentName !== undefined) {
     segments.push(stripTerminalControls(state.trace.agentName));
   }
-  if (state.trace?.sessionId !== undefined) {
-    segments.push(`session ${stripTerminalControls(state.trace.sessionId)}`);
+  if (state.trace?.conversationId !== undefined) {
+    segments.push(`conversation ${stripTerminalControls(state.trace.conversationId)}`);
   }
   if (state.trace !== undefined) {
     const end =

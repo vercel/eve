@@ -143,7 +143,7 @@ export async function runTurnOwnedWorkflow(
           throw new Error("Background tasks were returned without their committed session state.");
         }
         await cursor.adopt({
-          serializedContext: beforeStep.serializedContext,
+          serializedContext: result.backgroundTaskContext ?? beforeStep.serializedContext,
           sessionState: result.backgroundTaskState,
         });
         await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });

@@ -12,7 +12,7 @@ function span(spanId: string, sessionId: string): LocalTraceSpan {
   return {
     attributes: {
       "agent.name": "tester",
-      "agent.session.id": sessionId,
+      "gen_ai.conversation.id": sessionId,
       "agent.turn.id": "turn_0",
     },
     endTimeNs: 1_000_000n,
@@ -25,14 +25,14 @@ function span(spanId: string, sessionId: string): LocalTraceSpan {
   };
 }
 
-function trace(traceId: string, sessionIds: readonly string[]): LocalTrace {
-  const spans = sessionIds.map((sessionId, index) =>
-    span(String(index).padStart(16, "0"), sessionId),
+function trace(traceId: string, conversationIds: readonly string[]): LocalTrace {
+  const spans = conversationIds.map((conversationId, index) =>
+    span(String(index).padStart(16, "0"), conversationId),
   );
   return {
     endTimeNs: 1_000_000n,
-    sessionId: sessionIds[0],
-    sessionIds,
+    conversationId: conversationIds[0],
+    conversationIds,
     spans,
     startTimeNs: 1_000_000n,
     traceId,
@@ -84,7 +84,9 @@ describe("TraceViewerSession drag copy", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "copy me please" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "copy me please", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };
@@ -99,8 +101,8 @@ describe("TraceViewerSession drag copy", () => {
     const store = stubStore([
       {
         endTimeNs: 1_000_000n,
-        sessionId: "session-mine",
-        sessionIds: ["session-mine"],
+        conversationId: "session-mine",
+        conversationIds: ["session-mine"],
         spans: [turn, delivery, model],
         startTimeNs: 1_000_000n,
         traceId: "c".repeat(32),
@@ -151,15 +153,17 @@ describe("TraceViewerSession background surfaces", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };
     const store = stubStore([
       {
         endTimeNs: 1_000_000n,
-        sessionId: "session-mine",
-        sessionIds: ["session-mine"],
+        conversationId: "session-mine",
+        conversationIds: ["session-mine"],
         spans: [turn, model],
         startTimeNs: 1_000_000n,
         traceId: "c".repeat(32),
@@ -194,15 +198,17 @@ describe("TraceViewerSession background surfaces", () => {
       name: "ai.streamText.doStream",
       parentSpanId: turn.spanId,
       attributes: {
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
         "ai.response.text": "reply",
       },
     };
     const store = stubStore([
       {
         endTimeNs: 1_000_000n,
-        sessionId: "session-mine",
-        sessionIds: ["session-mine"],
+        conversationId: "session-mine",
+        conversationIds: ["session-mine"],
         spans: [turn, model],
         startTimeNs: 1_000_000n,
         traceId: "c".repeat(32),
@@ -230,13 +236,13 @@ describe("TraceViewerSession background surfaces", () => {
 describe("TraceViewerSession session preference", () => {
   it("opens on the trace containing the current session, not the newest", async () => {
     // Trace ids are provider-generated, so the session's trace is found by
-    // matching sessionIds — here the session lives in the older trace.
+    // matching conversation IDs — here the session lives in the older trace.
     const store = stubStore([
       trace("a".repeat(32), ["session-other"]),
       trace("b".repeat(32), ["session-mine"]),
     ]);
     const frame = await openViewer(store, "session-mine");
-    expect(frame).toContain("session session-mine");
+    expect(frame).toContain("conversation session-mine");
     expect(frame).toContain("[2/2]");
   });
 
@@ -246,7 +252,7 @@ describe("TraceViewerSession session preference", () => {
       trace("b".repeat(32), ["session-other"]),
     ]);
     const frame = await openViewer(store, "session-child");
-    expect(frame).toContain("session session-root");
+    expect(frame).toContain("conversation session-root");
     expect(frame).toContain("[1/2]");
   });
 
@@ -256,7 +262,7 @@ describe("TraceViewerSession session preference", () => {
       trace("b".repeat(32), ["session-older"]),
     ]);
     const frame = await openViewer(store, "session-unseen");
-    expect(frame).toContain("session session-other");
+    expect(frame).toContain("conversation session-other");
     expect(frame).toContain("[1/2]");
   });
 });

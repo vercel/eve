@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ChatGptCredentialStore } from "#public/models/openai/chatgpt/credential-store.js";
+import {
+  ChatGptInvalidStoredSessionError,
+  type ChatGptCredentialStore,
+} from "#public/models/openai/chatgpt/credential-store.js";
 import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
 import { createCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
@@ -46,6 +49,44 @@ function setup() {
 const device = { device_auth_id: "device-id", user_code: "ABCD-EFGH", interval: "1" };
 
 describe("ChatGPT device sign-in", () => {
+  it("reports unavailable secure storage before opening OAuth", async () => {
+    const options = setup();
+    vi.spyOn(options.store, "read").mockRejectedValue(new Error("OS secret store is locked"));
+    await expect(ensureChatGptAuth(options)).rejects.toThrow("OS secret store is locked");
+    expect(options.open).not.toHaveBeenCalled();
+    expect(options.fetch).not.toHaveBeenCalled();
+    expect(options.store.update).not.toHaveBeenCalled();
+  });
+
+  it("checks secure storage even after the broker was previously signed out", async () => {
+    const options = setup();
+    await expect(options.broker.refreshState()).resolves.toEqual({ kind: "signed-out" });
+    vi.spyOn(options.store, "read").mockRejectedValue(new Error("OS secret store is locked"));
+    await expect(ensureChatGptAuth(options)).rejects.toThrow("OS secret store is locked");
+    expect(options.open).not.toHaveBeenCalled();
+    expect(options.fetch).not.toHaveBeenCalled();
+  });
+
+  it("allows a new sign-in to replace malformed secure credentials", async () => {
+    vi.useFakeTimers();
+    const options = setup();
+    vi.spyOn(options.store, "read")
+      .mockRejectedValueOnce(new ChatGptInvalidStoredSessionError())
+      .mockRejectedValueOnce(new ChatGptInvalidStoredSessionError());
+    options.fetch
+      .mockResolvedValueOnce(Response.json(device))
+      .mockResolvedValueOnce(
+        Response.json({ authorization_code: "code", code_verifier: "verifier" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 }),
+      );
+    const login = ensureChatGptAuth(options);
+    await vi.advanceTimersByTimeAsync(2001);
+    await login;
+    expect(options.store.update).toHaveBeenCalledWith(expect.any(Function), { replace: true });
+  });
+
   it("completes a first sign-in after pending polls without any Codex credentials", async () => {
     vi.useFakeTimers();
     const options = setup();

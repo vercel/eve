@@ -20,16 +20,24 @@ import {
   turnIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import {
+  findInstrumentationActionScopeForCall,
   rememberInstrumentationActionScope,
   rememberInstrumentationInputScope,
   takeInstrumentationActionScopeForCall,
+  takeInstrumentationActionScopeForTask,
   takeInstrumentationInputScope,
 } from "#instrumentation/state.js";
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import {
+  isRuntimeWorkflowToolAction,
+  type RuntimeActionRequest,
+  type RuntimeActionResult,
+} from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { deriveTaskId } from "#tasks/task-id.js";
+import type { TaskUsage, TaskView } from "#tasks/types.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
@@ -84,7 +92,8 @@ export function createInstrumentationHandleEvent(
           includeTurn:
             event.type === "turn.cancelled" ||
             event.type === "turn.completed" ||
-            event.type === "turn.failed",
+            event.type === "turn.failed" ||
+            event.type === "session.failed",
           outcome:
             event.type === "turn.failed" || event.type === "session.failed"
               ? "failed"
@@ -203,6 +212,7 @@ async function publishActionStarts(
         callId: action.callId,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
+        ...(isRuntimeWorkflowToolAction(action) ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         name: actionName(action),
         scope,
@@ -217,11 +227,16 @@ async function publishActionTerminal(
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
 ): Promise<void> {
-  const correlation = takeInstrumentationActionScopeForCall(
+  const correlation = findInstrumentationActionScopeForCall(
     input.sessionId,
     event.data.result.callId,
   );
   if (correlation === undefined) return;
+  const backgroundTask = readBackgroundTaskReceipt(event.data.result, correlation);
+  if (event.data.status === "completed" && backgroundTask !== undefined) {
+    return;
+  }
+  takeInstrumentationActionScopeForCall(input.sessionId, event.data.result.callId);
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
 
@@ -266,6 +281,85 @@ async function publishActionTerminal(
   );
 }
 
+/** Settles actions whose model-facing result was an admitted background-task receipt. */
+export async function publishBackgroundTaskSettlements(input: {
+  readonly acceptedAtMs?: number;
+  readonly hooks: InstrumentationHooks;
+  readonly views: readonly TaskView[];
+}): Promise<void> {
+  const capturesOutputs = input.hooks.capturesOutputs ?? input.hooks.capturesContent;
+  const acceptedAtMs = input.acceptedAtMs ?? Date.now();
+  for (const view of input.views) {
+    if (view.status !== "completed" && view.status !== "failed" && view.status !== "cancelled") {
+      continue;
+    }
+    const correlation = takeInstrumentationActionScopeForTask(view.taskId);
+    if (correlation === undefined) continue;
+    if (view.status === "completed") {
+      await input.hooks.publish(
+        Object.freeze({
+          acceptedAtMs,
+          idempotencyKey: correlation.idempotencyKey,
+          outcome: "completed",
+          output: Object.freeze(
+            capturesOutputs ? { output: view.lastOutput.data, type: "result" } : { type: "result" },
+          ),
+          scope: correlation.scope,
+          type: "action.completed",
+          usage: instrumentationUsage(view.usage),
+        }),
+      );
+      continue;
+    }
+    await input.hooks.publish(
+      Object.freeze({
+        acceptedAtMs,
+        error:
+          view.status === "failed"
+            ? capturesOutputs
+              ? view.lastOutput.data
+              : undefined
+            : new Error("The background task was cancelled."),
+        errorCode:
+          view.status === "failed" ? "BACKGROUND_TASK_FAILED" : "BACKGROUND_TASK_CANCELLED",
+        idempotencyKey: correlation.idempotencyKey,
+        outcome: view.status,
+        scope: correlation.scope,
+        type: "action.failed",
+      } satisfies InstrumentationActionFailedEvent),
+    );
+  }
+}
+
+function readBackgroundTaskReceipt(
+  result: RuntimeActionResult,
+  correlation: { readonly scope: InstrumentationAttemptScope },
+): { readonly taskId: string } | undefined {
+  const output = result.output;
+  if (typeof output !== "object" || output === null || Array.isArray(output)) return undefined;
+  if (Reflect.get(output, "status") !== "working") return undefined;
+  const taskId = Reflect.get(output, "taskId");
+  if (typeof taskId !== "string") return undefined;
+  const expectedTaskId = deriveTaskId({
+    callId: result.callId,
+    parentSessionId: correlation.scope.sessionId,
+    parentTurnId: correlation.scope.turnId,
+  });
+  return taskId === expectedTaskId ? { taskId } : undefined;
+}
+
+function instrumentationUsage(usage: TaskUsage | undefined): InstrumentationUsage | undefined {
+  if (usage === undefined) return undefined;
+  return {
+    inputTokenDetails: {
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+    },
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+}
+
 function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {
   if (
     result.kind !== "subagent-result" ||
@@ -302,6 +396,7 @@ function toLifecycleEvent(
         channelAudience: input.channelAudience,
         channelKind: input.channelKind,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
         sessionId: input.sessionId,

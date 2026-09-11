@@ -1,7 +1,6 @@
-import type { ModelMessage } from "ai";
-
 import { clearReadFileState } from "#execution/tools/file-state.js";
 import { getTodoCompactionMessage } from "#execution/tools/todo.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 
 /**
  * Re-applies framework-owned state preservation after the harness compacts
@@ -15,7 +14,7 @@ import { getTodoCompactionMessage } from "#execution/tools/todo.js";
  * Must be called inside the harness step's `AlsContext`; both steps read
  * durable context state.
  */
-export function preserveFrameworkStateOnCompaction(): readonly ModelMessage[] {
+export function preserveFrameworkStateOnCompaction(): readonly HarnessModelMessage[] {
   clearReadFileState();
   const todo = getTodoCompactionMessage();
   return todo === undefined ? [] : [todo];

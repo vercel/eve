@@ -42,10 +42,14 @@ export async function applyTaskAgentRequest(
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
+        serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
-      return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
+      return {
+        serializedContext: settled.serializedContext,
+        sessionState: settled.sessionState,
+      };
     }
     case "agent-invoke": {
       const dispatched = await dispatchTaskAgentInvocationStep({
@@ -61,7 +65,7 @@ export async function applyTaskAgentRequest(
           const emitted = await emitTaskSubagentCalledStep({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
           });
           return {
             serializedContext: emitted.serializedContext,
@@ -74,7 +78,7 @@ export async function applyTaskAgentRequest(
             results: [dispatched.result],
           });
           return {
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
             sessionState: dispatched.sessionState,
           };
         case "not-admitted":

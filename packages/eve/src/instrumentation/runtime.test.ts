@@ -2,13 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
+  AuthKey,
   ChannelInstrumentationKey,
+  ConversationIdKey,
+  InitiatorAuthKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
+  ParentSessionKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { instrumentMemoryOperation } from "#instrumentation/memory.js";
 import {
   bindInstrumentationRuntime,
   bindSessionInstrumentation,
@@ -87,19 +92,16 @@ function initializeRemoteSession(
     idGenerator: new AgentSpanIdGenerator(),
     prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
   });
-  initializeSessionInstrumentation({
-    agentName: "remote-agent",
-    ctx,
-    parentTraceContext: {
-      forwardedTracePolicy: {
-        ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
-        originAudience,
-      },
-      spanId: "c".repeat(16),
-      traceFlags: 1,
-      traceId: "d".repeat(32),
+  ctx.set(ParentTraceContextKey, {
+    forwardedTracePolicy: {
+      ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
+      originAudience,
     },
+    spanId: "c".repeat(16),
+    traceFlags: 1,
+    traceId: "d".repeat(32),
   });
+  initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
   return ctx;
 }
 
@@ -125,6 +127,12 @@ describe("initializeSessionInstrumentation", () => {
       traceFlags: 1,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
+      spanId: "c".repeat(16),
+      traceId: "d".repeat(32),
+    });
+    expect(ctx.get(SessionTraceSeedKey)?.spanId).not.toBe("c".repeat(16));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
     expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
     expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
@@ -225,19 +233,16 @@ describe("initializeSessionInstrumentation", () => {
       idGenerator: new AgentSpanIdGenerator(),
       prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
     });
-    initializeSessionInstrumentation({
-      agentName: "remote-agent",
-      ctx,
-      parentTraceContext: {
-        forwardedTracePolicy: {
-          ceiling: { recordInputs: false, recordOutputs: true },
-          originAudience: "public",
-        },
-        spanId: "c".repeat(16),
-        traceFlags: 1,
-        traceId: "d".repeat(32),
+    ctx.set(ParentTraceContextKey, {
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "public",
       },
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
     });
+    initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
 
     const messageCount = await bindSessionInstrumentation({
       agentName: "remote-agent",
@@ -306,7 +311,7 @@ describe("initializeSessionInstrumentation", () => {
     expect(ceiling).toEqual({ recordInputs: false, recordOutputs: false });
   });
 
-  it("preserves sampled flags for a non-forwarded parent decision", () => {
+  it("drops the independent trace when a local parent decision drops", () => {
     const ctx = createContext("public");
     ctx.set(ParentTraceContextKey, {
       decision: { action: "drop" },
@@ -322,22 +327,55 @@ describe("initializeSessionInstrumentation", () => {
     initializeSessionInstrumentation({
       agentName: "local-subagent",
       ctx,
-      parentTraceContext: ctx.get(ParentTraceContextKey),
     });
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
       decision: { action: "drop" },
-      traceFlags: 1,
+      traceFlags: 0,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+  });
+
+  it("does not widen an unsampled parent with a record decision", () => {
+    const ctx = createContext("public");
+    ctx.set(ParentTraceContextKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      spanId: "c".repeat(16),
+      traceFlags: 0,
+      traceId: "d".repeat(32),
+    });
+    initializeSessionInstrumentation({ agentName: "local-subagent", ctx });
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "drop" },
+      traceFlags: 0,
+    });
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
   });
 });
 
 describe("bindInstrumentationRuntime", () => {
-  it("returns no worker controls when no runtime is loaded", () => {
-    expect(
-      bindInstrumentationRuntime(undefined, new ContextContainer(), boundSession),
-    ).toBeUndefined();
+  it("initializes conversation identity without worker controls when no runtime is loaded", () => {
+    const ctx = new ContextContainer();
+    expect(bindInstrumentationRuntime(undefined, ctx, boundSession)).toBeUndefined();
+    expect(ctx.get(ConversationIdKey)).toBe(boundSession.rootSessionId);
+  });
+
+  it.each([true, false])("preserves effective correlation (runtime installed: %s)", (installed) => {
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call",
+      sessionId: "parent",
+      rootSessionId: "effective-root",
+      turn: { id: "turn", sequence: 0 },
+    });
+    const runtime = installed
+      ? createRuntime({ capturesContent: true, publish: vi.fn() })
+      : undefined;
+    bindInstrumentationRuntime(runtime, ctx, boundSession);
+    expect(ctx.get(ConversationIdKey)).toBe("effective-root");
+    ctx.set(ConversationIdKey, "original-conversation");
+    bindInstrumentationRuntime(runtime, ctx, boundSession);
+    expect(ctx.get(ConversationIdKey)).toBe("original-conversation");
   });
 
   it("reads the channel audience when the step runs", async () => {
@@ -383,6 +421,74 @@ describe("bindInstrumentationRuntime", () => {
     });
   });
 
+  it.each([
+    ["public", undefined, true],
+    ["private", undefined, false],
+    ["public", { action: "drop" }, false],
+    ["public", { action: "record", recordInputs: false, recordOutputs: true }, false],
+    ["public", { action: "record", recordInputs: true, recordOutputs: false }, false],
+    ["public", { action: "record", recordInputs: false, recordOutputs: false }, false],
+    ["public", { action: "record", recordInputs: true, recordOutputs: true }, true],
+  ] as const)(
+    "prepares %s turn traces with decision %j and permitted principal summaries",
+    async (audience, decision, includesId) => {
+      const ctx = createContext(audience);
+      if (decision !== undefined) {
+        ctx.set(SessionTraceSeedKey, {
+          decision,
+          spanId: "1".repeat(16),
+          traceFlags: decision.action === "drop" ? 0 : 1,
+          traceId: "2".repeat(32),
+        });
+      }
+      ctx.set(AuthKey, {
+        attributes: { email: "current@example.com" },
+        authenticator: "api-key",
+        principalId: "current-secret",
+        principalType: "service",
+      });
+      ctx.set(InitiatorAuthKey, {
+        attributes: { email: "initiator@example.com" },
+        authenticator: "oidc",
+        principalId: "initiator-secret",
+        principalType: "user",
+      });
+      const prepareTurnTrace = vi.fn().mockResolvedValue({
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      });
+      const instrumentation = bindInstrumentationRuntime(
+        {
+          ...createRuntime({ capturesContent: false, publish: vi.fn() }),
+          prepareTurnTrace,
+        },
+        ctx,
+        boundSession,
+      );
+
+      await instrumentation?.preparePreamble({
+        sequence: 0,
+        sessionStarted: true,
+        turnId: "turn-1",
+      });
+
+      const event = prepareTurnTrace.mock.calls[0]?.[0];
+      expect(event).toMatchObject({
+        currentPrincipal: { type: "service" },
+        initiatorPrincipal: { type: "user" },
+      });
+      if (includesId) {
+        expect(event?.currentPrincipal?.id).toBe("current-secret");
+        expect(event?.initiatorPrincipal?.id).toBe("initiator-secret");
+      } else {
+        expect(event?.currentPrincipal).not.toHaveProperty("id");
+        expect(event?.initiatorPrincipal).not.toHaveProperty("id");
+      }
+      expect(JSON.stringify(event)).not.toContain("@example.com");
+    },
+  );
+
   it("keeps the step-entry audience for the rest of the step", async () => {
     const ctx = createContext("private");
     const instrumentation = bindInstrumentationRuntime(
@@ -423,6 +529,7 @@ describe("bindInstrumentationRuntime", () => {
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [authoredIntegration];
     const runtime = {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      memoryOperations: true,
       ownsAgentSpans: true,
     };
     const instrumentation = bindInstrumentationRuntime(runtime, createContext(), boundSession);
@@ -454,6 +561,92 @@ describe("bindInstrumentationRuntime", () => {
     } finally {
       globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = originalIntegrations;
     }
+  });
+
+  it("does not publish memory operations without a memory instrumentation provider", async () => {
+    const publish = vi.fn();
+    const execute = vi.fn(async () => ({ value: "recalled" }));
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish }),
+      createContext(),
+      boundSession,
+    );
+
+    const result = await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: false,
+        session: { sessionId: "session-1" },
+      },
+      async () =>
+        await instrumentMemoryOperation(
+          instrumentation?.memory,
+          {
+            idempotencyKey: "memory:search",
+            operationName: "search_memory",
+            phase: "turn.started",
+            slot: "profile",
+            storeId: "memscope1_scope",
+            turnId: "turn-1",
+          },
+          execute,
+        ),
+    );
+
+    expect(result).toBe("recalled");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("publishes memory operations with the effective session identity", async () => {
+    const publish = vi.fn();
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call-1",
+      rootSessionId: "conversation-root",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 0 },
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        memoryOperations: true,
+      },
+      ctx,
+      boundSession,
+    );
+
+    await instrumentMemoryOperation(
+      instrumentation?.memory,
+      {
+        idempotencyKey: "memory:search",
+        operationName: "search_memory",
+        phase: "turn.started",
+        slot: "profile",
+        storeId: "memscope1_scope",
+        turnId: "turn-1",
+      },
+      async () => ({
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+        recordCount: 1,
+        value: undefined,
+      }),
+    );
+
+    expect(publish.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        rootSessionId: "conversation-root",
+        sessionId: "session-1",
+        type: "memory.operation.started",
+      }),
+      expect.objectContaining({
+        recordCount: 1,
+        rootSessionId: "conversation-root",
+        sessionId: "session-1",
+        type: "memory.operation.completed",
+      }),
+    ]);
   });
 
   it("isolates concurrent step decisions and audiences", async () => {
@@ -730,7 +923,7 @@ describe("initializeSessionInstrumentation", () => {
     });
   }
 
-  it("marks the seed unsampled when the installed sampler drops the trace", () => {
+  it("defers sampler admission until activation metadata is available", () => {
     const samplesTrace = vi.fn(() => false);
     registerSeedRuntime({ samplesTrace });
     const ctx = createContext();
@@ -738,9 +931,9 @@ describe("initializeSessionInstrumentation", () => {
     initializeSessionInstrumentation({ agentName: "test-agent", ctx });
 
     const seed = ctx.get(SessionTraceSeedKey);
-    expect(seed?.traceFlags).toBe(0);
+    expect(seed?.traceFlags).toBe(1);
     expect(seed?.decision).toMatchObject({ action: "record" });
-    expect(samplesTrace).toHaveBeenCalledExactlyOnceWith(seed?.traceId);
+    expect(samplesTrace).not.toHaveBeenCalled();
   });
 
   it("keeps the seed sampled when the sampler admits the trace", () => {

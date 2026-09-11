@@ -17,7 +17,7 @@ describe("compiled agent manifest v49", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       agent: {
-        experimental: { workflow: { modelCallsPerStep: 4 } },
+        experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
         limits: { maxTokenCostUsdPerSession: 1.5 },
         model: "openai/gpt-5.4",
       },
@@ -28,6 +28,8 @@ describe("compiled agent manifest v49", () => {
     const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
+    // `0` is falsy: a truthiness-based copy anywhere on the manifest path drops it.
+    expect(parsed.config.experimental?.workflow?.retention).toBe(0);
     expect(parsed.config.limits?.maxTokenCostUsdPerSession).toBe(1.5);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
   });

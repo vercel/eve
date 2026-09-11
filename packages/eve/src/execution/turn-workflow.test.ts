@@ -15,6 +15,7 @@ import {
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -426,6 +427,13 @@ describe("turnWorkflow", () => {
   it("commits and releases background tasks before settling a cancelled turn", async () => {
     const initialState = createSessionState({ continuationToken: "http:parent" });
     const backgroundState = createSessionState({ continuationToken: "http:parent:background" });
+    const backgroundContext = {
+      "eve.harness.agentTrace": { actions: { "action-1": {} }, sessions: {}, turns: {} },
+      "eve.harness.instrumentationActionScopes": {
+        "action-1": { scope: { turnId: "turn-1" }, taskId: "task-1" },
+      },
+      "eve.harness.instrumentationState": { "sink\0action-1": { value: "open" } },
+    };
     const backgroundTasks = [
       {
         taskId: "task-1",
@@ -433,12 +441,14 @@ describe("turnWorkflow", () => {
         taskRunId: "task-run-1",
       },
     ];
+    const adopt = vi.spyOn(TurnExecutionCursor.prototype, "adopt");
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "cancelled",
+      backgroundTaskContext: { ...backgroundContext, state: "start" },
       backgroundTaskState: backgroundState,
       backgroundTasks,
-      serializedContext: { state: "cancelled" },
+      serializedContext: { ...backgroundContext, state: "cancelled" },
       sessionState: initialState,
     });
 
@@ -450,10 +460,15 @@ describe("turnWorkflow", () => {
     await turnWorkflow(input);
 
     expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks: backgroundTasks });
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "cancelled" },
+    expect(adopt.mock.calls[0]?.[0]).toEqual({
+      serializedContext: { ...backgroundContext, state: "start" },
       sessionState: backgroundState,
     });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { ...backgroundContext, state: "cancelled" },
+      sessionState: backgroundState,
+    });
+    adopt.mockRestore();
   });
 
   it("checkpoints a durable turn step that finishes as cancellation arrives", async () => {
@@ -488,6 +503,65 @@ describe("turnWorkflow", () => {
       },
       kind: "turn-result",
     });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "done" }),
+      }),
+    );
+  });
+
+  it("checkpoints background task observability when cancellation arrives after a step", async () => {
+    const sessionState = createSessionState();
+    const backgroundState = createSessionState({ continuationToken: "http:background" });
+    const backgroundTasks = [
+      {
+        taskId: "task-1",
+        taskInboxToken: "task-inbox-1",
+        taskRunId: "task-run-1",
+      },
+    ];
+    const backgroundContext = {
+      "eve.harness.agentTrace": { actions: { "action-1": {} }, sessions: {}, turns: {} },
+      "eve.harness.instrumentationActionScopes": {
+        "action-1": { scope: { turnId: "turn-1" }, taskId: "task-1" },
+      },
+    };
+    const completedContext = { ...backgroundContext, state: "completed" };
+    installInbox([], { cancelPayloads: [{}] });
+    vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
+      await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
+      return {
+        action: "done",
+        backgroundTaskContext: { ...backgroundContext, state: "start" },
+        backgroundTaskState: backgroundState,
+        backgroundTasks,
+        output: "must not complete",
+        serializedContext: completedContext,
+        sessionState,
+      };
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: completedContext,
+      sessionState: backgroundState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        cancelled: true,
+        kind: "park",
+        serializedContext: completedContext,
+        sessionState: backgroundState,
+      },
+      kind: "turn-result",
+    });
+    expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks: backgroundTasks });
     expect(resumeHookMock).not.toHaveBeenCalledWith(
       "turn-token",
       expect.objectContaining({
@@ -1105,7 +1179,11 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(applyTaskAgentRequest).mock.calls.map(([delivery]) => delivery)).toEqual([
       expect.objectContaining({
         ownerId: "run-1",
-        request: { kind: "agent-invoke", invocationId: "call-1", input: expect.any(Object) },
+        request: {
+          kind: "agent-invoke",
+          invocationId: "call-1",
+          input: expect.any(Object),
+        },
       }),
       expect.objectContaining({
         ownerId: "run-1",

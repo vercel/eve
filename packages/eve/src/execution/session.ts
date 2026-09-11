@@ -1,5 +1,6 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import type {
   HarnessSession,
   SessionAgent,
@@ -73,7 +74,6 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
-  readonly systemPromptAdditions?: readonly string[];
   readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
 }
@@ -86,11 +86,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: createSessionAgent(
-      turnAgent,
-      createSessionSystemPrompt({ additions: input.systemPromptAdditions, turnAgent }),
-      tools,
-    ),
+    agent: createSessionAgent(turnAgent, createSessionSystemPrompt(turnAgent), tools),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -148,7 +144,6 @@ function createSessionAgent(
  */
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
-  readonly systemPromptAdditions?: readonly string[];
   readonly turnAgent: RuntimeTurnAgent;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
@@ -158,10 +153,7 @@ export function refreshSessionFromTurnAgent(input: {
     ...input.session,
     agent: createSessionAgent(
       input.turnAgent,
-      createSessionSystemPrompt({
-        additions: input.systemPromptAdditions,
-        turnAgent: input.turnAgent,
-      }),
+      createSessionSystemPrompt(input.turnAgent),
       createSessionToolDefinitions(input.turnAgent),
     ),
     compaction: createCompactionConfig({
@@ -173,16 +165,11 @@ export function refreshSessionFromTurnAgent(input: {
   };
 }
 
-function createSessionSystemPrompt(input: {
-  readonly additions?: readonly string[];
-  readonly turnAgent: RuntimeTurnAgent;
-}): string {
-  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? []);
+function createSessionSystemPrompt(turnAgent: RuntimeTurnAgent): string {
+  const skillSection = formatAvailableSkillsSection(turnAgent.availableSkills ?? []);
   const blocks =
-    skillSection === null
-      ? input.turnAgent.instructions
-      : [...input.turnAgent.instructions, skillSection];
-  return [...blocks, ...(input.additions ?? [])].join("\n\n");
+    skillSection === null ? turnAgent.instructions : [...turnAgent.instructions, skillSection];
+  return blocks.join("\n\n");
 }
 
 /**
@@ -287,7 +274,7 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: durable.history,
+    history: validateHarnessModelMessages(durable.history),
     sessionId: durable.sessionId,
   };
 

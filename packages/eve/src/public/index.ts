@@ -12,6 +12,7 @@ export {
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
   type AgentWorkflowDefinition,
+  type AgentWorkflowRetentionDefinition,
   type AgentWorkflowWorldDefinition,
   type DefinedAgent,
   type DynamicSubagentDefinition,
@@ -20,6 +21,11 @@ export {
   defineDynamic,
 } from "#public/definitions/agent.js";
 export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export {
+  defineWorkspaceAgent,
+  type WorkspaceAgentDefinition,
+  type WorkspaceAgentTransport,
+} from "#public/definitions/workspace-agent.js";
 export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,

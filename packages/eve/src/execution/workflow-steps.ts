@@ -41,13 +41,15 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
+import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
+import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
 import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
@@ -76,11 +78,15 @@ import { createDurableSessionState, readDurableSession } from "#execution/durabl
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
+  getBackgroundTaskDelivery,
+  markBackgroundTaskStepInput,
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
-import { runBackgroundStep } from "#execution/tasks/parent/tool-execution.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
+import {
+  readRetainedBackgroundToolResult,
+  runBackgroundStep,
+} from "#execution/tasks/parent/tool-execution.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -127,14 +133,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const taskUpdatesEnabled =
-    durableSession.taskId !== undefined &&
-    effectiveAgent.turnAgent.tools.some(
-      (tool) =>
-        tool.kind === "authored-tool" &&
-        tool.behavior?.handling?.kind === "dispatch" &&
-        tool.behavior.handling.target.kind === "task-update",
-    );
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -180,7 +178,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
     ctx.set(AuthKey, input.input.auth ?? null);
   }
-
+  const backgroundTaskDelivery = getBackgroundTaskDelivery(input.input);
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
@@ -249,7 +247,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           : defaultDeliverResult(payload);
 
         if (result !== undefined && result !== null) {
-          results.push(result);
+          results.push(
+            backgroundTaskDelivery === undefined ? result : markBackgroundTaskStepInput(result),
+          );
         }
       }
     } catch (error) {
@@ -265,14 +265,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   let taskRootTurnId: string | undefined;
-  if (
-    resolved !== undefined &&
-    rawInput.input?.kind === "deliver" &&
-    rawInput.input.taskDeliveryId !== undefined
-  ) {
+  if (resolved !== undefined && backgroundTaskDelivery !== undefined) {
     const taskContext = resolveTaskDeliveryContext({
       state: durableSession.state,
-      taskDeliveryId: rawInput.input.taskDeliveryId,
+      taskDeliveryId: backgroundTaskDelivery.taskDeliveryId,
     });
     if (taskContext !== undefined) {
       ctx.set(TurnTaskDeliveryKey, taskContext.phase);
@@ -409,6 +405,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
       ctx,
       event,
+      instrumentation: instrumentation?.memory,
       memories: effectiveNode.agent?.memories ?? [],
       messages,
       nodeId: bundle.nodeId ?? "__root__",
@@ -468,7 +465,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         thresholdPercent: effectiveAgent.thresholdPercent,
       },
       session: lifecycleSession,
-      systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
       turnAgent: effectiveAgent.turnAgent,
     });
     const modelSession = refreshedSession;
@@ -525,7 +521,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             let emissionState = getHarnessEmissionState(schemaSession.state);
             if (isHarnessBetweenTurns(schemaSession)) {
               prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
-              let instructionMessages: readonly import("ai").ModelMessage[] = [];
+              let instructionMessages: readonly UserModelMessage[] = [];
               const traceContext = await prepareWorkflowPreambleTrace({
                 emissionState,
                 instrumentation,
@@ -579,6 +575,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       throw error;
     }
     writer.releaseLock();
+    const retained = readRetainedBackgroundToolResult(ctx);
+    instrumentation?.rememberBackgroundTasks(retained?.backgroundTasks ?? []);
     return createCancelledModelCallBatchResult({
       beforeBatchContext: input.serializedContext,
       checkpoint: completedModelCall,
@@ -588,8 +586,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
   }
 
+  instrumentation?.rememberBackgroundTasks(stepResult.backgroundTasks ?? []);
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
+  agentTraceState.pruneAgentTraceState(ctx, rekeyed.sessionId, rekeyed.state);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };
 
@@ -598,6 +598,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
       : {
+          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
+            input.serializedContext,
+            nextSerializedContext,
+            stepResult.backgroundTasks,
+          ),
           backgroundTaskState: createDurableSessionState({
             session: stepResult.backgroundTaskSession,
           }),

@@ -15,9 +15,10 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
-import type {
-  PublicAgentModelDefinition,
-  PublicAgentStaticModelDefinition,
+import {
+  AGENT_WORKFLOW_RETENTION_VALUES,
+  type PublicAgentModelDefinition,
+  type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { HarnessV1 } from "@ai-sdk/harness";
 import {
@@ -298,7 +299,7 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["modelCallsPerStep", "world"], message);
+  expectOnlyKnownKeys(record, ["modelCallsPerStep", "retention", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
 
   if (record.modelCallsPerStep !== undefined) {
@@ -308,11 +309,33 @@ function normalizeAgentWorkflowDefinition(
     );
   }
 
+  if (record.retention !== undefined) {
+    normalizedDefinition.retention = normalizeAgentWorkflowRetentionDefinition(
+      record.retention,
+      message,
+    );
+  }
+
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
   }
 
   return normalizedDefinition;
+}
+
+function normalizeAgentWorkflowRetentionDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<AgentWorkflowDefinition["retention"]> {
+  const match = AGENT_WORKFLOW_RETENTION_VALUES.find((accepted) => accepted === value);
+  if (match === undefined) {
+    const accepted = AGENT_WORKFLOW_RETENTION_VALUES.map((entry) => JSON.stringify(entry)).join(
+      " or ",
+    );
+    throw new Error(`${message} "experimental.workflow.retention" must be ${accepted}.`);
+  }
+
+  return match;
 }
 
 function normalizeAgentWorkflowWorldDefinition(

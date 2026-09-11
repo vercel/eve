@@ -42,6 +42,26 @@ describe("buildAgentWorkspace", () => {
 
     const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
+    const multiAgentSummary = JSON.parse(
+      await readFile(join(root, ".eve", "agent-summary.json"), "utf8"),
+    );
+
+    expect(multiAgentSummary).toMatchObject({
+      agents: [
+        {
+          name: "research",
+          routePrefix: "/research",
+          summaryPath: "agents/research/.eve/agent-summary.json",
+        },
+        {
+          name: "support",
+          routePrefix: "/support",
+          summaryPath: "agents/support/.eve/agent-summary.json",
+        },
+      ],
+      kind: "vercel-eve-multi-agent-summary",
+      schemaVersion: 1,
+    });
 
     expect(config.routes).toEqual([
       {
@@ -49,10 +69,22 @@ describe("buildAgentWorkspace", () => {
         src: "^/research/eve/v1/(.*)$",
       },
       {
+        destination: { service: "eve-research", type: "service" },
+        src: "^/research/?$",
+      },
+      {
         destination: { service: "eve-support", type: "service" },
         src: "^/support/eve/v1/(.*)$",
       },
+      {
+        destination: { service: "eve-support", type: "service" },
+        src: "^/support/?$",
+      },
+      { handle: "filesystem" },
     ]);
+    await expect(readFile(join(output, "static", "index.html"), "utf8")).resolves.toContain(
+      "2 agents are up and accepting messages.",
+    );
     await expect(
       access(join(root, ".eve", "vercel-services", "eve-support")),
     ).resolves.toBeUndefined();
@@ -64,6 +96,10 @@ describe("buildAgentWorkspace", () => {
       root: ".eve/vercel-services/eve-support",
       routePrefix: "/support",
       routes: [
+        {
+          src: "^/support/?$",
+          transforms: [{ args: "/", op: "set", type: "request.path" }],
+        },
         {
           src: "^/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],

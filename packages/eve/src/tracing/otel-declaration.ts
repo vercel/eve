@@ -60,9 +60,11 @@ export interface OtelOptions {
    */
   readonly functionId?: string;
   /**
-   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
-   * request — the parent of the turn trace and of any `hook.resume` or
-   * outgoing HTTP spans. Defaults to `false`.
+   * Whether to emit an eve-owned HTTP `SERVER` span around each channel
+   * request. For a one-to-one delivery, the activation remains a separate
+   * trace root and links to this span; when disabled, it links to any
+   * already-active upstream request or function span instead. Defaults to
+   * `false`.
    */
   readonly traceChannelRequests?: boolean;
   /**
@@ -222,7 +224,7 @@ function createOtelIntegration(
   };
 }
 
-/** Vercel Agent Runs through the production request-context transport. @internal */
+/** Vercel Agent Runs through the hosted request-context transport. @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
   return {
     [OTEL_INTEGRATION]: true,

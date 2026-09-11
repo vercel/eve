@@ -18,6 +18,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
@@ -87,7 +88,7 @@ export interface HarnessSession {
   readonly agent: SessionAgent;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
-  readonly history: ModelMessage[];
+  readonly history: HarnessModelMessage[];
   readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
@@ -167,8 +168,8 @@ export interface StepInput {
   /** Internal actor attribution for `message`. */
   readonly messageAuth?: SessionAuthContext | null;
   /**
-   * Context strings from the channel delivery. Each entry is appended
-   * as a `role: "user"` message to `session.history` before the
+   * Context strings from the channel delivery. Each entry is appended as a
+   * synthetic user-role message to `session.history` before the
    * delivery message. Populated by channels via `SendPayload.context`.
    */
   readonly context?: readonly string[];
@@ -229,6 +230,7 @@ export interface StepResult {
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
   readonly backgroundTasks?: readonly {
+    readonly callId?: string;
     readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;
@@ -343,7 +345,7 @@ export interface ToolLoopHarnessConfig {
    * re-injection). The harness appends the returned messages to the
    * compacted history.
    */
-  readonly onCompaction?: () => readonly ModelMessage[];
+  readonly onCompaction?: () => readonly HarnessModelMessage[];
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

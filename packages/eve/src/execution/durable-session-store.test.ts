@@ -202,15 +202,40 @@ describe("durable-session-store cross-version contract", () => {
     expect(getRunMock).not.toHaveBeenCalled();
   });
 
+  it("classifies unmarked legacy history in an embedded snapshot", async () => {
+    const session = buildSession({
+      continuationToken: "http:test",
+      sessionId: "wrun_embedded_legacy",
+    });
+    const state = createDurableSessionState({ session });
+    const legacySnapshot = {
+      ...state.snapshot,
+      session: {
+        ...state.snapshot!.session,
+        history: [{ content: "Retained before eve 0.54.", role: "user" }],
+      },
+    } as DurableSessionSnapshot;
+
+    const durableSession = await readDurableSession({ ...state, snapshot: legacySnapshot });
+
+    expect(durableSession.history).toEqual([
+      { content: "Retained before eve 0.54.", kind: "legacy.unknown", role: "user" },
+    ]);
+    expect(getRunMock).not.toHaveBeenCalled();
+  });
+
   it("cancels the legacy tail read after loading one durable session snapshot", async () => {
     const session = buildSession({
       continuationToken: "http:test",
       sessionId: "wrun_tail_cancel",
     });
-    const snapshot: DurableSessionSnapshot = {
-      session: projectToDurableSession(session),
+    const snapshot = {
+      session: {
+        ...projectToDurableSession(session),
+        history: [{ content: "Retained before eve 0.54.", role: "user" }],
+      },
       version: DURABLE_SESSION_VERSION,
-    };
+    } as DurableSessionSnapshot;
     const cancel = vi.fn();
     const stream = new ReadableStream<DurableSessionSnapshot>({
       cancel,
@@ -223,7 +248,10 @@ describe("durable-session-store cross-version contract", () => {
 
     const durableSession = await readDurableSession(projectSessionState({ session }));
 
-    expect(durableSession).toEqual(snapshot.session);
+    expect(durableSession).toEqual({
+      ...snapshot.session,
+      history: [{ content: "Retained before eve 0.54.", kind: "legacy.unknown", role: "user" }],
+    });
     expect(getRunMock).toHaveBeenCalledWith("wrun_tail_cancel");
     expect(getReadable).toHaveBeenCalledWith({
       namespace: "eve.session",
@@ -293,7 +321,7 @@ function buildSession(input: {
       threshold: 180_000,
     },
     continuationToken: input.continuationToken,
-    history: [{ content: "hi", role: "user" }],
+    history: [{ content: "hi", kind: "user", role: "user" }],
     sessionId: input.sessionId,
   };
 }

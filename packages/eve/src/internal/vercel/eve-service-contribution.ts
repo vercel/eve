@@ -38,6 +38,7 @@ export interface EveVercelBuildTarget {
 }
 
 export interface EveVercelServiceContribution {
+  readonly homeRouteSrc: string | undefined;
   readonly rootDirectory: string;
   readonly routeSrc: string;
   readonly service: GeneratedVercelServiceConfig;
@@ -65,10 +66,14 @@ export function createEveServiceName(name: string | undefined): string {
   return serviceName;
 }
 
+function escapeVercelRouteLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function createEveServiceRouteSrc(publicRoutePrefix: string): string {
   if (publicRoutePrefix.length === 0) return `^${EVE_ROUTE_PREFIX}/(.*)$`;
   const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
-  return `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${EVE_ROUTE_PREFIX}/(.*)$`;
+  return `^${escapeVercelRouteLiteral(prefix)}${EVE_ROUTE_PREFIX}/(.*)$`;
 }
 
 export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
@@ -76,6 +81,20 @@ export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
     src: routeSrc,
     transforms: [{ args: `${EVE_ROUTE_PREFIX}/$1`, op: "set", type: "request.path" }],
   };
+}
+
+export function createEveHomeRouteSrc(publicRoutePrefix: string): string | undefined {
+  if (publicRoutePrefix.length === 0) return undefined;
+  const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
+  return `^${escapeVercelRouteLiteral(prefix)}/?$`;
+}
+
+/** Route a member's public base path to its package-owned home channel. */
+export function createEveHomePathRoute(publicRoutePrefix: string): VercelRouteConfig | undefined {
+  const src = createEveHomeRouteSrc(publicRoutePrefix);
+  return src === undefined
+    ? undefined
+    : { src, transforms: [{ args: "/", op: "set", type: "request.path" }] };
 }
 
 export function createEvePublicRoute(serviceName: string, routeSrc: string): VercelRouteConfig {
@@ -114,6 +133,14 @@ export function compileEveVercelService(input: {
 }): EveVercelServiceContribution {
   const serviceName = createEveServiceName(input.agent.name);
   const routeSrc = createEveServiceRouteSrc(input.agent.publicRoutePrefix);
+  const homeRouteSrc =
+    input.agent.workspaceMember === true
+      ? createEveHomeRouteSrc(input.agent.publicRoutePrefix)
+      : undefined;
+  const homeRoute =
+    input.agent.workspaceMember === true
+      ? createEveHomePathRoute(input.agent.publicRoutePrefix)
+      : undefined;
   const build = createIsolatedBuild({
     agent: input.agent,
     hostOutputDirectory: input.target.hostOutputDirectory,
@@ -122,13 +149,17 @@ export function compileEveVercelService(input: {
   });
 
   return {
+    homeRouteSrc,
     rootDirectory: build.rootDirectory,
     routeSrc,
     service: {
       buildCommand: build.buildCommand,
       framework: "eve",
       root: build.root,
-      routes: [createEveRequestPathRoute(routeSrc)],
+      routes: [
+        ...(homeRoute === undefined ? [] : [homeRoute]),
+        createEveRequestPathRoute(routeSrc),
+      ],
       ...(input.agent.publicRoutePrefix.length > 0
         ? { routePrefix: input.agent.publicRoutePrefix }
         : {}),

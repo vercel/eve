@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 35,
-  "sha256": "108c1c575fc4cda0a649a8a11b4aad54963ec4f841c6369faef6bf10f670dc24",
+  "sha256": "529424f22f7d526261c063d4223ccfe80aea1baf1bd5609c40d2fcb973a56c92",
   "exports": [
     "defaultWebSearch",
     "defineTool",

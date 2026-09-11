@@ -8,6 +8,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
+import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
@@ -177,7 +178,7 @@ describe("shouldCompact", () => {
     const activeInputTokens = getInputTokenCount(messages, compaction);
     const promptEnvelopeTokens = estimateTokens([
       { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
-      { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+      createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
     ] satisfies ModelMessage[]);
 
     expect(
@@ -270,7 +271,7 @@ describe("resolveCompactionModel", () => {
 
 const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
-  { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+  createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
 const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
 const ROOMY = 100_000;
@@ -279,6 +280,10 @@ const CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
 function user(text: string): ModelMessage {
   return { content: text, role: "user" };
+}
+
+function compactionMarker(text: string): ModelMessage {
+  return createFrameworkUserMessage("context.compaction", text);
 }
 
 function assistant(text: string): ModelMessage {
@@ -319,7 +324,7 @@ function toolExchange(input: {
 }
 
 function checkpointHead(text: string): ModelMessage[] {
-  return [user(CHECKPOINT_MARKER), assistant(text)];
+  return [compactionMarker(CHECKPOINT_MARKER), assistant(text)];
 }
 
 function expectWellFormedCompaction(result: ModelMessage[], threshold: number): void {
@@ -634,7 +639,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
     const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
 
     expect(summarizer).not.toHaveBeenCalled();
-    expect(result[0]).toEqual(user(CHECKPOINT_MARKER));
+    expect(result[0]).toEqual(compactionMarker(CHECKPOINT_MARKER));
     expect(result[1]).toEqual(assistant("Previous checkpoint"));
   });
 
@@ -724,8 +729,10 @@ describe("compactMessages: summarization fallback", () => {
     });
 
     expect(summarizer).toHaveBeenCalledTimes(1);
-    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain("old context to fold away");
-    expect(result[0]).toEqual(user(CHECKPOINT_MARKER));
+    expect(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain(
+      "old context to fold away",
+    );
+    expect(result[0]).toEqual(compactionMarker(CHECKPOINT_MARKER));
     expect(result[1]).toEqual(assistant("Distilled story"));
     expect(result.some((m) => m.content === "old context to fold away")).toBe(false);
   });
@@ -744,8 +751,8 @@ describe("compactMessages: summarization fallback", () => {
       threshold: HEURISTICS_FORBIDDEN,
     });
 
-    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain(previousCheckpoint);
-    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain(markerPast280);
+    expect(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain(previousCheckpoint);
+    expect(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain(markerPast280);
     expect(result.filter((m) => m.content === previousCheckpoint)).toHaveLength(0);
     expect(result.filter((m) => m.content === "Updated checkpoint")).toHaveLength(1);
   });
@@ -776,6 +783,22 @@ describe("compactMessages: summarization fallback", () => {
     expect(summarizer).toHaveBeenCalled();
     expect(result).toContainEqual(call);
     expect(result).toContainEqual(resultMsg);
+    expect(result.at(-1)).toEqual(task);
+  });
+
+  it("does not replay unknown legacy provenance as the user's latest request", async () => {
+    const task = user("Summarize the report.");
+    const legacy = {
+      content: "A background task completed.",
+      kind: "legacy.unknown",
+      role: "user",
+    } as const;
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 100 });
+    const { result } = await compact(
+      [user("old notes ".repeat(4_000)), task, legacy, call, resultMsg],
+      { recentWindowSize: 2, threshold: 2_048 },
+    );
+
     expect(result.at(-1)).toEqual(task);
   });
 
@@ -812,7 +835,7 @@ describe("compactMessages: summarization fallback", () => {
     // sized to exceed the window-selection reserve, which is what makes the
     // verbatim tail overshoot after the summary head is added.
     const summary = "s".repeat(2_400);
-    const summaryHead = [user(CHECKPOINT_MARKER), assistant(summary)];
+    const summaryHead = [compactionMarker(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
     const strippedSize = estimateTokens([
       ...summaryHead,
@@ -848,7 +871,7 @@ describe("compactMessages: summarization fallback", () => {
     // The folded-away user prompt is replayed as the live turn, so the model
     // resumes against its actual instruction rather than a bare "Continue.".
     expect(result).toEqual([
-      user(CHECKPOINT_MARKER),
+      compactionMarker(CHECKPOINT_MARKER),
       assistant("Summary of the large SQL result"),
       user("Find the relevant rows."),
     ]);
@@ -869,7 +892,7 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.at(-1)).toEqual(user("please fix the flaky test"));
   });
 
-  it("falls back to a synthetic resumption when the real user prompt survives in the tail", async () => {
+  it("falls back to a framework continuation when the real user prompt survives in the tail", async () => {
     const messages = [user("old context"), user("latest question"), assistant("answering")];
 
     const { result } = await compact(messages, {
@@ -879,7 +902,9 @@ describe("compactMessages: summarization fallback", () => {
 
     // "latest question" is already in the kept tail — replaying it would ask
     // the model to answer again instead of continuing.
-    expect(result.at(-1)).toEqual(user("Continue."));
+    expect(result.at(-1)).toEqual(
+      createFrameworkUserMessage("execution.continuation", "Continue."),
+    );
     expect(result.filter((m) => m.content === "latest question")).toHaveLength(1);
   });
 

@@ -12,6 +12,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
+import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { runTurnOwnedWorkflow } from "#execution/turn-workflow.js";
@@ -41,6 +42,7 @@ interface TurnDispatchInput {
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
@@ -94,6 +96,7 @@ async function runAndAwaitTurn(
       initialStep: input.initialStep,
       mode: input.mode,
       parentWritable: input.parentWritable,
+      retention: input.retention,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     } satisfies TurnWorkflowDispatchInput;

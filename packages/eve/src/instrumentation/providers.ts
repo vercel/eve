@@ -52,7 +52,9 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 /** Fills reserved slots before authored files may reconfigure or disable them. */
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  if (process.env.VERCEL_ENV === "production") registry.set("agent-runs", agentRuns());
+  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+    registry.set("agent-runs", agentRuns());
+  }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {
     registry.set("local", localTraces());
   }

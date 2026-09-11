@@ -1,6 +1,9 @@
-import type { SessionStateMap } from "#harness/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import { markFrameworkStepInput } from "#harness/messages.js";
+import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { getTaskCohortId } from "#tasks/session-task-cohorts.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
 
@@ -9,9 +12,29 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists tasks started by the same parent turn, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
+export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists overlapping background tasks in the same cohort, potentially started across different user turns, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
 
-/** Returns model context and cohort phase for tasks started by the same parent turn as this delivery. */
+type BackgroundTaskDelivery = DeliverHookPayload & {
+  readonly taskDeliveryId: string;
+};
+
+/** Returns task delivery provenance when a child task wakes its parent. */
+export function getBackgroundTaskDelivery(input: unknown): BackgroundTaskDelivery | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const delivery = input as { readonly kind?: unknown; readonly taskDeliveryId?: unknown };
+  return delivery.kind === "deliver" && typeof delivery.taskDeliveryId === "string"
+    ? (input as BackgroundTaskDelivery)
+    : undefined;
+}
+
+/** Marks a task-produced user message before the harness coalesces delivery results. */
+export function markBackgroundTaskStepInput(input: StepInput): StepInput {
+  return input.message === undefined
+    ? input
+    : markFrameworkStepInput(input, "execution.background_task");
+}
+
+/** Groups overlapping tasks without changing the delivered task's activity root. */
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryId: string;
@@ -26,7 +49,7 @@ export function resolveTaskDeliveryContext(input: {
   const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
-  const cohort = entries.filter((entry) => entry.createdByTurnId === delivered.createdByTurnId);
+  const cohort = entries.filter((entry) => getTaskCohortId(entry) === getTaskCohortId(delivered));
   return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
 }
 

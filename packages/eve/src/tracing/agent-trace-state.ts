@@ -2,9 +2,13 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
+  InstrumentationActionOutcome,
+  InstrumentationParentLineage,
+  InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
+  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -15,14 +19,18 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly decision?: InstrumentationDecision;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
 }
 
 export interface AgentTurnTraceState {
+  readonly caller?: SpanContext;
+  readonly channelDelivery?: AgentTurnChannelDeliveryTraceState;
   readonly context: SpanContext;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
-  readonly parentIsRemote?: boolean;
-  readonly parentSpanId: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly startTimeMs: number;
@@ -32,11 +40,21 @@ export interface AgentTurnTraceState {
     | { readonly type: InstrumentationTurnSettledEvent["type"] };
 }
 
+export interface AgentTurnChannelDeliveryTraceState {
+  readonly channelKind: string;
+  readonly channelName: string;
+  readonly deliveryId: string;
+  readonly inputAttribute?: string;
+  readonly requestId?: string;
+  readonly requestTraceContext?: SpanContext;
+}
+
 export interface AgentActionTraceState {
   readonly attemptIndex: number;
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
   readonly inputAttribute?: string;
+  readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
@@ -46,18 +64,49 @@ export interface AgentActionTraceState {
   readonly startTimeMs: number;
   readonly stepIndex: number;
   readonly turnId: string;
+  readonly workflowName?: string;
+}
+
+export interface AgentInvocationTraceState extends Omit<
+  AgentActionTraceState,
+  "inputAttribute" | "isWorkflowTool" | "kind" | "workflowName"
+> {
+  readonly kind: "remote-agent-call" | "subagent-call";
+  readonly parentActionCallId: string;
+  readonly recordOutputs?: boolean;
+  readonly terminal?: AgentActionTraceTerminalState;
+}
+
+export interface AgentActionTraceTerminalState {
+  readonly acceptedAtMs?: number;
+  readonly error?: unknown;
+  readonly outcome: InstrumentationActionOutcome;
+  readonly usage?: InstrumentationUsage;
 }
 
 /** Provider-owned serializable storage for durable agent trace state. */
 export interface AgentTraceStateStore {
   deleteAction(idempotencyKey: string): void | PromiseLike<void>;
+  deleteActionAnchors(sessionId: string): void | PromiseLike<void>;
   deleteActions(sessionId: string, turnId?: string): void | PromiseLike<void>;
+  deleteInvocation(idempotencyKey: string): void | PromiseLike<void>;
+  deleteInvocations(sessionId: string, turnId?: string): void | PromiseLike<void>;
   deleteSession(sessionId: string): void | PromiseLike<void>;
   deleteTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   findAction(
     sessionId: string,
     callId: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
+  findActionAnchor(
+    sessionId: string,
+    turnId: string,
+    callId: string,
+  ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
+  findInvocations(
+    sessionId?: string,
+    turnId?: string,
+    parentActionCallId?: string,
+  ): readonly AgentInvocationTraceState[] | PromiseLike<readonly AgentInvocationTraceState[]>;
   getAction(
     idempotencyKey: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
@@ -69,6 +118,8 @@ export interface AgentTraceStateStore {
     turnId: string,
   ): AgentTurnTraceState | undefined | PromiseLike<AgentTurnTraceState | undefined>;
   setAction(idempotencyKey: string, state: AgentActionTraceState): void | PromiseLike<void>;
+  setActionAnchor(idempotencyKey: string, state: AgentActionTraceState): void | PromiseLike<void>;
+  setInvocation(idempotencyKey: string, state: AgentInvocationTraceState): void | PromiseLike<void>;
   setSession(sessionId: string, state: AgentSessionTraceState): void | PromiseLike<void>;
   setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void | PromiseLike<void>;
   /** Atomically updates an existing turn and does nothing after that turn is deleted. */
@@ -81,7 +132,9 @@ export interface AgentTraceStateStore {
 
 /** In-memory trace state used by tests and non-durable runtimes. */
 export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
+  readonly #actionAnchors = new Map<string, AgentActionTraceState>();
   readonly #actions = new Map<string, AgentActionTraceState>();
+  readonly #invocations = new Map<string, AgentInvocationTraceState>();
   readonly #sessions = new Map<string, AgentSessionTraceState>();
   readonly #turns = new Map<string, AgentTurnTraceState>();
 
@@ -89,10 +142,28 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
     this.#actions.delete(idempotencyKey);
   }
 
+  deleteActionAnchors(sessionId: string): void {
+    for (const [key, state] of this.#actionAnchors) {
+      if (state.sessionId === sessionId) this.#actionAnchors.delete(key);
+    }
+  }
+
   deleteActions(sessionId: string, turnId?: string): void {
     for (const [key, state] of this.#actions) {
       if (state.sessionId === sessionId && (turnId === undefined || state.turnId === turnId)) {
         this.#actions.delete(key);
+      }
+    }
+  }
+
+  deleteInvocation(idempotencyKey: string): void {
+    this.#invocations.delete(idempotencyKey);
+  }
+
+  deleteInvocations(sessionId: string, turnId?: string): void {
+    for (const [key, state] of this.#invocations) {
+      if (state.sessionId === sessionId && (turnId === undefined || state.turnId === turnId)) {
+        this.#invocations.delete(key);
       }
     }
   }
@@ -111,6 +182,30 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
     );
   }
 
+  findActionAnchor(
+    sessionId: string,
+    turnId: string,
+    callId: string,
+  ): AgentActionTraceState | undefined {
+    return [...this.#actionAnchors.values()].find(
+      (state) =>
+        state.sessionId === sessionId && state.turnId === turnId && state.callId === callId,
+    );
+  }
+
+  findInvocations(
+    sessionId?: string,
+    turnId?: string,
+    parentActionCallId?: string,
+  ): readonly AgentInvocationTraceState[] {
+    return [...this.#invocations.values()].filter(
+      (state) =>
+        (sessionId === undefined || state.sessionId === sessionId) &&
+        (turnId === undefined || state.turnId === turnId) &&
+        (parentActionCallId === undefined || state.parentActionCallId === parentActionCallId),
+    );
+  }
+
   getAction(idempotencyKey: string): AgentActionTraceState | undefined {
     return this.#actions.get(idempotencyKey);
   }
@@ -125,6 +220,14 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
 
   setAction(idempotencyKey: string, state: AgentActionTraceState): void {
     this.#actions.set(idempotencyKey, state);
+  }
+
+  setActionAnchor(idempotencyKey: string, state: AgentActionTraceState): void {
+    this.#actionAnchors.set(idempotencyKey, state);
+  }
+
+  setInvocation(idempotencyKey: string, state: AgentInvocationTraceState): void {
+    this.#invocations.set(idempotencyKey, state);
   }
 
   setSession(sessionId: string, state: AgentSessionTraceState): void {
