@@ -644,22 +644,27 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+export interface SlackBotConfig {
+  /** Whether the Slack bot always appears online. Defaults to `false`. */
+  readonly alwaysOnline?: boolean;
+  /** Hex color used behind the Slack app's information hovercard. */
+  readonly backgroundColor?: string;
+  /** Short Slack app description, up to 140 characters. */
+  readonly description?: string;
+  /** Longer Slack app description, up to 4,000 characters. */
+  readonly longDescription?: string;
+  /** Display name used for the Slack app and bot. */
+  readonly name?: string;
+}
+
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
-  /** Whether the Slack bot always appears online. Defaults to `false`. */
-  readonly botAlwaysOnline?: boolean;
-  /** Hex color used behind the Slack app's information hovercard. */
-  readonly botBackgroundColor?: string;
-  /** Short Slack app description, up to 140 characters. */
-  readonly botDescription?: string;
-  /** Longer Slack app description, up to 4,000 characters. */
-  readonly botLongDescription?: string;
-  /** Display name used for the Slack app and bot. */
-  readonly botName?: string;
+  /** Slack bot identity and presentation. */
+  readonly bot?: SlackBotConfig;
   /** Additional Slack Events API bot events delivered to this channel. */
-  readonly botEvents?: readonly string[];
+  readonly eventSubscriptions?: readonly string[];
   /** Additional Slack bot OAuth scopes required by this channel. */
-  readonly botScopes?: readonly string[];
+  readonly scopes?: readonly string[];
 
   /**
    * Chooses where each input request is delivered. Direct-message requests go to the
@@ -1065,13 +1070,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   return Object.assign(channel, {
     slackAppManifest: defineSlackAppManifest({
-      alwaysOnline: config.botAlwaysOnline,
-      backgroundColor: config.botBackgroundColor,
-      botEvents: config.botEvents,
-      botScopes: config.botScopes,
-      description: config.botDescription,
-      displayName: config.botName,
-      longDescription: config.botLongDescription,
+      alwaysOnline: config.bot?.alwaysOnline,
+      backgroundColor: config.bot?.backgroundColor,
+      botEvents: config.eventSubscriptions,
+      botScopes: config.scopes,
+      description: config.bot?.description,
+      displayName: config.bot?.name,
+      longDescription: config.bot?.longDescription,
     }),
     vercelConnect: credentials?.vercelConnect,
   });
