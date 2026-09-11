@@ -5,6 +5,14 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 export const SESSION_TASKS_STATE_KEY = "eve.tasks";
 export const SESSION_TASKS_STATE_VERSION = 2;
 
+/** An entry without a join target starts its own cohort. */
+export function getTaskCohortId(task: {
+  readonly taskId: string;
+  readonly cohortId?: string;
+}): string {
+  return task.cohortId ?? task.taskId;
+}
+
 /**
  * Reads cohort identities and settlement for workflow-side completion batching.
  * Full task validation stays in getSessionTaskIndex on the step side, so
@@ -12,8 +20,8 @@ export const SESSION_TASKS_STATE_VERSION = 2;
  */
 export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, { readonly turnId: string; readonly settled: boolean }> {
-  const cohorts = new Map<string, { readonly turnId: string; readonly settled: boolean }>();
+): ReadonlyMap<string, { readonly cohortId: string; readonly settled: boolean }> {
+  const cohorts = new Map<string, { readonly cohortId: string; readonly settled: boolean }>();
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) return cohorts;
 
@@ -32,6 +40,7 @@ export function getSessionTaskCohorts(
       !isObject(task) ||
       !isNonEmptyString(task.taskId) ||
       !isNonEmptyString(task.createdByTurnId) ||
+      (task.cohortId !== undefined && !isNonEmptyString(task.cohortId)) ||
       cohorts.has(task.taskId)
     ) {
       throw new Error(
@@ -39,7 +48,7 @@ export function getSessionTaskCohorts(
       );
     }
     cohorts.set(task.taskId, {
-      turnId: task.createdByTurnId,
+      cohortId: getTaskCohortId({ taskId: task.taskId, cohortId: task.cohortId }),
       settled: task.terminalView !== undefined,
     });
   }

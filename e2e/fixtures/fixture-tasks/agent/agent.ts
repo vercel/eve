@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
 import {
   mockModel,
   type MockModelRequest,
@@ -7,7 +7,7 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
-import { COHORT_SCENARIO } from "./lib/cohort.js";
+import { lifecycleModel } from "./lib/lifecycle-model.js";
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 const TASK_STATE_LABEL = "[Task state]\n";
@@ -15,6 +15,8 @@ const CHILD_TOOL_SURFACE_SCENARIO =
   "Alice asks Bob to summarize the available tools for a background task.";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const lifecycle = lifecycleModel(request);
+  if (lifecycle !== undefined) return lifecycle;
   if (request.userMessages.includes(CHILD_TOOL_SURFACE_SCENARIO)) {
     return childToolSurfaceReport(request);
   }
@@ -232,7 +234,9 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
 function batchingBenchmark(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages]
     .reverse()
-    .find((entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task "));
+    .find(
+      (entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task task_"),
+    );
   if (message === "TASK-BATCHING-QUESTION") return "56";
   if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
   if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
@@ -618,26 +622,11 @@ function findString(value: unknown, prefix: string): string | undefined {
   return undefined;
 }
 
-const { model, modelContextWindowTokens, ...base } = e2eAgentConfig();
-const scriptedModel = mockModel(respond);
-
 export default defineAgent({
-  ...base,
-  model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) => {
-        const liveCohort = ctx.messages.some((message) => {
-          if (message.role !== "user") return false;
-          const text =
-            typeof message.content === "string"
-              ? message.content
-              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-          return text.startsWith(COHORT_SCENARIO);
-        });
-        return liveCohort
-          ? { model, modelContextWindowTokens }
-          : { model: scriptedModel, modelContextWindowTokens: 1_000_000 };
-      },
-    },
-  }),
+  ...e2eAgentConfig(),
+  // Script orchestration checks here; real-model coverage lives in agent-task-reporting.
+  model: mockModel(respond),
+  // The lifecycle eval checks child usage through the runtime's budget gate.
+  limits: { maxInputTokensPerSession: 1_000_000 },
+  modelContextWindowTokens: 10_000_000,
 });

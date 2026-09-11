@@ -30,9 +30,21 @@ export default defineTaskEval({
     const started = (await t.send("TASK-FAN-IN")).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
     started.calledSubagent("fanout-worker", { count: MARKERS.length });
+    let session: TaskEvalSessionDriver = t;
+    const requests = new Map<string, InputRequest>();
+    const setupEvents: EveEvalTurn["events"][number][] = [];
+    collectRequests(started);
+    for (let attempt = 0; requests.size < 2 && attempt < 8; attempt += 1)
+      collectRequests(await nextTurn());
+    await t.require([...requests.keys()].sort(), equals([...MARKERS]));
+    await t.require(
+      new Set([...requests.values()].map((request) => request.requestId)).size,
+      equals(2),
+    );
+
     const children = MARKERS.map((marker) => {
       const callId = marker.toLowerCase();
-      const called = started.events.find(
+      const called = setupEvents.find(
         (event) => event.type === "subagent.called" && event.data.callId === callId,
       );
       const receipt = started.events.find(
@@ -60,17 +72,6 @@ export default defineTaskEval({
         creatingTurns: new Set(children.map((child) => child.turnId)).size,
       },
       equals({ tasks: 2, sessions: 2, creatingTurns: 1 }),
-    );
-
-    let session: TaskEvalSessionDriver = t;
-    const requests = new Map<string, InputRequest>();
-    collectRequests(started);
-    for (let attempt = 0; requests.size < 2 && attempt < 8; attempt += 1)
-      collectRequests(await nextTurn());
-    await t.require([...requests.keys()].sort(), equals([...MARKERS]));
-    await t.require(
-      new Set([...requests.values()].map((request) => request.requestId)).size,
-      equals(2),
     );
 
     await release("TASK-FAN-IN-2");
@@ -128,6 +129,7 @@ export default defineTaskEval({
     t.noFailedActions();
 
     function collectRequests(turn: EveEvalTurn) {
+      setupEvents.push(...turn.events);
       for (const request of turn.inputRequests) {
         const marker = request.action.input.marker;
         if (request.action.toolName === "release" && typeof marker === "string")

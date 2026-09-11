@@ -450,7 +450,7 @@ function completion(taskId: string): DeliverHookPayload {
   };
 }
 
-function batchingInput(count = 100) {
+function batchingInput(count = 100, crossTurn = false) {
   const input = waitInput(createMockInbox([]));
   input.stateCursor.adoptState({
     sessionState: {
@@ -467,13 +467,15 @@ function batchingInput(count = 100) {
               version: 2,
               tasks: Array.from({ length: count }, (_, index) => ({
                 taskId: `task_${index}`,
+                cohortId: "task_0",
                 taskRunId: `run-${index}`,
                 taskInboxToken: `inbox-${index}`,
-                createdByTurnId: "turn-1",
+                createdByTurnId: crossTurn ? `turn-${index + 1}` : "turn-1",
                 metadata: { kind: "subagent", name: "worker" },
               })).concat([
                 {
                   taskId: "other-cohort",
+                  cohortId: "other-cohort",
                   taskRunId: "other-run",
                   taskInboxToken: "other-inbox",
                   createdByTurnId: "turn-2",
@@ -556,32 +558,35 @@ describe("buffered task completion batching", () => {
     },
   );
 
-  it("keeps the same buffer across a user turn until the last sibling arrives", async () => {
-    const input = batchingInput(3);
-    const first = completion("task_0");
-    const second = completion("task_1");
-    const last = completion("task_2");
-    input.bufferedDeliveries.push(first);
-    input.commandInbox = createMockInbox([
-      { result: { done: false, value: second }, source: "session" },
-      messageRead("user question"),
-      { result: { done: false, value: last }, source: "session" },
-    ]);
+  it.each([false, true])(
+    "keeps the cohort across a user turn (cross-turn launches: %s)",
+    async (crossTurn) => {
+      const input = batchingInput(3, crossTurn);
+      const first = completion("task_0");
+      const second = completion("task_1");
+      const last = completion("task_2");
+      input.bufferedDeliveries.push(first);
+      input.commandInbox = createMockInbox([
+        { result: { done: false, value: second }, source: "session" },
+        messageRead("user question"),
+        { result: { done: false, value: last }, source: "session" },
+      ]);
 
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [{ message: "user question" }] },
-    });
-    expect(input.bufferedDeliveries).toEqual([first, second]);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        kind: "turn",
+        delivery: { payloads: [{ message: "user question" }] },
+      });
+      expect(input.bufferedDeliveries).toEqual([first, second]);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
 
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [...first.payloads, ...second.payloads, ...last.payloads] },
-    });
-    expect(input.bufferedDeliveries).toEqual([]);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
-  });
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        kind: "turn",
+        delivery: { payloads: [...first.payloads, ...second.payloads, ...last.payloads] },
+      });
+      expect(input.bufferedDeliveries).toEqual([]);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("batches a whole cohort when every completion arrives after the active turn", async () => {
     const input = batchingInput(3);
@@ -594,6 +599,68 @@ describe("buffered task completion batching", () => {
       delivery: { payloads: deliveries.flatMap((delivery) => delivery.payloads) },
     });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes intervening child settlement before releasing the completion cohort", async () => {
+    const input = batchingInput(2);
+    const first = completion("task_0");
+    const last = completion("task_1");
+    const settlement: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [
+        {
+          task: {
+            agentRequests: [
+              {
+                taskId: "task_1",
+                replyTo: "child-reply",
+                request: {
+                  kind: "agent-settled",
+                  result: {
+                    callId: "child-call",
+                    kind: "subagent-result",
+                    origin: "child",
+                    subagentName: "worker",
+                    output: "done",
+                    outcome: {
+                      kind: "terminal",
+                      result: { kind: "succeeded", output: "done" },
+                      usageDelta: {
+                        inputTokens: 211,
+                        outputTokens: 37,
+                        cacheReadTokens: 0,
+                        cacheWriteTokens: 0,
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    input.bufferedDeliveries.push(first, settlement, last);
+    vi.mocked(routeDeliverToChildren).mockImplementation(
+      async ({ delivery, sessionState, serializedContext }) => ({
+        kind: "continue",
+        remainder: delivery.payloads.some((payload) => payload.task?.agentRequests !== undefined)
+          ? undefined
+          : delivery,
+        sessionState,
+        serializedContext,
+      }),
+    );
+
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [...first.payloads, ...last.payloads] },
+    });
+    expect(vi.mocked(routeDeliverToChildren).mock.calls.map(([call]) => call.delivery)).toEqual([
+      settlement,
+      expect.objectContaining({ payloads: [...first.payloads, ...last.payloads] }),
+    ]);
+    expect(input.bufferedDeliveries).toEqual([]);
   });
 
   it("combines siblings across buffered deliveries from another cohort", async () => {

@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { getSessionTaskIndex } from "#tasks/session-index.js";
-import { getSessionTaskCohorts, SESSION_TASKS_STATE_KEY } from "#tasks/session-task-cohorts.js";
+import {
+  getTaskCohortId,
+  getSessionTaskCohorts,
+  SESSION_TASKS_STATE_KEY,
+} from "#tasks/session-task-cohorts.js";
 
 describe("workflow task cohort lookup", () => {
   it("projects the same identities as the full task index", () => {
     const state = {
       [SESSION_TASKS_STATE_KEY]: {
         version: 2,
-        tasks: ["turn-1", "turn-1", "turn-2"].map((createdByTurnId, index) => ({
+        tasks: ["turn-1", "turn-2", "turn-2"].map((createdByTurnId, index) => ({
+          cohortId: index === 1 ? "task_0" : undefined,
           taskId: `task_${index}`,
           taskRunId: `run-${index}`,
           taskInboxToken: `inbox-${index}`,
@@ -20,7 +25,7 @@ describe("workflow task cohort lookup", () => {
     expect([...getSessionTaskCohorts(state)]).toEqual(
       getSessionTaskIndex(state).map((task) => [
         task.taskId,
-        { turnId: task.createdByTurnId, settled: task.terminalView !== undefined },
+        { cohortId: getTaskCohortId(task), settled: task.terminalView !== undefined },
       ]),
     );
   });
@@ -39,6 +44,10 @@ describe("workflow task cohort lookup", () => {
     { version: 2, tasks: [{ taskId: "", createdByTurnId: "turn-1" }] },
     { version: 2, tasks: [{ taskId: "task_1", createdByTurnId: "" }] },
     { version: 2, tasks: [{ taskId: "task_1", createdByTurnId: 1 }] },
+    ...["", null, 42].map((cohortId) => ({
+      version: 2,
+      tasks: [{ taskId: "task_1", createdByTurnId: "turn-1", cohortId }],
+    })),
     {
       version: 2,
       tasks: [

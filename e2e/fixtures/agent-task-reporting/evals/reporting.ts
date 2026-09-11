@@ -68,17 +68,44 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
   const calls = started.events.flatMap((event) =>
     event.type === "subagent.called" ? [event.data] : [],
   );
-  const children = calls.map((call): Child => {
-    const message = actions.find((action) => action.callId === call.callId)?.input.message;
-    const checks = CHECKS.filter(
-      (check) => typeof message === "string" && message.includes(`check=${check}`),
-    );
-    const receipt = receipts.find((entry) => entry.callId === call.callId);
-    if (checks.length !== 1 || receipt === undefined)
-      throw new Error("Each warehouse child needs one check and a matching task receipt.");
-    return { check: checks[0]!, sessionId: call.childSessionId, taskId: receipt.taskId };
-  });
+  const children: Child[] = [];
   const taskIds = receipts.map((receipt) => receipt.taskId);
+  const requests = new Map<Check, InputRequest>();
+  const run: ReportingRun = {
+    session: t,
+    sessionId: started.sessionId,
+    taskIds,
+    children,
+    requests,
+    modelId,
+    completedChildren: new Map(),
+    parentTurns: [],
+  };
+  collectRequests(started);
+  // Task receipts precede child startup; called events can arrive after the parent parks.
+  for (
+    let attempt = 0;
+    (calls.length < TASK_COUNT || requests.size < TASK_COUNT) && attempt < 8;
+    attempt += 1
+  ) {
+    const turn = await nextParentTurn(t, run);
+    calls.push(
+      ...turn.events.flatMap((event) => (event.type === "subagent.called" ? [event.data] : [])),
+    );
+    collectRequests(turn);
+  }
+  children.push(
+    ...calls.map((call): Child => {
+      const message = actions.find((action) => action.callId === call.callId)?.input.message;
+      const checks = CHECKS.filter(
+        (check) => typeof message === "string" && message.includes(`check=${check}`),
+      );
+      const receipt = receipts.find((entry) => entry.callId === call.callId);
+      if (checks.length !== 1 || receipt === undefined)
+        throw new Error("Each warehouse child needs one check and a matching task receipt.");
+      return { check: checks[0]!, sessionId: call.childSessionId, taskId: receipt.taskId };
+    }),
+  );
   await t.require(
     {
       receipts: taskIds.length,
@@ -100,21 +127,6 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
     }),
   );
 
-  const requests = new Map<Check, InputRequest>();
-  const run: ReportingRun = {
-    session: t,
-    sessionId: started.sessionId,
-    taskIds,
-    children,
-    requests,
-    modelId,
-    completedChildren: new Map(),
-    parentTurns: [],
-  };
-  collectRequests(started);
-  for (let attempt = 0; requests.size < TASK_COUNT && attempt < 8; attempt += 1) {
-    collectRequests(await nextParentTurn(t, run));
-  }
   await t.require(
     {
       checks: [...requests.keys()].sort(),

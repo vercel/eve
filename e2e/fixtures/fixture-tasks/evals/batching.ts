@@ -8,14 +8,12 @@ import {
 } from "./shared.js";
 
 /** Release children independently of parent wakes, retaining the entire parent stream suffix. */
-export async function startBlockedFanout(
-  t: EveEvalContext,
-  count: number,
-  message = "TASK-BATCHING-BENCHMARK",
-) {
+export async function startBlockedFanout(t: EveEvalContext, count: number) {
   let session: TaskEvalSessionDriver = t;
-  const started = await t.send(message);
+  const started = await t.send("TASK-BATCHING-BENCHMARK");
   started.expectOk();
+  started.noFailedActions();
+  started.messageIncludes("TASK-FANOUT-STARTED");
   started.calledSubagent("fanout-worker", { count });
   const receipts = started.events.flatMap((event) =>
     event.type === "subagent.completed" && event.data.backgroundTask !== undefined
@@ -28,9 +26,16 @@ export async function startBlockedFanout(
     equals({ receipts: count, distinct: count }),
   );
 
-  const children = started.events.flatMap((event) => {
+  const setupEvents: EveEvalTurn["events"][number][] = [];
+  const requests = new Map<string, InputRequest>();
+  collectRequests(started);
+  for (let attempt = 0; requests.size < count && attempt < count; attempt += 1) {
+    collectRequests(await nextTurn());
+  }
+
+  const children = setupEvents.flatMap((event) => {
     if (event.type !== "subagent.called") return [];
-    const action = started.events
+    const action = setupEvents
       .flatMap((entry) => (entry.type === "actions.requested" ? entry.data.actions : []))
       .find((entry) => entry.callId === event.data.callId);
     const marker =
@@ -67,11 +72,6 @@ export async function startBlockedFanout(
     }),
   );
 
-  const requests = new Map<string, InputRequest>();
-  collectRequests(started);
-  for (let attempt = 0; requests.size < count && attempt < count; attempt += 1) {
-    collectRequests(await nextTurn());
-  }
   await t.require(
     {
       markers: [...requests.keys()].sort(),
@@ -135,6 +135,7 @@ export async function startBlockedFanout(
   };
 
   function collectRequests(turn: EveEvalTurn) {
+    setupEvents.push(...turn.events);
     for (const request of turn.inputRequests) {
       if (request.action.toolName !== "release") continue;
       const marker = request.action.input.marker;

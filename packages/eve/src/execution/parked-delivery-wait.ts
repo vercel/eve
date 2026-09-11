@@ -276,14 +276,29 @@ function takeBufferedTurnDelivery(
   const pendingCohorts = new Set<string>();
   for (const [taskId, cohort] of cohorts) {
     if (!cohort.settled && !completed.has(taskId) && !cancelledTaskIds.has(taskId)) {
-      pendingCohorts.add(cohort.turnId);
+      pendingCohorts.add(cohort.cohortId);
     }
   }
-  const index = bufferedDeliveries.findIndex((delivery) => {
+  let index = bufferedDeliveries.findIndex((delivery) => {
     const cohort = completionCohort(delivery, cohorts);
     return cohort === undefined || !pendingCohorts.has(cohort);
   });
   if (index < 0) return undefined;
+  const readyCohort = completionCohort(bufferedDeliveries[index]!, cohorts);
+  if (readyCohort !== undefined) {
+    const lastSibling = bufferedDeliveries.findLastIndex(
+      (delivery) => completionCohort(delivery, cohorts) === readyCohort,
+    );
+    // Settlement must apply before terminal views release its claimed handle.
+    // Process intervening deliveries first, then re-evaluate the cohort.
+    const boundary = bufferedDeliveries.findIndex(
+      (delivery, position) =>
+        position > index &&
+        position < lastSibling &&
+        completionCohort(delivery, cohorts) === undefined,
+    );
+    if (boundary >= 0) index = boundary;
+  }
   const first = bufferedDeliveries.splice(index, 1)[0]!;
   const cohort = completionCohort(first, cohorts);
   if (cohort !== undefined) {
@@ -330,7 +345,7 @@ function completionCohort(
   cohorts: ReturnType<typeof getSessionTaskCohorts>,
 ): string | undefined {
   const taskId = completionTaskId(delivery);
-  return taskId === undefined ? undefined : cohorts.get(taskId)?.turnId;
+  return taskId === undefined ? undefined : cohorts.get(taskId)?.cohortId;
 }
 
 function completionTaskId(delivery: DeliverHookPayload): string | undefined {
