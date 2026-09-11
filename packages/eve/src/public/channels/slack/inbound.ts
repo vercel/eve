@@ -20,7 +20,10 @@ import type {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
-import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
+import {
+  type SlackInboundContent,
+  projectSlackInboundContent,
+} from "#public/channels/slack/inbound-content.js";
 import { isObject } from "#shared/guards.js";
 
 /**
@@ -80,6 +83,8 @@ export interface SlackMessage {
   /** Raw inbound event payload from Slack. */
   readonly raw: Record<string, unknown>;
 }
+
+const slackInboundContent = new WeakMap<SlackMessage, SlackInboundContent>();
 
 /**
  * Open-ended Slack Events API payload handed to `slackChannel({ onEvent })`.
@@ -286,10 +291,10 @@ export function slackMessageFromWebhookPayload(
   }
 
   if (!payload.channelId || !payload.ts) return null;
-  const text = resolveSlackInboundMrkdwn(payload.text, payload.raw);
-  return {
-    text,
-    markdown: slackMrkdwnToGfm(text),
+  const content = projectSlackInboundContent(payload.text, payload.raw);
+  return createSlackMessage(content, {
+    text: content.text,
+    markdown: slackMrkdwnToGfm(content.text),
     ts: payload.ts,
     threadTs: payload.threadTs,
     channelId: payload.channelId,
@@ -297,7 +302,7 @@ export function slackMessageFromWebhookPayload(
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
     raw: payload.raw,
-  };
+  });
 }
 
 function buildSlackMessage(
@@ -309,13 +314,13 @@ function buildSlackMessage(
   if (!channelId || !ts) return null;
 
   const topLevelText = typeof event.text === "string" ? event.text : "";
-  const text = resolveSlackInboundMrkdwn(topLevelText, event as Record<string, unknown>);
+  const content = projectSlackInboundContent(topLevelText, event as Record<string, unknown>);
   const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : ts;
   const teamId = typeof envelopeTeamId === "string" ? envelopeTeamId : undefined;
 
-  return {
-    text,
-    markdown: slackMrkdwnToGfm(text),
+  return createSlackMessage(content, {
+    text: content.text,
+    markdown: slackMrkdwnToGfm(content.text),
     ts,
     threadTs,
     channelId,
@@ -323,7 +328,23 @@ function buildSlackMessage(
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),
     raw: event as Record<string, unknown>,
-  };
+  });
+}
+
+function createSlackMessage(content: SlackInboundContent, message: SlackMessage): SlackMessage {
+  slackInboundContent.set(message, content);
+  return message;
+}
+
+/** Returns the provenance-preserving content projection for model shaping. */
+export function getSlackInboundContent(message: SlackMessage): SlackInboundContent {
+  return (
+    slackInboundContent.get(message) ?? {
+      modelText: message.text,
+      text: message.text,
+      unfurls: [],
+    }
+  );
 }
 
 function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuthor | undefined {
