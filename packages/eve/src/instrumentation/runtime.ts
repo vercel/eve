@@ -263,10 +263,11 @@ export function bindInstrumentationRuntime(
     runtime.memoryOperations === true
       ? {
           async execute(operation, execute) {
-            const hooks = bindHooks(readSessionContext());
+            const sessionContext = readSessionContext();
+            const hooks = bindHooks(sessionContext);
             const event = {
               ...operation,
-              rootSessionId: boundSession.rootSessionId,
+              rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
               sessionId: boundSession.sessionId,
             };
             await hooks.publish({

@@ -599,14 +599,21 @@ describe("bindInstrumentationRuntime", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
-  it("publishes memory operations when a memory instrumentation provider exists", async () => {
+  it("publishes memory operations with the effective session identity", async () => {
     const publish = vi.fn();
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call-1",
+      rootSessionId: "conversation-root",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 0 },
+    });
     const instrumentation = bindInstrumentationRuntime(
       {
         ...createRuntime({ capturesContent: true, publish }),
         memoryOperations: true,
       },
-      createContext(),
+      ctx,
       boundSession,
     );
 
@@ -629,13 +636,13 @@ describe("bindInstrumentationRuntime", () => {
 
     expect(publish.mock.calls.map(([event]) => event)).toEqual([
       expect.objectContaining({
-        rootSessionId: "session-1",
+        rootSessionId: "conversation-root",
         sessionId: "session-1",
         type: "memory.operation.started",
       }),
       expect.objectContaining({
         recordCount: 1,
-        rootSessionId: "session-1",
+        rootSessionId: "conversation-root",
         sessionId: "session-1",
         type: "memory.operation.completed",
       }),
