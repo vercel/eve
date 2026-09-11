@@ -947,6 +947,25 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("passes completed conversation history to turn.completed handlers", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    let completedMessages: readonly ModelMessage[] | undefined;
+    const emit: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "turn.completed") completedMessages = messages;
+    };
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(completedMessages).toEqual(result.session.history);
+  });
+
   it("omits user messages with no model-visible content", async () => {
     setupMockAgent({
       finishReason: "stop",
