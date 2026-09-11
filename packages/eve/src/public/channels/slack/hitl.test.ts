@@ -4,6 +4,7 @@ import type { InputRequest } from "#shared/input.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
+  decodeHitlActionId,
   deriveHitlResponse,
   formatInputRequestFallbackText,
   freeformRequestIdFromActionId,
@@ -30,6 +31,35 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
     kind: overrides.kind ?? "question",
   };
 }
+
+describe("private HITL routes", () => {
+  it("renders and decodes one typed return route", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        kind: "tool-approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
+        ],
+        requestId: "approval_abc123",
+      }),
+      { channelId: "C123", threadTs: "111.222" },
+    );
+    const actionId = (blocks[0] as { actions: Array<{ action_id: string }> }).actions[0]!.action_id;
+
+    expect(decodeHitlActionId(actionId)).toEqual({
+      button: true,
+      kind: "tool-approval",
+      requestId: "approval_abc123",
+      route: { channelId: "C123", threadTs: "111.222" },
+    });
+    expect(deriveHitlResponse({ actionId, value: "approve" })).toMatchObject({
+      kind: "tool-approval",
+      response: { optionId: "approve", requestId: "approval_abc123" },
+      route: { channelId: "C123", threadTs: "111.222" },
+    });
+  });
+});
 
 describe("deriveHitlResponse", () => {
   it("keeps Slack classification outside the durable input response type", () => {
@@ -371,6 +401,18 @@ describe("renderInputRequestBlocks", () => {
     );
     expect(freeformRequestIdFromActionId(`${HITL_ACTION_PREFIX}call_xyz`)).toBeUndefined();
     expect(freeformRequestIdFromActionId(HITL_FREEFORM_ACTION_PREFIX)).toBeUndefined();
+  });
+
+  it("preserves the return route on a freeform question", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({ requestId: "question_freeform", options: undefined }),
+      { channelId: "C777", threadTs: "7.7" },
+    );
+    const actionId = (blocks[1] as { elements: Array<{ action_id: string }> }).elements[0]!
+      .action_id;
+
+    expect(actionId).toBe("eve_input_freeform:route:C777:7.7:question_freeform");
+    expect(freeformRequestIdFromActionId(actionId)).toBe("question_freeform");
   });
 
   it("truncates section-block prompts past the Slack 3000-char cap", () => {

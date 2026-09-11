@@ -20,8 +20,8 @@ import {
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildFreeformModalView,
+  decodeFreeformHitlActionId,
   deriveHitlResponse,
-  freeformRequestIdFromActionId,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
@@ -299,7 +299,6 @@ export async function handleInteractionPost(
     return ack;
   }
 
-  const continuationToken = slackContinuationToken(interaction.channelId, interaction.threadTs);
   const hitlActions = interaction.actions.flatMap((action) => {
     const derived = deriveHitlResponse(action);
     return derived === null ? [] : [{ action, derived }];
@@ -307,11 +306,13 @@ export async function handleInteractionPost(
 
   if (hitlActions.length > 0) {
     const user = hitlActions[0]!.action.user;
+    const route = hitlActions[0]!.derived.route;
     ctx.waitUntil(
       dispatchBlockInputResponses({
         ctx,
         deps,
         interaction,
+        route,
         submission: {
           type: "block_actions",
           actions: hitlActions.map(({ action }) => action),
@@ -337,7 +338,7 @@ export async function handleInteractionPost(
       });
       const slackCtx: SlackInteractionContext = {
         ...bindSlackSessionOperations({
-          address: continuationToken,
+          address: slackContinuationToken(interaction.channelId, interaction.threadTs),
           defaultAuth: buildSlackAuthContext({
             channelId: interaction.channelId,
             teamId: interaction.teamId,
@@ -482,21 +483,24 @@ async function dispatchBlockInputResponses(input: {
   };
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
+  readonly route?: { readonly channelId: string; readonly threadTs: string };
   readonly submission: Extract<SlackInputResponseSubmission, { type: "block_actions" }>;
 }): Promise<void> {
+  const channelId = input.route?.channelId ?? input.interaction.channelId;
+  const threadTs = input.route?.threadTs ?? input.interaction.threadTs;
   const result = await authorizeInputResponse({
-    channelId: input.interaction.channelId,
+    channelId,
     deps: input.deps,
     installationTeamId: input.interaction.installationTeamId,
     submission: input.submission,
     teamId: input.interaction.teamId,
-    threadTs: input.interaction.threadTs,
+    threadTs,
   });
   if (result === null) return;
 
   try {
     await input.ctx
-      .from(slackContinuationToken(input.interaction.channelId, input.interaction.threadTs))
+      .from(slackContinuationToken(channelId, threadTs))
       .respond(input.submission.inputResponses, {
         auth: result.auth,
         state: approvalResponderStatePatch(input.submission, result.auth),
@@ -531,8 +535,12 @@ async function openFreeformModal(input: {
     return;
   }
 
-  const requestId =
-    freeformRequestIdFromActionId(input.freeformAction.actionId) ?? input.freeformAction.value;
+  const decoded = decodeFreeformHitlActionId(input.freeformAction.actionId);
+  if (decoded === null) {
+    log.warn("freeform button click carries invalid metadata");
+    return;
+  }
+  const requestId = decoded.requestId;
   if (!requestId) {
     log.warn("freeform button click missing requestId");
     return;
@@ -544,14 +552,14 @@ async function openFreeformModal(input: {
     return;
   }
 
+  const channelId = decoded?.route?.channelId ?? input.interaction.channelId;
+  const threadTs = decoded?.route?.threadTs ?? input.interaction.threadTs;
   const metadata: HitlFreeformModalMetadata = {
-    continuationToken: slackContinuationToken(
-      input.interaction.channelId,
-      input.interaction.threadTs,
-    ),
-    channelId: input.interaction.channelId,
+    continuationToken: slackContinuationToken(channelId, threadTs),
+    channelId,
     installationTeamId: input.interaction.installationTeamId,
-    threadTs: input.interaction.threadTs,
+    messageChannelId: input.interaction.channelId,
+    threadTs,
     messageTs,
     requestId,
   };
@@ -676,7 +684,7 @@ async function dispatchViewInputResponse(input: {
 
   try {
     await updateAnsweredFreeformCard({
-      channelId: input.metadata.channelId,
+      channelId: input.metadata.messageChannelId ?? input.metadata.channelId,
       messageTs: input.metadata.messageTs,
       answerLabel: input.text,
       userId: input.submission.user.id,
