@@ -1,6 +1,7 @@
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
-import { buildSlackBinding } from "#public/channels/slack/api.js";
+import { buildSlackBinding, slackContinuationToken } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { deriveHitlResponse } from "#public/channels/slack/hitl.js";
 import type {
@@ -10,6 +11,7 @@ import type {
   SlackInputResponseSubmission,
   SlackChannelState,
 } from "#public/channels/slack/slackChannel.js";
+import type { ValidatedInputResponse } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
 
@@ -24,6 +26,19 @@ export function approvalResponderStatePatch(
     return undefined;
   }
   return { approvalResponderUsers: { [auth.principalId]: submission.user.id } };
+}
+
+/** Delivers an admitted response to the session that owns the routed request. */
+export async function deliverAuthenticatedInputResponse(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly from: ChannelFrom<SlackChannelState>;
+  readonly inputResponses: readonly ValidatedInputResponse[];
+  readonly returnTo: { readonly channelId: string; readonly threadTs: string };
+  readonly state?: Partial<SlackChannelState>;
+}): Promise<void> {
+  await input
+    .from(slackContinuationToken(input.returnTo.channelId, input.returnTo.threadTs))
+    .respond(input.inputResponses, { auth: input.auth, state: input.state });
 }
 
 export async function authorizeInputResponse(input: {

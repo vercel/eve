@@ -18,6 +18,39 @@ const from = {
 };
 
 describe("workflow-tool task input", () => {
+  it("preserves workflow ask metadata by value during normalization", () => {
+    const metadata = { source: "customer", nested: { priority: 2 }, enabled: true };
+    const request = {
+      kind: "ask" as const,
+      request: {
+        metadata,
+        prompt: "Choose a priority",
+      },
+    };
+
+    const normalized = workflowToolRunRequestToTaskInputRequest({
+      from,
+      replyTo: "subagent:parent:call-1",
+      request,
+    });
+
+    expect(normalized.request).toMatchObject({ metadata });
+    expect(JSON.parse(JSON.stringify(normalized))).toMatchObject({ request: { metadata } });
+  });
+
+  it.each([
+    ["non-JSON metadata", { invalid: new Date() }],
+    ["oversized metadata", { value: "x".repeat(16 * 1024) }],
+  ])("rejects %s at the workflow input boundary", (_name, metadata) => {
+    expect(() =>
+      workflowToolRunRequestToTaskInputRequest({
+        from,
+        replyTo: "subagent:parent:call-1",
+        request: { kind: "ask", request: { metadata: metadata as never, prompt: "Choose" } },
+      }),
+    ).toThrow();
+  });
+
   it("preserves a forwarded child request id independently of its session route", () => {
     const request = {
       action: {

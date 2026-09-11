@@ -216,16 +216,21 @@ Blocking workflows and background workflows without auth are unaffected.
 ## Ask a human: `ctx.ask`
 
 ```ts
+type JSONValue = null | boolean | number | string | JSONValue[] | { [key: string]: JSONValue };
+
 const answer = await ctx.ask({
   prompt: string,
   display?: "confirmation" | "select" | "text",
   options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
   allowFreeform?: boolean,
+  metadata?: Record<string, JSONValue>,
 }); // { optionId?: string; text?: string }
 ```
 
 `ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
 `ask_question` and tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+
+Use `metadata` to identify an application-specific request in a custom `input.requested` renderer. eve passes the metadata through unchanged, does not render it automatically, and preserves it when the workflow suspends and replays. Metadata must be a JSON-serializable object whose serialized form is at most 16 KiB. Treat it as application data, not responder identity or authorization evidence.
 It composes with the SDK's own constructs; race it against a deadline:
 
 ```ts

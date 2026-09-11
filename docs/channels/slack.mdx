@@ -453,6 +453,30 @@ export default slackChannel({
 
 The callback receives the `InputRequest` and current `SessionContext`, so it can switch on `kind`, `action`, or presentation properties. Omit it to keep every request in the thread, or return `"direct-message"` unconditionally to make every request private. If eve cannot resolve the triggering Slack user for a direct message, it logs the undelivered request and posts no fallback, so private delivery fails closed. The existing `onInputResponse` or tool approval response policy still decides whether the person who clicks may respond.
 
+For application-owned delivery, override `events["input.requested"]` and use `renderInputRequestBlocks(request, { returnTo })` when you post a question or tool approval outside its session thread. The encoded return route sends a button, select, or freeform-modal answer back to the original continuation. eve still runs `onInputResponse` with auth derived from the Slack user who submitted the signed interaction before delivering the answer. Metadata on a `ctx.ask()` request is available to this trusted event handler but is not included in the rendered blocks.
+
+```ts title="agent/channels/slack.ts"
+import { renderInputRequestBlocks, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  events: {
+    async "input.requested"({ requests }, channel) {
+      for (const request of requests) {
+        const blocks = renderInputRequestBlocks(request, {
+          returnTo: {
+            channelId: channel.slack.channelId,
+            threadTs: channel.slack.threadTs,
+          },
+        });
+        // Post `blocks` to the application-selected Slack conversation.
+      }
+    },
+  },
+});
+```
+
+Use the `returnTo` values from `channel.slack`, not request metadata or other client-provided data. Omitting `returnTo` preserves normal thread behavior.
+
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
 
 ```ts

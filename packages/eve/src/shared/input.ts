@@ -1,6 +1,26 @@
 import { z } from "#compiled/zod/index.js";
 
 import { runtimeToolCallActionRequestSchema } from "#shared/action-types.js";
+import { jsonObjectSchema } from "#shared/json-schemas.js";
+import type { JsonObject } from "#shared/json.js";
+
+/** Maximum serialized size of application-authored input request metadata. */
+export const INPUT_REQUEST_METADATA_MAX_BYTES = 16 * 1024;
+
+const inputRequestMetadataSchema = jsonObjectSchema.refine(
+  (metadata) =>
+    new TextEncoder().encode(JSON.stringify(metadata)).byteLength <=
+    INPUT_REQUEST_METADATA_MAX_BYTES,
+  `Input request metadata exceeds ${INPUT_REQUEST_METADATA_MAX_BYTES} UTF-8 bytes.`,
+);
+
+/** Bounded application metadata carried with an input request. */
+export type InputRequestMetadata = JsonObject;
+
+/** Validates application-authored input request metadata at the durable boundary. */
+export function parseInputRequestMetadata(value: unknown): InputRequestMetadata {
+  return inputRequestMetadataSchema.parse(value);
+}
 
 /**
  * One selectable option presented to the user in an input request.
@@ -58,6 +78,9 @@ export const inputRequestSchema = z
     kind: inputRequestKindSchema.describe(
       "Framework-owned request source used to resolve, route, and render the response.",
     ),
+    metadata: inputRequestMetadataSchema
+      .describe("Application-authored metadata passed unchanged to input request renderers.")
+      .optional(),
     options: z
       .array(inputOptionSchema)
       .describe("Selectable answer options to present to the user.")
