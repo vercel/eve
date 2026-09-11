@@ -513,11 +513,17 @@ export interface ResultCompletedStreamEvent {
 }
 
 /**
- * Stream event emitted when one model call starts inside the current turn.
+ * Identifies the execution backend responsible for one step.
+ */
+export type StepExecutionIdentity =
+  | { readonly harnessId: string; readonly modelId?: never }
+  | { readonly harnessId?: never; readonly modelId: string };
+
+/**
+ * Stream event emitted when one execution step starts inside the current turn.
  */
 export interface StepStartedStreamEvent {
-  data: {
-    readonly modelId: string;
+  data: StepExecutionIdentity & {
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -526,7 +532,7 @@ export interface StepStartedStreamEvent {
 }
 
 /**
- * Stream event emitted when one model call completes successfully.
+ * Stream event emitted when one execution step completes successfully.
  */
 export interface StepCompletedStreamEvent {
   data: {
@@ -547,7 +553,7 @@ export interface StepCompletedStreamEvent {
 }
 
 /**
- * Stream event emitted when one model call fails.
+ * Stream event emitted when one execution step fails.
  */
 export interface StepFailedStreamEvent {
   data: {
@@ -1476,17 +1482,20 @@ export function createResultCompletedEvent(input: {
 }
 
 /**
- * Creates the `step.started` event for one model call.
+ * Creates the `step.started` event for one execution step.
  */
-export function createStepStartedEvent(input: {
-  readonly modelId: string;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}): StepStartedStreamEvent {
+export function createStepStartedEvent(
+  input: StepExecutionIdentity & {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  },
+): StepStartedStreamEvent {
+  const identity: StepExecutionIdentity =
+    input.harnessId === undefined ? { modelId: input.modelId } : { harnessId: input.harnessId };
   return {
     data: {
-      modelId: input.modelId,
+      ...identity,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1496,7 +1505,7 @@ export function createStepStartedEvent(input: {
 }
 
 /**
- * Creates the `step.completed` event for one completed model call.
+ * Creates the `step.completed` event for one completed execution step.
  */
 export function createStepCompletedEvent(input: {
   readonly finishReason: AssistantStepFinishReason;
@@ -1533,7 +1542,7 @@ export function createStepCompletedEvent(input: {
 }
 
 /**
- * Creates the `step.failed` event for one failed model call.
+ * Creates the `step.failed` event for one failed execution step.
  */
 export function createStepFailedEvent(input: {
   readonly code: string;

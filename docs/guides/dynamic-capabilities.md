@@ -313,11 +313,11 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 ### Events
 
-| Event             | Resolver runs                                         | Tools available for             |
-| ----------------- | ----------------------------------------------------- | ------------------------------- |
-| `session.started` | At session start; may be redelivered during recovery¹ | Every model call in the session |
-| `turn.started`    | Once per turn                                         | Every model call in the turn    |
-| `step.started`    | Before each model call                                | That model call                 |
+| Event             | Resolver runs                                         | Tools available for                 |
+| ----------------- | ----------------------------------------------------- | ----------------------------------- |
+| `session.started` | At session start; may be redelivered during recovery¹ | Every execution step in the session |
+| `turn.started`    | Once per turn                                         | Every execution step in the turn    |
+| `step.started`    | Before each execution step                            | That execution step                 |
 
 ¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
 
@@ -329,7 +329,7 @@ When a stream event fires, three things happen in order.
 2. Stream-event [hooks](./hooks) fire.
 3. Dynamic tool resolvers subscribed to that event run and update the tool set.
 
-The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
+The tool loop reads the current set right before each execution step, so a mid-turn update is visible on the next step.
 
 A single file can declare handlers for several events, and the most recently fired one owns that file's tool set. Re-resolve on `turn.started` to replace what `session.started` returned:
 

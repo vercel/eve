@@ -50,7 +50,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `session.started`         | A durable session was created; carries `trace` when the runtime is traced.                                       |
 | `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                         |
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
-| `step.started`            | A model step began.                                                                                              |
+| `step.started`            | An execution step began; carries either `modelId` or `harnessId`.                                                |
 | `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                          |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
@@ -68,8 +68,8 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
 | `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                       |
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                        |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                         |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
+| `step.completed`          | An execution step finished; carries `finishReason` and usage.                                                    |
+| `step.failed`             | An execution step failed; carries `{ code, message, details? }`.                                                 |
 | `turn.completed`          | The turn finished.                                                                                               |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
 | `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                   |

@@ -14,6 +14,7 @@ import type {
   AssistantStepFinishReason,
   RuntimeIdentity,
   RuntimeTraceContext,
+  StepExecutionIdentity,
 } from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
@@ -109,22 +110,22 @@ export async function emitTurnPreamble(
 }
 
 /**
- * Emits `step.started` for one model call.
+ * Emits `step.started` for one execution step.
  */
-export async function emitStepStarted(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  modelId: string,
-  messages?: readonly import("ai").ModelMessage[],
-): Promise<void> {
-  await emitFn(
+export async function emitStepStarted(input: {
+  readonly emit: HarnessEmitFn;
+  readonly identity: StepExecutionIdentity;
+  readonly messages?: readonly import("ai").ModelMessage[];
+  readonly state: HarnessEmissionState;
+}): Promise<void> {
+  await input.emit(
     createStepStartedEvent({
-      modelId,
-      sequence: state.sequence,
-      stepIndex: state.stepIndex,
-      turnId: state.turnId,
+      ...input.identity,
+      sequence: input.state.sequence,
+      stepIndex: input.state.stepIndex,
+      turnId: input.state.turnId,
     }),
-    messages,
+    input.messages,
   );
 }
 

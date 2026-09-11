@@ -10,6 +10,8 @@ import {
   type UserContent,
 } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
+import type { HarnessV1 } from "@ai-sdk/harness";
+import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -113,6 +115,10 @@ vi.mock("ai", () => ({
   jsonSchema: vi.fn((s: unknown) => s),
   isStepCount: vi.fn((n: number) => n),
   tool: vi.fn((t: unknown) => t),
+}));
+
+vi.mock("@ai-sdk/harness/agent", () => ({
+  HarnessAgent: vi.fn(),
 }));
 
 const {
@@ -243,6 +249,7 @@ vi.mock("./compaction.js", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.mocked(HarnessAgent).mockReset();
   vi.mocked(shouldCompact).mockReset().mockReturnValue(false);
   vi.mocked(compactMessages).mockReset();
   vi.unstubAllEnvs();
@@ -263,6 +270,15 @@ function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession 
     sessionId: "test-session",
     ...overrides,
   };
+}
+
+function createTestHarness(harnessId = "test-harness"): HarnessV1 {
+  return {
+    builtinTools: {},
+    doStart: vi.fn(),
+    harnessId,
+    specificationVersion: "harness-v1",
+  } as unknown as HarnessV1;
 }
 
 const analysisTaskAnnouncement =
@@ -551,6 +567,32 @@ type MockAgentConstructor =
     ? (settings: S) => ToolLoopAgent
     : never;
 type MockAgentInstance = ToolLoopAgent & Record<string, unknown>;
+
+type MockHarnessAgentSettings = {
+  onStepEnd?: (step: unknown) => Promise<void> | void;
+};
+
+type MockHarnessAgentConstructor = (settings: MockHarnessAgentSettings) => HarnessAgent;
+
+function setupMockHarnessAgent(result: Record<string, unknown>): void {
+  vi.mocked(HarnessAgent).mockImplementation(function (
+    this: Record<string, unknown>,
+    settings: MockHarnessAgentSettings,
+  ) {
+    const { onStepEnd } = settings;
+    this.createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
+    this.generate = vi.fn().mockImplementation(async () => {
+      if (onStepEnd) await onStepEnd(result);
+      return createMockGenerateResult(result);
+    });
+    this.stream = vi.fn().mockImplementation(async () => {
+      const mockResult = createMockStreamResult(result);
+      if (onStepEnd) void Promise.resolve().then(() => onStepEnd(result));
+      return mockResult;
+    });
+    return this as unknown as HarnessAgent;
+  } as unknown as MockHarnessAgentConstructor);
+}
 
 function setupMockAgent(result: Record<string, unknown>): void {
   vi.mocked(ToolLoopAgent).mockImplementation(function (
@@ -1444,6 +1486,86 @@ describe("createToolLoopHarness", () => {
       providerOptions: { openai: { parallelToolCalls: false } },
     });
     expect(result.session.compaction.threshold).toBe(180_000);
+  });
+
+  it("runs a harness-backed step without model resolution", async () => {
+    setupMockHarnessAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    vi.mocked(shouldCompact).mockReturnValue(true);
+
+    const harness = createTestHarness();
+    const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
+    const dispatchDynamicModelEvent = vi.fn();
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        dispatchDynamicModelEvent,
+        harness,
+        resolveModel,
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        harnessId: harness.harnessId,
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      history: [{ content: "Earlier message", role: "user" }],
+    });
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { message: "Hi" }),
+    );
+
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(dispatchDynamicModelEvent).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(HarnessAgent).toHaveBeenCalledOnce();
+    expect(vi.mocked(HarnessAgent).mock.calls[0]?.[0]).not.toHaveProperty("model");
+    expect(vi.mocked(HarnessAgent).mock.calls[0]?.[0]).not.toHaveProperty("headers");
+    expect(events.find((event) => event.type === "step.started")).toEqual({
+      data: {
+        harnessId: "test-harness",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      type: "step.started",
+    });
+    expect(result.session.history).toContainEqual({ content: "Hello!", role: "assistant" });
+  });
+
+  it("rejects a harness that does not match the persisted harness identity", async () => {
+    const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
+    const dispatchDynamicModelEvent = vi.fn();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        dispatchDynamicModelEvent,
+        harness: createTestHarness("authored-harness"),
+        resolveModel,
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        harnessId: "persisted-harness",
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    await expect(
+      contextStorage.run(new ContextContainer(), () => runStep(session, { message: "Hi" })),
+    ).rejects.toThrow(
+      'Harness-backed session requires harness "persisted-harness", but the authored harness is "authored-harness".',
+    );
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(dispatchDynamicModelEvent).not.toHaveBeenCalled();
   });
 
   it("uses session-scoped dynamic model selection for the model call", async () => {
@@ -9755,6 +9877,36 @@ describe("createToolLoopHarness", () => {
     expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
     expect(ToolLoopAgent).not.toHaveBeenCalled();
     expect(compactMessages).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve a model to compact a harness-backed session", async () => {
+    const harness = createTestHarness();
+    const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        harness,
+        resolveModel,
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        harnessId: harness.harnessId,
+        system: "You are a test assistant.",
+        tools: [],
+      },
+      history: [{ content: "Keep this history", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result).toEqual({ next: null, session });
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(HarnessAgent).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
   it("returns a failed manual compaction to its waiting boundary", async () => {

@@ -14,6 +14,7 @@ import {
   createActionResultEvent,
   createActionsRequestedEvent,
   createStepCompletedEvent,
+  type StepExecutionIdentity,
   type StepCompletedProviderMetadata,
 } from "#protocol/message.js";
 import {
@@ -38,12 +39,8 @@ import {
 } from "#harness/action-presentation.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import {
-  type HarnessEmitFn,
-  type HarnessSession,
-  requireSessionModelReference,
-  type ToolLoopHarnessConfig,
-} from "#harness/types.js";
+import { type HarnessEmitFn, type ToolLoopHarnessConfig } from "#harness/types.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
@@ -81,10 +78,20 @@ export type HarnessStepResult = Pick<
  * Input for {@link buildStepHooks}.
  */
 interface StepHooksInput {
-  readonly auth?: import("#channel/types.js").SessionAuthContext | null;
-  readonly cachePath: PromptCachePath;
   readonly emit?: HarnessEmitFn;
   readonly emissionState: HarnessEmissionState;
+  readonly execution:
+    | {
+        readonly auth?: import("#channel/types.js").SessionAuthContext | null;
+        readonly cachePath: PromptCachePath;
+        readonly kind: "model";
+        readonly marker: AnthropicCacheMarker | undefined;
+        readonly modelReference: RuntimeModelReference;
+      }
+    | {
+        readonly harnessId: string;
+        readonly kind: "harness";
+      };
   /**
    * When `false`, `prepareStep` skips the `step.started` emission.
    * Used by the harness recovery path to avoid emitting `step.started`
@@ -93,8 +100,6 @@ interface StepHooksInput {
    * Defaults to `true`.
    */
   readonly emitStepStarted?: boolean;
-  readonly marker: AnthropicCacheMarker | undefined;
-  readonly session: HarnessSession;
 }
 
 /**
@@ -149,7 +154,6 @@ interface StepHooks {
  * results via `stepResult` after the agent finishes.
  */
 export function buildStepHooks(input: StepHooksInput): StepHooks {
-  const session = input.session;
   const emit = input.emit;
 
   let resolveStep: (step: HarnessStepResult) => void;
@@ -170,29 +174,39 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     let processed = messages;
 
     if (emit && input.emitStepStarted !== false) {
-      await emitStepStarted(
+      const identity: StepExecutionIdentity =
+        input.execution.kind === "model"
+          ? { modelId: input.execution.modelReference.id }
+          : { harnessId: input.execution.harnessId };
+      await emitStepStarted({
         emit,
-        input.emissionState,
-        requireSessionModelReference(session).id,
+        identity,
         messages,
-      );
+        state: input.emissionState,
+      });
     }
 
-    if (input.cachePath.kind === "anthropic-direct" && input.marker) {
-      processed = applyConversationCacheControl([...messages], input.marker);
+    if (
+      input.execution.kind === "model" &&
+      input.execution.cachePath.kind === "anthropic-direct" &&
+      input.execution.marker
+    ) {
+      processed = applyConversationCacheControl([...messages], input.execution.marker);
     }
 
     const stepResult: NonNullable<Awaited<ReturnType<PrepareStepFunction<ToolSet>>>> = {
       messages: processed,
     };
 
-    const modelReference = requireSessionModelReference(session);
+    if (input.execution.kind === "harness") return stepResult;
+
+    const modelReference = input.execution.modelReference;
     const providerOptions = mergeProviderSafetyIdentifier(
       modelReference,
       modelReference.providerOptions,
-      input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
+      input.execution.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
     );
-    if (input.cachePath.kind === "gateway-auto") {
+    if (input.execution.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions
       >;

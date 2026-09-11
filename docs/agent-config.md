@@ -109,8 +109,10 @@ selection object. Returning `null` or `undefined` fails the turn.
   return per-model values from the handler.
 
 The `session.started` runtime identity does not include a model id for a
-dynamic agent. Each public `step.started` event reports the concrete `modelId`
-selected for that model call.
+dynamic agent. Each public `step.started` event reports exactly one execution
+identity: the concrete `modelId` selected for a model-backed step, or the
+`harnessId` for a harness-backed step. Harness-backed agents do not run dynamic
+model resolution.
 
 ## Reasoning effort
 

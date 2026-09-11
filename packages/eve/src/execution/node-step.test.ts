@@ -1,5 +1,6 @@
 import { ToolLoopAgent } from "ai";
 import type { HarnessV1 } from "@ai-sdk/harness";
+import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -45,12 +46,17 @@ vi.mock("ai", () => ({
   tool: vi.fn((definition: unknown) => definition),
 }));
 
+vi.mock("@ai-sdk/harness/agent", () => ({
+  HarnessAgent: vi.fn(),
+}));
+
 vi.mock("../runtime/agent/resolve-model.js", () => ({
   resolveRuntimeModelReference: vi.fn().mockResolvedValue({}),
 }));
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.mocked(HarnessAgent).mockReset();
   vi.unstubAllEnvs();
 });
 
@@ -114,6 +120,31 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
     return this as unknown as ToolLoopAgent;
   } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
     ? (settings: S) => ToolLoopAgent
+    : never);
+}
+
+function setupMockHarnessAgent(): void {
+  vi.mocked(HarnessAgent).mockImplementation(function (
+    this: Record<string, unknown>,
+    settings: Record<string, unknown>,
+  ) {
+    const onStepEnd = settings.onStepEnd as ((step: unknown) => Promise<void>) | undefined;
+    const result = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Harness result", role: "assistant" }] },
+      text: "Harness result",
+      toolCalls: [],
+      toolResults: [],
+      usage: undefined,
+    };
+    this.createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
+    this.generate = vi.fn().mockImplementation(async () => {
+      await onStepEnd?.(result);
+      return { ...result, responseMessages: result.response.messages };
+    });
+    return this as unknown as HarnessAgent;
+  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer S]
+    ? (settings: S) => HarnessAgent
     : never);
 }
 
@@ -318,6 +349,7 @@ describe("createNodeHarnessTools", () => {
 
 describe("createExecutionNodeStep", () => {
   it("passes a live harness to the tool-loop boundary without constructing ToolLoopAgent", async () => {
+    setupMockHarnessAgent();
     const harness = {
       builtinTools: {},
       harnessId: "test-harness",
@@ -342,16 +374,17 @@ describe("createExecutionNodeStep", () => {
       node,
     });
 
-    await expect(
-      step(
-        createSession({
-          continuationToken: "test-root",
-          sessionId: "sess-root",
-          turnAgent,
-        }),
-        { message: "Hello" },
-      ),
-    ).rejects.toThrow("Harness-backed agent execution is not implemented.");
+    const result = await step(
+      createSession({
+        continuationToken: "test-root",
+        sessionId: "sess-root",
+        turnAgent,
+      }),
+      { message: "Hello" },
+    );
+
+    expect(result.next).toEqual({ done: true, output: "Harness result" });
+    expect(HarnessAgent).toHaveBeenCalledWith(expect.objectContaining({ harness }));
     expect(harness.doStart).not.toHaveBeenCalled();
     expect(resolveRuntimeModelReference).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
