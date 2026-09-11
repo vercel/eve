@@ -1,3 +1,4 @@
+import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrations/snapshot.js";
@@ -43,13 +44,16 @@ describe("pre-0.54 durable history", () => {
       turnAgent,
     });
     const state = createDurableSessionState({ session: initial });
+    const legacySession = { ...projectToDurableSession(initial) };
+    delete legacySession.userMessageKindVersion;
     const legacySnapshot = {
       ...state.snapshot,
       retained: "snapshot field",
-      session: { ...projectToDurableSession(initial), history },
+      session: { ...legacySession, history },
     } as DurableSessionSnapshot;
 
     const durable = await readDurableSession({ ...state, snapshot: legacySnapshot });
+    expect(durable.history[0]).not.toHaveProperty("kind");
     const resumed = hydrateDurableSession({ durable, turnAgent });
 
     expect(resumed.history).toEqual([
@@ -62,9 +66,11 @@ describe("pre-0.54 durable history", () => {
     const saved = createDurableSessionState({ session: resumed });
     expect(saved.version).toBe(state.version);
     expect(saved.snapshot?.version).toBe(state.snapshot?.version);
-    expect(await readDurableSession(saved)).toEqual(durable);
+    expect(saved.snapshot?.session.userMessageKindVersion).toBe(1);
+    expect((await readDurableSession(saved)).history).toEqual(resumed.history);
 
     const migrated = migrateDurableSessionSnapshot(legacySnapshot);
+    expect(migrated).toBe(legacySnapshot);
     expect(migrated).toHaveProperty("retained", "snapshot field");
   });
 
@@ -72,12 +78,23 @@ describe("pre-0.54 durable history", () => {
     expect(() => validateHarnessModelMessages([{ content: "New input", role: "user" }])).toThrow(
       "Expected every user-role model message to have a kind.",
     );
+    const malformed: ModelMessage = { content: "Old input", role: "user" };
+    Reflect.set(malformed, "kind", "invalid");
     expect(() =>
-      migrateDurableSessionSnapshot({
-        session: {
-          history: [{ content: "Old input", kind: "invalid", role: "user" }],
-        },
-        version: 1,
+      validateHarnessModelMessages([malformed], { missingUserKind: "legacy.unknown" }),
+    ).toThrow("Expected every user-role model message to have a kind.");
+
+    const initial = createSession({
+      continuationToken: "test-token",
+      sessionId: "test-session",
+      turnAgent,
+    });
+    const durable = projectToDurableSession(initial);
+    Reflect.set(durable, "history", [{ content: "Current input", role: "user" }]);
+    expect(() =>
+      hydrateDurableSession({
+        durable,
+        turnAgent,
       }),
     ).toThrow("Expected every user-role model message to have a kind.");
   });

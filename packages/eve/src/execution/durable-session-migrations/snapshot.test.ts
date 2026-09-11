@@ -22,7 +22,8 @@ describe("migrateDurableSessionSnapshot", () => {
 
     const migrated = migrateDurableSessionSnapshot(snapshot);
 
-    expect(migrated).toEqual(snapshot);
+    expect(migrated).toBe(snapshot);
+    expect(migrated.session.history).toBe(snapshot.session.history);
     expect(migrated.version).toBe(DURABLE_SESSION_VERSION);
   });
 

@@ -201,12 +201,14 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sessionId: string;
     state?: HarnessSession["state"];
     taskId?: string;
+    userMessageKindVersion: 1;
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
     history: session.history,
     sessionId: session.sessionId,
+    userMessageKindVersion: 1,
   };
 
   if (
@@ -268,7 +270,12 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: validateHarnessModelMessages(durable.history),
+    history: validateHarnessModelMessages(
+      durable.history,
+      durable.userMessageKindVersion === undefined
+        ? { missingUserKind: "legacy.unknown" }
+        : undefined,
+    ),
     sessionId: durable.sessionId,
   };
 

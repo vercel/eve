@@ -343,6 +343,27 @@ describe("createFrameworkUserMessage", () => {
       validateHarnessModelMessages([{ content: "A user message", role: "user" }]),
     ).toThrow("Expected every user-role model message to have a kind.");
   });
+
+  it("classifies only missing legacy kinds when explicitly requested", () => {
+    const legacy = { content: "A retained pre-0.54 message", role: "user" as const };
+    const classified = {
+      content: "A current framework message",
+      kind: "context.instruction" as const,
+      role: "user" as const,
+    };
+
+    expect(
+      validateHarnessModelMessages([legacy, classified], {
+        missingUserKind: "legacy.unknown",
+      }),
+    ).toEqual([{ ...legacy, kind: "legacy.unknown" }, classified]);
+    expect(legacy).not.toHaveProperty("kind");
+    const malformed: ModelMessage = { content: "Malformed input", role: "user" };
+    Reflect.set(malformed, "kind", undefined);
+    expect(() =>
+      validateHarnessModelMessages([malformed], { missingUserKind: "legacy.unknown" }),
+    ).toThrow("Expected every user-role model message to have a kind.");
+  });
 });
 
 describe("resolveAssistantStepText", () => {

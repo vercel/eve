@@ -87,6 +87,10 @@ export function isFrameworkUserMessage(message: ModelMessage): message is Framew
 /** Validates that every user-role message is classified before history retains it. */
 export function validateHarnessModelMessages(
   messages: readonly ModelMessage[],
+  options?: {
+    /** Applied only when a user message has no `kind` property. */
+    readonly missingUserKind?: "legacy.unknown";
+  },
 ): HarnessModelMessage[] {
   const validated: HarnessModelMessage[] = [];
   for (const message of messages) {
@@ -95,6 +99,10 @@ export function validateHarnessModelMessages(
       continue;
     }
     if (!isUserModelMessage(message)) {
+      if (options?.missingUserKind !== undefined && !("kind" in message)) {
+        validated.push({ ...message, kind: options.missingUserKind });
+        continue;
+      }
       throw new TypeError("Expected every user-role model message to have a kind.");
     }
     validated.push(message);

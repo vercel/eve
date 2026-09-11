@@ -80,6 +80,8 @@ export interface DurableSession {
   readonly rootSessionId?: string;
   readonly continuationToken: string;
   readonly history: HarnessModelMessage[];
+  /** Message-kind schema version; absent on history persisted before eve 0.54. */
+  readonly userMessageKindVersion?: 1;
   readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;

@@ -11,9 +11,16 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { projectToDurableSession } from "#execution/session.js";
+import { hydrateDurableSession, projectToDurableSession } from "#execution/session.js";
 
 const getRunMock = vi.hoisted(() => vi.fn());
+const turnAgent = {
+  id: "test-agent",
+  instructions: ["Be concise."],
+  model: { id: "test-model" },
+  tools: [],
+  workspaceSpec: { rootEntries: [] },
+};
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
@@ -71,6 +78,7 @@ describe("durable-session-store cross-version contract", () => {
     expect(durable.sessionId).toBe(session.sessionId);
     expect(durable.continuationToken).toBe(session.continuationToken);
     expect(durable.history).toBe(session.history);
+    expect(durable.userMessageKindVersion).toBe(1);
     expect(durable.agent).toEqual({ system: session.agent.system });
     // turnAgent-derived fields are rebuilt every turn — not persisted.
     expect(durable.agent).not.toHaveProperty("modelReference");
@@ -202,16 +210,18 @@ describe("durable-session-store cross-version contract", () => {
     expect(getRunMock).not.toHaveBeenCalled();
   });
 
-  it("classifies unmarked legacy history in an embedded snapshot", async () => {
+  it("reads unmarked legacy history without normalizing the snapshot", async () => {
     const session = buildSession({
       continuationToken: "http:test",
       sessionId: "wrun_embedded_legacy",
     });
     const state = createDurableSessionState({ session });
+    const legacySession = { ...state.snapshot!.session };
+    delete legacySession.userMessageKindVersion;
     const legacySnapshot = {
       ...state.snapshot,
       session: {
-        ...state.snapshot!.session,
+        ...legacySession,
         history: [{ content: "Retained before eve 0.54.", role: "user" }],
       },
     } as DurableSessionSnapshot;
@@ -219,8 +229,9 @@ describe("durable-session-store cross-version contract", () => {
     const durableSession = await readDurableSession({ ...state, snapshot: legacySnapshot });
 
     expect(durableSession.history).toEqual([
-      { content: "Retained before eve 0.54.", kind: "legacy.unknown", role: "user" },
+      { content: "Retained before eve 0.54.", role: "user" },
     ]);
+    expect(durableSession.userMessageKindVersion).toBeUndefined();
     expect(getRunMock).not.toHaveBeenCalled();
   });
 
@@ -229,9 +240,11 @@ describe("durable-session-store cross-version contract", () => {
       continuationToken: "http:test",
       sessionId: "wrun_tail_cancel",
     });
+    const legacySession = { ...projectToDurableSession(session) };
+    delete legacySession.userMessageKindVersion;
     const snapshot = {
       session: {
-        ...projectToDurableSession(session),
+        ...legacySession,
         history: [{ content: "Retained before eve 0.54.", role: "user" }],
       },
       version: DURABLE_SESSION_VERSION,
@@ -248,10 +261,10 @@ describe("durable-session-store cross-version contract", () => {
 
     const durableSession = await readDurableSession(projectSessionState({ session }));
 
-    expect(durableSession).toEqual({
-      ...snapshot.session,
-      history: [{ content: "Retained before eve 0.54.", kind: "legacy.unknown", role: "user" }],
-    });
+    expect(durableSession).toEqual(snapshot.session);
+    expect(hydrateDurableSession({ durable: durableSession, turnAgent }).history).toEqual([
+      { content: "Retained before eve 0.54.", kind: "legacy.unknown", role: "user" },
+    ]);
     expect(getRunMock).toHaveBeenCalledWith("wrun_tail_cancel");
     expect(getReadable).toHaveBeenCalledWith({
       namespace: "eve.session",
