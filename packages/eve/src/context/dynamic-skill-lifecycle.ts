@@ -227,6 +227,7 @@ export async function dispatchDynamicSkillEvent(input: {
 
     for (const { skills } of updates) {
       for (const skill of skills) {
+        await removeSkillPackageFromSandbox({ name: skill.name, sandbox });
         await writeSkillPackageToSandbox({ sandbox, skill });
       }
     }

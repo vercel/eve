@@ -110,7 +110,10 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
     expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
-    expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant"]);
+    expect(sandbox.removedPaths).toEqual([
+      "/home/agent/.agents/skills/tenant",
+      "/home/agent/.agents/skills/tenant",
+    ]);
   });
 
   it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {

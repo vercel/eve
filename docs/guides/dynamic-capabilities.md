@@ -384,6 +384,8 @@ The caller's team gets its own playbook advertised as a loadable skill; everyone
 
 Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
+Each resolved skill replaces its sandbox package directory, so supporting files omitted from the new result are removed. Store session output outside these managed directories. Package refreshes are not atomic for concurrent readers of a shared sandbox.
+
 ## Dynamic instructions
 
 A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
