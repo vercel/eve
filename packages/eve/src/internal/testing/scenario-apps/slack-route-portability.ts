@@ -5,7 +5,7 @@ export const SLACK_ROUTE_PORTABILITY_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/channels/slack.ts": `import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
-  botName: "testbot",
+  bot: { name: "testbot" },
 });
 `,
   },
