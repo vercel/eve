@@ -32,6 +32,7 @@ describe("createVercelConnectManifest", () => {
         format: "slack-app-manifest",
         path: "channels/support.slack-app-manifest.json",
       },
+      trigger: { method: "POST", path: "/eve/v1/slack" },
       access: { principalTypes: ["user"] },
       uses: [use],
     },
