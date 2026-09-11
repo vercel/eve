@@ -384,6 +384,8 @@ The caller's team gets its own playbook advertised as a loadable skill; everyone
 
 Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
+If a `turn.started` skill resolver throws, the current conversation turn fails before model work and the session stays available for a new turn. Repair the source before sending the next turn. Errors from `session.started` skill resolvers fail session initialization.
+
 ## Dynamic instructions
 
 A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
