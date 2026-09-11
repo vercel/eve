@@ -9,6 +9,11 @@ export const SLACK_APP_MANIFEST_FORMAT = "slack-app-manifest";
 export interface SlackAppManifest {
   readonly display_information: { readonly name: string };
   readonly features: {
+    readonly app_home: {
+      readonly home_tab_enabled: false;
+      readonly messages_tab_enabled: true;
+      readonly messages_tab_read_only_enabled: false;
+    };
     readonly bot_user: { readonly display_name: string; readonly always_online: false };
   };
   readonly oauth_config: { readonly scopes: { readonly bot: readonly string[] } };
@@ -157,7 +162,14 @@ export function buildSlackAppManifests(manifest: {
     const name = channel.name.slice(0, 35);
     manifests.set(slackAppManifestPath(channel.logicalPath), {
       display_information: { name },
-      features: { bot_user: { display_name: name, always_online: false } },
+      features: {
+        app_home: {
+          home_tab_enabled: false,
+          messages_tab_enabled: true,
+          messages_tab_read_only_enabled: false,
+        },
+        bot_user: { display_name: name, always_online: false },
+      },
       oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
       settings: {
         event_subscriptions: { bot_events: ["app_mention"] },
