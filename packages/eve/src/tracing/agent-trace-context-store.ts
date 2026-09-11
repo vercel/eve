@@ -201,7 +201,28 @@ export function recordNestedAgentInvocation(input: {
   const outer = state.actions[outerKey] ?? state.actionAnchors[outerKey];
   if (outer === undefined) return input.serializedContext;
   const key = actionIdempotencyKey(input.sessionId, input.turnId, input.callId);
-  if (state.invocations[key] !== undefined) return input.serializedContext;
+  const promote = (action: AgentActionTraceState): AgentActionTraceState =>
+    action.isWorkflowTool === true && action.kind === "tool-call"
+      ? { ...action, workflowName: action.name }
+      : action;
+  const actions =
+    state.actions[outerKey] === undefined
+      ? state.actions
+      : { ...state.actions, [outerKey]: promote(state.actions[outerKey]) };
+  const actionAnchors =
+    state.actionAnchors[outerKey] === undefined
+      ? state.actionAnchors
+      : { ...state.actionAnchors, [outerKey]: promote(state.actionAnchors[outerKey]) };
+  if (state.invocations[key] !== undefined) {
+    return {
+      ...input.serializedContext,
+      [AgentTraceContextKey.name]: serializeAgentTraceContextState({
+        ...state,
+        actionAnchors,
+        actions,
+      }),
+    };
+  }
   const invocation: AgentInvocationTraceState = {
     attemptIndex: outer.attemptIndex,
     callId: input.callId,
@@ -226,6 +247,8 @@ export function recordNestedAgentInvocation(input: {
     ...input.serializedContext,
     [AgentTraceContextKey.name]: serializeAgentTraceContextState({
       ...state,
+      actionAnchors,
+      actions,
       invocations: { ...state.invocations, [key]: invocation },
     }),
   };
@@ -245,7 +268,12 @@ export function recordActionInvocationKind(input: {
     action.sessionId === input.sessionId &&
     action.turnId === input.turnId &&
     action.callId === input.callId
-      ? { ...action, kind: input.kind }
+      ? {
+          ...action,
+          isWorkflowTool: undefined,
+          kind: input.kind,
+          workflowName: undefined,
+        }
       : action;
   return {
     ...input.serializedContext,

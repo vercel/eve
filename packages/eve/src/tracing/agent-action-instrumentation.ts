@@ -79,6 +79,7 @@ export function createAgentActionInstrumentation(input: {
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
+      isWorkflowTool: event.isWorkflowTool === true,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -92,7 +93,6 @@ export function createAgentActionInstrumentation(input: {
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
-      workflowName: event.isWorkflowTool === true ? event.name : undefined,
     };
     await input.stateStore.setAction(event.idempotencyKey, state);
     if (event.isWorkflowTool === true) {
@@ -123,7 +123,7 @@ export function createAgentActionInstrumentation(input: {
         : workflowInvocationSpanName(workflowName);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        spanName,
+        AGENT_SPAN_NAMES.action,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -161,6 +161,7 @@ export function createAgentActionInstrumentation(input: {
         contextFromActionState(state),
       ),
     );
+    if (workflowName !== undefined) updateSpanName(span, spanName);
     if (!invocation && state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
     }
@@ -300,6 +301,11 @@ function contextFromActionState(state: AgentActionTraceState): Context {
 
 function isAgentInvocation(kind: InstrumentationActionKind): boolean {
   return kind === "subagent-call" || kind === "remote-agent-call";
+}
+
+function updateSpanName(span: Span, name: string): void {
+  const updateName = Reflect.get(span, "updateName");
+  if (typeof updateName === "function") Reflect.apply(updateName, span, [name]);
 }
 
 function recordActionError(span: Span, error: unknown, errorType?: string): void {

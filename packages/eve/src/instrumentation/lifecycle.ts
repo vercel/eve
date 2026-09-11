@@ -500,7 +500,7 @@ export interface InstrumentationActionStartedEvent {
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
-  /** Whether this action owns a workflow body that may invoke nested agents. */
+  /** Whether this action owns a durable workflow body. */
   readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;

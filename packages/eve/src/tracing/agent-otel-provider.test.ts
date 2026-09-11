@@ -2,8 +2,10 @@ import { SpanKind, SpanStatusCode, trace as apiTrace } from "@opentelemetry/api"
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
+  SamplingDecision,
   SimpleSpanProcessor,
   type ReadableSpan,
+  type Sampler,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
@@ -18,11 +20,16 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ActiveChannelDeliveriesKey, SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
+import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
+import type { HarnessToolMap } from "#harness/types.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 import {
   createAgentOtelInstrumentation,
   type AgentOtelInstrumentationInput,
 } from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import {
   type AgentTraceStateStore,
@@ -65,6 +72,7 @@ import {
   takeInstrumentationActionScopeForTask,
 } from "#instrumentation/state.js";
 import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
+import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;
@@ -90,11 +98,13 @@ function createRuntime(
   }),
   extraSpanProcessors: readonly SpanProcessor[] = [],
   samplesTrace?: AgentOtelInstrumentationInput["samplesTrace"],
+  sampler?: Sampler,
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
     idGenerator,
+    sampler,
     spanProcessors: [new SimpleSpanProcessor(exporter), ...extraSpanProcessors],
   });
   const tracer = provider.getTracer("eve.agent");
@@ -1236,7 +1246,190 @@ describe("createAgentOtelInstrumentation", () => {
     expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
 
-  it("keeps a workflow tool intact while emitting independent nested callers", async () => {
+  it("projects production workflow actions and classifies only GenAI composition", async () => {
+    const samplerCalls: {
+      readonly attributes: Readonly<Record<string, unknown>>;
+      readonly name: string;
+    }[] = [];
+    const sampler: Sampler = {
+      shouldSample(_context, _traceId, name, _kind, attributes) {
+        samplerCalls.push({ attributes, name });
+        return { decision: SamplingDecision.RECORD_AND_SAMPLED };
+      },
+      toString: () => "recording-sampler",
+    };
+    const context = new ContextContainer();
+    let runtime: TestRuntime | undefined;
+
+    await contextStorage.run(context, async () => {
+      runtime = createRuntime(new ContextAgentTraceStateStore(), undefined, [], undefined, sampler);
+      const scope: InstrumentationAttemptScope = {
+        attemptId: "session-workflow:turn-1:0:0",
+        attemptIndex: 0,
+        functionId: "weather",
+        sessionId: "session-workflow",
+        stepIndex: 0,
+        turnId: "turn-1",
+      };
+      await publishTurnStarted({
+        hooks: runtime.hooks,
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        turnSequence: 0,
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: attemptIdempotencyKey(scope),
+        operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+        scope,
+        type: "step.attempt.started",
+      });
+
+      const tools: HarnessToolMap = new Map([
+        [
+          "coordinate",
+          {
+            description: "Coordinate research.",
+            inputSchema: {} as never,
+            name: "coordinate",
+            workflowId: "workflow//./agent/tools/coordinate//execute",
+          },
+        ],
+        [
+          "wait",
+          {
+            description: "Wait durably.",
+            inputSchema: {} as never,
+            name: "wait",
+            workflowId: "workflow//./agent/tools/wait//execute",
+          },
+        ],
+      ]);
+      const projections = [
+        createPresentedRuntimeActionRequestFromToolCall({
+          toolCall: {
+            input: { query: "review" },
+            toolCallId: "workflow",
+            toolName: "coordinate",
+            type: "tool-call",
+          } as never,
+          tools,
+        }),
+        createPresentedRuntimeActionRequestFromToolCall({
+          toolCall: {
+            input: { delay: "1m" },
+            toolCallId: "wait",
+            toolName: "wait",
+            type: "tool-call",
+          } as never,
+          tools,
+        }),
+      ];
+      expect(projections.map(({ action }) => action.kind)).toEqual(["tool-call", "tool-call"]);
+      expect(projections.every(({ action }) => isRuntimeWorkflowToolAction(action))).toBe(true);
+
+      const handleEvent = createInstrumentationHandleEvent({
+        getAttemptScope: () => scope,
+        handleEvent: async () => {},
+        hooks: runtime.hooks,
+        sessionId: scope.sessionId,
+      })!;
+      await handleEvent(
+        createActionsRequestedEvent({
+          actions: projections.map(({ action }) => action),
+          sequence: 0,
+          stepIndex: 0,
+          turnId: scope.turnId,
+        }),
+      );
+
+      const nested = prepareAgentInvocationTrace({
+        invocation: {
+          callId: "workflow:child",
+          kind: "subagent-call",
+          name: "research",
+        },
+        ownerId: "workflow-run",
+        serializedContext: serializeContext(context),
+        sessionId: scope.sessionId,
+        sessionState: {
+          "eve.runtime.workflowToolRuns": [
+            {
+              callId: "workflow",
+              hookToken: "workflow-hook",
+              runId: "workflow-run",
+              toolName: "coordinate",
+            },
+          ],
+        },
+        startTimeMs: 2,
+        turnId: scope.turnId,
+      });
+      const settled = nested.fail({
+        callId: "workflow:child",
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: "unavailable",
+        subagentName: "research",
+      });
+      const restored = await deserializeContext(settled);
+      await contextStorage.run(restored, async () => {
+        const terminal = createInstrumentationHandleEvent({
+          handleEvent: async () => {},
+          hooks: runtime!.hooks,
+          sessionId: scope.sessionId,
+        })!;
+        for (const [callId, toolName] of [
+          ["workflow", "coordinate"],
+          ["wait", "wait"],
+        ] as const) {
+          await terminal(
+            createActionResultEvent({
+              result: {
+                callId,
+                kind: "tool-result",
+                output: { done: true },
+                toolName,
+              },
+              sequence: 0,
+              stepIndex: 0,
+              turnId: scope.turnId,
+            }),
+          );
+        }
+        await runtime!.hooks.publish({
+          idempotencyKey: attemptIdempotencyKey(scope),
+          scope,
+          type: "step.attempt.completed",
+        });
+        await completeTurn(runtime!.hooks, scope.sessionId, scope.turnId);
+      });
+    });
+
+    await runtime!.provider.forceFlush();
+    const spans = runtime!.exporter.getFinishedSpans();
+    const workflow = byName(spans, "invoke_workflow coordinate")[0]!;
+    const wait = spans.find((span) => span.attributes["agent.action.call_id"] === "wait")!;
+    const sampledWorkflow = samplerCalls.find(
+      ({ attributes }) => attributes["agent.action.call_id"] === "workflow",
+    )!;
+
+    expect(workflow.attributes).toMatchObject({
+      "gen_ai.operation.name": "invoke_workflow",
+      "gen_ai.workflow.name": "coordinate",
+    });
+    expect(wait.name).toBe("agent.action");
+    expect(wait.attributes).not.toHaveProperty("gen_ai.operation.name");
+    expect(sampledWorkflow).toMatchObject({
+      attributes: {
+        "gen_ai.operation.name": "invoke_workflow",
+        "gen_ai.workflow.name": "coordinate",
+      },
+      name: "agent.action",
+    });
+  });
+
+  it("keeps a composed workflow intact while emitting independent nested callers", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
     const runtime = createRuntime(stateStore);
     const scope: InstrumentationAttemptScope = {
@@ -1286,15 +1479,11 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "tool.call.completed",
     });
-    await runtime.hooks.publish({
-      idempotencyKey: actionKey,
-      outcome: "completed",
-      output: { output: "done", type: "result" },
-      scope,
-      type: "action.completed",
-    });
 
-    const anchor = stateStore.findActionAnchor(scope.sessionId, scope.turnId, "workflow")!;
+    const action = stateStore.getAction(actionKey)!;
+    const anchor = { ...action, workflowName: "coordinate" };
+    stateStore.setAction(actionKey, anchor);
+    stateStore.setActionAnchor(actionKey, anchor);
     stateStore.setInvocation(
       actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:first"),
       {
@@ -1321,6 +1510,13 @@ describe("createAgentOtelInstrumentation", () => {
         terminal: { error: new Error("review failed"), outcome: "failed" },
       },
     );
+    await runtime.hooks.publish({
+      idempotencyKey: actionKey,
+      outcome: "completed",
+      output: { output: "done", type: "result" },
+      scope,
+      type: "action.completed",
+    });
     await runtime.hooks.publish({
       idempotencyKey: attemptIdempotencyKey(scope),
       scope,

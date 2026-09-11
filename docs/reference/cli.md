@@ -310,7 +310,7 @@ Span rows carry inline metrics when the span recorded them — `↑input`/`↓ou
 
 Every subagent activation starts its own trace. The first child's `invoke_agent` root links to the dispatching caller with `eve.link.type=agent.dispatch`; remote agents carry that caller context over `traceparent`. Later turns also start fresh traces without repeating the initial caller link. All related sessions retain the same `gen_ai.conversation.id`, and `agent.subagent.name` labels the child invocation.
 
-Each `agent()` call inside an authored workflow has its own `agent.action` caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `invoke_workflow <tool>` and `execute_tool <tool>` spans. Only agent execution uses `invoke_agent`.
+Each `agent()` call inside an authored workflow has its own `agent.action` caller span, including sequential, parallel, and background calls. A workflow tool that coordinates one of those calls has an enclosing `invoke_workflow <tool>` span; a workflow tool without agent calls remains `agent.action`. The tool also keeps its `execute_tool <tool>` span. Only agent execution uses `invoke_agent`.
 
 A durable conversation produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the conversation ID shows every trace it produced, oldest first.
 

@@ -177,6 +177,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     callId: value.callId,
     channelAudience: normalizeChannelAudience(value.channelAudience),
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
+    isWorkflowTool: value.isWorkflowTool === true ? true : undefined,
     kind: value.kind,
     name: value.name,
     parent: value.parent,

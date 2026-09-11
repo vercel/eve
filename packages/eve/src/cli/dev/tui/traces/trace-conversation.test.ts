@@ -102,6 +102,38 @@ describe("buildConversationItems", () => {
     expect(items[2]?.result).toBe('{"temperatureF":72}');
   });
 
+  it.each([
+    { error: false, result: '{"deployed":true}', statusCode: 0 },
+    { error: true, result: undefined, statusCode: 2 },
+  ])("keeps $error workflow invocations as tool cards", ({ error, result, statusCode }) => {
+    const workflow = span(
+      "e".repeat(16),
+      "invoke_workflow deploy",
+      2500,
+      3250,
+      "b".repeat(16),
+      {
+        "agent.action.name": "deploy",
+        "gen_ai.operation.name": "invoke_workflow",
+        "gen_ai.tool.call.arguments": '{"service":"api"}',
+        "gen_ai.tool.call.result": result,
+        "gen_ai.workflow.name": "deploy",
+      },
+      statusCode,
+    );
+    const items = buildConversationItems(trace([...weatherTurn(), workflow]));
+    const item = items.find((candidate) => candidate.span.spanId === workflow.spanId);
+
+    expect(item).toMatchObject({
+      args: '{"service":"api"}',
+      durationMs: 750,
+      error,
+      kind: "tool",
+      name: "deploy",
+      result,
+    });
+  });
+
   it("renders provider-executed tool results as tool cards after the assistant", () => {
     // Provider-executed tools (e.g. web_search) never get an execute_tool
     // span; their outcomes live on the model span's tool_results attribute.

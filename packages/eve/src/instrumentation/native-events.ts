@@ -30,7 +30,11 @@ import {
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import {
+  isRuntimeWorkflowToolAction,
+  type RuntimeActionRequest,
+  type RuntimeActionResult,
+} from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import type { TaskUsage, TaskView } from "#tasks/types.js";
@@ -208,7 +212,7 @@ async function publishActionStarts(
         callId: action.callId,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
-        ...(action.kind === "workflow-tool-call" ? { isWorkflowTool: true } : undefined),
+        ...(isRuntimeWorkflowToolAction(action) ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         name: actionName(action),
         scope,
