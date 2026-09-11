@@ -266,6 +266,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
   });
 
+  it("removes streamed text when completion suppresses delivery", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "empty", delta: "<eve-empty-delivery/>" },
+        { type: "assistant-complete", id: "empty", text: null },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    expect(screen.snapshot()).not.toContain("eve-empty-delivery");
+  });
+
   it("renders rejected tools as denied", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
