@@ -9,7 +9,11 @@ import {
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
-import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import {
+  createFrameworkUserMessage,
+  isFrameworkUserMessage,
+  isUserModelMessage,
+} from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -383,7 +387,10 @@ function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMe
     if (message?.role !== "user" || typeof message.content !== "string") {
       continue;
     }
-    if (isFrameworkUserMessage(message)) {
+    if (
+      isFrameworkUserMessage(message) ||
+      (isUserModelMessage(message) && message.kind === "legacy.unknown")
+    ) {
       continue;
     }
     return message;

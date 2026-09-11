@@ -14,6 +14,9 @@
  * 4. Append the migration to {@link snapshotMigrations}.
  * 5. Cover it in `snapshot.test.ts`.
  */
+import type { ModelMessage } from "ai";
+
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { DurableSessionSnapshot } from "#execution/durable-session-store.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-store.js";
 
@@ -30,10 +33,22 @@ const snapshotMigrations: readonly VersionMigration[] = [];
  * {@link DURABLE_SESSION_VERSION}. Pure; safe to call inline.
  */
 export function migrateDurableSessionSnapshot(value: unknown): DurableSessionSnapshot {
-  return runMigrationChain<DurableSessionSnapshot>({
+  const snapshot = runMigrationChain<DurableSessionSnapshot>({
     label: "durable session snapshot",
     migrations: snapshotMigrations,
     targetVersion: DURABLE_SESSION_VERSION,
     value,
   });
+
+  // Pre-0.54 history used user-role messages for both human and framework input.
+  // Keep v1 so a pinned older driver can still forward the updated snapshot.
+  const history = snapshot.session.history.map((message: ModelMessage) =>
+    message.role === "user" && !("kind" in message)
+      ? { ...message, kind: "legacy.unknown" as const }
+      : message,
+  );
+  return {
+    ...snapshot,
+    session: { ...snapshot.session, history: validateHarnessModelMessages(history) },
+  };
 }
