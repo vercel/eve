@@ -1,5 +1,5 @@
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { InputResponse } from "#shared/input.js";
 

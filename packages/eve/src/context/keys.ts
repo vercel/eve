@@ -21,7 +21,7 @@ import { ContextKey } from "#context/key.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/session-inbox/address.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { UserModelMessage } from "#harness/messages.js";

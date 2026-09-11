@@ -8,7 +8,7 @@ const getWorldMock = vi.fn();
 const world = {};
 const resumeSessionInboxMock = vi.fn();
 
-vi.mock("#execution/wire/session-inbox-resume.js", () => ({
+vi.mock("#execution/session-inbox/resume.js", () => ({
   resumeSessionInbox: (...args: unknown[]) => resumeSessionInboxMock(...args),
 }));
 

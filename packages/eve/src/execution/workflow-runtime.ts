@@ -74,8 +74,8 @@ import {
   AcceptedSessionIdentityError,
   requireSessionId,
   resumeSessionInbox,
-} from "#execution/wire/session-inbox-resume.js";
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+} from "#execution/session-inbox/resume.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {

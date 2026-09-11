@@ -1,4 +1,4 @@
-import { claimSessionHooks, type SessionInbox } from "#execution/session-inbox.js";
+import { claimSessionHooks, type SessionInbox } from "#execution/session-inbox/inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import {

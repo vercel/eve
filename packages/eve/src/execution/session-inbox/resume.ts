@@ -8,7 +8,7 @@ import {
   isSessionInboxAddress,
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   type SessionInboxAddress,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/session-inbox/address.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 

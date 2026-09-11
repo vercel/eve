@@ -63,7 +63,7 @@ async function handleWorkflowToolRunOutcome(
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
   const recorded = findWorkflowToolRun(
-    cursor.sessionState.snapshot?.session.state,
+    cursor.sessionState.snapshot.session.state,
     message.from.callId,
   );
   if (recorded?.runId !== message.from.runId) return undefined;
@@ -90,7 +90,7 @@ async function handleWorkflowToolRunOutcome(
     sessionState: released.sessionState,
   });
 
-  const sessionSnapshotState = cursor.sessionState.snapshot?.session.state;
+  const sessionSnapshotState = cursor.sessionState.snapshot.session.state;
   const accepted =
     result.kind === "subagent-result"
       ? result.callId === message.from.callId &&
@@ -126,7 +126,7 @@ async function handleWorkflowToolRunRequest(
   const { cursor, message } = input;
   if (message.request.kind === "agent-invoke" || message.request.kind === "agent-settled") {
     const recorded = findWorkflowToolRun(
-      cursor.sessionState.snapshot?.session.state,
+      cursor.sessionState.snapshot.session.state,
       message.from.callId,
     );
     if (recorded?.runId !== message.from.runId) {

@@ -109,7 +109,7 @@ export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<PreparedCoordinationDispatch | undefined> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingCoordinationBatch(durableSession.state);
 
   if (pending === undefined) return undefined;

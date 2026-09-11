@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import {
-  handleConnectionCallbackRequest,
-  handleLegacyConnectionCallbackRequest,
-} from "#execution/connections/callback-route.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 
 const resumeHookMock = vi.fn();
 
@@ -88,28 +85,6 @@ describe("handleConnectionCallbackRequest", () => {
               params: { code: "abc", state: "xyz" },
               method: "GET",
             },
-          },
-        },
-      ],
-    });
-  });
-
-  it("projects legacy callback URLs into authorization-only messages", async () => {
-    resumeHookMock.mockResolvedValueOnce(undefined);
-    const response = await handleLegacyConnectionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/connections/linear/callback/tok123?code=abc"),
-      buildRouteContext({ name: "linear", token: "tok123" }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "authorization-callback",
-      payloads: [
-        {
-          authorizationCallback: {
-            callback: { method: "GET", params: { code: "abc" } },
-            connectionName: "linear",
-            legacy: true,
           },
         },
       ],

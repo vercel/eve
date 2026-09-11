@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/session-inbox/protocol.js";
 
 describe("session inbox payloads", () => {
   it("normalizes send into the current delivery shape", () => {

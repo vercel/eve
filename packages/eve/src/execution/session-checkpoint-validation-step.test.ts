@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionCheckpoint } from "#execution/session-handoff.js";
@@ -10,7 +11,8 @@ const readDurableSessionMock = vi.fn();
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: (...args: unknown[]) => deserializeContextMock(...args),
 }));
-vi.mock("#execution/durable-session-store.js", () => ({
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   readDurableSession: (...args: unknown[]) => readDurableSessionMock(...args),
 }));
 
@@ -22,7 +24,7 @@ describe("validateSessionCheckpointStep", () => {
   it("hydrates the target bundle and durable state for a complete hook set", async () => {
     const require = vi.fn();
     deserializeContextMock.mockResolvedValue({ require });
-    readDurableSessionMock.mockResolvedValue({});
+    readDurableSessionMock.mockReturnValue({});
     const checkpoint = createCheckpoint();
 
     await validateSessionCheckpointStep({ checkpoint });
@@ -60,12 +62,12 @@ function createCheckpoint(input: { readonly session?: readonly string[] } = {}):
       sessionId: "session-1",
     },
     serializedContext: {},
-    sessionState: {
+    sessionState: createTestSessionState({
       continuationToken: "channel:current",
       emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
       hasProxyInputRequests: false,
       sessionId: "session-1",
       version: 1,
-    },
+    }),
   };
 }

@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata, sleep } from "#compiled/@workflow/core/index.js";
 
-import { createSessionInbox } from "#execution/session-inbox.js";
+import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { appendTaskViewStep } from "#execution/tasks/child/steps.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";

@@ -19,7 +19,7 @@ export async function cancelAllIndexedSessionTasksStep(input: {
 
   let durable;
   try {
-    durable = await readDurableSession(input.sessionState);
+    durable = readDurableSession(input.sessionState);
   } catch (error) {
     logError(log, "failed to read the session for indexed task cancellation", error, {
       parentSessionId: input.sessionState.sessionId,

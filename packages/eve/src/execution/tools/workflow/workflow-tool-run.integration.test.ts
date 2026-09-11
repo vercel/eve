@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";

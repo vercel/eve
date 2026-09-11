@@ -5,7 +5,7 @@ import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-wor
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/session-inbox/address.js";
 
 describe("session command inbox integration", () => {
   it("pumps a burst across aliases while the owner waits on an independent hook", async () => {

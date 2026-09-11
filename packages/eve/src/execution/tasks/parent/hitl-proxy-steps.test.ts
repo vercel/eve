@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
@@ -18,7 +19,10 @@ import { getSessionTaskIndex } from "#tasks/session-index.js";
 const flushInstrumentation = vi.hoisted(() => vi.fn());
 const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
 
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readDurableSession: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 vi.mock("#instrumentation/runtime.js", () => ({
   bindSessionInstrumentation: vi.fn(),
@@ -52,19 +56,19 @@ const request = {
   turnId: "turn-1",
 };
 
-const sessionState = {
+const sessionState = createTestSessionState({
   continuationToken: "parent-token",
   emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
   hasProxyInputRequests: false,
   sessionId: "parent-session",
   version: 1,
-} as const;
+});
 const remoteReplyTo = "eve:eve:op:0123456789abcdef0123456789abcdef";
 
 describe("recordTaskInputRequestStep", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -102,7 +106,7 @@ describe("recordTaskInputRequestStep", () => {
       sessionState: { hasProxyInputRequests: true },
     });
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:req-1"),
+      getProxyInputRequests(result.sessionState.snapshot.session.state).get("task-1:req-1"),
     ).toEqual({
       childContinuationToken: request.replyTo,
       childRequestId: "req-1",
@@ -126,7 +130,7 @@ describe("recordTaskInputRequestStep", () => {
   });
 
   it("records a narrowed remote response route for a claimed remote child", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -179,7 +183,7 @@ describe("recordTaskInputRequestStep", () => {
     const result = await recordTaskInputRequestStep({ request: remoteRequest, sessionState });
 
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:remote-req"),
+      getProxyInputRequests(result.sessionState.snapshot.session.state).get("task-1:remote-req"),
     ).toMatchObject({
       childResponseUrl:
         "https://remote.example/eve/v1/task-input/eve%3Atask-input%3A0123456789abcdef0123456789abcdef",
@@ -197,7 +201,7 @@ describe("recordTerminalTaskViewsStep", () => {
   });
 
   it("caches an owned terminal view and releases the task's agent lease", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -246,7 +250,7 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionState,
       views: [view],
     });
-    const state = result.sessionState.snapshot?.session.state;
+    const state = result.sessionState.snapshot.session.state;
 
     expect(getSessionTaskIndex(state)[0]?.terminalView).toEqual(view);
     expect(getAgentHandleStore(state)?.handles).toEqual([
@@ -265,7 +269,7 @@ describe("recordTerminalTaskViewsStep", () => {
     const context = new ContextContainer();
     context.set(BundleKey, bundle);
     const serializedContext = serializeContext(context);
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox.js";
+import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 const createHookMock = vi.fn();
 

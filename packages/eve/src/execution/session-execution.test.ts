@@ -1,6 +1,7 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SessionInbox } from "#execution/session-inbox.js";
+import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
@@ -107,11 +108,11 @@ describe("SessionExecution background task checkpoints", () => {
 });
 
 function state(continuationToken: string): DurableSessionState {
-  return {
+  return createTestSessionState({
     continuationToken,
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
     hasProxyInputRequests: false,
     sessionId: "session-1",
     version: 1,
-  };
+  });
 }

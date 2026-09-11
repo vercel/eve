@@ -1,5 +1,5 @@
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
-import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
@@ -8,7 +8,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
@@ -31,19 +31,6 @@ export type RoutedDeliverResult =
       readonly sessionState: DurableSessionState;
     };
 
-type LegacyRoutedDeliverResult =
-  | {
-      readonly kind: "cancel-turn";
-      readonly serializedContext: Record<string, unknown>;
-      readonly sessionState: DurableSessionState;
-    }
-  | {
-      readonly kind: "continue";
-      readonly remainder: DeliverPayload | undefined;
-      readonly serializedContext: Record<string, unknown>;
-      readonly sessionState: DurableSessionState;
-    };
-
 interface ChildBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
@@ -57,43 +44,15 @@ interface ChildBucket {
 }
 
 /** Splits an envelope and validates task routes before forwarding descendant input. */
-export function routeProxiedDeliverStep(input: {
+export async function routeProxiedDeliverStep(input: {
   readonly delivery: DeliverHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<RoutedDeliverResult>;
-export function routeProxiedDeliverStep(input: {
-  readonly auth?: SessionAuthContext | null;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payload: DeliverPayload;
-  readonly serializedContext?: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<LegacyRoutedDeliverResult>;
-export async function routeProxiedDeliverStep(
-  input:
-    | {
-        readonly delivery: DeliverHookPayload;
-        readonly parentWritable: WritableStream<Uint8Array>;
-        readonly serializedContext?: Record<string, unknown>;
-        readonly sessionState: DurableSessionState;
-      }
-    | {
-        readonly auth?: SessionAuthContext | null;
-        readonly parentWritable: WritableStream<Uint8Array>;
-        readonly payload: DeliverPayload;
-        readonly serializedContext?: Record<string, unknown>;
-        readonly sessionState: DurableSessionState;
-      },
-): Promise<LegacyRoutedDeliverResult | RoutedDeliverResult> {
+}): Promise<RoutedDeliverResult> {
   "use step";
-
-  let durableSession = await readDurableSession(input.sessionState);
-  const legacyInput = !("delivery" in input);
-  const sourceDelivery: DeliverHookPayload =
-    "delivery" in input
-      ? input.delivery
-      : { auth: input.auth, kind: "deliver", payloads: [input.payload] };
+  let durableSession = readDurableSession(input.sessionState);
+  const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -216,13 +175,11 @@ export async function routeProxiedDeliverStep(
   const remainder =
     orderedParentPayloads.length === 0
       ? undefined
-      : legacyInput
-        ? coalesceDeliverPayloads(orderedParentPayloads.map(([, payload]) => payload))
-        : {
-            ...sourceDelivery,
-            deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
-            payloads: orderedParentPayloads.map(([, payload]) => payload),
-          };
+      : {
+          ...sourceDelivery,
+          deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
+          payloads: orderedParentPayloads.map(([, payload]) => payload),
+        };
   return { ...context, kind: "continue", remainder };
 }
 

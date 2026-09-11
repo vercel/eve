@@ -86,7 +86,7 @@ export async function dispatchAgentInvocation(input: {
   readonly ownerId: string;
   readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
   const prepared = await prepareOwnerAgentInvocation({
     invocation: input.request.input,
@@ -325,7 +325,7 @@ export async function dispatchTaskAgentInvocationStep(
   "use step";
 
   if (input.taskId !== undefined) {
-    const session = await readDurableSession(input.sessionState);
+    const session = readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
     const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
@@ -353,7 +353,7 @@ export async function settleTaskAgentInvocationStep(input: {
 }> {
   "use step";
 
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const serializedContext = await flushAgentInvocationTraces(
     settleAgentInvocationTrace({
       acceptedAtMs: Date.now(),
@@ -428,7 +428,7 @@ export async function releaseAgentInvocationOwnerStep(input: {
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const session = input.cancelled
     ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))
     : applyTaskAgentHandleCommand(durable, {

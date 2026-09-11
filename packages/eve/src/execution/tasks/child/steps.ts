@@ -7,7 +7,7 @@ import type {
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";

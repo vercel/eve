@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContinuationHookTokensKey } from "#context/keys.js";
@@ -56,11 +57,11 @@ describe("SessionExecutionCursor", () => {
 });
 
 function state(continuationToken: string): DurableSessionState {
-  return {
+  return createTestSessionState({
     continuationToken,
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
     hasProxyInputRequests: false,
     sessionId: "session-1",
     version: 1,
-  };
+  });
 }

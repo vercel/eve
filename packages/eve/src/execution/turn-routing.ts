@@ -2,13 +2,13 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox.js";
+import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import type { RuntimeActionResultStepInput } from "#execution/turn-step.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/session-inbox/protocol.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { findRunningAgentHandle } from "#subagents/handles/query.js";
@@ -123,7 +123,7 @@ export class TurnRouting {
       return;
     }
     if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-      const handle = findRunningAgentHandle(this.cursor.sessionState.snapshot?.session.state, {
+      const handle = findRunningAgentHandle(this.cursor.sessionState.snapshot.session.state, {
         callId: value.callId,
       });
       if (

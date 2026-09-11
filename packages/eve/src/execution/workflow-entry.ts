@@ -46,7 +46,7 @@ import {
   claimSessionHooks,
   type SessionInboxHandle,
   type SessionInboxPayload,
-} from "#execution/session-inbox.js";
+} from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
@@ -54,7 +54,7 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
-import { SESSION_INBOX_CONTEXT_KEY } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_CONTEXT_KEY } from "#execution/session-inbox/address.js";
 import { SessionHandoff } from "#execution/session-handoff.js";
 import {
   signalSessionAnchorStep,

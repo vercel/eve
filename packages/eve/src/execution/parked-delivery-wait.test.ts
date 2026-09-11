@@ -1,10 +1,10 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
 vi.mock("./route-child-delivery.js", () => ({
@@ -72,6 +72,7 @@ function authorizationRead(): ScriptedRead {
         payloads: [
           {
             authorizationCallback: {
+              attemptId: "attempt-1",
               callback: { method: "GET", params: { code: "abc" } },
               connectionName: "weather",
             },
@@ -94,9 +95,7 @@ function messageRead(message: string): ScriptedRead {
   };
 }
 
-// Routing never runs in these tests: scripted reads stop at authorization
-// instructions or exhaust before any deliver-kind turn payload.
-const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
+const sessionState = createTestSessionState({ sessionId: "ses-parked-wait" });
 
 function waitInput(inbox: SessionInbox): Parameters<typeof nextTurnDelivery>[0] {
   return {
@@ -350,13 +349,13 @@ function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
 
 describe("nextTurnDelivery routing", () => {
   it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {
-    const sessionState = {
+    const sessionState = createTestSessionState({
       continuationToken: "token",
       emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "turn" },
       hasProxyInputRequests: true,
       sessionId: "session",
       version: 1,
-    } as const;
+    });
     const routedSessionState = { ...sessionState, hasProxyInputRequests: false };
     vi.mocked(routeDeliverToChildren)
       .mockResolvedValueOnce({
@@ -442,7 +441,6 @@ function batchingInput() {
     sessionState: {
       ...sessionState,
       snapshot: {
-        version: 1,
         session: {
           sessionId: "session",
           continuationToken: "token",

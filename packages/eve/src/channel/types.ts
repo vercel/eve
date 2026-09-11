@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";

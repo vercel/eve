@@ -541,7 +541,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
   it("keeps the session command inbox factory visible in workflow driver builds", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/session-inbox.ts";
+    const filename = "src/execution/session-inbox/inbox.ts";
     const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
     const transformed = await applyWorkflowTransform(
       filename,

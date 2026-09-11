@@ -51,10 +51,10 @@ describe("createSessionStep", () => {
       taskId: "task-1",
     });
 
-    expect(state.snapshot?.session.agent.system).toContain("Background task updates");
-    expect(state.snapshot?.session.agent.system).toContain("what you are currently doing");
-    expect(state.snapshot?.session.taskId).toBe("task-1");
-    expect(state.snapshot?.session.state).toBeUndefined();
+    expect(state.snapshot.session.agent.system).toContain("Background task updates");
+    expect(state.snapshot.session.agent.system).toContain("what you are currently doing");
+    expect(state.snapshot.session.taskId).toBe("task-1");
+    expect(state.snapshot.session.state).toBeUndefined();
   });
 
   it("does not add task_update guidance to a task-owned node without the tool", async () => {
@@ -72,7 +72,7 @@ describe("createSessionStep", () => {
       taskId: "task-1",
     });
 
-    expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
+    expect(state.snapshot.session.agent.system).not.toContain("Background task updates");
   });
 
   it("defaults root sessions to the root input token budget", async () => {
@@ -89,7 +89,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-root",
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(
       DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
     );
   });
@@ -110,7 +110,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits).toEqual({
+    expect(state.snapshot.session.limits).toEqual({
       maxInputTokensPerSession: 3_000_000,
     });
   });
@@ -131,7 +131,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits).toEqual({});
+    expect(state.snapshot.session.limits).toEqual({});
   });
 
   it("caps configured child token limits at the inherited token budget", async () => {
@@ -152,7 +152,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
   });
 
   it("caps a configured child token-cost limit at the inherited budget", async () => {
@@ -171,7 +171,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits?.maxTokenCostUsdPerSession).toBe(0.75);
+    expect(state.snapshot.session.limits?.maxTokenCostUsdPerSession).toBe(0.75);
   });
 
   it("keeps tighter configured child token limits under inherited token budget", async () => {
@@ -192,7 +192,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
   });
 
   it("still applies inherited token budget when configured child limit is false", async () => {
@@ -213,7 +213,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(500_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(500_000);
   });
 
   it("seeds session token limits from resolved agent config", async () => {
@@ -236,7 +236,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-root",
     });
 
-    expect(state.snapshot?.session.limits).toMatchObject({
+    expect(state.snapshot.session.limits).toMatchObject({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
       maxTokenCostUsdPerSession: 1.5,
@@ -258,6 +258,6 @@ describe("createSessionStep", () => {
       sessionId: "sess-root",
     });
 
-    expect(state.snapshot?.session.workflowMaxSubagents).toBe(5);
+    expect(state.snapshot.session.workflowMaxSubagents).toBe(5);
   });
 });

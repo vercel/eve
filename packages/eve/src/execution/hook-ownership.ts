@@ -5,7 +5,7 @@ export async function claimHookOwnership<T>(hook: Hook<T>): Promise<void> {
   try {
     conflict = await hook.getConflict();
   } catch (error) {
-    return await disposeAndThrow(hook, normalizeHookClaimError(error, hook.token));
+    return await disposeAndThrow(hook, error);
   }
 
   if (conflict !== null) {
@@ -13,20 +13,8 @@ export async function claimHookOwnership<T>(hook: Hook<T>): Promise<void> {
   }
 }
 
-export async function disposeHook(hook: {
-  dispose?: () => unknown;
-  [Symbol.dispose]?: () => unknown;
-}): Promise<void> {
-  const explicitDispose = hook.dispose;
-  if (typeof explicitDispose === "function") {
-    await explicitDispose.call(hook);
-    return;
-  }
-
-  const symbolDispose = hook[Symbol.dispose];
-  if (typeof symbolDispose === "function") {
-    await symbolDispose.call(hook);
-  }
+export async function disposeHook(hook: { dispose: () => unknown }): Promise<void> {
+  await hook.dispose();
 }
 
 async function disposeAndThrow(hook: Hook<unknown>, error: unknown): Promise<never> {
@@ -38,19 +26,7 @@ async function disposeAndThrow(hook: Hook<unknown>, error: unknown): Promise<nev
   throw error;
 }
 
-function normalizeHookClaimError(error: unknown, token: string): unknown {
-  if (!isHookConflictError(error)) {
-    return error;
-  }
-
-  // Legacy worlds reject here when they cannot identify the owning run.
-  return createHookConflictError(
-    typeof error.token === "string" ? error.token : token,
-    typeof error.conflictingRunId === "string" ? error.conflictingRunId : undefined,
-  );
-}
-
-/** Recognizes hook conflicts across current and legacy Workflow World implementations. */
+/** Error names survive Workflow serialization across runtime boundaries. */
 export function isHookConflictError(error: unknown): error is {
   readonly conflictingRunId?: unknown;
   readonly name: "HookConflictError";
@@ -66,12 +42,12 @@ export function isHookConflictError(error: unknown): error is {
 
 function createHookConflictError(
   token: string,
-  conflictingRunId?: string,
+  conflictingRunId: string,
 ): Error & {
-  readonly conflictingRunId?: string;
+  readonly conflictingRunId: string;
   readonly token: string;
 } {
-  const owner = conflictingRunId === undefined ? "" : ` (run "${conflictingRunId}")`;
+  const owner = ` (run "${conflictingRunId}")`;
   return Object.assign(new Error(`Hook token "${token}" is already in use${owner}`), {
     conflictingRunId,
     name: "HookConflictError",

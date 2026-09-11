@@ -138,7 +138,7 @@ async function runSessionStep(
 ): Promise<DurableStepResult> {
   let input = rawInput;
 
-  let durableSession = await readDurableSession(input.sessionState);
+  let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");

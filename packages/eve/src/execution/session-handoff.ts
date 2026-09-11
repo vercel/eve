@@ -9,7 +9,7 @@ import {
   claimSessionHooks,
   type SessionInboxHandle,
   type SessionInboxPayload,
-} from "#execution/session-inbox.js";
+} from "#execution/session-inbox/inbox.js";
 import { startSessionOwnerStep, type SessionOwnerStartInput } from "#execution/workflow-runtime.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";

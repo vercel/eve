@@ -1,10 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
-status: proposed
-last_updated: "2026-09-04"
+status: superseded
+last_updated: "2026-09-11"
 ---
 
 # Versioned wire schema for the session inbox
+
+Superseded by [single-workflow sessions](./single-workflow-session-upgrades.md).
+The implementation uses one inbox protocol with no negotiation or migration chain.
+The proposal below records the previous deployment model, not current guidance.
 
 ## Purpose
 

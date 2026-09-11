@@ -70,7 +70,7 @@ export async function taskModelRetryStep(input: {
   "use step";
 
   const { attempt } = getStepMetadata();
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
   const session = hydrateDurableSession({ durable, turnAgent: createTurnAgent() });
   const historyBeforeModelCall = [...session.history];
   const model = new MockLanguageModelV3({

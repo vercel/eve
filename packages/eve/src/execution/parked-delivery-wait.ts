@@ -2,7 +2,7 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox.js";
+import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox/inbox.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
@@ -10,7 +10,7 @@ import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
   type DecodedSessionInbox,
-} from "#execution/wire/session-inbox-wire.js";
+} from "#execution/session-inbox/protocol.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
@@ -176,7 +176,7 @@ async function waitForNextSessionAction(input: {
     return {
       delivery: takeBufferedTurnDelivery(
         input.bufferedDeliveries,
-        getSessionTaskCohorts(input.stateCursor.sessionState.snapshot?.session.state),
+        getSessionTaskCohorts(input.stateCursor.sessionState.snapshot.session.state),
       ),
       kind: "delivery",
     };

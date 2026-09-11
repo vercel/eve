@@ -46,7 +46,7 @@ export async function cancelAgentInvocationOwnerStep(input: {
 }): Promise<void> {
   "use step";
 
-  const session = await readDurableSession(input.sessionState);
+  const session = readDurableSession(input.sessionState);
   const handles = (getAgentHandleStore(session.state)?.handles ?? []).filter(
     (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
       candidate.phase === "claimed" && candidate.ownerId === input.ownerId,

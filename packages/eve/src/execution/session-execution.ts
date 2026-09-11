@@ -5,7 +5,7 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox.js";
+import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox/inbox.js";
 import { TurnRouting } from "#execution/turn-routing.js";
 import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
@@ -271,7 +271,7 @@ export class SessionExecution {
       const next = await this.nextRuntimeEvent(input.control);
       if (next === "cancelled" || next === "cancel-turn") return next;
       if (next.kind === "runtime-action-result") {
-        const snapshot = this.cursor.sessionState.snapshot?.session.state;
+        const snapshot = this.cursor.sessionState.snapshot.session.state;
         const accepted = next.results.filter((result) => {
           if (result.kind === "tool-result") {
             return isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result);

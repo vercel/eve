@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionHandoff } from "#execution/session-handoff.js";
-import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox.js";
+import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 const claimHookOwnershipMock = vi.fn();
 const disposeHookMock = vi.fn();

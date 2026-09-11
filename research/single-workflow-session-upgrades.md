@@ -274,6 +274,14 @@ adopts step results through the one shared `SessionStateCursor`.
 
 The result must have fewer execution paths, not the old topology behind new interfaces.
 
+The current inbox implementation lives in `execution/session-inbox/`: `inbox.ts`
+owns the pump, `protocol.ts` normalizes commands, `address.ts` defines identity,
+and `resume.ts` owns resume-first delivery and lazy identity resolution.
+Session checkpoints require embedded program memory; there is no `eve.session`
+stream fallback, snapshot migration registry, or duplicate snapshot version.
+The state-level version only rejects incompatible handoffs. Client event-stream
+versions remain separate because stored output survives deployments.
+
 - `turn-dispatch.ts`, `dispatch-turn-step.ts`, and the inline/child split in `inline-turn.ts`.
 - The conversational turn workflow entrypoint, registration, and legacy runner in
   `turn-workflow.ts`; the coordination it owns moves into `SessionExecution`.

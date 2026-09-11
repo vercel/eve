@@ -27,6 +27,11 @@ When a Vercel production deployment changes, a new delivery to an idle session h
 
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
+Handoff requires a readable checkpoint with embedded session state. eve does not
+migrate stream-only checkpoints from the former execution model; start a new
+session when upgrading from that model. Authorization callback URLs without an
+attempt ID are also unsupported; restart authorization to obtain a current URL.
+
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
 
 For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:

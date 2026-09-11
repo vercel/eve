@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { ModelMessage } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -41,12 +42,9 @@ import { createActionsRequestedEvent, createInputRequestedEvent } from "#protoco
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
-  DURABLE_SESSION_VERSION,
   type DurableSessionState,
-  projectSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
@@ -75,7 +73,7 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
   return {
     ...actual,
-    createDurableSessionState: vi.fn(),
+    createDurableSessionState: vi.fn(actual.createDurableSessionState),
     readDurableSession: vi.fn(),
   };
 });
@@ -103,34 +101,24 @@ function installSessionStoreMocks(
   // off the queue. Tests that exercise multiple harness steps stack
   // sessions in the order the step boundaries hit them.
   const queue = [...sessions];
-  vi.mocked(readDurableSession).mockImplementation(async () => {
+  vi.mocked(readDurableSession).mockImplementation(() => {
     const next = queue.shift() ?? sessions[sessions.length - 1];
     if (!next) {
       throw new Error("No session prepared for readDurableSession");
     }
     return next;
   });
-
-  vi.mocked(createDurableSessionState).mockImplementation(({ session }) => {
-    return {
-      ...projectSessionState({ session }),
-      snapshot: {
-        session: projectToDurableSession(session),
-        version: DURABLE_SESSION_VERSION,
-      },
-    };
-  });
 }
 
 function createStubSessionState(overrides: Partial<DurableSessionState> = {}): DurableSessionState {
-  return {
+  return createTestSessionState({
     continuationToken: "test-token",
     emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
     hasProxyInputRequests: false,
     sessionId: "sess-test",
     version: 1,
     ...overrides,
-  };
+  });
 }
 
 const DEFAULT_WORKFLOW_STREAM_NAMESPACE = "__default__";
@@ -319,7 +307,10 @@ describe("routeProxiedDeliverStep", () => {
 
     await routeProxiedDeliverStep({
       parentWritable: createTestWritable(),
-      payload: { inputResponses: [{ requestId: "request-1", text: "yes" }] },
+      delivery: {
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
+      },
       sessionState: createStubSessionState({
         continuationToken: "parent-token",
         hasProxyInputRequests: true,
@@ -357,10 +348,15 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      auth,
       parentWritable: createTestWritable(),
-      payload: {
-        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      delivery: {
+        kind: "deliver",
+        auth,
+        payloads: [
+          {
+            inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+          },
+        ],
       },
       sessionState: createStubSessionState({
         continuationToken: "parent-token",
@@ -520,7 +516,10 @@ describe("routeProxiedDeliverStep", () => {
   }
 
   const taskRouteInput = {
-    payload: { inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] },
+    delivery: {
+      kind: "deliver" as const,
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] }],
+    },
     sessionState: createStubSessionState({ hasProxyInputRequests: true }),
   };
 
@@ -543,7 +542,7 @@ describe("routeProxiedDeliverStep", () => {
       },
       taskInboxToken: "task-token",
     });
-    expect(getProxyInputRequests(result.sessionState.snapshot?.session.state).size).toBe(0);
+    expect(getProxyInputRequests(result.sessionState.snapshot.session.state).size).toBe(0);
   });
 
   it("preserves the task-owned workflow-tool answer route for its controller", async () => {
@@ -587,7 +586,8 @@ describe("routeProxiedDeliverStep", () => {
     ).resolves.toMatchObject({
       kind: "continue",
       remainder: {
-        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] }],
       },
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
@@ -602,7 +602,8 @@ describe("routeProxiedDeliverStep", () => {
     ).resolves.toMatchObject({
       kind: "continue",
       remainder: {
-        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] }],
       },
     });
   });
@@ -703,7 +704,7 @@ describe("recordTaskInputRequestStep", () => {
 
     expect(result.accepted).toBe(true);
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:request-1"),
+      getProxyInputRequests(result.sessionState.snapshot.session.state).get("task-1:request-1"),
     ).toEqual({
       childContinuationToken: "eve:workflow-tool-run-answer:run-1:0",
       childRequestId: "request-1",
@@ -1023,7 +1024,7 @@ describe("turnStep", () => {
       undefined,
       undefined,
     ]);
-    expect(result.sessionState.snapshot?.session.history).toEqual([
+    expect(result.sessionState.snapshot.session.history).toEqual([
       { content: "model call 1", role: "assistant" },
       { content: "model call 2", role: "assistant" },
       { content: "model call 3", role: "assistant" },
@@ -1080,8 +1081,8 @@ describe("turnStep", () => {
     expect(result.action).toBe("cancelled");
     expect(callCount).toBe(51);
     expect(result.serializedContext).toMatchObject({ [ThreadKey.name]: "completed call 50" });
-    expect(result.sessionState.snapshot?.session.history).toHaveLength(50);
-    expect(result.sessionState.snapshot?.session.history.at(-1)).toEqual({
+    expect(result.sessionState.snapshot.session.history).toHaveLength(50);
+    expect(result.sessionState.snapshot.session.history.at(-1)).toEqual({
       content: "model call 50",
       role: "assistant",
     });
@@ -1722,7 +1723,7 @@ describe("turnStep", () => {
       },
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
-    expect(result.sessionState.snapshot?.session.history).toEqual([
+    expect(result.sessionState.snapshot.session.history).toEqual([
       { role: "user", content: announcement, kind: "user" },
       { content: "thread=unset; user=cancel this turn", kind: "user", role: "user" },
     ]);
@@ -1767,7 +1768,7 @@ describe("turnStep", () => {
     });
 
     expect(result).toMatchObject({ action: "cancelled" });
-    expect(result.sessionState.snapshot?.session.history).toEqual([
+    expect(result.sessionState.snapshot.session.history).toEqual([
       {
         content: [
           { text: "thread=unset; user=look at this", type: "text" },
@@ -2046,7 +2047,7 @@ describe("turnStep", () => {
 
     // Second turn: session totals are cumulative (150/60), but the settled
     // answer must only report what this turn added (50/20).
-    installSessionStoreMocks([first.sessionState.snapshot?.session as HarnessSession]);
+    installSessionStoreMocks([first.sessionState.snapshot.session as HarnessSession]);
     const committed = await settleTurnStep({
       parentWritable: createTestWritable(),
       serializedContext: first.serializedContext,
@@ -2061,7 +2062,7 @@ describe("turnStep", () => {
         emissionAfter: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
       },
     });
-    installSessionStoreMocks([committed.sessionState.snapshot?.session as HarnessSession]);
+    installSessionStoreMocks([committed.sessionState.snapshot.session as HarnessSession]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
@@ -2767,82 +2768,6 @@ describe("turnStep", () => {
         resolverSlug: "current",
       }),
     ]);
-  });
-
-  it("resumes a legacy pending authorization without attempt metadata", async () => {
-    const challenge = {
-      challenge: {
-        instructions: "Sign in to continue",
-        url: "https://idp.example/authorize",
-      },
-      hookUrl: "https://app.example/eve/v1/connections/statuspage/callback/sess-test:auth",
-      name: "statuspage",
-      resume: { nonce: "n1" },
-    };
-    const session = createStubSession({
-      state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
-    });
-    installSessionStoreMocks([session]);
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {} as never,
-      graph: {
-        nodesByNodeId: new Map(),
-        root: {
-          sandboxRegistry: { sandbox: null },
-          turnAgent: TestTurnAgent,
-        },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    let observedPendingAuth: unknown;
-    let observedStepInput: unknown = "not-called";
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session, stepInput): Promise<StepResult> => {
-        observedPendingAuth = getPendingAuthorization(session.state);
-        observedStepInput = stepInput;
-        return { next: null, session };
-      };
-    });
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [
-          {
-            authorizationCallback: {
-              callback: { code: "oauth-code" },
-              connectionName: "statuspage",
-              legacy: true,
-            },
-          },
-        ],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(observedPendingAuth).toBeUndefined();
-    expect(observedStepInput).toBeUndefined();
-    expect(result).toMatchObject({
-      action: "park",
-      hasPendingAuthorization: false,
-    });
-    if (result.action === "park") {
-      expect(result.authorizationNames).toBeUndefined();
-    }
-    const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
-    expect(persistedSession?.state?.retained).toBe("yes");
-    expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
   });
 
   it("clears pending authorization after a matching callback resumes the turn", async () => {

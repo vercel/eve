@@ -6,12 +6,13 @@ import { restoreAuthorizationActivity } from "#execution/activity-cohort.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 
 describe("restoreAuthorizationActivity", () => {
-  it("restores candidate authorization activity by candidate ID", () => {
+  it("restores authorization activity by attempt ID", () => {
     const ctx = new ContextContainer();
     const pending = {
-      activityRootTurnIds: { "candidate-1": "turn-origin" },
+      activityRootTurnIds: { "attempt-1": "turn-origin" },
       challenges: [
         {
+          attemptId: "attempt-1",
           candidateId: "candidate-1",
           challenge: { url: "https://auth.example.com" },
           hookUrl: "https://app.example.com/callback",
@@ -23,6 +24,7 @@ describe("restoreAuthorizationActivity", () => {
     const { matches } = matchAuthorizationCallbacks(pending, [
       {
         authorizationCallback: {
+          attemptId: "attempt-1",
           callback: { params: { code: "callback-code" } },
           connectionName: "github",
         },
@@ -31,7 +33,7 @@ describe("restoreAuthorizationActivity", () => {
 
     const ids = restoreAuthorizationActivity({ ctx, matches, pending });
 
-    expect(ids).toEqual(["candidate-1"]);
+    expect(ids).toEqual(["attempt-1"]);
     expect(ctx.get(ActivityRootTurnIdKey)).toBe("turn-origin");
     expect(ctx.get(ActivityPendingBlockersKey)).toBeUndefined();
   });

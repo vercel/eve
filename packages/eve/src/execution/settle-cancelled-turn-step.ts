@@ -63,7 +63,7 @@ export async function settleCancelledTurnStep(input: {
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);

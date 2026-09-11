@@ -1,7 +1,7 @@
 {
   "title": "eve session network hops",
   "captured": "2026-09-11",
-  "baseCommit": "6148095750f402188d28afa3b67cb254852f3f70",
+  "baseCommit": "adb6beff622b274970d4e48b7178b7d44c11d456",
   "workingTree": true,
   "sdk": "@workflow/core 5.0.0-beta.50",
   "evidence": "Source-derived operation inventory, not a latency benchmark. World, cache, replay, payload size, and authored integrations change request counts.",
@@ -102,7 +102,7 @@
       "operations": "0 hook reads; lazy metadata key access as needed",
       "why": "Runs AFTER resume acceptance, concurrent with the awakened workflow. Known session addresses and forwarding-only senders do not access metadata.",
       "source": {
-        "path": "packages/eve/src/execution/wire/session-inbox-resume.ts",
+        "path": "packages/eve/src/execution/session-inbox/resume.ts",
         "symbol": "get sessionId()"
       }
     },
@@ -186,7 +186,7 @@
       "operations": "1 hook_disposed per address",
       "why": "If another accepted command is found, reclaim and abandon handoff. Release and claim are not atomic.",
       "source": {
-        "path": "packages/eve/src/execution/session-inbox.ts",
+        "path": "packages/eve/src/execution/session-inbox/inbox.ts",
         "symbol": "async release()"
       }
     },

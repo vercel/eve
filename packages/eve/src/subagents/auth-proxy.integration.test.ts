@@ -238,7 +238,7 @@ describe("subagent authorization proxy", () => {
     };
     const completed = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: required.serializedContext }),
-      durableSession: required.sessionState.snapshot!.session,
+      durableSession: required.sessionState.snapshot.session,
       hookPayload: authorizationPayload(completedEvent),
       parentWritable,
     });

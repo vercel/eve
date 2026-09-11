@@ -22,5 +22,5 @@ export async function validateSessionCheckpointStep(input: {
   }
   const context = await deserializeContext(input.checkpoint.serializedContext);
   context.require(BundleKey);
-  await readDurableSession(input.checkpoint.sessionState);
+  readDurableSession(input.checkpoint.sessionState);
 }

@@ -1,237 +1,53 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-
+import { describe, expect, it } from "vitest";
 import type { HarnessSession } from "#harness/types.js";
 import {
   createDurableSessionState,
   DURABLE_SESSION_VERSION,
-  type DurableSessionSnapshot,
   type DurableSessionState,
-  projectSessionState,
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
 
-const getRunMock = vi.hoisted(() => vi.fn());
-
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  getRun: (...args: unknown[]) => getRunMock(...args),
-}));
-
-afterEach(() => {
-  getRunMock.mockReset();
-  vi.useRealTimers();
-});
-
-/**
- * Pins the cross-version wire contract: `version` discriminators,
- * and spread-only forwarding that preserves unknown fields.
- */
-describe("durable-session-store cross-version contract", () => {
-  it("stamps `DurableSessionState.version` and never carries session-shape flags", () => {
+describe("durable session checkpoints", () => {
+  it("embeds the durable session and its workflow projections together", () => {
     const session = buildSession({
-      sessionId: "wrun_state_version",
-      continuationToken: "http:test",
-    });
-
-    const state = projectSessionState({ session });
-
-    expect(state.version).toBe(DURABLE_SESSION_VERSION);
-    expect(state.sessionId).toBe("wrun_state_version");
-    expect(state.continuationToken).toBe("http:test");
-    expect(state.hasProxyInputRequests).toBe(false);
-    // Emission state is projected onto the handle so framework steps
-    // can stamp protocol events without taking an extra step boundary.
-    expect(state.emissionState).toEqual({
-      sequence: 0,
-      sessionStarted: false,
-      stepIndex: 0,
-      turnId: "",
-    });
-    // Pending-batch flags remain execution results, not durable session state.
-    // arms, not on the owner-visible state.
-    expect(state).not.toHaveProperty("hasPendingInputBatch");
-    expect(state).not.toHaveProperty("hasPendingCoordinationBatch");
-    expect(state).not.toHaveProperty("pendingCoordinationCallIds");
-    expect(state).not.toHaveProperty("snapshot");
-  });
-
-  it("projects only the durable subset into DurableSession", () => {
-    const session = buildSession({
-      sessionId: "wrun_persist",
-      continuationToken: "http:test",
+      sessionId: "session",
+      continuationToken: "alias",
       withRefreshableAgent: true,
     });
-
-    const durable = projectToDurableSession(session);
-
-    expect(durable.sessionId).toBe(session.sessionId);
-    expect(durable.continuationToken).toBe(session.continuationToken);
-    expect(durable.history).toBe(session.history);
-    expect(durable.agent).toEqual({ system: session.agent.system });
-    // turnAgent-derived fields are rebuilt every turn — not persisted.
-    expect(durable.agent).not.toHaveProperty("modelReference");
-    expect(durable.agent).not.toHaveProperty("tools");
-    expect(durable.agent).not.toHaveProperty("compactionModelReference");
-  });
-
-  it("preserves unrecognized DurableSessionState fields via spread (forward compat)", () => {
-    // Hypothetical state shape introduced by a newer eve version.
-    const futureState: DurableSessionState & { futureFlag: { hint: string } } = {
-      continuationToken: "http:test",
-      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
-      futureFlag: { hint: "experimental" },
-      hasProxyInputRequests: false,
-      sessionId: "wrun_future",
-      version: 1,
-    };
-
-    // Mirror the owner's spread-only forwarding pattern.
-    const passedThrough: DurableSessionState = { ...futureState };
-    expect((passedThrough as { futureFlag?: unknown }).futureFlag).toEqual({
-      hint: "experimental",
-    });
-  });
-
-  it("preserves unrecognized fields on a DurableSessionSnapshot", () => {
-    const durable = projectToDurableSession(
-      buildSession({ sessionId: "wrun_snapshot", continuationToken: "http:test" }),
-    );
-    const snapshotWithFutureField = {
-      session: { ...durable, futureField: { kind: "experimental" } },
-      version: DURABLE_SESSION_VERSION,
-    } as DurableSessionSnapshot;
-
-    // Unknown fields inside the durable session shape must round-trip.
-    const passedThrough = { ...snapshotWithFutureField };
-    expect(passedThrough.version).toBe(DURABLE_SESSION_VERSION);
-    expect((passedThrough.session as { futureField?: unknown }).futureField).toEqual({
-      kind: "experimental",
-    });
-  });
-
-  it("creates state with the latest durable snapshot", () => {
-    const session = buildSession({
-      continuationToken: "http:test",
-      sessionId: "wrun_embedded_write",
-    });
-
     const state = createDurableSessionState({ session });
-
     expect(state).toEqual({
-      ...projectSessionState({ session }),
-      snapshot: {
-        session: projectToDurableSession(session),
-        version: DURABLE_SESSION_VERSION,
-      },
-    });
-  });
-
-  it("replaces the session without dropping unknown snapshot fields", () => {
-    const original = createDurableSessionState({
-      session: buildSession({ continuationToken: "http:old", sessionId: "wrun_replace" }),
-    });
-    const state = {
-      ...original,
-      snapshot: {
-        ...original.snapshot,
-        futureSnapshotField: { owner: "newer deployment" },
-      },
-    } as DurableSessionState;
-    const session = {
-      ...state.snapshot!.session,
-      continuationToken: "http:new",
-    };
-
-    const replaced = replaceDurableSessionSnapshot({ session, state });
-
-    expect(replaced.continuationToken).toBe("http:new");
-    expect(replaced.snapshot?.session).toBe(session);
-    expect(
-      (replaced.snapshot as DurableSessionSnapshot & { futureSnapshotField?: unknown })
-        .futureSnapshotField,
-    ).toEqual({ owner: "newer deployment" });
-  });
-
-  it("reads an embedded snapshot without opening the legacy stream", async () => {
-    const session = buildSession({
-      continuationToken: "http:test",
-      sessionId: "wrun_embedded_read",
-    });
-    const state = createDurableSessionState({ session });
-
-    const durableSession = await readDurableSession(state);
-
-    expect(durableSession).toEqual(projectToDurableSession(session));
-    expect(getRunMock).not.toHaveBeenCalled();
-  });
-
-  it("cancels the legacy tail read after loading one durable session snapshot", async () => {
-    const session = buildSession({
-      continuationToken: "http:test",
-      sessionId: "wrun_tail_cancel",
-    });
-    const snapshot: DurableSessionSnapshot = {
-      session: projectToDurableSession(session),
+      sessionId: "session",
+      continuationToken: "alias",
       version: DURABLE_SESSION_VERSION,
-    };
-    const cancel = vi.fn();
-    const stream = new ReadableStream<DurableSessionSnapshot>({
-      cancel,
-      start(controller) {
-        controller.enqueue(snapshot);
-      },
+      hasProxyInputRequests: false,
+      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      snapshot: { session: projectToDurableSession(session) },
     });
-    const getReadable = vi.fn(() => stream);
-    getRunMock.mockReturnValue({ getReadable });
-
-    const durableSession = await readDurableSession(projectSessionState({ session }));
-
-    expect(durableSession).toEqual(snapshot.session);
-    expect(getRunMock).toHaveBeenCalledWith("wrun_tail_cancel");
-    expect(getReadable).toHaveBeenCalledWith({
-      namespace: "eve.session",
-      startIndex: -1,
-    });
-    expect(cancel).toHaveBeenCalledWith("eve durable session tail read complete");
-    expect(stream.locked).toBe(false);
+    expect(readDurableSession(state)).toBe(state.snapshot.session);
+    expect(state.snapshot.session.agent).toEqual({ system: "test system" });
   });
 
-  it("throws a named timeout and cancels the legacy tail read when the stream hangs", async () => {
-    vi.useFakeTimers();
-
-    const session = buildSession({
-      continuationToken: "http:test",
-      sessionId: "wrun_tail_timeout",
+  it("refreshes projections when replacing session program memory", () => {
+    const state = createDurableSessionState({
+      session: buildSession({ sessionId: "session", continuationToken: "old" }),
     });
-    const cancel = vi.fn();
-    const stream = new ReadableStream<DurableSessionSnapshot>({
-      cancel,
-    });
-    const getReadable = vi.fn(() => stream);
-    getRunMock.mockReturnValue({ getReadable });
-
-    const promise = readDurableSession(projectSessionState({ session }));
-    const assertion = expect(promise).rejects.toMatchObject({
-      message: expect.stringContaining(
-        'Timed out reading durable session snapshot from stream "eve.session" for run wrun_tail_timeout after 10000ms.',
-      ),
-      name: "DurableSessionReadTimeoutError",
-    });
-
-    await vi.advanceTimersByTimeAsync(10_000);
-
-    await assertion;
-
-    expect(getRunMock).toHaveBeenCalledTimes(1);
-    expect(getReadable).toHaveBeenCalledTimes(1);
-    expect(getReadable).toHaveBeenCalledWith({
-      namespace: "eve.session",
-      startIndex: -1,
-    });
-    expect(cancel).toHaveBeenCalledWith("eve durable session tail read timed out after 10000ms");
-    expect(stream.locked).toBe(false);
+    const session = { ...readDurableSession(state), continuationToken: "new" };
+    const replaced = replaceDurableSessionSnapshot({ session, state });
+    expect(replaced.continuationToken).toBe("new");
+    expect(readDurableSession(replaced)).toBe(session);
+    expect(state.continuationToken).toBe("old");
   });
+
+  it.each([{ version: 2, snapshot: { session: {} } }, { version: 1 }])(
+    "rejects unsupported checkpoints without a storage fallback",
+    (state) => {
+      expect(() => readDurableSession(state as DurableSessionState)).toThrow(
+        "Unsupported session checkpoint",
+      );
+    },
+  );
 });
 
 function buildSession(input: {

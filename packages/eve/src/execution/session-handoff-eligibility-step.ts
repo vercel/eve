@@ -13,7 +13,7 @@ export async function isSessionIdleForHandoffStep(input: {
 }): Promise<boolean> {
   "use step";
 
-  const session = await readDurableSession(input.sessionState);
+  const session = readDurableSession(input.sessionState);
   const state = session.state;
   if (getPendingAuthorization(state) !== undefined || hasPendingInputBatch(state)) return false;
   if (getPendingCoordinationBatch(state) !== undefined) return false;
