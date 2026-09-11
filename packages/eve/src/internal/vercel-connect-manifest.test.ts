@@ -22,6 +22,7 @@ describe("createVercelConnectManifest", () => {
     {
       target: { mode: "direct", locator: "oauth/linear" },
       connector: { type: "oauth" },
+      interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
       access: { principalTypes: ["user"] },
       uses: [use],
     },
