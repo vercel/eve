@@ -51,7 +51,7 @@ export function withInstrumentationDecision(
     case "model.call.completed":
       return decision.recordOutputs ? event : Object.freeze({ ...event, content: undefined });
     case "memory.operation.completed":
-      return decision.recordOutputs ? event : Object.freeze({ ...event, outputRecords: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, outputRecords: undefined });
     case "step.attempt.metadata":
       return decision.recordOutputs
         ? event

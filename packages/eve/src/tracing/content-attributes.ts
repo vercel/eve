@@ -26,6 +26,7 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.value",
   "ai.values",
   "gen_ai.input.messages",
+  "gen_ai.memory.records",
   "gen_ai.system_instructions",
   "gen_ai.tool.call.arguments",
   "gen_ai.tool.definitions",
@@ -51,7 +52,6 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.response.tool_results",
   "ai.toolCall.args",
   "ai.toolCall.result",
-  "gen_ai.memory.records",
   "gen_ai.output.messages",
   "gen_ai.tool.call.result",
 ]);

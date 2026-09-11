@@ -44,7 +44,7 @@ export interface InstrumentationMemoryOperationCompletedEvent extends Instrument
   readonly type: "memory.operation.completed";
   /** The number of records the operation returned or changed, when known. */
   readonly recordCount?: number;
-  /** Content. Absent unless this provider's trace policy records outputs. */
+  /** Content. Absent unless this provider's trace policy records inputs. */
   readonly outputRecords?: readonly InstrumentationMemoryRecord[];
 }
 
