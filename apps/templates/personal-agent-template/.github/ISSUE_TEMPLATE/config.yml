@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/vercel-labs/personal-agent-template/discussions
+    about: Ask questions and discuss ideas with the community

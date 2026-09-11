@@ -1,0 +1,20 @@
+name: 🚀 Feature request
+description: Suggest an idea or enhancement for the template.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before requesting a feature, please search existing [issues](https://github.com/vercel-labs/personal-agent-template/issues). If it was already requested, add your reaction instead of opening a duplicate.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What would you like to add or improve, and what problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Mockups, links, or implementation ideas.

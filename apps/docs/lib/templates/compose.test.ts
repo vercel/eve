@@ -57,16 +57,16 @@ describe("composeTemplateEntries", () => {
       ...manifestEntry,
       github: {
         owner: "vercel",
-        repo: "eve-examples",
+        repo: "eve",
         ref: "main",
-        pathPrefix: "example-template",
+        pathPrefix: "apps/templates/example-template",
       },
     };
 
     const [entry] = composeTemplateEntries([monorepoEntry], generated);
 
     expect(entry.sourceRevisionHref).toBe(
-      "https://github.com/vercel/eve-examples/tree/0123456789abcdef0123456789abcdef01234567/example-template",
+      "https://github.com/vercel/eve/tree/0123456789abcdef0123456789abcdef01234567/apps/templates/example-template",
     );
   });
 

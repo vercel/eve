@@ -1,0 +1,9 @@
+packages:
+  - "."
+
+minimumReleaseAgeExclude:
+  - eve
+  - "@vercel/connect"
+
+allowBuilds:
+  esbuild: true

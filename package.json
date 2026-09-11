@@ -11,6 +11,7 @@
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",
+    "check:templates": "node ./scripts/check-template-compatibility.mjs",
     "dev": "node ./scripts/dev.mjs",
     "docs:check": "node ./scripts/check-docs.mjs && node ./scripts/check-doc-snippets.mjs && node ./scripts/check-doc-mdx.mjs",
     "fix:deps": "syncpack fix-mismatches && syncpack format",
