@@ -113,9 +113,7 @@ describe("withEve", () => {
         },
         { root },
       ),
-    ).rejects.toThrow(
-      'withEve received duplicate Vercel service name "web". Give every entry in the services array a unique name.',
-    );
+    ).rejects.toThrow('Duplicate Vercel service name "web".');
   });
 
   it("rejects obsolete service fields", async () => {

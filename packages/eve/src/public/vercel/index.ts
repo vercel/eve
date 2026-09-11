@@ -56,20 +56,6 @@ function toInternalConfig(config: EveVercelConfig): VercelServicesConfig {
   return config as VercelServicesConfig;
 }
 
-function assertUniqueNamedServices(services: EveVercelConfig["services"]): void {
-  if (!Array.isArray(services)) return;
-
-  const seen = new Set<string>();
-  for (const service of services) {
-    if (seen.has(service.name)) {
-      throw new Error(
-        `withEve received duplicate Vercel service name ${JSON.stringify(service.name)}. Give every entry in the services array a unique name.`,
-      );
-    }
-    seen.add(service.name);
-  }
-}
-
 function assertComposableConfig(config: EveVercelConfig, agentNames: readonly string[]): void {
   if (config.experimentalServices !== undefined || config.experimentalServicesV2 !== undefined) {
     throw new Error(
@@ -77,7 +63,6 @@ function assertComposableConfig(config: EveVercelConfig, agentNames: readonly st
     );
   }
 
-  assertUniqueNamedServices(config.services);
   const internalConfig = toInternalConfig(config);
   const services = createServiceConfigRecord(internalConfig.services);
   for (const name of agentNames) {
