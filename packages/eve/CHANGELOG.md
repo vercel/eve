@@ -1,5 +1,14 @@
 # eve
 
+## 0.54.3
+
+### Patch Changes
+
+- 6cb22a4: Store ChatGPT refresh credentials in the OS credential store using vendored just-secrets, with access tokens kept in memory. Existing users must sign in once through eve; a successful save removes the old plaintext session file. ChatGPT sign-in now remains inside the model setup panel while browser authentication is in progress.
+- c5bb66f: fix(eve): align internal AI SDK step lifecycle hooks with the current `onStepStart` and `onStepEnd` callback names
+- fb6750f: Resume sessions whose history predates user-message provenance instead of failing with a missing-kind error. Existing unclassified messages retain their content and are marked `legacy.unknown`, without treating unknown framework input as a new human request after compaction.
+- eaf8895: Add `defineWorkspaceAgent()` for delegating to a workspace peer by name. It selects Vercel routing and OIDC automatically on Vercel, accepts explicit transport overrides elsewhere, and uses the peer agent's description by default.
+
 ## 0.54.2
 
 ### Patch Changes
