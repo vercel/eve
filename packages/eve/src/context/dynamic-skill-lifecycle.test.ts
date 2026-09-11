@@ -7,7 +7,7 @@ import {
 } from "#context/dynamic-skill-lifecycle.js";
 import { DynamicSkillManifestKey, SessionIdKey, SandboxKey } from "#context/keys.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createTurnStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
@@ -81,6 +81,51 @@ function makeSkill(description: string, markdown = description): SkillPackageDef
 }
 
 describe("dispatchDynamicSkillEvent", () => {
+  it("rejects a failed turn refresh without applying another resolver's update", async () => {
+    const { ctx, sandbox } = createCtx();
+    const cause = new Error("skill source is unavailable");
+    let playbookAvailable = true;
+    let supportDescription = "Original support";
+    const playbook = {
+      ...createResolver("playbook", () => {
+        if (!playbookAvailable) throw cause;
+        return makeSkill("Playbook");
+      }),
+      eventNames: ["session.started", "turn.started"],
+    } satisfies ResolvedDynamicSkillResolver;
+    playbook.events["turn.started"] = playbook.events["session.started"];
+    const support = {
+      ...createResolver("support", () => makeSkill(supportDescription)),
+      eventNames: ["session.started", "turn.started"],
+    } satisfies ResolvedDynamicSkillResolver;
+    support.events["turn.started"] = support.events["session.started"];
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [support, playbook],
+    });
+    const writesBeforeFailedRefresh = sandbox.writes.length;
+
+    playbookAvailable = false;
+    supportDescription = "Updated support";
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+        messages: [],
+        resolvers: [support, playbook],
+      }),
+    ).rejects.toMatchObject({ cause, name: "BoundaryHookError" });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      playbook: [{ description: "Playbook", name: "playbook" }],
+      support: [{ description: "Original support", name: "support" }],
+    });
+    expect(sandbox.writes).toHaveLength(writesBeforeFailedRefresh);
+  });
+
   it("clears removed dynamic skills from the durable announcement", async () => {
     const { ctx, sandbox } = createCtx();
     let enabled = true;
