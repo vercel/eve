@@ -414,6 +414,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
       ctx,
       event,
+      instrumentation: instrumentation?.memory,
       memories: effectiveNode.agent?.memories ?? [],
       messages,
       nodeId: bundle.nodeId ?? "__root__",

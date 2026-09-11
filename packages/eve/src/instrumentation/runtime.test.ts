@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SpanKind, trace } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   AuthKey,
@@ -14,6 +13,7 @@ import {
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { instrumentMemoryOperation } from "#instrumentation/memory.js";
 import {
   bindInstrumentationRuntime,
   bindSessionInstrumentation,
@@ -529,6 +529,7 @@ describe("bindInstrumentationRuntime", () => {
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [authoredIntegration];
     const runtime = {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      memoryOperations: true,
       ownsAgentSpans: true,
     };
     const instrumentation = bindInstrumentationRuntime(runtime, createContext(), boundSession);
@@ -562,74 +563,81 @@ describe("bindInstrumentationRuntime", () => {
     }
   });
 
-  it("creates memory spans beneath the legacy OTel turn context", async () => {
-    const span = {
-      end: vi.fn(),
-      recordException: vi.fn(),
-      setAttribute: vi.fn(),
-      setStatus: vi.fn(),
-    };
-    const tracer = { startSpan: vi.fn(() => span) };
-    const parentSpan = { spanContext: () => ({ spanId: "1".repeat(16), traceFlags: 1 }) };
-    const getTracer = vi.spyOn(trace, "getTracer").mockReturnValue(tracer as never);
-    const getSpan = vi.spyOn(trace, "getSpan").mockReturnValue(parentSpan as never);
+  it("does not publish memory operations without a memory instrumentation provider", async () => {
+    const publish = vi.fn();
+    const execute = vi.fn(async () => ({ value: "recalled" }));
     const instrumentation = bindInstrumentationRuntime(
-      createRuntime({ capturesContent: true, publish: vi.fn() }),
+      createRuntime({ capturesContent: true, publish }),
       createContext(),
       boundSession,
     );
 
-    try {
-      await instrumentation?.prepareExecution().runStep(
-        {
-          environment: "test",
-          eveVersion: "0.0.0",
-          hasInput: false,
-          session: { sessionId: "session-1" },
-        },
-        async (scope) =>
-          await scope.instrumentMemory(
-            {
-              idempotencyKey: "memory:search",
-              operationName: "search_memory",
-              phase: "turn.started",
-              rootSessionId: "session-1",
-              sessionId: "session-1",
-              slot: "profile",
-              storeId: "memscope1_scope",
-              turnId: "turn-1",
-            },
-            async () => ({
-              outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
-              recordCount: 1,
-              value: undefined,
-            }),
-          ),
-      );
-    } finally {
-      getSpan.mockRestore();
-      getTracer.mockRestore();
-    }
-
-    expect(tracer.startSpan).toHaveBeenCalledWith(
-      "search_memory",
+    const result = await instrumentation?.prepareExecution().runStep(
       {
-        attributes: expect.objectContaining({
-          "agent.memory.phase": "turn.started",
-          "agent.memory.slot": "profile",
-          "gen_ai.memory.store.id": "memscope1_scope",
-          "gen_ai.operation.name": "search_memory",
-        }),
-        kind: SpanKind.CLIENT,
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: false,
+        session: { sessionId: "session-1" },
       },
-      expect.anything(),
+      async () =>
+        await instrumentMemoryOperation(
+          instrumentation?.memory,
+          {
+            idempotencyKey: "memory:search",
+            operationName: "search_memory",
+            phase: "turn.started",
+            rootSessionId: "session-1",
+            sessionId: "session-1",
+            slot: "profile",
+            storeId: "memscope1_scope",
+            turnId: "turn-1",
+          },
+          execute,
+        ),
     );
-    expect(span.setAttribute).toHaveBeenCalledWith("gen_ai.memory.record.count", 1);
-    expect(span.setAttribute).toHaveBeenCalledWith(
-      "gen_ai.memory.records",
-      '[{"content":"The user prefers dark mode.","id":"preference"}]',
+
+    expect(result).toBe("recalled");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("publishes memory operations when a memory instrumentation provider exists", async () => {
+    const publish = vi.fn();
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        memoryOperations: true,
+      },
+      createContext(),
+      boundSession,
     );
-    expect(span.end).toHaveBeenCalledOnce();
+
+    await instrumentMemoryOperation(
+      instrumentation?.memory,
+      {
+        idempotencyKey: "memory:search",
+        operationName: "search_memory",
+        phase: "turn.started",
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        slot: "profile",
+        storeId: "memscope1_scope",
+        turnId: "turn-1",
+      },
+      async () => ({
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+        recordCount: 1,
+        value: undefined,
+      }),
+    );
+
+    expect(publish.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({ type: "memory.operation.started" }),
+      expect.objectContaining({
+        recordCount: 1,
+        type: "memory.operation.completed",
+      }),
+    ]);
   });
 
   it("isolates concurrent step decisions and audiences", async () => {

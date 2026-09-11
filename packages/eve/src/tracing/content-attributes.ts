@@ -51,6 +51,7 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.response.tool_results",
   "ai.toolCall.args",
   "ai.toolCall.result",
+  "gen_ai.memory.records",
   "gen_ai.output.messages",
   "gen_ai.tool.call.result",
 ]);
@@ -61,16 +62,7 @@ export interface ResolvedContentOptions {
   readonly recordOutputs: boolean;
 }
 
-function isDeclined(
-  key: string,
-  attributes: Readonly<Record<string, unknown>>,
-  content: ResolvedContentOptions,
-): boolean {
-  if (key === "gen_ai.memory.records") {
-    return attributes["gen_ai.operation.name"] === "search_memory"
-      ? !content.recordOutputs
-      : !content.recordInputs;
-  }
+function isDeclined(key: string, content: ResolvedContentOptions): boolean {
   if (!content.recordInputs && INPUT_CONTENT_ATTRIBUTES.has(key)) return true;
   return !content.recordOutputs && OUTPUT_CONTENT_ATTRIBUTES.has(key);
 }
@@ -88,11 +80,11 @@ export function withoutDeclinedContent(
   content: ResolvedContentOptions,
 ): Record<string, unknown> | undefined {
   const keys = Object.keys(attributes);
-  if (!keys.some((key) => isDeclined(key, attributes, content))) return undefined;
+  if (!keys.some((key) => isDeclined(key, content))) return undefined;
 
   const kept: Record<string, unknown> = {};
   for (const key of keys) {
-    if (!isDeclined(key, attributes, content)) kept[key] = attributes[key];
+    if (!isDeclined(key, content)) kept[key] = attributes[key];
   }
   return kept;
 }

@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import type { MemoryInstrumentation } from "#context/memory-instrumentation.js";
 import {
   dispatchMemoryCompactionCompleted,
   dispatchMemoryCompactionRequested,
@@ -12,13 +11,8 @@ import {
   prepareMemoryCompaction,
   prepareMemoryPreamble,
 } from "#context/memory-lifecycle.js";
-import {
-  AuthKey,
-  MemoryInstrumentationKey,
-  SessionIdKey,
-  SessionKey,
-  TurnMemoryLocksKey,
-} from "#context/keys.js";
+import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
+import { type MemoryInstrumentation } from "#instrumentation/memory.js";
 import {
   defineMemory,
   type MemoryDefinition,
@@ -221,7 +215,6 @@ describe("memory lifecycle", () => {
         return result.value;
       },
     };
-    ctx.setVirtualContext(MemoryInstrumentationKey, instrumentation);
     prepareMemoryPreamble(ctx, { history: [], input: [] });
 
     await contextStorage.run(
@@ -231,6 +224,7 @@ describe("memory lifecycle", () => {
           appRoot: "/app",
           ctx,
           event: turnStarted,
+          instrumentation,
           memories: [
             memory("profile", {
               provider: {

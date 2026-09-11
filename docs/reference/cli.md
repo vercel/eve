@@ -316,7 +316,7 @@ A durable conversation produces one bounded trace per turn. Worker replacements 
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
-Model, `execute_tool`, and memory spans omit their content by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models; call arguments and results for tools; and submitted or recalled memory records. Each captured value is capped at 32 KB.
+Model, `execute_tool`, and memory spans omit their content by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models; call arguments and results for tools; and recalled memory records. Each captured value is capped at 32 KB.
 
 Step spans carry token counts under `agent.usage.*`, and cost when Vercel AI Gateway served the call. Model spans also expose `gen_ai.usage.*` token counters. The CLI sums step-level counters only, so model and delegated-call totals are not counted twice.
 

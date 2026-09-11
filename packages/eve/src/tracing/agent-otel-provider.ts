@@ -34,11 +34,7 @@ import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { isAgentTraceContext, markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
-import {
-  memorySpanAttributes,
-  setMemorySpanInputRecords,
-  updateMemorySpan,
-} from "#tracing/memory-span.js";
+import { memorySpanAttributes, updateMemorySpan } from "#tracing/agent-memory-instrumentation.js";
 import {
   readGatewayCost,
   setAgentInvocationUsage,
@@ -250,7 +246,6 @@ export function createAgentOtelInstrumentation(
       },
       parent,
     );
-    setMemorySpanInputRecords(span, event.inputRecords);
     memorySpans.set(event.idempotencyKey, {
       context: trace.setSpan(parent, span),
       span,

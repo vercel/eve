@@ -1,7 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import { instrumentCurrentMemoryOperation } from "#context/memory-instrumentation.js";
-import { defineTool, type ToolContext } from "#tools/definition.js";
+import { defineTool } from "#tools/definition.js";
 import {
   MemoryDocumentConflictError,
   type MemoryDocument,
@@ -78,27 +77,12 @@ function createFileMemoryTools(input: {
       description:
         "Remove one persistent memory by the index shown in recalled memory. Use when it is wrong, outdated, or no longer needed.",
       async execute(toolInput, toolContext) {
-        await instrumentCurrentMemoryOperation(
-          () =>
-            fileMemoryToolOperation({
-              operationName: "delete_memory",
-              phase: "tool.remove_memory",
-              recordCount: 1,
-              recordId: String(toolInput.index),
-              slot: input.slot,
-              storeId: input.key,
-              toolContext,
-            }),
-          async () => {
-            await removeMemory({
-              backend: input.backend,
-              index: toolInput.index,
-              key: input.key,
-              signal: toolContext.abortSignal,
-            });
-            return { value: undefined };
-          },
-        );
+        await removeMemory({
+          backend: input.backend,
+          index: toolInput.index,
+          key: input.key,
+          signal: toolContext.abortSignal,
+        });
       },
       inputSchema: z.object({
         index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -108,61 +92,20 @@ function createFileMemoryTools(input: {
       description:
         "Save one concise, stable fact or preference for future conversations. Omit secrets, instructions, and current-task details.",
       async execute(toolInput, toolContext) {
-        await instrumentCurrentMemoryOperation(
-          () => ({
-            ...fileMemoryToolOperation({
-              operationName: "create_memory",
-              phase: "tool.save_memory",
-              recordCount: 1,
-              slot: input.slot,
-              storeId: input.key,
-              toolContext,
-            }),
-            inputRecords: [{ content: toolInput.text }],
-          }),
-          async () => ({
-            recordId: String(
-              await saveMemory({
-                backend: input.backend,
-                key: input.key,
-                maxCharacters: input.maxCharacters,
-                signal: toolContext.abortSignal,
-                slot: input.slot,
-                text: toolInput.text,
-              }),
-            ),
-            value: undefined,
-          }),
-        );
+        await saveMemory({
+          backend: input.backend,
+          key: input.key,
+          maxCharacters: input.maxCharacters,
+          signal: toolContext.abortSignal,
+          slot: input.slot,
+          text: toolInput.text,
+        });
       },
       inputSchema: z.object({
         text: z.string().min(1),
       }),
     }),
   };
-}
-
-function fileMemoryToolOperation(input: {
-  readonly operationName: "create_memory" | "delete_memory";
-  readonly phase: "tool.save_memory" | "tool.remove_memory";
-  readonly recordCount: number;
-  readonly recordId?: string;
-  readonly slot: string;
-  readonly storeId: string;
-  readonly toolContext: ToolContext;
-}) {
-  return {
-    idempotencyKey: `memory.tool:${input.toolContext.session.id}:${input.toolContext.session.turn.id}:${input.toolContext.callId}`,
-    operationName: input.operationName,
-    phase: input.phase,
-    recordCount: input.recordCount,
-    recordId: input.recordId,
-    rootSessionId: input.toolContext.session.parent?.rootSessionId ?? input.toolContext.session.id,
-    sessionId: input.toolContext.session.id,
-    slot: input.slot,
-    storeId: input.storeId,
-    turnId: input.toolContext.session.turn.id,
-  } as const;
 }
 
 async function recallMemory(
@@ -193,7 +136,7 @@ async function saveMemory(input: {
   readonly signal: AbortSignal;
   readonly slot: string;
   readonly text: string;
-}): Promise<number> {
+}): Promise<void> {
   const text = normalizeMemoryText(input.text);
   let document = await readDocument(input);
   let conflicts = 0;
@@ -201,8 +144,7 @@ async function saveMemory(input: {
   for (;;) {
     const parsed = parseMemoryDocumentOrEmpty(document);
     // Duplicate text is a successful no-op.
-    const existing = parsed.entries.find((entry) => entry.text === text);
-    if (existing !== undefined) return existing.index;
+    if (parsed.entries.some((entry) => entry.text === text)) return;
 
     const index = nextMemoryIndex(parsed.lastAllocatedIndex);
     const entries = [...parsed.entries, { index, text }];
@@ -229,7 +171,7 @@ async function saveMemory(input: {
         key: input.key,
         signal: input.signal,
       });
-      return index;
+      return;
     } catch (error) {
       if (!MemoryDocumentConflictError.is(error)) throw error;
       if (conflicts >= MAX_CONFLICT_RETRIES) throw error;

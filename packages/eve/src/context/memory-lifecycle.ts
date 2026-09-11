@@ -1,7 +1,6 @@
 import type { ModelMessage } from "ai";
 
 import type { AlsContext } from "#context/container.js";
-import { instrumentMemoryOperation } from "#context/memory-instrumentation.js";
 import {
   PendingMemoryCommitKey,
   PreparedMemoryCompactionKey,
@@ -27,6 +26,7 @@ import type {
   InstrumentationMemoryOperation,
   InstrumentationMemoryRecord,
 } from "#instrumentation/lifecycle.js";
+import { instrumentMemoryOperation, type MemoryInstrumentation } from "#instrumentation/memory.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
   applyMemoryRecallBatches,
@@ -62,6 +62,7 @@ export async function dispatchMemoryTurnStarted(input: {
   readonly event: TurnStartedStreamEvent;
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly nodeId: string;
+  readonly instrumentation?: MemoryInstrumentation;
 }): Promise<readonly ModelMessage[]> {
   const prepared = input.ctx.get(PreparedMemoryPreambleKey);
   if (prepared === undefined) return [];
@@ -108,7 +109,7 @@ export async function dispatchMemoryTurnStarted(input: {
             turnId: turn.id,
           });
           const result = await instrumentMemoryOperation(
-            input.ctx,
+            input.instrumentation,
             memoryInstrumentationOperation({
               operationId,
               operationName: "search_memory",
@@ -188,6 +189,7 @@ export async function dispatchMemoryCompactionRequested(input: {
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly messages: readonly ModelMessage[];
   readonly nodeId: string;
+  readonly instrumentation?: MemoryInstrumentation;
 }): Promise<void> {
   const callbackContext = buildCallbackContext();
   const locks = await resolveCompactionLocks(input);
@@ -208,7 +210,7 @@ export async function dispatchMemoryCompactionRequested(input: {
           turnId: turn?.id ?? null,
         });
         await instrumentMemoryOperation(
-          input.ctx,
+          input.instrumentation,
           memoryInstrumentationOperation({
             operationId,
             operationName: "upsert_memory",
@@ -246,6 +248,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
   readonly event: CompactionCompletedStreamEvent;
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly messages: readonly ModelMessage[];
+  readonly instrumentation?: MemoryInstrumentation;
 }): Promise<readonly ModelMessage[]> {
   const prepared = input.ctx.get(PreparedMemoryCompactionKey);
   const rawHistory = prepared?.history ?? input.messages;
@@ -272,7 +275,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
             turnId: turn?.id ?? null,
           });
           const result = await instrumentMemoryOperation(
-            input.ctx,
+            input.instrumentation,
             memoryInstrumentationOperation({
               operationId,
               operationName: "search_memory",
@@ -334,6 +337,7 @@ export async function dispatchMemoryTurnCompleted(input: {
   readonly event: TurnCompletedStreamEvent;
   readonly memories: readonly ResolvedMemoryDefinition[];
   readonly messages: readonly ModelMessage[];
+  readonly instrumentation?: MemoryInstrumentation;
 }): Promise<void> {
   const locks = (input.ctx.get(TurnMemoryLocksKey) ?? {}) as Readonly<
     Record<string, InternalMemoryLock>
@@ -355,7 +359,7 @@ export async function dispatchMemoryTurnCompleted(input: {
           turnId: input.event.data.turnId,
         });
         await instrumentMemoryOperation(
-          input.ctx,
+          input.instrumentation,
           memoryInstrumentationOperation({
             operationId,
             operationName: "upsert_memory",

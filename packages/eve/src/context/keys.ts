@@ -34,7 +34,6 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
-import type { MemoryInstrumentation } from "#context/memory-instrumentation.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -159,10 +158,6 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
-/** Step-local bridge used to parent memory provider operations under their GenAI spans. */
-export const MemoryInstrumentationKey = new ContextKey<MemoryInstrumentation>(
-  "eve.memory.instrumentation",
-);
 
 // ---------------------------------------------------------------------------
 // Dynamic model keys

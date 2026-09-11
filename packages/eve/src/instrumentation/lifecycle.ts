@@ -42,11 +42,7 @@ export interface InstrumentationModelRef {
 }
 
 /** Standard GenAI memory operations that eve can identify from its lifecycle. */
-export type InstrumentationMemoryOperationName =
-  | "create_memory"
-  | "delete_memory"
-  | "search_memory"
-  | "upsert_memory";
+export type InstrumentationMemoryOperationName = "search_memory" | "upsert_memory";
 
 /** One memory record in the OpenTelemetry GenAI memory-records shape. */
 export interface InstrumentationMemoryRecord {
@@ -72,16 +68,10 @@ export interface InstrumentationMemoryOperation {
   readonly rootSessionId: string;
   readonly sessionId: string;
   readonly turnId?: string;
-  /** A record identity when one operation targets exactly one record. */
-  readonly recordId?: string;
-  /** The number of records the operation intends to change. */
-  readonly recordCount?: number;
 }
 
 export interface InstrumentationMemoryOperationStartedEvent extends InstrumentationMemoryOperation {
   readonly type: "memory.operation.started";
-  /** Content. Absent unless this provider's trace policy records inputs. */
-  readonly inputRecords?: readonly InstrumentationMemoryRecord[];
 }
 
 export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperation {

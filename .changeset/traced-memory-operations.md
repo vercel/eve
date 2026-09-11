@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add OpenTelemetry GenAI spans for memory recall, capture, and built-in file-memory changes.
+Add OpenTelemetry GenAI spans for memory provider recall and capture operations.
