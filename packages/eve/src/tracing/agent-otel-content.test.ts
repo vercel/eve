@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { FrameworkMessageKind } from "#harness/messages.js";
 import {
@@ -6,6 +6,7 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
+  messagesContentAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
 
@@ -18,6 +19,51 @@ const FRAMEWORK_MESSAGE_KINDS = [
   "execution.continuation",
   "execution.retry",
 ] as const satisfies readonly FrameworkMessageKind[];
+
+describe("messagesContentAttribute", () => {
+  it.each([
+    ["Buffer", () => Buffer.alloc(64, 97)],
+    ["Uint8Array", () => new Uint8Array(64).fill(97)],
+  ] as const)(
+    "does not enumerate %s attachment bytes before applying the trace limit",
+    (_, createData) => {
+      // A small attachment takes the same traversal path as a multi-MiB file,
+      // without making the regression test depend on RSS or GC behavior.
+      const data = createData();
+      const entries = Object.entries;
+      let binaryEnumerations = 0;
+      const spy = vi.spyOn(Object, "entries").mockImplementation((value) => {
+        if (value === data) binaryEnumerations += 1;
+        return entries(value);
+      });
+
+      let attribute: string | undefined;
+      try {
+        attribute = messagesContentAttribute([
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Summarize file." },
+              { type: "file", mediaType: "application/octet-stream", filename: "test.bin", data },
+            ],
+          },
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(binaryEnumerations).toBe(0);
+      expect(attribute).toBeDefined();
+      expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+      expect(JSON.parse(attribute!)).toEqual([
+        expect.objectContaining({
+          role: "user",
+          content: expect.arrayContaining([{ type: "text", text: "Summarize file." }]),
+        }),
+      ]);
+    },
+  );
+});
 
 describe("GenAI message attributes", () => {
   it("preserves every user-message kind in the GenAI input attribute", () => {
