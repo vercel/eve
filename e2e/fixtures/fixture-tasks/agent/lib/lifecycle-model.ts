@@ -3,6 +3,7 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 export const LIFECYCLE_SCENARIO = "Alice coordinates Bob's lifecycle ordering check.";
 export const CROSS_TURN_SCENARIO = "Alice launches two pieces of work in separate user turns.";
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0 };
+const COMPLETION = /^Background task task_[a-z0-9]+ \([^)]+\) is completed\./u;
 
 export function lifecycleModel(request: MockModelRequest): MockModelResponse | undefined {
   const setup = request.userMessages.find(
@@ -14,7 +15,7 @@ export function lifecycleModel(request: MockModelRequest): MockModelResponse | u
   const message =
     [...request.userMessages]
       .reverse()
-      .find((entry) => entry.startsWith("Alice ") || entry.startsWith("Background task ")) ?? "";
+      .find((entry) => entry.startsWith("Alice ") || COMPLETION.test(entry)) ?? "";
   const result = (id: string) => request.toolResults.find((entry) => entry.id === id);
   const call = (marker: "A" | "B") => ({
     id: `lifecycle-${marker}`,
@@ -30,11 +31,9 @@ export function lifecycleModel(request: MockModelRequest): MockModelResponse | u
       text: JSON.stringify([...agents.matchAll(/<agent id="([^"]+)"/gu)].map((match) => match[1])),
     });
   }
-  if (message.startsWith("Background task ")) {
+  if (COMPLETION.test(message)) {
     // Report only what the runtime actually delivered, without model-side batching.
-    const notifications = request.userMessages.filter(
-      (entry) => entry.startsWith("Background task ") && entry.includes(" is completed."),
-    );
+    const notifications = request.userMessages.filter((entry) => COMPLETION.test(entry));
     return response({ text: JSON.stringify({ report: "LIFECYCLE-REPORT", notifications }) });
   }
   if (message === "Alice keeps the parent active while Bob finishes.") {

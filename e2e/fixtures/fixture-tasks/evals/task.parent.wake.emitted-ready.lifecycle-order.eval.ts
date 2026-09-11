@@ -107,8 +107,11 @@ export default defineTaskEval({
     ).label(
       "runtime session total includes exactly B's 211 input tokens plus 999790 parent tokens",
     );
-    budget.notEvent("step.started");
-    budget.usedNoTools();
+    budget.notEvent("step.completed");
+    t.check(
+      budget.toolCalls.map((call) => call.name),
+      equals(["session_limit_continuation"]),
+    ).label("only the runtime's session-limit control runs, not an authored tool");
     t.notEvent("compaction.requested");
     // No blanket noFailedActions: Bob's provider rejection is intentional.
   },

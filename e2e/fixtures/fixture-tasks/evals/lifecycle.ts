@@ -14,7 +14,7 @@ export function lifecycleDriver(t: EveEvalContext, key: string) {
 
   async function post<T>(action: string, body: object): Promise<T> {
     const response = await t.target.fetch(
-      `/task-lifecycle/${encodeURIComponent(sessionId)}/${action}`,
+      `/eve/v1/task-lifecycle/${encodeURIComponent(sessionId)}/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },

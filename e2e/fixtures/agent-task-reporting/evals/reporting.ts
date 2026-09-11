@@ -2,12 +2,18 @@ import { e2eModel } from "@eve-e2e/config";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
+import {
+  CHECKS,
+  checkForTask,
+  eventsForSession,
+  toolEvidence,
+  type Check,
+} from "./event-matching.js";
+
 export const TASK_COUNT = 3;
 export const QUESTION =
   "Alice is packing seven boxes with eight jars in each. How many jars is that? Reply with just the number.";
 
-const CHECKS = ["first", "second", "third"] as const;
-type Check = (typeof CHECKS)[number];
 const RESULTS = { first: "oranges", second: "pears", third: "apples" } as const;
 const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
@@ -23,6 +29,8 @@ export interface ReportingRun {
   readonly children: readonly Child[];
   readonly requests: ReadonlyMap<Check, InputRequest>;
   readonly completedChildren: Map<Check, EveEvalTurn>;
+  readonly childTurns: EveEvalTurn[];
+  readonly probeSessions: Map<Check, string>;
   readonly parentTurns: EveEvalTurn[];
   readonly modelId: string;
   session: EveEvalSession | EveEvalContext;
@@ -81,6 +89,8 @@ Once all three assignments are accepted, let Alice know the checks are underway.
     requests,
     modelId,
     completedChildren: new Map(),
+    childTurns: [],
+    probeSessions: new Map(),
     parentTurns: [],
   };
   collectRequests(started);
@@ -98,14 +108,27 @@ Once all three assignments are accepted, let Alice know the checks are underway.
   }
   children.push(
     ...calls.map((call): Child => {
-      const message = actions.find((action) => action.callId === call.callId)?.input.message;
-      const checks = CHECKS.filter(
-        (check) => typeof message === "string" && message.includes(`check=${check}`),
+      const assignments = actions.filter(
+        (action) =>
+          action.callId === call.callId &&
+          action.kind === "tool-call" &&
+          action.toolName === "agent",
       );
-      const receipt = receipts.find((entry) => entry.callId === call.callId);
-      if (checks.length !== 1 || receipt === undefined)
-        throw new Error("Each warehouse child needs one check and a matching task receipt.");
-      return { check: checks[0]!, sessionId: call.childSessionId, taskId: receipt.taskId };
+      const matchingReceipts = receipts.filter((entry) => entry.callId === call.callId);
+      const receipt = matchingReceipts[0];
+      if (
+        call.sessionId !== started.sessionId ||
+        call.name !== "agent" ||
+        assignments.length !== 1 ||
+        matchingReceipts.length !== 1 ||
+        receipt === undefined
+      )
+        throw new Error("Each warehouse child needs one assignment and a matching task receipt.");
+      return {
+        check: checkForTask(receipt.taskId, [...requests.values()]),
+        sessionId: call.childSessionId,
+        taskId: receipt.taskId,
+      };
     }),
   );
   await t.require(
@@ -223,15 +246,23 @@ export async function waitForReport(t: EveEvalContext, run: ReportingRun): Promi
       turn.notEvent("message.completed", { data: (data) => data.message === null });
       await t.require(turn.message, completeReport());
       t.calledSubagent("agent", { count: TASK_COUNT });
-      t.calledSubagent("warehouse-worker", { count: 1 });
-      t.calledTool("probe", { count: TASK_COUNT });
+      const probeCalls = [...new Set(run.childTurns.map((child) => child.sessionId))].flatMap(
+        (sessionId) => toolEvidence(run.childTurns, sessionId, "probe"),
+      );
+      await t.require(probeCalls.length, equals(TASK_COUNT));
       for (const check of CHECKS) {
-        t.calledTool("probe", {
-          count: 1,
-          input: { check },
-          output: { result: RESULTS[check] },
-          status: "completed",
-        });
+        const sessionId = run.probeSessions.get(check);
+        if (sessionId === undefined) throw new Error(`Missing probe session for ${check}.`);
+        await t.require(
+          toolEvidence(run.childTurns, sessionId, "probe"),
+          equals([
+            {
+              callId: run.requests.get(check)!.action.callId,
+              inputs: [{ check }],
+              results: [{ output: { result: RESULTS[check] }, status: "completed" }],
+            },
+          ]),
+        );
       }
       return turn;
     }
@@ -281,30 +312,56 @@ async function releaseCheck(t: EveEvalContext, run: ReportingRun, check: Check):
   });
   const turns = await readCompletedChild(t, child.sessionId, check, run.modelId);
   run.completedChildren.set(check, turns.at(-1)!);
-  if (check === "third") {
-    const nested = turns
-      .flatMap((turn) => turn.events)
-      .flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "warehouse-worker"
-          ? [event.data]
-          : [],
-      );
-    await t.require(nested.length, equals(1));
-    await t.require(
-      run.children.some((entry) => entry.sessionId === nested[0]!.childSessionId),
-      equals(false),
-    );
-    const leaf = await readCompletedChild(t, nested[0]!.childSessionId, check, run.modelId);
-    await t.require(
-      leaf
-        .flatMap((turn) => turn.events)
-        .flatMap((event) => (event.type === "actions.requested" ? event.data.actions : []))
-        .filter((action) => action.kind === "tool-call" && action.toolName === "probe")
-        .map((action) => action.input.check),
-      equals([check]),
-    );
-    await t.require(completedAt(leaf.at(-1)!) <= completedAt(turns.at(-1)!), equals(true));
+  run.childTurns.push(...turns);
+  const nested = eventsForSession(turns, child.sessionId).flatMap((event) =>
+    event.type === "subagent.called" ? [event.data] : [],
+  );
+  if (check !== "third") {
+    await t.require(nested, equals([]));
+    run.probeSessions.set(check, child.sessionId);
+    return;
   }
+  await t.require(nested.length, equals(1));
+  const delegate = nested[0]!;
+  const lookup = toolEvidence(turns, child.sessionId, "warehouse_lookup");
+  await t.require(lookup.length, equals(1));
+  await t.require(
+    {
+      name: delegate.name,
+      sessionId: delegate.sessionId,
+      ownedCall: delegate.callId.startsWith(`${lookup[0]!.callId}:`),
+      distinctSession:
+        delegate.childSessionId !== run.sessionId &&
+        !run.children.some((entry) => entry.sessionId === delegate.childSessionId),
+    },
+    equals({
+      name: "warehouse-worker",
+      sessionId: child.sessionId,
+      ownedCall: true,
+      distinctSession: true,
+    }),
+  );
+  const leaf = await readCompletedChild(t, delegate.childSessionId, check, run.modelId);
+  run.childTurns.push(...leaf);
+  run.probeSessions.set(check, delegate.childSessionId);
+  await t.require(
+    eventsForSession(leaf, delegate.childSessionId).filter(
+      (event) => event.type === "subagent.called",
+    ),
+    equals([]),
+  );
+  // ctx.agent completes through its owning workflow tool, not a subagent.completed event.
+  await t.require(
+    lookup,
+    equals([
+      {
+        callId: lookup[0]!.callId,
+        inputs: [{ check }],
+        results: [{ status: "completed", output: leaf.at(-1)!.message }],
+      },
+    ]),
+  );
+  await t.require(completedAt(leaf.at(-1)!) <= completedAt(turns.at(-1)!), equals(true));
 }
 
 async function readCompletedChild(

@@ -14,7 +14,7 @@ const bodySchema = z.object({
 // control stream. Only fixture gate tokens are exposed, never runtime routing credentials.
 export default defineChannel({
   routes: [
-    POST("/task-lifecycle/:sessionId/:action", async (request, { params }) => {
+    POST("/eve/v1/task-lifecycle/:sessionId/:action", async (request, { params }) => {
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(60_000)]);
       const body = bodySchema.parse(JSON.parse(await boundedBody(request)));
       const sessionId = params.sessionId;

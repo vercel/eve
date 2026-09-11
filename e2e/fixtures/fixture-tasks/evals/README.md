@@ -64,7 +64,8 @@ completion delivery while the other gate remains active. The final delivery is
 exactly the union, never one report per creating turn. The mock reports received
 notifications immediately; it does not implement its own cohort barrier.
 
-The `/task-lifecycle/:sessionId/:action` channel is fixture-only. Random per-eval
+The `/eve/v1/task-lifecycle/:sessionId/:action` channel is fixture-only and stays
+inside the fixture's Vercel service route prefix. Random per-eval
 keys scope control-stream reads; releases validate gate metadata against that key
 and parent session. Reads, bodies, and owner-log audits are bounded. The route
 only releases authored hooks and reads actual Workflow owner metadata; it never
