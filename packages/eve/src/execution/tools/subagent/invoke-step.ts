@@ -94,6 +94,7 @@ export async function dispatchAgentInvocation(input: {
     knownAgentIds: agentHandles.map((handle) => handle.identity.id),
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
+    taskId: input.taskId,
   });
   const entry = prepared.plan[0];
   if (entry === undefined) {
