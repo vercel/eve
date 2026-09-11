@@ -45,7 +45,6 @@ import {
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
-import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
@@ -89,7 +88,6 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
@@ -226,7 +224,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
-    parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     activityObserver: resolvePreparedActivity(
       ctx.get(ActivityObserverKey),

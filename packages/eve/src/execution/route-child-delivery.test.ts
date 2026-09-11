@@ -5,7 +5,10 @@ import {
   emitRecordedTaskInputRequestStep,
   runProxySubagentEventStep,
 } from "#subagents/event-proxy-step.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import {
+  recordTaskInputRequestStep,
+  recordTerminalTaskViewsStep,
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -18,6 +21,7 @@ vi.mock("#subagents/event-proxy-step.js", () => ({
 }));
 vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
   recordTaskInputRequestStep: vi.fn(),
+  recordTerminalTaskViewsStep: vi.fn(),
 }));
 vi.mock("#execution/tools/subagent/accept-event-step.js", () => ({
   acceptTaskAuthorizationEventStep: vi.fn(),
@@ -96,6 +100,42 @@ describe("task HITL delivery routing", () => {
     expect(vi.mocked(recordTaskInputRequestStep).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(emitRecordedTaskInputRequestStep).mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it("adopts instrumentation context returned with terminal task views", async () => {
+    const recordedState = state(false);
+    const view = {
+      lastOutput: { data: "done", type: "result" as const },
+      metadata: { kind: "tool", name: "publish" },
+      status: "completed" as const,
+      taskId: "task-1",
+    };
+    vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      serializedContext: { trace: "settled" },
+      sessionState: recordedState,
+    });
+
+    const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ task: { views: [view] } }],
+      },
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { trace: "open" },
+      sessionState: state(false),
+    });
+
+    expect(recordTerminalTaskViewsStep).toHaveBeenCalledWith({
+      serializedContext: { trace: "open" },
+      sessionState: state(false),
+      views: [view],
+    });
+    expect(result).toEqual({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: { trace: "settled" },
+      sessionState: recordedState,
+    });
   });
 
   it("drops an unowned task envelope before it can reach the parent model", async () => {

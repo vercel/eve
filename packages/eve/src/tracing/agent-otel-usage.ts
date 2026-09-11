@@ -2,33 +2,40 @@ import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationUsage } from "#instrumentation/lifecycle.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
 
 /** Applies eve's structural token usage attributes to an agent span. */
-export function setAgentUsage(
-  span: Span,
-  usage: InstrumentationUsage,
-  options: { readonly includeGenAiDetails?: boolean } = {},
-): void {
+export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
   if (usage.inputTokens !== undefined) {
-    span.setAttribute("agent.usage.input_tokens", usage.inputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, usage.inputTokens);
   }
   if (usage.outputTokens !== undefined) {
-    span.setAttribute("agent.usage.output_tokens", usage.outputTokens);
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.outputTokens, usage.outputTokens);
   }
   const details = usage.inputTokenDetails;
   if (details?.cacheReadTokens !== undefined) {
-    if (options.includeGenAiDetails === false) {
-      span.setAttribute("agent.usage.cache_read_tokens", details.cacheReadTokens);
-    } else {
-      span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
-    }
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheReadTokens, details.cacheReadTokens);
   }
   if (details?.cacheWriteTokens !== undefined) {
-    if (options.includeGenAiDetails === false) {
-      span.setAttribute("agent.usage.cache_write_tokens", details.cacheWriteTokens);
-    } else {
-      span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
-    }
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheWriteTokens, details.cacheWriteTokens);
+  }
+}
+
+/** Applies standard GenAI token usage while retaining eve's compatibility attributes. */
+export function setGenAiUsage(span: Span, usage: InstrumentationUsage): void {
+  setAgentUsage(span, usage);
+  if (usage.inputTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.input_tokens", usage.inputTokens);
+  }
+  if (usage.outputTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.output_tokens", usage.outputTokens);
+  }
+  const details = usage.inputTokenDetails;
+  if (details?.cacheReadTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
+  }
+  if (details?.cacheWriteTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
   }
 }
 
@@ -37,21 +44,10 @@ export function setAgentInvocationUsage(
   modelUsage: AgentTurnTraceState["modelUsage"],
 ): void {
   if (modelUsage === undefined) return;
-  if (modelUsage.inputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.input_tokens", modelUsage.inputTokens);
-  }
-  if (modelUsage.outputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.output_tokens", modelUsage.outputTokens);
-  }
+  setGenAiUsage(span, modelUsage);
 }
 
-/**
- * Extracts cost data from a step result's provider metadata. Only Vercel AI
- * Gateway reports it (`providerMetadata.gateway`): raw inference cost, the
- * gateway's surcharged total, the input/output split, and the generation id
- * for dashboard reconciliation. Values arrive as USD strings; anything
- * missing or non-numeric is skipped, so non-gateway providers get nothing.
- */
+/** Projects Vercel AI Gateway cost metadata onto GenAI span attributes. */
 export function readGatewayCost(
   providerMetadata: Readonly<Record<string, unknown>>,
 ): Record<string, string | number> | undefined {

@@ -279,6 +279,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly channelType?: string;
   readonly channelAudience?: ChannelAudience;
   readonly idempotencyKey: string;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
@@ -288,6 +289,31 @@ export interface InstrumentationSessionStartedEvent {
 export type InstrumentationTraceContext = RuntimeTraceContext;
 export interface InstrumentationTraceSeed extends InstrumentationTraceContext {
   readonly decision?: InstrumentationDecision;
+}
+
+export const INSTRUMENTATION_PRINCIPAL_TYPES = [
+  "anonymous",
+  "app",
+  "local-dev",
+  "none",
+  "other",
+  "runtime",
+  "service",
+  "unknown",
+  "user",
+] as const;
+
+export type InstrumentationPrincipalType = (typeof INSTRUMENTATION_PRINCIPAL_TYPES)[number];
+
+export function isInstrumentationPrincipalType(
+  value: unknown,
+): value is InstrumentationPrincipalType {
+  return INSTRUMENTATION_PRINCIPAL_TYPES.some((type) => type === value);
+}
+
+export interface InstrumentationPrincipalSummary {
+  readonly id?: string;
+  readonly type: InstrumentationPrincipalType;
 }
 
 /**
@@ -331,7 +357,9 @@ export type InstrumentationSessionTransitionEvent =
 export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
   readonly agentName?: string;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly idempotencyKey: string;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
@@ -413,6 +441,7 @@ export interface InstrumentationModelCallCompletedEvent {
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
+  readonly responseId?: string;
   readonly scope: InstrumentationAttemptScope;
   readonly usage: InstrumentationUsage;
 }
@@ -470,6 +499,8 @@ export interface InstrumentationActionStartedEvent {
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
+  /** Whether this action owns a workflow body that may invoke nested agents. */
+  readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly scope: InstrumentationAttemptScope;

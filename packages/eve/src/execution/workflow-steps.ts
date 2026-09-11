@@ -41,6 +41,7 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -85,7 +86,10 @@ import {
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
-import { runBackgroundStep } from "#execution/tasks/parent/tool-execution.js";
+import {
+  readRetainedBackgroundToolResult,
+  runBackgroundStep,
+} from "#execution/tasks/parent/tool-execution.js";
 import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -632,6 +636,8 @@ async function runSessionStep(
       throw error;
     }
     writer.releaseLock();
+    const retained = readRetainedBackgroundToolResult(ctx);
+    instrumentation?.rememberBackgroundTasks(retained?.backgroundTasks ?? []);
     return createCancelledModelCallBatchResult({
       beforeBatchContext: input.serializedContext,
       checkpoint: completedModelCall,
@@ -641,11 +647,19 @@ async function runSessionStep(
     });
   }
 
-  // Re-stamp the current address after `session.continuation.alias(...)` (eg. Slack auto-anchor).
+  instrumentation?.rememberBackgroundTasks(stepResult.backgroundTasks ?? []);
+  // Re-stamp the current address after handlers add a continuation alias.
   const aliased = reconcileSessionContinuationToken(ctx, stepResult.session);
+  agentTraceState.pruneAgentTraceState(ctx, aliased.sessionId, aliased.state);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: aliased };
 
   writer.releaseLock();
-  return resolveSessionStepResult(stepResult, nextSerializedContext, mode, settlement);
+  return resolveSessionStepResult(
+    stepResult,
+    nextSerializedContext,
+    mode,
+    settlement,
+    input.serializedContext,
+  );
 }

@@ -197,14 +197,13 @@ describe("local instrumentation runtime", () => {
     );
     const spans = spanGroups.flat();
     expect(formatTraceTree(spans)).toEqual([
-      "agent.session",
-      "  invoke_agent weather",
-      "    agent.step",
-      "      agent.action",
-      "        execute_tool weather",
-      "          user.tool-work",
-      "      chat model-1",
-      "        user.model-work",
+      "invoke_agent weather",
+      "  agent.step",
+      "    agent.action",
+      "      execute_tool weather",
+      "        user.tool-work",
+      "    chat model-1",
+      "      user.model-work",
     ]);
     for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
       expect(exported.attributes).toEqual(
@@ -239,7 +238,7 @@ describe("local instrumentation runtime", () => {
     ]);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
+    expect(listed[0]).toMatchObject({ conversationId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {

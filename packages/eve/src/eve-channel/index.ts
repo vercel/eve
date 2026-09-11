@@ -50,6 +50,7 @@ import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { readConversationBaggage } from "#tracing/conversation-context.js";
 import {
   FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
   formatTraceContentCeiling,
@@ -150,8 +151,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        // Top-level sessions own their trace. Callback sessions are delegated
-        // remote agents and intentionally continue the dispatching agent trace.
         const parsedParentTraceContext =
           body.callback === undefined
             ? undefined
@@ -263,6 +262,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.context,
             ),
             mode: body.mode ?? "conversation",
+            conversationId:
+              body.callback === undefined
+                ? undefined
+                : readConversationBaggage(req.headers.get("baggage")),
             parentTraceContext,
             title: messageResult.title,
           });

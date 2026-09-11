@@ -1,14 +1,15 @@
 /**
  * Conversation view for the `/traces` viewer: the same trace, re-told as a
  * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Durable delivery and action spans provide the user and
- * tool cards directly; model response spans provide assistant cards.
+ * latency waterfall. Activation and action spans provide the user and tool
+ * cards directly; model response spans provide assistant cards.
  */
 
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
+import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -43,12 +44,12 @@ export interface ConversationItem {
   readonly error: boolean;
 }
 
-/** Dispatch lineage for a subagent turn, read from its parent action span. */
+/** Dispatch lineage available on a subagent activation or its caller. */
 export interface ConversationSubagent {
   /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
   /** Turn id of the dispatching parent turn. */
-  readonly parentTurnId: string;
+  readonly parentTurnId?: string;
   /** Tool call id of the dispatch, when recorded. */
   readonly parentCallId?: string;
 }
@@ -56,13 +57,13 @@ export interface ConversationSubagent {
 /** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow from eve's durable delivery, model, and action spans. */
+/** Builds the conversation flow from eve's activation, model, and action spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
   for (const span of trace.spans) {
     if (!isAgentTurnSpan(span)) continue;
-    const turnId = stringAttribute(span, "agent.turn.id");
+    const turnId = agentTurnIdentity(span);
     const subagent = turnSubagent(span, byId);
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
@@ -87,14 +88,15 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
 
   for (const span of trace.spans) {
     const subagent = subagentFor(span, subagents, byId);
-    if (span.name === "agent.channel.delivery") {
-      const text = deliveryText(stringAttribute(span, "agent.channel.delivery.input"));
+    const deliveryInput = stringAttribute(span, "agent.channel.delivery.input");
+    if (deliveryInput !== undefined) {
+      const text = deliveryText(deliveryInput);
       if (text === undefined) continue;
       entries.push({
         item: {
           kind: "user",
-          durationMs: spanDurationMs(span),
-          error: span.statusCode === 2,
+          durationMs: 0,
+          error: false,
           span,
           subagent,
           text,
@@ -185,20 +187,26 @@ function subagentFor(
 ): ConversationSubagent | undefined {
   let current: LocalTraceSpan | undefined = span;
   while (current !== undefined) {
-    const turnId = stringAttribute(current, "agent.turn.id");
+    const turnId = agentTurnIdentity(current);
     if (turnId !== undefined) return subagents.get(turnId);
     current = current.parentSpanId === undefined ? undefined : byId.get(current.parentSpanId);
   }
   return undefined;
 }
 
-/** Reads subagent identity from the action span that directly parents its turn. */
 function turnSubagent(
   turn: LocalTraceSpan,
   byId: ReadonlyMap<string, LocalTraceSpan>,
 ): ConversationSubagent | undefined {
+  const subagentName = stringAttribute(turn, "agent.subagent.name");
+  if (subagentName !== undefined) {
+    const name = subagentName ?? stringAttribute(turn, "gen_ai.agent.name");
+    return {
+      name: name === undefined ? undefined : stripTerminalControls(name),
+    };
+  }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent?.name !== "agent.action") return undefined;
+  if (parent === undefined || parent.name !== "agent.action") return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");

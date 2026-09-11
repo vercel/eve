@@ -8,6 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { SubagentParentContext } from "#subagents/invocation.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -19,7 +20,6 @@ type DynamicSubagentAgentConfig = Parameters<
 export async function startLocalSubagent(input: {
   readonly action: RuntimeSubagentDispatchRequest;
   readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
-  readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
@@ -28,8 +28,7 @@ export async function startLocalSubagent(input: {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
-  readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly parent: SubagentParentContext;
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
@@ -45,14 +44,12 @@ export async function startLocalSubagent(input: {
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
     auth: input.auth,
-    batchEvent: input.batchEvent,
     capabilities: input.capabilities,
     channelMetadata: input.channelMetadata,
     fanoutSize: input.fanoutSize,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
-    parentContinuationToken: input.parentContinuationToken,
-    parentTraceContext: input.parentTraceContext,
+    parent: input.parent,
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,

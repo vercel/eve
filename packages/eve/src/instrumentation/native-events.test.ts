@@ -401,6 +401,7 @@ describe("createInstrumentationHandleEvent", () => {
         callId: "workflow-1",
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
         input: { report: "weekly" },
+        isWorkflowTool: true,
         kind: "tool-call",
         name: "publish",
         scope,

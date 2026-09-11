@@ -72,7 +72,7 @@ void (async () => {
       start: 900,
       end: 900,
       attributes: {
-        "agent.session.id": "session-smoke",
+        "gen_ai.conversation.id": "session-smoke",
         "agent.name": "smoke-agent",
       },
     });
@@ -83,7 +83,7 @@ void (async () => {
       end: 1_000,
       parentSpanId: sessionRoot,
       attributes: {
-        "agent.session.id": "session-smoke",
+        "gen_ai.conversation.id": "session-smoke",
         "agent.name": "smoke-agent",
         "agent.turn.id": "turn_0",
       },
@@ -155,7 +155,7 @@ void (async () => {
       end: 7_000,
       parentSpanId: subagentAction,
       attributes: {
-        "agent.session.id": "child-session",
+        "gen_ai.conversation.id": "child-session",
         "agent.turn.id": "turn_child",
       },
     });
@@ -194,7 +194,7 @@ void (async () => {
       name: "agent.turn",
       start: 500,
       end: 900,
-      attributes: { "agent.session.id": "older-session" },
+      attributes: { "gen_ai.conversation.id": "older-session" },
     });
     // The viewer lists traces by segments-dir mtime (last span activity);
     // same-millisecond writes would race, so pin the ordering explicitly.

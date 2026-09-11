@@ -9,9 +9,10 @@ import {
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { recordErrorOnSpan } from "#internal/logging.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { withErrorContent } from "#tracing/error-content-context.js";
 
 /**
  * Stable tracer name for every inbound eve channel HTTP request. Kept
@@ -51,15 +52,14 @@ export interface TraceChannelRequestInput {
  *
  * The handler runs inside the span's active context. When it returns, the
  * response status is recorded and a `>= 500` status marks the span as an
- * error. A thrown handler is recorded once and rethrown — handler
- * exceptions that eve already converts to a JSON 500 return normally and
- * are recorded by `logError` against this active span, so they are not
- * recorded a second time here. The span always ends in `finally`, without
+ * error. A thrown handler marks failure status and is rethrown; request
+ * spans never record exception content. The span always ends in `finally`, without
  * waiting for `event.waitUntil()` work or streamed response bodies.
  *
  * Emitting these spans is opt-in: unless authored instrumentation enables it
  * via `traceChannelRequests: true`, the handler runs with no span (`undefined`)
- * and no context extraction — a true bypass, not a non-recording span.
+ * and performs no header extraction. The channel dispatcher can still use an
+ * already-active platform span for the activation's cross-trace link.
  *
  * This is observability-only: it never changes the response and performs no
  * synchronous span export in the request path, adding only minimal in-process
@@ -77,7 +77,7 @@ export async function traceChannelRequest<T extends Response>(
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
   const spanName =
     getInstrumentationRuntime()?.instrumentationProviders === true
-      ? "agent.channel.request"
+      ? AGENT_SPAN_NAMES.channelRequest
       : routeKey;
   const span = trace.getTracer(TRACER_NAME).startSpan(
     spanName,
@@ -90,7 +90,9 @@ export async function traceChannelRequest<T extends Response>(
     },
     parentContext,
   );
-  const activeContext = markAgentTraceContext(trace.setSpan(parentContext, span));
+  const activeContext = markAgentTraceContext(
+    withErrorContent(trace.setSpan(parentContext, span), false),
+  );
 
   try {
     const response = await context.with(activeContext, () => handler(span));
@@ -100,7 +102,7 @@ export async function traceChannelRequest<T extends Response>(
     }
     return response;
   } catch (error) {
-    recordErrorOnSpan(span, error);
+    span.setStatus({ code: SpanStatusCode.ERROR });
     throw error;
   } finally {
     span.end();

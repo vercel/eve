@@ -152,7 +152,6 @@ export function createWorkflowRuntime(config: {
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
-        parentTraceContext: input.parentTraceContext,
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       // Retention is always the authored value: `experimental` cannot be

@@ -85,10 +85,13 @@ export async function routeDeliverToChildren(input: {
   // and is enqueued before the task's terminal view. Preserve that ordering
   // when several task deliveries are coalesced into one parent turn.
   if ((payload.task?.views?.length ?? 0) > 0) {
-    sessionState = await recordTerminalTaskViewsStep({
+    const recorded = await recordTerminalTaskViewsStep({
+      serializedContext,
       sessionState,
       views: payload.task?.views ?? [],
     });
+    serializedContext = recorded.serializedContext;
+    sessionState = recorded.sessionState;
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];

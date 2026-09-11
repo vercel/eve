@@ -54,6 +54,7 @@ import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel
 const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
 
 interface BackgroundToolExecutionRecord {
+  readonly callId: string;
   claim?: {
     readonly operationId: string;
     readonly taskId: string;
@@ -247,16 +248,21 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
 
   private resultFields(): BackgroundToolStepResult | undefined {
     const tasks = this.records.flatMap((record) =>
-      record.settled && record.task !== undefined ? [record.task] : [],
+      record.settled && record.task !== undefined
+        ? [
+            {
+              callId: record.callId,
+              taskInboxToken: record.task.taskInboxToken,
+              taskId: record.task.taskId,
+              taskRunId: record.task.taskRunId,
+            },
+          ]
+        : [],
     );
     if (tasks.length === 0 && !this.agentHandlesChanged) return undefined;
     return {
       backgroundTaskSession: this.apply(this.initialSession),
-      backgroundTasks: tasks.map(({ taskInboxToken, taskId, taskRunId }) => ({
-        taskInboxToken,
-        taskId,
-        taskRunId,
-      })),
+      backgroundTasks: tasks,
     };
   }
 
@@ -266,7 +272,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     readonly options: ToolExecuteOptions;
     readonly toolInput: unknown;
   }): Promise<unknown> {
-    const record: BackgroundToolExecutionRecord = { settled: false };
+    const record: BackgroundToolExecutionRecord = {
+      callId: input.options.toolCallId,
+      settled: false,
+    };
     this.records.push(record);
     const emission = getHarnessEmissionState(this.initialSession.state);
     const ctx = loadContext();

@@ -116,7 +116,7 @@ export class SessionExecution {
           throw new Error("Background tasks were returned without their committed session state.");
         }
         await this.cursor.adopt({
-          serializedContext: beforeStep.serializedContext,
+          serializedContext: result.backgroundTaskContext ?? beforeStep.serializedContext,
           sessionState: result.backgroundTaskState,
         });
         await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
@@ -125,7 +125,7 @@ export class SessionExecution {
       await this.cursor.adopt({
         serializedContext: result.serializedContext,
         sessionState:
-          result.action === "cancelled"
+          result.action === "cancelled" || control.signal.aborted
             ? (result.backgroundTaskState ?? result.sessionState)
             : result.sessionState,
       });

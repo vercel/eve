@@ -7,12 +7,14 @@ import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workfl
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { HarnessSettlement, StepResult } from "#harness/types.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
   mode: RunMode,
   settlement: HarnessSettlement | undefined,
+  beforeStepContext: Record<string, unknown>,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
   const backgroundTransition = {
@@ -20,6 +22,11 @@ export function resolveSessionStepResult(
     ...(stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
       : {
+          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
+            beforeStepContext,
+            nextSerializedContext,
+            stepResult.backgroundTasks,
+          ),
           backgroundTaskState: createDurableSessionState({
             session: stepResult.backgroundTaskSession,
           }),

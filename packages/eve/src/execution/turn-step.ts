@@ -25,6 +25,8 @@ export interface TurnStepInput {
 }
 
 interface DurableStepResultFields {
+  /** Pre-step context plus the observability state owned by committed background tasks. */
+  readonly backgroundTaskContext?: Record<string, unknown>;
   readonly settlement?: HarnessSettlement;
   readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
