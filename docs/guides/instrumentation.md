@@ -50,8 +50,8 @@ Any OTel-compatible backend works (Braintrust, PostHog, Sentry, Raindrop, Arize,
 
 Three more fields control what eve and the AI SDK record inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
-- `recordOutputs` records model outputs and recalled memory records. It defaults to `false`; set it to `true` to include output content.
+- `recordInputs` records full message history on each step span and recalled records on memory spans. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
 eve records metadata without model, tool, or memory-record content by default. Enable either content category only after reviewing the exporter and its data-retention path.
@@ -144,7 +144,7 @@ eve records [OpenTelemetry GenAI memory spans](https://opentelemetry.io/docs/spe
 
 Every memory span includes `gen_ai.operation.name` and `gen_ai.memory.store.id`. The store ID is eve's opaque `memory.scope.key`, which identifies the resolved scope without exposing the namespace or scope values. Recall spans set `gen_ai.memory.record.count` to their result count.
 
-`gen_ai.memory.records` contains recalled record content only when `recordOutputs` is enabled. eve does not set `gen_ai.memory.query.text` because a memory provider receives structured conversation messages, not a standalone search-query string. The `agent.memory.slot` and `agent.memory.phase` attributes identify the eve slot and lifecycle boundary without adding either to the span name.
+`gen_ai.memory.records` contains recalled record content only when `recordInputs` is enabled. eve classifies recalled records as input content because they become part of the model context. eve does not set `gen_ai.memory.query.text` because a memory provider receives structured conversation messages, not a standalone search-query string. The `agent.memory.slot` and `agent.memory.phase` attributes identify the eve slot and lifecycle boundary without adding either to the span name.
 
 ## Agent trace contract
 
