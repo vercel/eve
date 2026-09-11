@@ -15,7 +15,7 @@ import {
 } from "#public/channels/github/auth.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
-import { type GitHubChannelState } from "#public/channels/github/state.js";
+import { initialGitHubState, type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 
 const SECRET = "github-secret";
@@ -191,6 +191,20 @@ async function firePost(
 }
 
 describe("githubChannel", () => {
+  it("projects the repository audience into instrumentation metadata", () => {
+    const metadata = getAdapter(githubChannel()).instrumentation?.metadata;
+
+    expect(metadata?.({ ...initialGitHubState(), audience: "public" })).toEqual({
+      audience: "public",
+    });
+    expect(metadata?.({ ...initialGitHubState(), audience: "private" })).toEqual({
+      audience: "private",
+    });
+    expect(metadata?.({ ...initialGitHubState(), audience: undefined })).toEqual({
+      audience: "unknown",
+    });
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     clearGitHubInstallationTokenCache();
@@ -233,6 +247,7 @@ describe("githubChannel", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect(input.message).toBe("help me");
+    expect(input.state).toMatchObject({ audience: "public" });
     expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
     expect(input.context[0]).toContain("bot_name: testbot");
     expect(input.context[0]).toContain("is_mentioned: true");

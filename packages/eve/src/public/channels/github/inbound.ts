@@ -20,6 +20,7 @@ import type {
   GitHubUser,
   GitHubWorkflowRunWebhookEvent,
 } from "#public/channels/github/inbound-types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   GitHubAppRef,
   GitHubCheckRunEvent,
@@ -119,6 +120,7 @@ export function parseGitHubWebhookEvent(input: {
   if (repository === null || sender === undefined) return null;
 
   const base = {
+    audience: normalizeRepositoryAudience(raw.repository),
     delivery: {
       event: eventName,
       hookId: readHeader(input.headers, "x-github-hook-id") ?? readGitHubHookId(raw),
@@ -453,6 +455,15 @@ function normalizeRepository(value: unknown): GitHubRepositoryRef | null {
     owner,
     private: value.private === true,
   };
+}
+
+function normalizeRepositoryAudience(value: unknown): ChannelAudience {
+  if (!isObject(value)) return "unknown";
+  if (value.private === true || value.visibility === "private" || value.visibility === "internal") {
+    return "private";
+  }
+  if (value.private !== false) return "unknown";
+  return value.visibility === undefined || value.visibility === "public" ? "public" : "unknown";
 }
 
 function normalizeUser(value: unknown): GitHubUser | undefined {
