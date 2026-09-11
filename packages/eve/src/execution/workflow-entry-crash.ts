@@ -7,12 +7,12 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
 
 /**
  * Write-through cell owned by `workflowEntry`: written
- * unconditionally by the driver loop as turns advance, read only by the
+ * unconditionally by the session loop as turns advance, read only by the
  * outer catch. When the loop throws, its locals are unreachable, so this
  * cell is the crash path's only view of values that changed after turn 1.
  *
  * Reach for this cell only when all three hold for a value:
- * 1. it is produced or replaced inside the driver loop, so the entry
+ * 1. it is produced or replaced inside the session loop, so the entry
  *    function's own locals go stale;
  * 2. it travels by value inside Workflow step results — there is no
  *    store the catch could re-read it from at crash time;
@@ -32,9 +32,9 @@ export interface CrashCleanupState {
   // "crashed before the caller was ever resolved", where a delegated caller
   // may still be parked on this session's reply.
   callerResolved: boolean;
-  // The latest snapshot the driver has received, so the catch can
+  // The latest snapshot the owner has received, so the catch can
   // terminate children adopted after turn 1. Honest staleness window: the
-  // driver only sees state at turn boundaries, so children dispatched by a
+  // owner sees state at durable turn boundaries, so children dispatched by a
   // turn that crashed mid-flight are absent from this snapshot and escape
   // crash cleanup.
   lastSessionState: DurableSessionState | undefined;

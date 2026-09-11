@@ -70,9 +70,9 @@ Each route receives these operation surfaces:
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
-`rekey()` when this channel needs to move it. `session.failed` receives only
-`(eventData, channel)` because it runs outside session context; its event data
-contains `sessionId` directly.
+`rekey()` when this channel needs to add another address. `session.failed`
+receives only `(eventData, channel)` because it runs outside session context;
+its event data contains `sessionId` directly.
 
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `rekey()`. Framework namespace prefixes are not
@@ -328,9 +328,9 @@ twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557
 
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
-When the identity that should address a session is not known until later, re-key the live address with `channel.continuation?.rekey(rawToken)`. The runtime preserves the current channel namespace.
+When another identity should address a session, add it with `channel.continuation?.rekey(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.
 
-Re-keying changes the address of the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
+Re-keying adds an address to the current session. Earlier addresses continue to resolve to the same session. `reset` is different: it terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
 The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelContinuationOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
 
@@ -359,7 +359,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-At the next workflow boundary, the runtime claims the new park hook before releasing the old token. If another active session already owns the new token, the re-keying session fails instead of taking it over. After a successful re-key, inbound deliveries still addressed to the old token are dropped, so coordinate with your senders to use the new token.
+At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the re-keying session fails instead of taking it over. Every address claimed by the session remains active, including across deployment handoffs, so senders can continue using an earlier token until the session ends or resets.
 
 ## File uploads
 

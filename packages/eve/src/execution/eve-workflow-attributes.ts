@@ -307,30 +307,3 @@ export function buildSubagentRootAttributes(input: {
     "$eve.trigger": readChannelKind(input.serializedContext),
   };
 }
-
-/**
- * Builds the `$eve.*` attribute payload for one turn workflow run.
- *
- * Turns live one level below their session: `$eve.parent` always points
- * to the parent's sessionId (which is the session-row's
- * `workflowRunId`), and `$eve.root` denormalizes the chain root (equal
- * to `$eve.parent` for turns of top-level sessions). Turn ordering is
- * recovered from each run's `createdAt`, so no explicit sequence tag is
- * emitted.
- */
-export function buildTurnAttributes(input: {
-  readonly parentSessionId: string;
-  readonly requestId?: string;
-  readonly rootSessionId: string;
-  readonly serializedContext: Record<string, unknown>;
-}): Record<string, EveAttributeValue> {
-  return {
-    "$eve.channel_request_id": input.requestId,
-    "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
-    "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
-    "$eve.trace_id": readSessionTraceId(input.serializedContext),
-    "$eve.type": "turn",
-    "$eve.parent": input.parentSessionId,
-    "$eve.root": input.rootSessionId,
-  };
-}

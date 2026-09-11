@@ -52,7 +52,7 @@ import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workfl
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { DurableStepResult } from "#execution/next-driver-action.js";
+import type { DurableStepResult, TurnStepInput } from "#execution/turn-step.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
@@ -73,7 +73,6 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
   getBackgroundTaskDelivery,
@@ -91,7 +90,6 @@ import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
@@ -115,9 +113,6 @@ export type { TurnStepInput };
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
-
-  const deferred = deferMismatchedInlineTurnStep(rawInput);
-  if (deferred !== undefined) return deferred;
 
   let input = rawInput;
 
@@ -588,7 +583,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
   }
 
-  // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
+  // Re-stamp the current address after `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };

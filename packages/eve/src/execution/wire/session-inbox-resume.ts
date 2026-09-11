@@ -1,108 +1,44 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-
 import type {
   DeliverHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
-  isSessionCommandHookToken,
-  sessionCommandHookToken,
-} from "#execution/session-command-token.js";
-import {
-  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
-  WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
   isSessionInboxAddress,
-  isSessionInboxWireVersion,
-  SessionInboxWireError,
+  SESSION_INBOX_SESSION_ID_METADATA_KEY,
   type SessionInboxAddress,
-  type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { getHookByToken, getRawHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
-type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
+export interface ResumedSessionInboxHook {
+  readonly ownerRunId: string;
+  readonly sessionId: string;
+}
 
-/** Resolves the consumer contract, encodes for it, and resumes that exact hook. */
+/** Resumes the current owner with the current command shape. */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
-  if (typeof address !== "string") {
-    if (!isSessionInboxAddress(address)) {
-      throw new SessionInboxWireError("Session inbox target has an invalid address.");
-    }
-    if (!isSessionInboxWireVersion(address.version)) {
-      throw new SessionInboxWireError(
-        `Session inbox target declares unsupported wire version ${JSON.stringify(address.version)}.`,
-      );
-    }
-    return await resumeHook(
-      sessionCommandHookToken(address.sessionId),
-      sessionInboxWire.encode(command, { version: address.version }),
-    );
+  let token: string;
+  if (typeof address === "string") {
+    token = address;
+  } else {
+    if (!isSessionInboxAddress(address))
+      throw new Error("Session inbox target has an invalid address.");
+    token = sessionCommandHookToken(address.sessionId);
   }
-
-  const token = address;
-  if (isStableInboxFastPathCompatible(token, command)) {
-    return await resumeHook(
-      token,
-      sessionInboxWire.encode(command, { variant: "send", version: 0 }),
-    );
-  }
-
   const hook = await getHookByToken(token);
-  const target = await resolveSessionInboxWireTarget(hook);
-  return await resumeHook(hook, sessionInboxWire.encode(command, target));
-}
-
-function isStableInboxFastPathCompatible(
-  token: string,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): boolean {
-  if (!isSessionCommandHookToken(token)) return false;
-  if (command.kind === "cancel" && command.tasks === true) return false;
-  return !("caller" in command && command.caller?.activityObserver !== undefined);
-}
-
-type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;
-
-/** Whether the session's pinned driver displays authorization events raised by workflow tasks. */
-export async function sessionDriverSupportsWorkflowTaskAuthorization(
-  sessionId: string,
-): Promise<boolean> {
-  const driver = await getHookByToken(sessionCommandHookToken(sessionId));
-  const metadata = await driver.metadata;
-  return isObject(metadata) && metadata[WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY] === true;
-}
-
-/** Selects the encoder understood by a persisted hook's consumer deployment. */
-export async function resolveSessionInboxWireTarget(
-  hook: SessionInboxHook,
-): Promise<SessionInboxWireTarget> {
   const metadata = await hook.metadata;
-  if (isObject(metadata) && SESSION_INBOX_WIRE_VERSION_METADATA_KEY in metadata) {
-    const version = metadata[SESSION_INBOX_WIRE_VERSION_METADATA_KEY];
-    if (isSessionInboxWireVersion(version)) return { version };
-    throw new SessionInboxWireError(
-      `Session inbox target declares unsupported wire version ${JSON.stringify(version)}.`,
-    );
-  }
+  const sessionId = readSessionId(metadata) ?? hook.runId;
+  await resumeHook(hook, command);
+  return { ownerRunId: hook.runId, sessionId };
+}
 
-  const stableToken = sessionCommandHookToken(hook.runId);
-  if (hook.token === stableToken) return { variant: "send", version: 0 };
-
-  try {
-    const stableHook = await getRawHookByToken(stableToken);
-    if (stableHook.runId !== hook.runId) {
-      throw new SessionInboxWireError(
-        `Stable session inbox ${JSON.stringify(stableToken)} belongs to run ${JSON.stringify(stableHook.runId)}, expected ${JSON.stringify(hook.runId)}.`,
-      );
-    }
-    return { variant: "send", version: 0 };
-  } catch (error) {
-    if (HookNotFoundError.is(error)) return { variant: "deliver", version: 0 };
-    throw error;
-  }
+function readSessionId(metadata: unknown): string | undefined {
+  if (!isObject(metadata)) return undefined;
+  const value = metadata[SESSION_INBOX_SESSION_ID_METADATA_KEY];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

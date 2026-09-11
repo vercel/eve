@@ -1488,9 +1488,8 @@ export class EveTUIRunner {
 
   /**
    * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. A key-driven cancel that lands in the dispatch
-   * window — after the turn was sent but before the turn workflow claims its
-   * cancel hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * while the turn stays live. A key-driven cancel that lands before the owner
+   * begins the turn (i.e. before `turn.started` reaches the client) resolves as a
    * benign `no_active_turn` and would otherwise be silently lost, leaving
    * the TUI showing "Cancelling…" while the turn runs to completion.
    * Retrying until the stream reaches its boundary closes that window.

@@ -21,7 +21,13 @@ import type {
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
-import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationHookTokensKey,
+  ContinuationTokenKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import {
   type InputResponse,
   parseInputResponses,
@@ -79,8 +85,9 @@ export type SessionRespondOptions = SessionDeliveryOptions;
  * Live handle to the current session, exposed on `ctx.session` to
  * `deliver` and event handlers. The framework hydrates the read-only
  * fields from the active context at step start. A write through
- * `continuation.rekey()` updates the context so the
- * runtime can re-key the parked workflow hook at the next step boundary.
+ * `continuation.rekey()` selects a new current address and records it so the
+ * runtime can add its hook to the session inbox at the next step boundary.
+ * Previously claimed addresses remain active.
  */
 export interface SessionHandle {
   readonly id: string;
@@ -222,6 +229,10 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
         rekey(rawToken: string): void {
           const token = namespaceContinuationToken(currentToken, rawToken);
           if (currentToken === token) return;
+          accessor.set(ContinuationHookTokensKey, (claimed) => {
+            const tokens = claimed ?? [currentToken];
+            return tokens.includes(token) ? tokens : [...tokens, token];
+          });
           accessor.set(ContinuationTokenKey, token);
         },
       };

@@ -1779,7 +1779,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw finalError;
           }
 
-          // A task run cannot park for a user retry (turnWorkflow rejects
+          // A task run cannot park for a user retry (session execution rejects
           // `next: null` in task mode). Classified transient errors arrive
           // here only after their bounded in-process retries are exhausted;
           // empty responses already received their specialized reissue.
@@ -1821,7 +1821,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Step-side observability tags ---------------------------------------
     //
-    // Tag the **turn workflow run** (the current `"use step"` is hosted by
+    // Tag the **owning session run** (the current `"use step"` is hosted by
     // that workflow, so `setAttributes` writes to its
     // attributes table) with the model id and per-turn cumulative token
     // counts. Per-turn totals are accumulated on `session.state` because

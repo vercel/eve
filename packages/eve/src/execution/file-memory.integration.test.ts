@@ -80,6 +80,8 @@ describe("file memory integration", () => {
 async function runTurn(input: { readonly message: string; readonly principalId: string }) {
   const run = await start(workflowEntry, [
     {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
       input: { message: input.message },
       serializedContext: {
         "eve.auth": {

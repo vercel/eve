@@ -25,10 +25,10 @@ describe("createSessionCommandInbox", () => {
         token: "channel",
       }),
     );
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
-    await inbox.rekeyContinuation("channel");
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("channel");
 
     await expect(inbox.next()).resolves.toEqual(resolved(send("by id")));
     inbox.consumeNext();
@@ -37,7 +37,20 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
-  it("retains a committed read from the previous alias across rekey", async () => {
+  it("accounts for an accepted unread command before releasing ownership", async () => {
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("during release")))],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
+
+    await expect(inbox.release()).resolves.toEqual([send("during release")]);
+  });
+
+  it("keeps every continuation alias active after later claims", async () => {
     const oldRead = createDeferred<IteratorResult<SessionInboxPayload>>();
     const replacementRead = createDeferred<IteratorResult<SessionInboxPayload>>();
     const stable = createMockHook({ token: "stable" });
@@ -47,12 +60,12 @@ describe("createSessionCommandInbox", () => {
       token: "replacement",
     });
     installHooks(stable, oldAlias, replacement);
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
-    await inbox.rekeyContinuation("old");
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("old");
     const pending = inbox.next();
-    await inbox.rekeyContinuation("replacement");
+    await inbox.claimSessionHook("replacement");
 
     oldRead.resolve(resolved(send("old")));
     await expect(pending).resolves.toEqual(resolved(send("old")));
@@ -76,11 +89,11 @@ describe("createSessionCommandInbox", () => {
         token: "channel",
       }),
     );
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
+    await inbox.claimSessionHook("stable");
     const pending = inbox.next();
-    await inbox.rekeyContinuation("channel");
+    await inbox.claimSessionHook("channel");
 
     await expect(pending).resolves.toEqual(resolved(send("anchored")));
     inbox.consumeNext();
@@ -95,11 +108,11 @@ describe("createSessionCommandInbox", () => {
       token: "candidate",
     });
     installHooks(stable, current, candidate);
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
-    await inbox.rekeyContinuation("current");
-    await expect(inbox.rekeyContinuation("candidate")).rejects.toMatchObject({
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("current");
+    await expect(inbox.claimSessionHook("candidate")).rejects.toMatchObject({
       conflictingRunId: "wrun_owner",
       name: "HookConflictError",
       token: "candidate",
@@ -111,19 +124,19 @@ describe("createSessionCommandInbox", () => {
     expect(current.dispose).toHaveBeenCalledOnce();
   });
 
-  it("never permits the stable session token to change", async () => {
+  it("deduplicates session hooks and preserves their claim order", async () => {
     const stable = createMockHook({ token: "stable" });
-    installHooks(stable);
-    const inbox = createSessionCommandInbox();
+    const channel = createMockHook({ token: "channel" });
+    installHooks(stable, channel);
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
-    await inbox.claimStable("stable");
-    await expect(inbox.claimStable("different")).rejects.toThrow(
-      "A session command inbox cannot change its stable token.",
-    );
-    expect(createHookMock).toHaveBeenCalledOnce();
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("channel");
+    expect(inbox.sessionHookTokens).toEqual(["stable", "channel"]);
+    expect(createHookMock).toHaveBeenCalledTimes(2);
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: 6, workflowTaskAuthorization: true },
+      metadata: { sessionId: "session-1" },
       token: "stable",
     });
     await inbox.dispose();
@@ -133,10 +146,10 @@ describe("createSessionCommandInbox", () => {
     const stable = createMockHook({ token: "stable" });
     const alias = createMockHook({ token: "channel" });
     installHooks(stable, alias);
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
-    await inbox.rekeyContinuation("channel");
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("channel");
     void inbox.next();
     await inbox.dispose();
     await inbox.dispose();
@@ -156,8 +169,8 @@ describe("createSessionCommandInbox", () => {
         token: "session:auth",
       }),
     );
-    const inbox = createSessionCommandInbox();
-    await inbox.claimStable("stable");
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
     await inbox.claimAuthorization("session:auth");
 
     // The callback resolves first, but only session activity surfaces.
@@ -187,8 +200,8 @@ describe("createSessionCommandInbox", () => {
         token: "session:auth",
       }),
     );
-    const inbox = createSessionCommandInbox();
-    await inbox.claimStable("stable");
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
     await inbox.claimAuthorization("session:auth");
 
     // Window open: the session read arrives first and is offered; the
@@ -230,8 +243,8 @@ describe("createSessionCommandInbox", () => {
         token: "session:auth",
       }),
     );
-    const inbox = createSessionCommandInbox();
-    await inbox.claimStable("stable");
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
     await inbox.claimAuthorization("session:auth");
 
     const losingRead = inbox.nextWithSource();
@@ -262,9 +275,9 @@ describe("createSessionCommandInbox", () => {
   it("disposes the authorization hook with the inbox", async () => {
     const auth = createMockHook({ token: "session:auth" });
     installHooks(createMockHook({ token: "stable" }), auth);
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox("session-1");
 
-    await inbox.claimStable("stable");
+    await inbox.claimSessionHook("stable");
     await inbox.claimAuthorization("session:auth");
     await inbox.dispose();
 

@@ -1,10 +1,7 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
-import {
-  ConnectionAuthorizationFailedError,
-  isConnectionAuthorizationFailedError,
-} from "#connections/errors.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
@@ -42,20 +39,13 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         scope: input.toolName,
         completeAuthorization: completeWorkflowStepAuthorization,
       });
-      const unavailable = (): never => {
-        throw new ConnectionAuthorizationFailedError(input.toolName, {
-          message: `Background workflow tool "${input.toolName}" cannot use ctx.getToken or ctx.requireAuth in this session because its driver predates workflow-task authorization. Start a new session and try again.`,
-          reason: "workflow_task_authorization_unsupported",
-          retryable: false,
-        });
-      };
       const ctx = {
         ...buildBaseToolContext({
           toolName: input.toolName,
           options: { abortSignal: input.abortSignal, toolCallId: input.callId },
         }),
-        getToken: input.authorizationSupported ? auth.getToken : unavailable,
-        requireAuth: input.authorizationSupported ? auth.requireAuth : unavailable,
+        getToken: auth.getToken,
+        requireAuth: auth.requireAuth,
       };
       let output: unknown;
       try {

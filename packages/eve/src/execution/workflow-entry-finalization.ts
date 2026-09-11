@@ -5,7 +5,7 @@ import {
   createDelegatedSubagentSuccessResult,
 } from "#subagents/parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type { TurnOutcome } from "#execution/turn-step.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
@@ -14,7 +14,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 
 export async function finalizeExpiredSession(input: {
   readonly caller: TurnCaller | undefined;
-  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -25,7 +25,7 @@ export async function finalizeExpiredSession(input: {
     sessionState: input.sessionState,
   });
   await emitTerminalSessionCompletionStep({
-    parentWritable: input.driverWritable,
+    parentWritable: input.sessionWritable,
     serializedContext: input.serializedContext,
   });
   if (input.terminalState !== undefined) input.terminalState.terminalEmitted = true;
@@ -52,7 +52,7 @@ export async function finalizeExpiredSession(input: {
 }
 
 export async function finalizeDone(input: {
-  readonly action: NextDriverAction & { readonly kind: "done" };
+  readonly action: TurnOutcome & { readonly kind: "done" };
   readonly caller: TurnCaller | undefined;
   readonly mode: RunMode;
   readonly terminalState?: { terminalEmitted: boolean };

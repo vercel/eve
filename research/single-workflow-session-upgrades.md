@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
-status: proposed
-last_updated: "2026-09-10"
+status: implemented
+last_updated: "2026-09-11"
 ---
 
 # Single-workflow sessions with ingress-driven upgrades
@@ -91,7 +91,8 @@ Public identity and execution ownership become separate internal facts:
 
 ```ts
 interface SessionOwnership {
-  readonly sessionId: string; // original run id; public stream location
+  readonly sessionId: string; // stable public session identity
+  readonly anchorRunId: string; // original run that owns the public stream
   readonly ownerRunId: string; // current execution run; changes on handoff
   readonly deploymentId: string; // exact deployment of the current owner
 }
@@ -101,7 +102,7 @@ interface SessionOwnership {
 
 | State or behavior                                                           | Sole owner                 |
 | --------------------------------------------------------------------------- | -------------------------- |
-| Stable inbox, continuation alias, timeout claim, terminal event             | Current owner run          |
+| Stable inbox, additive continuation hooks, timeout claim, terminal event    | Current owner run          |
 | Durable session snapshot, event sequence, remaining limits                  | Current owner run          |
 | `turnStep` execution, coordination waits, cancellation rollback, settlement | Current owner run          |
 | Public stream lifetime                                                      | Original run (anchor)      |
@@ -163,7 +164,7 @@ context and lifecycle metadata:
 
 - private model history, raw authored state, memory, sandbox attachment;
 - auth and initiator context, output schema, compaction accounting;
-- event sequence, remaining limits, continuation alias, original deadline.
+- event sequence, remaining limits, the complete claimed session-hook set, and original deadline.
 
 The single triggering delivery travels alongside the checkpoint. The checkpoint never carries a
 command backlog, live waits, callback ownership, or task/subagent/tool handles; the eligibility rule
@@ -174,6 +175,8 @@ bundle. It rejects a checkpoint it cannot read. There is no migration chain and 
 state migration API, so raw `defineState` values must remain readable by the target code. The
 public event stream is not a checkpoint (it omits private history and framework state), and the
 design needs no per-turn snapshot store: the upgrade copies one settled snapshot when it is needed.
+The checkpoint carries `anchorRunId` separately from `sessionId`, so future caller-assigned session
+ids do not need to identify a Workflow run.
 
 ## Handoff
 
@@ -188,8 +191,9 @@ two live owners; it does not provide atomic transfer (see [Open questions](#open
    upgrade.
 3. After release and a final safety check, start a candidate on the triggering delivery's
    deployment with the checkpoint, the stable session identity, and the original stream. The
-   candidate validates and hydrates, then claims the full required hook set. It performs no model
-   or tool work until it owns every hook.
+   checkpoint names the stable inbox, every continuation hook claimed during the session, and the
+   authorization hook. The candidate validates and hydrates, then claims that exact set in order.
+   It performs no model or tool work until it owns every hook.
 4. The candidate activates and processes the triggering delivery before any later arrival.
 5. Once activation is confirmed, the old owner exits, or parks as the stream anchor if it is the
    original run. Recovery after activation belongs to the successor.
@@ -253,12 +257,12 @@ gap inside the handoff boundary without touching ordinary execution.
 These are eve-owned internal contracts inside `execution/`, not public APIs. Each exists to absorb
 a deleted path, not to wrap the Workflow SDK generally.
 
-| Contract                                                                                                                                                                   | Replaces                                                                                                           | Responsibility                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SessionExecution`: `runTurn(delivery) → TurnOutcome`                                                                                                                      | `turn-dispatch.ts`, `dispatch-turn-step.ts`, the inline/child split, turn-owned coordination in `turn-workflow.ts` | Run `turnStep`, service the inbox, coordinate waits, settle locally. No driver messages.                                                              |
-| `SessionCommandInbox` (extend existing)                                                                                                                                    | Turn-control hooks and `TurnControlReceiver`                                                                       | Order accepted commands across stable, continuation, and authorization/callback hooks; expose a durable position; transfer ownership. No turn policy. |
-| `SessionHandoff`: `checkpoint(delivery) → ready(checkpoint) \| skipped(reason)`, `release()`, `start(checkpoint) → candidate`, `activate(candidate)`, `recover(candidate)` | New                                                                                                                | Eligibility, hydration on the target, replay-safe transfer through the inbox. The only boundary that changes when the upstream primitive lands.       |
-| Session-owner start and stream operations in the existing `workflow-runtime.ts`                                                                                            | Per-turn `start()` of the child turn workflow                                                                      | Start an exact-deployment owner; open and close session output; keep workflow-body and step-side execution contexts distinct.                         |
+| Contract                                                                                                                                                                   | Replaces                                                                                                           | Responsibility                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SessionExecution`: `runTurn(delivery) → TurnOutcome`                                                                                                                      | `turn-dispatch.ts`, `dispatch-turn-step.ts`, the inline/child split, turn-owned coordination in `turn-workflow.ts` | Run `turnStep`, service the inbox, coordinate waits, settle locally. No driver messages.                                                                                                                      |
+| `SessionCommandInbox` (extend existing)                                                                                                                                    | Turn-control hooks and `TurnControlReceiver`                                                                       | Retain an additive array beginning with the stable inbox, merge one pending iterator read from every session hook, gate authorization callbacks, and expose the exact claim set for transfer. No turn policy. |
+| `SessionHandoff`: `checkpoint(delivery) → ready(checkpoint) \| skipped(reason)`, `release()`, `start(checkpoint) → candidate`, `activate(candidate)`, `recover(candidate)` | New                                                                                                                | Eligibility, hydration on the target, replay-safe transfer through the inbox. The only boundary that changes when the upstream primitive lands.                                                               |
+| Session-owner start and stream operations in the existing `workflow-runtime.ts`                                                                                            | Per-turn `start()` of the child turn workflow                                                                      | Start an exact-deployment owner; open and close session output; keep workflow-body and step-side execution contexts distinct.                                                                                 |
 
 `workflowEntry` remains the composition root and owns lifecycle and cleanup. `SessionExecution`
 adopts step results through the one shared `SessionStateCursor`.
@@ -286,12 +290,14 @@ migration, callback rebinding, or cross-version coordination.
 
 ## Out of scope
 
-- The background pump. It is a follow-up informed by the holder-runtime refactor in
-  [PR #3063](https://github.com/vercel/eve/pull/3063); that runtime, background write queues,
-  detached persistence, per-turn snapshot storage, and a general holder are not ported here.
+- The general holder runtime from [PR #3063](https://github.com/vercel/eve/pull/3063), background
+  write queues, detached persistence, and per-turn snapshot storage are not ported here. The
+  session inbox does keep one pending iterator read on every claimed hook so all stable and
+  continuation addresses feed its existing merged queue.
 - Public upgrade or state-migration APIs: `Session.upgrade()`, a channel operation, or a route.
-- A session directory and caller-assigned run ids. Separating `sessionId` from `ownerRunId`
-  prepares for eve-owned run ids without requiring them.
+- A session directory and caller-assigned session ids. Separating `sessionId`, `anchorRunId`, and
+  `ownerRunId` keeps that future change from depending on Workflow run identity without adding the
+  directory here.
 - Changes to `turnStep`, harness semantics, or the independent runs for tasks, subagents, workflow
   tools, timeout, and activity collection.
 
@@ -311,8 +317,8 @@ migration, callback rebinding, or cross-version coordination.
 - Same-deployment turns, including coordination waits and cancellation, run on one owner with no
   child turn run or private control hooks. Assert the deleted paths are unreachable.
 - An eligible A→B delivery starts one successor on B and preserves identity, connected stream and
-  cursor, settled state, limits, and deadline. Owner and authored code report B. An unreadable
-  checkpoint recovers A's ownership and processes the delivery once.
+  cursor, settled state, limits, deadline, and every claimed session hook. Owner and authored code
+  report B. An unreadable checkpoint recovers A's ownership and processes the delivery once.
 - Every unsafe category skips: parked HITL, background tasks, batched deliveries, queued commands.
   Work stays on A. Settlement and queue draining trigger nothing; only a fresh eligible delivery
   does. No remembered target or live handle crosses versions.

@@ -77,6 +77,10 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
+/** Every channel continuation address requested for this session, in claim order. */
+export const ContinuationHookTokensKey = new ContextKey<readonly string[]>(
+  "eve.continuationHookTokens",
+);
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 /** Parent-verified local client provenance, valid only for the current dev host secret. */
 export interface LocalDevRequestProvenance {

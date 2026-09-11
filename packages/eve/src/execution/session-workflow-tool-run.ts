@@ -5,7 +5,7 @@ import type {
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import type { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
+import type { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
 import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
@@ -29,7 +29,7 @@ import type {
 
 interface HandlerInput<T> {
   readonly callbackMetadataUrl: string;
-  readonly cursor: TurnExecutionCursor;
+  readonly cursor: SessionExecutionCursor;
   readonly message: T;
 }
 

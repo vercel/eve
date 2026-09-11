@@ -7,6 +7,7 @@ import {
   ChannelInstrumentationKey,
   ChannelDeliveryKey,
   ChannelRequestIdKey,
+  ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
@@ -46,6 +47,7 @@ export function buildRunContext(input: {
 
   if (run.continuationToken !== undefined) {
     ctx.set(ContinuationTokenKey, run.continuationToken);
+    ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);

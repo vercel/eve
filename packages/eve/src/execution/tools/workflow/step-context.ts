@@ -7,7 +7,6 @@ export type WorkflowStepAuthorizationResult = AuthorizationResult & {
 };
 
 export interface WorkflowStepContext {
-  readonly authorizationSupported: boolean;
   readonly callId: string;
   readonly toolName: string;
   readonly session: SessionContext["session"];

@@ -1,10 +1,6 @@
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/state-key.js";
-import type {
-  AgentHandle,
-  AgentHandleStore,
-  TurnOwnedAgentHandle,
-} from "#subagents/handles/store.js";
+import type { AgentHandle, TurnOwnedAgentHandle } from "#subagents/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 /** A handle with one outstanding operation and a confirmed child address. */
@@ -14,8 +10,8 @@ export type RunningAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "running
  * Schema-free read of the agent handles from session state.
  *
  * Trust boundary: every source store was validated by a handle transition.
- * Driver-side reads trust that invariant instead of re-validating, so the
- * workflow driver bundle stays free of compiled zod.
+ * Owner-side reads trust that invariant instead of re-validating, so the
+ * session owner bundle stays free of compiled zod.
  */
 function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHandle[] {
   const raw = state?.[AGENT_HANDLES_STATE_KEY];
@@ -24,75 +20,6 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
   }
   const handles = (raw as { handles?: unknown }).handles;
   return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
-}
-
-/** Preserves driver-owned task leases when a concurrent turn returns an older snapshot. */
-export function mergeTaskOwnedAgentHandlesIntoTurnState(input: {
-  readonly baseState: SessionStateMap | undefined;
-  readonly driverState: SessionStateMap | undefined;
-  readonly turnState: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const baseHandles = new Map(
-    readAgentHandles(input.baseState).map((handle) => [handle.identity.id, handle] as const),
-  );
-  const driverHandles = new Map(
-    readAgentHandles(input.driverState).map((handle) => [handle.identity.id, handle] as const),
-  );
-  const mutatedIds = new Set([...baseHandles.keys(), ...driverHandles.keys()]);
-  for (const id of mutatedIds) {
-    if (handlesEqual(baseHandles.get(id), driverHandles.get(id))) mutatedIds.delete(id);
-  }
-  if (mutatedIds.size === 0) return input.turnState;
-
-  const merged: AgentHandle[] = [];
-  for (const handle of readAgentHandles(input.turnState)) {
-    if (!mutatedIds.has(handle.identity.id)) {
-      merged.push(handle);
-      continue;
-    }
-    const current = driverHandles.get(handle.identity.id);
-    const base = baseHandles.get(handle.identity.id);
-    if (!handlesEqual(handle, base) && !handlesEqual(handle, current)) {
-      throw new Error(
-        `Agent handle "${handle.identity.id}" changed ownership while its turn was running.`,
-      );
-    }
-    if (current !== undefined) merged.push(current);
-    mutatedIds.delete(handle.identity.id);
-  }
-  for (const id of mutatedIds) {
-    const current = driverHandles.get(id);
-    if (current !== undefined) merged.push(current);
-  }
-
-  return {
-    ...input.turnState,
-    [AGENT_HANDLES_STATE_KEY]: { handles: merged } satisfies AgentHandleStore,
-  };
-}
-
-function handlesEqual(left: AgentHandle | undefined, right: AgentHandle | undefined): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => valuesEqual(Reflect.get(left, key), Reflect.get(right, key)))
-  );
-}
-
-function valuesEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {
-    return false;
-  }
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => valuesEqual(Reflect.get(left, key), Reflect.get(right, key)))
-  );
 }
 
 /**

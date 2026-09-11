@@ -1,9 +1,8 @@
-import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
   DeliverPayload,
-  HookPayload,
   RunInput,
   SessionCommand,
   SessionCapabilities,
@@ -28,21 +27,20 @@ import {
 import { createDelegatedSubagentErrorResult } from "#subagents/parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
-import { SessionStateCursor } from "#execution/session-state-cursor.js";
-import { rebaseTaskAgentHandleMutations } from "#subagents/handles/rebase.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
-import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
+import { SessionExecution } from "#execution/session-execution.js";
+import type { TurnOutcome, TurnStepPayload } from "#execution/turn-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { finalizeDone, finalizeExpiredSession } from "#execution/workflow-entry-finalization.js";
-import { isHookConflictError } from "#execution/hook-ownership.js";
+import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createSessionCommandInbox,
-  type SessionCommandInbox,
+  type SessionCommandInboxHandle,
+  type SessionInboxPayload,
 } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
@@ -51,10 +49,13 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import { SESSION_INBOX_CONTEXT_KEY } from "#execution/wire/session-inbox-contract.js";
+import { SessionHandoff, type SessionCheckpoint } from "#execution/session-handoff.js";
 import {
-  SESSION_INBOX_CONTEXT_KEY,
-  SESSION_INBOX_WIRE_VERSION,
-} from "#execution/wire/session-inbox-contract.js";
+  signalSessionAnchorStep,
+  signalSessionOwnerActivationStep,
+} from "#execution/session-handoff-steps.js";
+import { validateSessionCheckpointStep } from "#execution/session-checkpoint-validation-step.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -65,22 +66,35 @@ import {
  * `serializedContext`, which is produced by `serializeContext(ctx)`
  * and deserialized at each `"use step"` boundary.
  */
-export interface WorkflowEntryInput {
+export interface InitialWorkflowEntryInput {
   readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
+  readonly kind: "initial";
   readonly limits?: RunInput["limits"];
+  readonly ownerDeploymentId: string;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
   readonly taskId?: string;
 }
 
+export interface HandoffWorkflowEntryInput {
+  readonly activationToken: string;
+  readonly checkpoint: SessionCheckpoint;
+  readonly delivery: DeliverHookPayload;
+  readonly kind: "handoff";
+  readonly ownerDeploymentId: string;
+  readonly parentWritable: WritableStream<Uint8Array>;
+}
+
+export type WorkflowEntryInput = InitialWorkflowEntryInput | HandoffWorkflowEntryInput;
+
 export interface WorkflowEntryResult {
   readonly output: unknown;
 }
 
-type DriverLoopOutcome =
+type SessionLoopOutcome =
   | {
       readonly kind: "expired";
       readonly serializedContext: Record<string, unknown>;
@@ -89,6 +103,9 @@ type DriverLoopOutcome =
   | {
       readonly kind: "result";
       readonly result: WorkflowEntryResult;
+    }
+  | {
+      readonly kind: "transferred";
     };
 
 /**
@@ -98,170 +115,205 @@ type DriverLoopOutcome =
  * on a child stream and resume the parked parent with a
  * `subagent-result` on completion.
  *
- * Owns the stable command inbox, its channel alias, and the session lifecycle; each turn-owned
- * turn resolves its own runtime actions in-line and reports back only
- * `done`/`park` via the closed-contract {@link NextDriverAction}. The
- * only session-shape flag the driver reads (besides identity) is
- * `hasProxyInputRequests`, the documented short-circuit for hook-payload
- * routing to any descendant still active when the parent parks.
+ * The current owner directly executes every turn. An idle owner can transfer
+ * its settled checkpoint and hooks to an exact successor deployment while the
+ * original run remains parked as the public stream anchor.
  */
 export async function workflowEntry(input: WorkflowEntryInput): Promise<WorkflowEntryResult> {
   "use workflow";
 
-  const { workflowRunId: sessionId, workflowStartedAt } = getWorkflowMetadata();
-  const continuationToken = (input.serializedContext["eve.continuationToken"] as string) || "";
-  const mode = input.serializedContext["eve.mode"] as RunMode;
-  const capabilities = input.serializedContext["eve.capabilities"] as
-    | SessionCapabilities
-    | undefined;
-  const serializedBundle = input.serializedContext["eve.bundle"] as {
-    source: DurableCompiledArtifactsSource;
-    nodeId?: string;
-  };
+  const { workflowRunId: ownerRunId, workflowStartedAt } = getWorkflowMetadata();
+  const isInitialOwner = input.kind === "initial";
+  const sessionId = isInitialOwner ? ownerRunId : input.checkpoint.ownership.sessionId;
+  const anchorRunId = isInitialOwner ? ownerRunId : input.checkpoint.ownership.anchorRunId;
+  const serializedContext = isInitialOwner
+    ? input.serializedContext
+    : { ...input.checkpoint.serializedContext };
+  const continuationToken = isInitialOwner
+    ? (serializedContext["eve.continuationToken"] as string) || ""
+    : input.checkpoint.sessionState.continuationToken;
+  const mode = isInitialOwner ? (serializedContext["eve.mode"] as RunMode) : input.checkpoint.mode;
+  const capabilities = isInitialOwner
+    ? (serializedContext["eve.capabilities"] as SessionCapabilities | undefined)
+    : input.checkpoint.capabilities;
+  const retention = isInitialOwner ? input.retention : input.checkpoint.retention;
+  const sessionTimeoutDeadline = isInitialOwner
+    ? input.sessionTimeoutMs === false
+      ? undefined
+      : new Date(
+          workflowStartedAt.getTime() + (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
+        )
+    : input.checkpoint.sessionTimeoutDeadline;
+  const anchorToken = isInitialOwner ? `${sessionId}:anchor` : input.checkpoint.anchorToken;
 
-  // Seed `eve.sessionId` so the terminal failure emitter can stamp it
-  // onto `session.failed` even if `createSessionStep` itself throws.
-  input.serializedContext["eve.sessionId"] = sessionId;
-  // The driver stays pinned while turn steps can move to newer deployments.
-  input.serializedContext[SESSION_INBOX_CONTEXT_KEY] = {
-    sessionId,
-    version: SESSION_INBOX_WIRE_VERSION,
-  };
+  serializedContext["eve.sessionId"] = sessionId;
+  serializedContext[SESSION_INBOX_CONTEXT_KEY] = { sessionId };
 
-  const driverWritable = getWritable<Uint8Array>();
+  const sessionWritable = isInitialOwner ? getWritable<Uint8Array>() : input.parentWritable;
   const crashCleanupState: CrashCleanupState = {
     caller: undefined,
     callerResolved: false,
     lastSessionState: undefined,
-    serializedContext: input.serializedContext,
+    serializedContext,
     terminalEmitted: false,
   };
+  const anchor = isInitialOwner
+    ? createHook<WorkflowEntryResult>({ token: anchorToken })
+    : undefined;
+  let activationConfirmed = isInitialOwner;
+  let failedActivationPayloads: readonly SessionInboxPayload[] = [];
 
   try {
-    // Derived once and reused for createSession + tag emission so the
-    // chain-root id can never drift between persisted session and tags.
-    const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
-    const dynamicSubagentAgentConfig = input.serializedContext["eve.dynamicSubagentAgentConfig"] as
-      | DynamicSubagentAgentConfig
-      | undefined;
-
-    const commandInbox = createSessionCommandInbox();
-    const stableCommandToken = sessionCommandHookToken(sessionId);
-    const authorizationHookToken = `${sessionId}:auth`;
+    const commandInbox = createSessionCommandInbox(sessionId);
+    const sessionHookTokens = isInitialOwner
+      ? [sessionCommandHookToken(sessionId)]
+      : input.checkpoint.hooks.session;
+    const stableCommandToken = sessionHookTokens[0];
+    if (stableCommandToken === undefined) {
+      throw new Error("Session owner requires a stable inbox hook.");
+    }
+    const authorizationHookToken = isInitialOwner
+      ? `${sessionId}:auth`
+      : input.checkpoint.hooks.authorization;
     let sessionState: DurableSessionState;
-    let outcome: DriverLoopOutcome;
+    let outcome: SessionLoopOutcome;
     try {
-      const [sessionCreation, stableClaim, authorizationClaim, continuationClaim] =
-        await Promise.allSettled([
-          createSessionStep({
-            compiledArtifactsSource: serializedBundle.source,
-            continuationToken,
-            dynamicSubagentAgentConfig,
-            inheritedLimits: input.limits,
-            nodeId: serializedBundle.nodeId,
-            outputSchema: input.input.outputSchema,
-            rootSessionId: rootSessionIdFromParent,
-            sessionId,
-            taskId: input.taskId,
-          }),
-          commandInbox.claimStable(stableCommandToken),
-          commandInbox.claimAuthorization(authorizationHookToken),
-          commandInbox.rekeyContinuation(continuationToken),
-        ]);
-
-      if (sessionCreation.status === "rejected") throw sessionCreation.reason;
-      if (stableClaim.status === "rejected") throw stableClaim.reason;
-      if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
-      if (continuationClaim.status === "rejected") {
-        // Two runs can race for the same continuation alias (e.g. two messages
-        // hit one thread before either session owns it). Only the winner runs
-        // a turn; the loser forwards its `send` to the owner and exits with an
-        // empty result, since it produced nothing.
-        if (isHookConflictError(continuationClaim.reason)) {
-          if (
-            input.activityCollectorRunId !== undefined ||
-            input.continuationConflictCommand !== undefined
-          ) {
-            await settleContinuationConflictStep({
-              activityCollectorRunId: input.activityCollectorRunId,
-              command: input.continuationConflictCommand,
+      if (isInitialOwner) {
+        const serializedBundle = serializedContext["eve.bundle"] as {
+          source: DurableCompiledArtifactsSource;
+          nodeId?: string;
+        };
+        const dynamicSubagentAgentConfig = serializedContext["eve.dynamicSubagentAgentConfig"] as
+          | DynamicSubagentAgentConfig
+          | undefined;
+        const [sessionCreation, stableClaim, authorizationClaim, anchorClaim] =
+          await Promise.allSettled([
+            createSessionStep({
+              compiledArtifactsSource: serializedBundle.source,
               continuationToken,
-              ownerSessionId:
-                typeof continuationClaim.reason.conflictingRunId === "string"
-                  ? continuationClaim.reason.conflictingRunId
-                  : undefined,
-            });
+              dynamicSubagentAgentConfig,
+              inheritedLimits: input.limits,
+              nodeId: serializedBundle.nodeId,
+              outputSchema: input.input.outputSchema,
+              rootSessionId: readRootSessionId(serializedContext),
+              sessionId,
+              taskId: input.taskId,
+            }),
+            commandInbox.claimSessionHook(stableCommandToken),
+            commandInbox.claimAuthorization(authorizationHookToken),
+            claimHookOwnership(anchor!),
+          ]);
+        if (sessionCreation.status === "rejected") throw sessionCreation.reason;
+        if (stableClaim.status === "rejected") throw stableClaim.reason;
+        if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
+        if (anchorClaim.status === "rejected") throw anchorClaim.reason;
+        try {
+          await commandInbox.claimSessionHook(continuationToken);
+        } catch (error) {
+          if (isHookConflictError(error)) {
+            if (
+              input.activityCollectorRunId !== undefined ||
+              input.continuationConflictCommand !== undefined
+            ) {
+              await settleContinuationConflictStep({
+                activityCollectorRunId: input.activityCollectorRunId,
+                command: input.continuationConflictCommand,
+                continuationToken,
+                ownerSessionId:
+                  typeof error.conflictingRunId === "string" ? error.conflictingRunId : undefined,
+              });
+            }
+            return { output: "" };
           }
-          return { output: "" };
+          throw error;
         }
-        throw continuationClaim.reason;
+        sessionState = sessionCreation.value.state;
+        crashCleanupState.caller = hasDelegatedCallerContext(serializedContext)
+          ? await resolveInitialTurnCallerStep({ serializedContext })
+          : undefined;
+      } else {
+        await validateSessionCheckpointStep({ checkpoint: input.checkpoint });
+        for (const token of sessionHookTokens) {
+          await commandInbox.claimSessionHook(token);
+        }
+        await commandInbox.claimAuthorization(authorizationHookToken);
+        sessionState = input.checkpoint.sessionState;
+        crashCleanupState.caller = input.checkpoint.caller;
+        await signalSessionOwnerActivationStep({
+          activation: { kind: "active" },
+          token: input.activationToken,
+        });
+        activationConfirmed = true;
       }
 
-      sessionState = sessionCreation.value.state;
       crashCleanupState.lastSessionState = sessionState;
-      crashCleanupState.caller = hasDelegatedCallerContext(input.serializedContext)
-        ? await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext })
-        : undefined;
       crashCleanupState.callerResolved = true;
 
-      outcome = await runDriverLoop({
+      outcome = await runSessionLoop({
+        anchorRunId,
+        anchorToken,
+        authorizationHookToken,
         capabilities,
         commandInbox,
-        driverWritable,
-        initialInput: {
-          deliveryMetadata:
-            input.serializedContext["eve.channelDelivery"] === undefined
-              ? undefined
-              : [
-                  {
-                    ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
-                      RunInput["delivery"]
-                    >),
-                    payloadIndex: 0,
-                  },
-                ],
-          kind: "deliver",
-          payloads: [
-            attachClientContext(
-              {
-                message: input.input.message,
-                context: input.input.context,
-                outputSchema: input.input.outputSchema,
-              },
-              readClientContext(input.input),
-            ),
-          ],
-          requestId: readChannelRequestId(input.serializedContext),
-        },
+        sessionWritable,
+        initialInput: isInitialOwner
+          ? createInitialDelivery(input, serializedContext)
+          : input.delivery,
         crashCleanupState,
         mode,
-        retention: input.retention,
-        serializedContext: input.serializedContext,
+        ownerDeploymentId: input.ownerDeploymentId,
+        ownerRunId,
+        retention,
+        serializedContext,
         sessionState,
-        sessionTimeoutDeadline:
-          input.sessionTimeoutMs === false
-            ? undefined
-            : new Date(
-                workflowStartedAt.getTime() +
-                  (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
-              ),
+        sessionId,
+        sessionTimeoutDeadline,
         stableCommandToken,
       });
     } finally {
-      await commandInbox.dispose();
+      if (!activationConfirmed && input.kind === "handoff") {
+        failedActivationPayloads = await commandInbox.release();
+      } else {
+        await commandInbox.dispose();
+      }
     }
-    if (outcome.kind === "result") {
-      return outcome.result;
+    if (outcome.kind === "transferred") {
+      if (!isInitialOwner) return { output: "" };
+      try {
+        return await anchor!;
+      } finally {
+        await disposeHook(anchor!);
+      }
     }
-    return await finalizeExpiredSession({
-      caller: crashCleanupState.caller,
-      driverWritable,
-      mode,
-      serializedContext: outcome.serializedContext,
-      sessionState: outcome.sessionState,
-      terminalState: crashCleanupState,
-    });
+    const result =
+      outcome.kind === "result"
+        ? outcome.result
+        : await finalizeExpiredSession({
+            caller: crashCleanupState.caller,
+            sessionWritable,
+            mode,
+            serializedContext: outcome.serializedContext,
+            sessionState: outcome.sessionState,
+            terminalState: crashCleanupState,
+          });
+    if (isInitialOwner) {
+      await disposeHook(anchor!);
+    } else {
+      await signalSessionAnchorStep({ result, token: anchorToken });
+    }
+    return result;
   } catch (error) {
+    if (!activationConfirmed && input.kind === "handoff") {
+      await signalSessionOwnerActivationStep({
+        activation: {
+          error: normalizeSerializableError(error),
+          kind: "failed",
+          payloads: failedActivationPayloads,
+        },
+        token: input.activationToken,
+      });
+      return { output: "" };
+    }
     const terminalAlreadyEmitted = crashCleanupState.terminalEmitted;
     // Safety net for failures the tool-loop harness does not already
     // surface as `session.failed` (deserialization, runtime-action
@@ -276,7 +328,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     if (!crashCleanupState.terminalEmitted) {
       await emitTerminalSessionFailureStep({
         error: normalizeSerializableError(error),
-        parentWritable: driverWritable,
+        parentWritable: sessionWritable,
         serializedContext: crashCleanupState.serializedContext,
         turnId: crashCleanupState.turnId,
       });
@@ -301,22 +353,62 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         settled: { isError: true, output: error },
       });
     }
+    if (!isInitialOwner) {
+      await signalSessionAnchorStep({ result: { output: "" }, token: anchorToken });
+    } else {
+      await disposeHook(anchor!);
+    }
     throw createSafeOuterWorkflowError();
   }
 }
-async function runDriverLoop(input: {
+
+function createInitialDelivery(
+  input: InitialWorkflowEntryInput,
+  serializedContext: Record<string, unknown>,
+): DeliverHookPayload {
+  return {
+    deliveryMetadata:
+      serializedContext["eve.channelDelivery"] === undefined
+        ? undefined
+        : [
+            {
+              ...(serializedContext["eve.channelDelivery"] as NonNullable<RunInput["delivery"]>),
+              payloadIndex: 0,
+            },
+          ],
+    kind: "deliver",
+    payloads: [
+      attachClientContext(
+        {
+          message: input.input.message,
+          context: input.input.context,
+          outputSchema: input.input.outputSchema,
+        },
+        readClientContext(input.input),
+      ),
+    ],
+    requestId: readChannelRequestId(serializedContext),
+  };
+}
+async function runSessionLoop(input: {
+  readonly anchorRunId: string;
+  readonly anchorToken: string;
+  readonly authorizationHookToken: string;
   readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionCommandInbox;
-  readonly driverWritable: WritableStream<Uint8Array>;
-  readonly initialInput: HookPayload;
+  readonly commandInbox: SessionCommandInboxHandle;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly initialInput: DeliverHookPayload;
   readonly crashCleanupState: CrashCleanupState;
   readonly mode: RunMode;
+  readonly ownerDeploymentId: string;
+  readonly ownerRunId: string;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly sessionId: string;
   readonly sessionTimeoutDeadline?: Date;
   readonly stableCommandToken: string;
-}): Promise<DriverLoopOutcome> {
+}): Promise<SessionLoopOutcome> {
   const commandInbox = input.commandInbox;
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
@@ -361,7 +453,7 @@ async function runDriverLoop(input: {
         cancelledTaskIds,
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
-        driverWritable: input.driverWritable,
+        sessionWritable: input.sessionWritable,
         seenTaskDeliveries,
         stateCursor,
       });
@@ -386,21 +478,23 @@ async function runDriverLoop(input: {
       }
     }
   };
-  // Fast descendant resumes can start the next turn before the prior
-  // control hook disposal is persisted by the Workflow SDK, so each
-  // turn needs its own session-scoped token.
-  let turnDispatchIndex = 0;
-  const nextTurnControlToken = (): string =>
-    `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
-
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const cancelledTaskIds = new Set<string>();
   const seenTaskDeliveries = new Set<string>();
-  const stateCursor = new SessionStateCursor({
+  const execution = new SessionExecution({
+    bufferedDeliveries,
+    bufferedSessionControls,
+    cancelledTaskIds,
+    capabilities: input.capabilities,
+    commandInbox,
+    mode: input.mode,
+    parentWritable: input.sessionWritable,
     serializedContext: input.serializedContext,
+    seenTaskDeliveries,
     sessionState: input.sessionState,
   });
+  const stateCursor = execution.cursor;
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
@@ -409,10 +503,8 @@ async function runDriverLoop(input: {
           token: input.stableCommandToken,
         });
 
-  // Control-hook disposal is deferred one turn — see DispatchedTurn.
-  let disposeSettledTurnControl: (() => Promise<void>) | undefined;
-  const runTurn = async (delivery: HookPayload): Promise<TurnDriverAction> => {
-    const dispatchedSessionState = stateCursor.sessionState;
+  let turnIndex = 0;
+  const runTurn = async (delivery: TurnStepPayload): Promise<TurnOutcome> => {
     const caller = input.crashCleanupState.caller;
     if (caller?.taskId !== undefined) {
       seenTaskDeliveries.add(caller.taskId);
@@ -424,33 +516,9 @@ async function runDriverLoop(input: {
             caller,
             serializedContext: stateCursor.serializedContext,
           });
-    input.crashCleanupState.turnId = `turn_${String(turnDispatchIndex)}`;
-    const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
-      bufferedSessionControls,
-      cancelledTaskIds,
-      capabilities: input.capabilities,
-      commandInbox,
-      controlToken: nextTurnControlToken(),
-      delivery,
-      mode: input.mode,
-      parentWritable: input.driverWritable,
-      retention: input.retention,
-      serializedContext,
-      seenTaskDeliveries,
-      sessionState: stateCursor.sessionState,
-      stateCursor,
-    });
-    await disposeSettledTurnControl?.();
-    disposeSettledTurnControl = turn.dispose;
-    const action =
-      stateCursor.sessionState === dispatchedSessionState
-        ? turn.action
-        : rebaseTaskAgentHandleMutations(
-            turn.action,
-            stateCursor.sessionState,
-            dispatchedSessionState,
-          );
+    input.crashCleanupState.turnId = `turn_${String(turnIndex++)}`;
+    stateCursor.adoptState({ serializedContext });
+    const action = await execution.runTurn(delivery);
     stateCursor.adoptState(action);
     input.crashCleanupState.lastSessionState = stateCursor.sessionState;
     input.crashCleanupState.serializedContext = stateCursor.serializedContext;
@@ -460,7 +528,7 @@ async function runDriverLoop(input: {
   try {
     await sessionTimeout?.start();
 
-    let action: TurnDriverAction = await runTurn(input.initialInput);
+    let action: TurnOutcome = await runTurn(input.initialInput);
 
     while (true) {
       if (action.kind === "done") {
@@ -475,16 +543,9 @@ async function runDriverLoop(input: {
         };
       }
 
-      if (action.kind !== "park") {
-        // Turn-owned turns resolve runtime actions in-line and only ever
-        // report `done`/`park`. The driver-owned `dispatch-*` arms exist
-        // solely for pre-change pinned drivers, which run their own code.
-        throw new Error(`Driver received unexpected turn action "${action.kind}".`);
-      }
-
       if (action.cancelled === true) {
         const settled = await settleCancelledTurnStep({
-          parentWritable: input.driverWritable,
+          parentWritable: input.sessionWritable,
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
         });
@@ -500,12 +561,6 @@ async function runDriverLoop(input: {
             : { ...cancelledCaller, usage: settled.usage },
         );
         input.crashCleanupState.lastSessionState = stateCursor.sessionState;
-      }
-
-      // Channel-created sessions may rekey their dynamic alias. Sessions
-      // without one remain reachable through the stable command inbox only.
-      if (stateCursor.sessionState.continuationToken) {
-        await commandInbox.rekeyContinuation(stateCursor.sessionState.continuationToken);
       }
 
       // `settled` rides the typed park arm exclusively; `run-step` preserves
@@ -557,7 +612,7 @@ async function runDriverLoop(input: {
           kind: "result",
           result: await finalizeExpiredSession({
             caller: input.crashCleanupState.caller,
-            driverWritable: input.driverWritable,
+            sessionWritable: input.sessionWritable,
             mode: input.mode,
             serializedContext: stateCursor.serializedContext,
             sessionState: stateCursor.sessionState,
@@ -576,7 +631,7 @@ async function runDriverLoop(input: {
           kind: "result",
           result: await finalizeExpiredSession({
             caller: input.crashCleanupState.caller,
-            driverWritable: input.driverWritable,
+            sessionWritable: input.sessionWritable,
             mode: input.mode,
             serializedContext: stateCursor.serializedContext,
             sessionState: stateCursor.sessionState,
@@ -591,7 +646,7 @@ async function runDriverLoop(input: {
           sessionState: stateCursor.sessionState,
         });
         const cancelled = await settleCancelledTurnStep({
-          parentWritable: input.driverWritable,
+          parentWritable: input.sessionWritable,
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
         });
@@ -606,13 +661,52 @@ async function runDriverLoop(input: {
         continue;
       }
 
+      const handoff = new SessionHandoff({
+        anchorToken: input.anchorToken,
+        authorizationHookToken: input.authorizationHookToken,
+        bufferedDeliveries,
+        bufferedSessionControls,
+        caller: input.crashCleanupState.caller,
+        capabilities: input.capabilities,
+        commandInbox,
+        mode: input.mode,
+        ownership: {
+          anchorRunId: input.anchorRunId,
+          deploymentId: input.ownerDeploymentId,
+          ownerRunId: input.ownerRunId,
+          sessionId: input.sessionId,
+        },
+        retention: input.retention,
+        serializedContext: stateCursor.serializedContext,
+        sessionState: stateCursor.sessionState,
+        sessionTimeoutDeadline: input.sessionTimeoutDeadline,
+      });
+      const checkpoint = await handoff.checkpoint(next.delivery);
+      if (checkpoint.kind === "ready") {
+        const acceptedDuringRelease = await handoff.release();
+        if (acceptedDuringRelease.length > 0) {
+          await handoff.recover(acceptedDuringRelease);
+        } else {
+          let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
+          try {
+            const candidate = await handoff.start(checkpoint);
+            const activation = await handoff.activate(candidate);
+            if (activation.kind === "active") return { kind: "transferred" };
+            acceptedByFailedCandidate = activation.payloads;
+          } catch {
+            // The current owner remains authoritative until activation.
+          }
+          await handoff.recover(acceptedByFailedCandidate);
+        }
+      }
+
       if (next.delivery.caller !== undefined) {
         input.crashCleanupState.caller = next.delivery.caller;
       }
       action = await runTurn(next.delivery);
     }
   } finally {
-    await disposeSettledTurnControl?.();
+    await execution.dispose();
     await sessionTimeout?.dispose();
   }
 }

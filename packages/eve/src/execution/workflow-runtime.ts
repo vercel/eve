@@ -32,6 +32,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   cancelRun,
+  getHookByToken,
   getRawHookByToken,
   getRun,
   getWorld,
@@ -54,7 +55,12 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import type {
+  HandoffWorkflowEntryInput,
+  InitialWorkflowEntryInput,
+} from "#execution/workflow-entry.js";
+import type { SessionCheckpoint } from "#execution/session-handoff.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
@@ -66,6 +72,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/wire/session-inbox-contract.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -73,7 +80,6 @@ import {
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
-  TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
@@ -88,24 +94,18 @@ interface WorkflowHookRecord {
   readonly runId: string;
 }
 
+interface SessionInboxOwnerRecord extends WorkflowHookRecord {
+  readonly sessionId: string;
+}
+
 /**
  * Stable workflow reference used by `start()` to locate the workflow
  * entrypoint registered by the Workflow DevKit builder. The id omits
- * the package version stamp so the long-lived driver can rotate across
+ * the package version stamp so the long-lived owner can rotate across
  * deployments without rewriting the registry key.
  */
 export const workflowEntryReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_ENTRY_NAME}`,
-};
-
-/**
- * Stable workflow reference used by the driver to dispatch per-turn
- * child workflow runs. The id omits the package version stamp so an
- * explicitly stamped accepting deployment can resolve the workflow even
- * when its eve version differs from the driver's deployment.
- */
-export const turnWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
 };
 
 /** Stable workflow reference for session deadline timers. */
@@ -129,8 +129,8 @@ export const workflowToolRunWorkflowReference = {
 };
 
 /**
- * Creates a workflow-backed runtime whose long-lived driver owns the
- * event stream and dispatches each turn as a child workflow run.
+ * Creates a workflow-backed runtime whose current owner executes turns and
+ * whose original run retains the public event stream across owner handoffs.
  */
 export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
@@ -204,13 +204,15 @@ export function createWorkflowRuntime(config: {
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const workflowInput: {
-        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
+        -readonly [K in keyof InitialWorkflowEntryInput]: InitialWorkflowEntryInput[K];
       } = {
+        kind: "initial",
         input: input.input,
-        limits: input.limits,
+        ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
         serializedContext,
       };
       const taskId = input.taskId ?? input.callback?.taskId;
+      if (input.limits !== undefined) workflowInput.limits = input.limits;
       if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
@@ -247,11 +249,17 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
       try {
-        run = await startWorkflowOnCurrentDeployment(workflowEntryReference, [workflowInput], {
+        const startOptions: StartOptionsWithoutDeploymentId = {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),
-          experimental_retention: retention,
-        });
+        };
+        if (retention !== undefined) startOptions.experimental_retention = retention;
+        run = await startWorkflowOnDeployment(
+          workflowEntryReference,
+          [workflowInput],
+          workflowInput.ownerDeploymentId,
+          startOptions,
+        );
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
         logError(log, "failed to start workflow run", error, {
@@ -313,8 +321,18 @@ export function createWorkflowRuntime(config: {
       continuationToken: string,
     ): Promise<{ sessionId: string } | undefined> {
       try {
-        const hook = await getRawHookByToken(continuationToken);
-        return { sessionId: hook.runId };
+        const hook = await getHookByToken(continuationToken);
+        const metadata: unknown = await hook.metadata;
+        const sessionId =
+          metadata !== null &&
+          typeof metadata === "object" &&
+          typeof (metadata as Record<string, unknown>)[SESSION_INBOX_SESSION_ID_METADATA_KEY] ===
+            "string"
+            ? ((metadata as Record<string, unknown>)[
+                SESSION_INBOX_SESSION_ID_METADATA_KEY
+              ] as string)
+            : hook.runId;
+        return { sessionId };
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;
@@ -326,6 +344,37 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+export interface SessionOwnerStartInput {
+  readonly activationToken: string;
+  readonly checkpoint: SessionCheckpoint;
+  readonly delivery: DeliverHookPayload;
+  readonly targetDeploymentId: string;
+}
+
+/** Starts a successor owner and binds its output to the original session stream. */
+export async function startSessionOwnerStep(
+  input: SessionOwnerStartInput,
+): Promise<{ readonly runId: string }> {
+  "use step";
+  const workflowInput: HandoffWorkflowEntryInput = {
+    activationToken: input.activationToken,
+    checkpoint: input.checkpoint,
+    delivery: input.delivery,
+    kind: "handoff",
+    ownerDeploymentId: input.targetDeploymentId,
+    parentWritable: getRun(input.checkpoint.ownership.anchorRunId).getWritable<Uint8Array>(),
+  };
+  const run = await startWorkflowOnDeployment(
+    workflowEntryReference,
+    [workflowInput],
+    input.targetDeploymentId,
+    input.checkpoint.retention === undefined
+      ? undefined
+      : { experimental_retention: input.checkpoint.retention },
+  );
+  return { runId: run.runId };
 }
 
 function normalizePersistedEvent(value: unknown): MessageStreamEvent {
@@ -349,9 +398,9 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   token: string,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
-  let hook: WorkflowHookRecord;
+  let hook: SessionInboxOwnerRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeSessionInbox(token, command));
+    hook = await resumeSessionInboxWithHandoffRetry(token, command);
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -364,10 +413,26 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+    await waitForCommandHookRelease(sessionCommandHookToken(hook.sessionId), hook.runId);
   }
 
-  return activeCommandResult(command, hook.runId);
+  return activeCommandResult(command, hook.sessionId);
+}
+
+async function resumeSessionInboxWithHandoffRetry(
+  token: string,
+  command: SessionCommand,
+): Promise<SessionInboxOwnerRecord> {
+  const deadline = Date.now() + 1_000;
+  while (true) {
+    try {
+      const resumed = await resumeSessionInbox(token, command);
+      return { runId: resumed.ownerRunId, sessionId: resumed.sessionId };
+    } catch (error) {
+      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(
@@ -466,7 +531,7 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
   return await startWorkflowOnDeployment(
     workflow,
     args,
-    process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+    await resolveCurrentWorkflowDeploymentId(),
     options,
   );
 }
@@ -491,17 +556,24 @@ export async function startWorkflowOnAcceptedDeployment<TArgs extends unknown[],
 async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
-  deploymentId: string | undefined,
+  deploymentId: string,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
   return await withWorkflowStartContext(async () => {
-    if (deploymentId !== undefined) {
-      return await start(workflow, args, { ...options, deploymentId });
+    if (deploymentId.length === 0 || deploymentId === "latest") {
+      throw new Error("Workflow starts require an exact deployment id.");
     }
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+    return await start(workflow, args, { ...options, deploymentId });
   });
+}
+
+async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
+  const deploymentId =
+    process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await (await getWorld()).getDeploymentId());
+  if (deploymentId.length === 0 || deploymentId === "latest") {
+    throw new Error("Workflow runtime could not resolve an exact deployment id.");
+  }
+  return deploymentId;
 }
 
 async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {

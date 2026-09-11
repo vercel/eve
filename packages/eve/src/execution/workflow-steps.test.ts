@@ -13,6 +13,7 @@ import {
   ActivityRootTurnIdKey,
   AuthKey,
   ChannelInstrumentationKey,
+  ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
@@ -45,8 +46,6 @@ import {
   projectSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
-import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
@@ -59,7 +58,6 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
-import { turnWorkflowReference } from "#execution/workflow-runtime.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
 vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
@@ -306,7 +304,7 @@ describe("routeProxiedDeliverStep", () => {
           "request-1",
           {
             childContinuationToken: "stale-alias",
-            childSessionInbox: { sessionId: "original-child", version: 1 },
+            childSessionInbox: { sessionId: "original-child" },
             kind: "question",
           },
         ],
@@ -330,10 +328,9 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "eve:session:original-child:inbox",
+      currentSessionHook("eve:session:original-child:inbox"),
       expect.objectContaining({
         kind: "deliver",
-        version: 1,
         payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
       }),
     );
@@ -375,14 +372,9 @@ describe("routeProxiedDeliverStep", () => {
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("child-token"), {
       auth,
-      caller: undefined,
+      deliveryMetadata: undefined,
       kind: "deliver",
-      payload: {
-        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
-      },
       payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
-      requestId: undefined,
-      version: 1,
     });
   });
 
@@ -634,7 +626,7 @@ describe("routeProxiedDeliverStep", () => {
 
 function currentSessionHook(token: string) {
   return {
-    metadata: { sessionInboxWireVersion: 1 },
+    metadata: { sessionId: "child-run" },
     runId: "child-run",
     token,
   };
@@ -735,206 +727,6 @@ describe("recordTaskInputRequestStep", () => {
     });
 
     expect(result).toEqual({ accepted: false, sessionState: createStubSessionState() });
-  });
-});
-
-describe("dispatchTurnStep", () => {
-  function createTurnInput(): Parameters<typeof dispatchTurnStep>[0] {
-    const parentWritable = createTestWritable();
-    const sessionState = createStubSessionState();
-
-    return {
-      capabilities: undefined,
-      completionToken: "turn-control",
-      delivery: {
-        kind: "deliver",
-        payloads: [{ message: "hello" }],
-        requestId: "req_turn",
-      },
-      mode: "conversation",
-      parentWritable,
-      serializedContext: { state: "driver" },
-      sessionState,
-    };
-  }
-
-  it("starts turn workflows on the current driver deployment without an ingress stamp", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
-    const input = createTurnInput();
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.channel_request_id": "req_turn",
-          "$eve.is_otel_trace_enabled": "false",
-          "$eve.parent": "sess-test",
-          "$eve.root": "sess-test",
-          "$eve.is_trace_content_visible": "false",
-          "$eve.type": "turn",
-        },
-        deploymentId: "dpl_driver",
-      },
-    );
-  });
-
-  it("starts on the accepted deployment when the dispatch step runs there", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
-    const baseInput = createTurnInput();
-    const input = {
-      ...baseInput,
-      delivery: {
-        ...baseInput.delivery,
-        deliveryMetadata: [
-          {
-            acceptedDeploymentId: "dpl_current",
-            channelKind: "channel:webhook",
-            channelName: "webhook",
-            deliveryId: "delivery-1",
-            payloadIndex: 0,
-          },
-        ],
-      },
-    };
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      expect.objectContaining({ deploymentId: "dpl_current" }),
-    );
-  });
-
-  it("stays on the driver deployment for mixed accepted deployments", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
-    const baseInput = createTurnInput();
-    const input = {
-      ...baseInput,
-      delivery: {
-        ...baseInput.delivery,
-        deliveryMetadata: [
-          {
-            acceptedDeploymentId: "dpl_current",
-            channelKind: "channel:webhook",
-            channelName: "webhook",
-            deliveryId: "delivery-1",
-            payloadIndex: 0,
-          },
-          {
-            acceptedDeploymentId: "dpl_other",
-            channelKind: "channel:webhook",
-            channelName: "webhook",
-            deliveryId: "delivery-2",
-            payloadIndex: 1,
-          },
-        ],
-      },
-    };
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      expect.objectContaining({ deploymentId: "dpl_current" }),
-    );
-  });
-
-  it("lets the development world retain its stamped generation", async () => {
-    vi.stubEnv("EVE_DEV", "1");
-    const input = createTurnInput();
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.channel_request_id": "req_turn",
-          "$eve.is_otel_trace_enabled": "false",
-          "$eve.parent": "sess-test",
-          "$eve.root": "sess-test",
-          "$eve.is_trace_content_visible": "true",
-          "$eve.type": "turn",
-        },
-      },
-    );
-  });
-
-  it("pins turn workflows to the current deployment off production", async () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
-    const input = createTurnInput();
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledTimes(1);
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.channel_request_id": "req_turn",
-          "$eve.is_otel_trace_enabled": "false",
-          "$eve.parent": "sess-test",
-          "$eve.root": "sess-test",
-          "$eve.is_trace_content_visible": "false",
-          "$eve.type": "turn",
-        },
-      },
-    );
-  });
-
-  it("targets a stamped accepting deployment even when the driver is older", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
-    const baseInput = createTurnInput();
-    const input = {
-      ...baseInput,
-      delivery: {
-        ...baseInput.delivery,
-        deliveryMetadata: [
-          {
-            acceptedDeploymentId: "dpl_ingress",
-            channelKind: "channel:webhook",
-            channelName: "webhook",
-            deliveryId: "delivery-1",
-            payloadIndex: 0,
-          },
-        ],
-      },
-    };
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.channel_request_id": "req_turn",
-          "$eve.is_otel_trace_enabled": "false",
-          "$eve.parent": "sess-test",
-          "$eve.root": "sess-test",
-          "$eve.is_trace_content_visible": "false",
-          "$eve.type": "turn",
-        },
-        deploymentId: "dpl_ingress",
-      },
-    );
   });
 });
 
@@ -1466,29 +1258,6 @@ describe("turnStep", () => {
         }),
       ]);
     }
-  });
-
-  it("defers before mutation when an inline step reaches another deployment", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
-    const sessionState = createStubSessionState();
-    const durableReadsBefore = vi.mocked(readDurableSession).mock.calls.length;
-
-    await expect(
-      turnStep({
-        acceptedDeploymentId: "dpl_ingress",
-        input: { kind: "deliver", payloads: [{ message: "hello" }] },
-        parentWritable: createTestWritable(),
-        serializedContext: { state: "untouched" },
-        sessionState,
-      }),
-    ).resolves.toEqual({
-      action: "continue",
-      requiresChildDispatch: true,
-      serializedContext: { state: "untouched" },
-      sessionState,
-    });
-
-    expect(vi.mocked(readDurableSession).mock.calls).toHaveLength(durableReadsBefore);
   });
 
   it("prepares resumed-session history before dynamic runtime refresh", async () => {
@@ -3445,7 +3214,7 @@ describe("runProxySubagentEventStep", () => {
     });
 
     // The updated serialized context must carry the adapter state
-    // mutation so the driver loop can thread it into the next
+    // mutation so the session loop can thread it into the next
     // `turnStep`. The workflow-side serialization layer
     // projects the adapter onto its wire shape (`{ kind, state }`),
     // which is where we look for the cached batch.
@@ -3487,11 +3256,12 @@ describe("runProxySubagentEventStep", () => {
     expect(writes).toHaveLength(3);
   });
 
-  it("re-stamps the returned session when the input.requested handler re-keys", async () => {
+  it("returns every continuation address claimed by the input.requested handler", async () => {
     const rekeyingAdapter: ChannelAdapter = {
       kind: "thread-context",
       async "input.requested"(_data, adapterCtx) {
-        adapterCtx.session.continuation?.rekey("proxy-rekeyed");
+        adapterCtx.session.continuation?.rekey("proxy-first");
+        adapterCtx.session.continuation?.rekey("proxy-second");
       },
     };
 
@@ -3513,8 +3283,13 @@ describe("runProxySubagentEventStep", () => {
       sessionState,
     });
 
-    expect(result.sessionState.continuationToken).toBe("http:proxy-rekeyed");
-    expect(result.serializedContext[ContinuationTokenKey.name]).toBe("http:proxy-rekeyed");
+    expect(result.sessionState.continuationToken).toBe("http:proxy-second");
+    expect(result.serializedContext[ContinuationTokenKey.name]).toBe("http:proxy-second");
+    expect(result.serializedContext[ContinuationHookTokensKey.name]).toEqual([
+      "http:proxy-test",
+      "http:proxy-first",
+      "http:proxy-second",
+    ]);
   });
 });
 

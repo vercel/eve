@@ -63,9 +63,9 @@ export async function taskCancelNotificationWorkflow() {
   "use workflow";
 
   const { workflowRunId: sessionId } = getWorkflowMetadata();
-  const inbox = createSessionCommandInbox();
+  const inbox = createSessionCommandInbox(sessionId);
   try {
-    await inbox.claimStable(sessionCommandHookToken(sessionId));
+    await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
     const entry = await startSlowCancelledTaskStep({ sessionId });
     const cancelled = await cancelSlowTaskFromParentStep({ entry, sessionId });
     const next = await inbox.next();

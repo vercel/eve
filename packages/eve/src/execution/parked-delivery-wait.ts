@@ -6,8 +6,8 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
-  sessionInboxWire,
-  SessionInboxWireError,
+  decodeSessionInboxPayload,
+  SessionInboxPayloadError,
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
@@ -32,7 +32,7 @@ export interface AuthorizationCallbackInstruction {
   readonly payloads: readonly DeliverPayload[];
 }
 
-/** What the parked driver should do with the next session activity. */
+/** What the parked owner should do with the next session activity. */
 export type NextTurnInstruction =
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
@@ -47,7 +47,7 @@ export type NextTurnInstruction =
     };
 
 /**
- * Awaits the next delivery that requires driver action while the session
+ * Awaits the next delivery that requires owner action while the session
  * is parked. Deliveries fully routed to a descendant leave the parent with
  * no turn to run, so this keeps waiting until a delivery produces a parent
  * turn, a cancellation, expiry, or hook closure. The wait is unbounded by
@@ -69,7 +69,7 @@ export async function nextTurnDelivery(input: {
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
-  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
@@ -91,7 +91,7 @@ async function awaitNextTurnDelivery(input: {
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
-  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
@@ -123,7 +123,7 @@ async function awaitNextTurnDelivery(input: {
 
     const routed = await routeDeliverToChildren({
       delivery: deliver,
-      parentWritable: input.driverWritable,
+      parentWritable: input.sessionWritable,
       serializedContext: input.stateCursor.serializedContext,
       sessionState: input.stateCursor.sessionState,
     });
@@ -196,7 +196,7 @@ async function waitForNextSessionAction(input: {
     }
 
     // Runtime-action results use the active turn's private inbox. A late value
-    // can still surface through an old session alias, where the driver has
+    // can still surface through an old session alias, where the owner has
     // always ignored it rather than treating it as a session command.
     if (first.value.kind === "runtime-action-result") {
       continue;
@@ -204,9 +204,9 @@ async function waitForNextSessionAction(input: {
 
     let decoded: DecodedSessionInbox;
     try {
-      decoded = sessionInboxWire.decode(first.value);
+      decoded = decodeSessionInboxPayload(first.value);
     } catch (error) {
-      if (!(error instanceof SessionInboxWireError)) throw error;
+      if (!(error instanceof SessionInboxPayloadError)) throw error;
       // A lost delivery with an operator-visible signal is the designed
       // failure; reinterpreting an unknown payload is the bug. Stay parked.
       await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });

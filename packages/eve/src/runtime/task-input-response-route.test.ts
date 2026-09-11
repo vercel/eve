@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 
@@ -10,7 +9,7 @@ const DIGEST = "0123456789abcdef0123456789abcdef";
 const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
 const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
 const TARGET_HOOK = {
-  metadata: { sessionInboxWireVersion: 1 },
+  metadata: { sessionId: "child-session" },
   runId: "child-session",
   token: TARGET_TOKEN,
 };
@@ -36,16 +35,10 @@ describe("task input response capability", () => {
 
     expect(response.status).toBe(202);
     expect(getHookByTokenMock).toHaveBeenCalledWith(TARGET_TOKEN);
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      TARGET_HOOK,
-      sessionInboxWire.encode(
-        {
-          kind: "send",
-          payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
-        },
-        { version: 1 },
-      ),
-    );
+    expect(resumeHookMock).toHaveBeenCalledWith(TARGET_HOOK, {
+      kind: "send",
+      payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+    });
   });
 
   it("rejects messages and empty response batches", async () => {

@@ -287,7 +287,8 @@ export interface AgentWorkflowDefinition {
   readonly modelCallsPerStep?: number;
   /**
    * How long the agent's run data is kept after the run finishes.
-   * Applied to both the session run and every turn run.
+   * Applied to every run that owns the session, including successors created
+   * by deployment handoff.
    *
    * - `"default"`: same as omission. The Workflow SDK World decides.
    *   On Vercel this follows your team's plan.

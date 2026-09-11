@@ -28,6 +28,7 @@ import { registerInstrumentationConfig } from "#instrumentation/config.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
@@ -43,6 +44,10 @@ vi.mock("#internal/nitro/routes/runtime-stack.js", () => ({
 
 vi.mock("#internal/vercel/project-link.js", () => ({
   readVercelProjectLink: vi.fn(),
+}));
+
+vi.mock("#internal/workflow/runtime.js", () => ({
+  getWorld: async () => ({ getDeploymentId: async () => "dpl_test" }),
 }));
 
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);
@@ -377,6 +382,47 @@ describe("dispatchChannelRequest", () => {
 
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
       { delivery: { acceptedDeploymentId: "dpl_current" } },
+    );
+  });
+
+  it("tags dev-worker sends with the generation that accepted them", async () => {
+    vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "secret");
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_route",
+        status: "accepted",
+      }),
+    });
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          handler: async (_req, args) => {
+            await args.from("route-token").send("hello", { auth: null });
+            return new Response("ok");
+          },
+          fetch: async () => new Response("ok"),
+          adapter: { kind: "channel:webhook" },
+          logicalPath: "agent/channels/webhook.ts",
+          method: "POST",
+          name: "webhook",
+          sourceId: "channel-webhook",
+          sourceKind: "module",
+          urlPath: "/webhook",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /webhook",
+      DEVELOPMENT_ARTIFACTS_CONFIG,
+    );
+
+    expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
+      { delivery: { acceptedDeploymentId: "dpl_test" } },
     );
   });
 

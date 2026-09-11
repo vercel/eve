@@ -45,10 +45,13 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
   return {
     windowTransitions,
     async claimAuthorization() {},
-    async claimStable() {},
+    async claimSessionHook() {},
     consumeNext() {},
     hasReadyAuthorization() {
       return authorizationReady;
+    },
+    async hasPending() {
+      return remaining.length > 0;
     },
     async next() {
       const read = remaining.shift();
@@ -60,7 +63,8 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
       if (read === undefined) throw new Error("Mock inbox exhausted.");
       return read;
     },
-    async rekeyContinuation() {},
+    sessionHookTokens: ["stable"],
+    restore() {},
     setAuthorizationWindow(open: boolean) {
       windowTransitions.push(open);
     },
@@ -111,7 +115,7 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
     bufferedDeliveries: [],
     bufferedSessionControls: [],
     commandInbox: inbox,
-    driverWritable: new WritableStream<Uint8Array>(),
+    sessionWritable: new WritableStream<Uint8Array>(),
     stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
   };
 }
@@ -387,15 +391,17 @@ describe("nextTurnDelivery routing", () => {
     ];
     const commandInbox: SessionCommandInbox = {
       claimAuthorization: vi.fn(),
-      claimStable: vi.fn(),
+      claimSessionHook: vi.fn(),
       consumeNext: vi.fn(),
       hasReadyAuthorization: vi.fn(() => false),
+      hasPending: vi.fn(async () => commands.length > 0),
       next: vi.fn(async () => ({ done: false as const, value: commands.shift()! })),
       nextWithSource: vi.fn(async () => ({
         result: { done: false as const, value: commands.shift()! },
         source: "session" as const,
       })),
-      rekeyContinuation: vi.fn(),
+      restore: vi.fn(),
+      sessionHookTokens: ["stable"],
       setAuthorizationWindow: vi.fn(),
     };
 
@@ -404,7 +410,7 @@ describe("nextTurnDelivery routing", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      driverWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       stateCursor,
     });
 

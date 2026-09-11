@@ -86,6 +86,8 @@ describe("session-limit continuation decline integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -158,6 +160,8 @@ describe("session-limit continuation decline integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Delegate through Workflow to a subagent: summarize the weather." },
           serializedContext: {
             ...buildSerializedContext({

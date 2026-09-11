@@ -3,18 +3,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eAgentConfig({
-    mock: ({ lastUserMessage }) =>
-      lastUserMessage?.includes("Please wait for cross-version follow-up.") === true
-        ? {
-            toolCalls: [
-              {
-                id: "wait-for-cancellation",
-                input: {},
-                name: "wait-for-cancellation",
-              },
-            ],
-          }
-        : `Mock reply: ${lastUserMessage ?? ""}`,
+    mock: ({ lastUserMessage }) => `Mock reply: ${lastUserMessage ?? ""}`,
   }),
   reasoning: "high",
 });

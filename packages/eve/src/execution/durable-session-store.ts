@@ -7,10 +7,9 @@
  * `"eve.session"` stream remains as a fallback for old in-flight
  * sessions that only carry a small state handle.
  *
- * The driver workflow run is pinned to the deployment that called
- * `start()`; child turn workflows run on latest. Both
+ * The owning session workflow carries this state across turns. Both
  * {@link DurableSessionState} and {@link DurableSessionSnapshot} carry
- * a `version` so a pinned driver can ferry shapes written by newer
+ * a `version` so a pinned owner can ferry shapes written by newer
  * steps. Adding optional fields is forward-compatible (devalue
  * preserves unknown POJO fields); shape-breaking changes bump
  * `version` and add a migrator.
@@ -39,12 +38,12 @@ const DURABLE_SESSION_READ_TIMEOUT_MS = 10_000;
  * workflow body needs without taking a step boundary: identity, the
  * hook continuation token,
  * `hasProxyInputRequests` (a closed-contract short-circuit that lets
- * the driver skip a per-delivery proxy-routing step when no
+ * the owner skip a per-delivery proxy-routing step when no
  * descendant subagent is active), and `emissionState` (so workflow-body
  * framework steps can stamp protocol events
  * with `{ turnId, sequence, stepIndex }` without reading the full
  * durable session). All other control-plane state travels via
- * {@link import("#execution/next-driver-action.js").NextDriverAction}.
+ * {@link import("#execution/turn-step.js").TurnOutcome}.
  * `snapshot` is optional so old stream-backed states can still read
  * from the legacy `eve.session` fallback.
  */

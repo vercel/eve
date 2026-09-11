@@ -91,7 +91,7 @@ interface WeatherAuthRuntime {
  * A get_weather tool behind an interactive authorization: getToken always
  * requires sign-in, and completeAuthorization mints `weather-token` from the
  * `oauth-code` callback. Shared by the callback-resume and
- * challenge-stays-open driver tests.
+ * challenge-stays-open owner tests.
  */
 async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
@@ -211,6 +211,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -329,6 +331,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -465,6 +469,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -532,6 +538,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -619,6 +627,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -650,10 +660,10 @@ describe("workflowEntry integration", () => {
         // A cancel with no active turn is consumed by the parked wait
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
-        // session activity re-parks the driver.
+        // session activity re-parks the owner.
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, { kind: "cancel" });
-        // Let the driver consume the no-op cancel and re-enter the parked
+        // Let the owner consume the no-op cancel and re-enter the parked
         // wait before the callback fires; back-to-back resumes could
         // otherwise surface the callback in the first wait iteration and
         // mask a wait that ignores callbacks after a consumed cancel.
@@ -703,6 +713,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             acceptedDeploymentId: "dpl_inline",
@@ -798,6 +810,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -826,6 +840,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "identify these events" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -892,6 +908,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -957,6 +975,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const child = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "delegated first turn" },
           serializedContext: buildSerializedContext({
             channelKind: "subagent",
@@ -1040,6 +1060,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const owner = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "owner message" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1056,6 +1078,8 @@ describe("workflowEntry integration", () => {
 
       const contender = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           continuationConflictCommand: {
             auth: null,
             kind: "send",
@@ -1103,6 +1127,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "summarize this", outputSchema },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1153,6 +1179,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1194,6 +1222,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1225,6 +1255,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1256,6 +1288,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "session tag round-trip" },
             serializedContext,
           },
@@ -1313,6 +1347,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "subagent tag round-trip" },
             serializedContext,
           },

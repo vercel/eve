@@ -4112,8 +4112,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
         gate.resolve();
         return { sessionId: "session_test", status: "accepted" as const };
       }
-      // The first request raced the dispatch window: the turn workflow has
-      // not claimed its cancel hook yet, so the server reports no turn.
+      // The first request arrived before the owner began the turn.
       return { status: "no_active_turn" as const };
     });
     const prompts: Array<string | undefined> = ["hello", undefined];

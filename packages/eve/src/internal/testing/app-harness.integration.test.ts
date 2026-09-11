@@ -27,6 +27,8 @@ describe("AppHarness pilot", () => {
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello pilot harness" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -73,6 +75,8 @@ describe("AppHarness pilot", () => {
       runtimeA.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "hello tenant-a" },
             serializedContext: buildSerializedContext({
               channelKind: "http",
@@ -86,6 +90,8 @@ describe("AppHarness pilot", () => {
       runtimeB.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "hello tenant-b" },
             serializedContext: buildSerializedContext({
               channelKind: "http",

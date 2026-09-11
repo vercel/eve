@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
-  buildTurnAttributes,
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
   isWorkflowTraceContentVisible,
@@ -402,50 +401,6 @@ describe("buildSubagentRootAttributes", () => {
     });
 
     expect(attrs["$eve.trace_id"]).toBe("f".repeat(32));
-  });
-});
-
-describe("buildTurnAttributes", () => {
-  it("emits type=turn with parent and root session", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      rootSessionId: "wrun_session_123",
-      serializedContext: slackChannelCtx,
-    });
-
-    expect(attrs).toEqual({
-      "$eve.channel_request_id": undefined,
-      "$eve.is_otel_trace_enabled": false,
-      "$eve.is_trace_content_visible": true,
-      "$eve.trace_id": undefined,
-      "$eve.type": "turn",
-      "$eve.parent": "wrun_session_123",
-      "$eve.root": "wrun_session_123",
-    });
-  });
-
-  it("emits the channel request id when present", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      requestId: "req_turn",
-      rootSessionId: "wrun_session_123",
-      serializedContext: slackChannelCtx,
-    });
-
-    expect(attrs["$eve.channel_request_id"]).toBe("req_turn");
-  });
-
-  it("emits $eve.trace_id from a sampled trace seed", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      rootSessionId: "wrun_session_123",
-      serializedContext: {
-        ...slackChannelCtx,
-        "eve.sessionTraceSeed": { spanId: "c".repeat(16), traceFlags: 1, traceId: "d".repeat(32) },
-      },
-    });
-
-    expect(attrs["$eve.trace_id"]).toBe("d".repeat(32));
   });
 });
 

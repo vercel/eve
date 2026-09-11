@@ -10,7 +10,6 @@ import {
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
-import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { projectToDurableSession } from "#execution/session.js";
 
 const getRunMock = vi.hoisted(() => vi.fn());
@@ -26,9 +25,7 @@ afterEach(() => {
 
 /**
  * Pins the cross-version wire contract: `version` discriminators,
- * spread-only forwarding (preserving unknown fields), and the closed
- * `NextDriverAction` dispatch surface. Breakage here means in-flight
- * sessions on a pinned older driver lose data on upgrade.
+ * and spread-only forwarding that preserves unknown fields.
  */
 describe("durable-session-store cross-version contract", () => {
   it("stamps `DurableSessionState.version` and never carries session-shape flags", () => {
@@ -51,8 +48,8 @@ describe("durable-session-store cross-version contract", () => {
       stepIndex: 0,
       turnId: "",
     });
-    // Closed contract: pending-batch flags live on `NextDriverAction`
-    // arms, not on the driver-visible state.
+    // Pending-batch flags remain execution results, not durable session state.
+    // arms, not on the owner-visible state.
     expect(state).not.toHaveProperty("hasPendingInputBatch");
     expect(state).not.toHaveProperty("hasPendingCoordinationBatch");
     expect(state).not.toHaveProperty("pendingCoordinationCallIds");
@@ -89,7 +86,7 @@ describe("durable-session-store cross-version contract", () => {
       version: 1,
     };
 
-    // Mirror the driver's spread-only forwarding pattern.
+    // Mirror the owner's spread-only forwarding pattern.
     const passedThrough: DurableSessionState = { ...futureState };
     expect((passedThrough as { futureFlag?: unknown }).futureFlag).toEqual({
       hint: "experimental",
@@ -111,39 +108,6 @@ describe("durable-session-store cross-version contract", () => {
     expect((passedThrough.session as { futureField?: unknown }).futureField).toEqual({
       kind: "experimental",
     });
-  });
-
-  it("NextDriverAction `kind` is the closed driver dispatch surface", () => {
-    const baseState: DurableSessionState = {
-      continuationToken: "http:test",
-      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
-      hasProxyInputRequests: false,
-      sessionId: "wrun_action",
-      version: 1,
-    };
-    const ctx: Record<string, unknown> = { "eve.sessionId": "wrun_action" };
-
-    const arms: NextDriverAction[] = [
-      { kind: "done", output: "ok", serializedContext: ctx, sessionState: baseState },
-      { kind: "park", serializedContext: ctx, sessionState: baseState },
-      {
-        kind: "dispatch-coordination",
-        pendingCallIds: ["call-1"],
-        serializedContext: ctx,
-        sessionState: baseState,
-      },
-      {
-        kind: "dispatch-workflow-tasks",
-        pendingCallIds: ["call-2"],
-        serializedContext: ctx,
-        sessionState: baseState,
-      },
-    ];
-
-    // Lock the closed-contract kind set. Adding a new arm is breaking.
-    expect(new Set(arms.map((a) => a.kind))).toEqual(
-      new Set(["done", "park", "dispatch-coordination", "dispatch-workflow-tasks"]),
-    );
   });
 
   it("creates state with the latest durable snapshot", () => {

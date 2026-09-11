@@ -24,7 +24,7 @@ export async function startSessionTimeoutStep(
   return { runId: run.runId };
 }
 
-/** Resumes the owning driver when its durable timer elapses. */
+/** Resumes the owning session when its durable timer elapses. */
 export async function signalSessionTimeoutStep(input: { readonly token: string }): Promise<void> {
   "use step";
 

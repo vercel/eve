@@ -64,7 +64,6 @@ describe("background agent invocation routing", () => {
     });
     const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from: {
         callId: "call-1",
         execution: "background",
@@ -129,7 +128,6 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",
@@ -213,59 +211,6 @@ describe("background agent invocation routing", () => {
       "call-1:reply-1",
       "call-1:reply-2",
     ]);
-  });
-
-  it("does not send the invocation before the owning task is admitted", async () => {
-    const admission = Promise.withResolvers<{ readonly status: "accepted" }>();
-    const replies: AgentInvocationReply[] = [
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1:agent-reply",
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "research",
-          } as never,
-        ],
-      },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      admission: admission.promise,
-      from: {
-        callId: "call-1",
-        execution: "background",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
-    const result = agent(ctx, "research", { message: "Find it" });
-    await Promise.resolve();
-    expect(mocks.createHook).not.toHaveBeenCalled();
-    expect(mocks.resumeHook).not.toHaveBeenCalled();
-
-    admission.resolve({ status: "accepted" });
-    await expect(result).resolves.toBe("done");
-    expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
   });
 
   it("waits for agent calls inside a blocking workflow tool", async () => {
@@ -388,7 +333,7 @@ describe("background agent invocation routing", () => {
         callId: "call-1",
         childContinuationToken: "child-continuation",
         childSessionId: "child-1",
-        childSessionInbox: advertiseInbox ? { sessionId: "child-1", version: 1 } : undefined,
+        childSessionInbox: advertiseInbox ? { sessionId: "child-1" } : undefined,
         event: {
           requests: [
             {
@@ -448,7 +393,6 @@ describe("background agent invocation routing", () => {
       };
       const ctx = { callId: "call-1" } as ToolContext;
       attachWorkflowToolRunContext(ctx, {
-        admission: Promise.resolve({ status: "accepted" }),
         from,
         owner: {
           inbox: "owner-inbox",
@@ -533,7 +477,6 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",
@@ -601,7 +544,6 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",

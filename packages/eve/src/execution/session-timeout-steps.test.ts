@@ -22,13 +22,14 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 }));
 
 const TIMEOUT_HOOK = {
-  metadata: { sessionInboxWireVersion: 1 },
+  metadata: { sessionId: "session-1" },
   runId: "session-1",
   token: "session-1:session-timeout",
 };
 
 beforeEach(() => {
   getHookByTokenMock.mockResolvedValue(TIMEOUT_HOOK);
+  getWorldMock.mockResolvedValue({ getDeploymentId: async () => "dpl_current" });
 });
 
 afterEach(() => {
@@ -50,7 +51,9 @@ describe("session timeout steps", () => {
     };
 
     await expect(startSessionTimeoutStep(input)).resolves.toEqual({ runId: "timer-run" });
-    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input]);
+    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input], {
+      deploymentId: "dpl_current",
+    });
   });
 
   it("signals the owning session hook", async () => {
@@ -60,7 +63,6 @@ describe("session timeout steps", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith(TIMEOUT_HOOK, {
       kind: "session-timeout",
-      version: 1,
     });
   });
 

@@ -166,7 +166,7 @@ export default defineAgent({
 `sessionTimeoutMs` sets an absolute lifetime for every session, including
 delegated sessions. It defaults to 30 days, starts at creation, and survives
 restarts and redeployments. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases the continuation; the next
+then emits `session.completed` and releases every continuation address; the next
 qualifying channel message starts fresh. Set it to `false` to disable the
 timeout. Expiration does not delete stored session data.
 
@@ -304,10 +304,10 @@ export default defineAgent({
 });
 ```
 
-This will be applied to the session run and every turn run the session
-dispatches, as well as the run that collects session activity. Runs eve
-starts for other purposes keep the world's default: session timeouts,
-background tasks, and [workflow tools](./tools/workflows).
+This applies to every run that owns the session, including successor owners
+started after a deployment handoff, and to the run that collects session
+activity. Runs eve starts for other purposes keep the world's default: session
+timeouts, background tasks, and [workflow tools](./tools/workflows).
 
 The value applies per agent. A [subagent](./subagents) that runs its own session
 uses its own value, unlike `experimental.workflow.world`, which is root-only.

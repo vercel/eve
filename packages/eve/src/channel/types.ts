@@ -494,10 +494,11 @@ export interface RunInput {
   readonly activityObserver?: ActivityObserverConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
-   * re-key the session during the first turn via
+   * add a continuation address during the first turn via
    * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
-   * acceptable when full identity isn't known until the first message. ID-only
+   * acceptable when full identity isn't known until the first message. Earlier
+   * addresses remain valid after a rekey. ID-only
    * transports omit this field.
    */
   readonly continuationToken?: string;

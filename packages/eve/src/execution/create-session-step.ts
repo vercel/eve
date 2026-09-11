@@ -18,7 +18,7 @@ import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js
 /**
  * Result returned by {@link createSessionStep}.
  *
- * Exposes the projected {@link DurableSessionState} the driver needs to
+ * Exposes the projected {@link DurableSessionState} the owner needs to
  * drive the turn loop.
  */
 export interface CreateSessionStepResult {

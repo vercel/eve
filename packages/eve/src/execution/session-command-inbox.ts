@@ -1,28 +1,15 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type {
-  DeliverHookPayload,
-  RuntimeActionResultHookPayload,
-  SessionCommand,
-  SessionTimeoutHookPayload,
-} from "#channel/types.js";
+import type { HookPayload, SessionCommand } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import {
-  SESSION_INBOX_WIRE_VERSION,
-  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
-  WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY,
-} from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/wire/session-inbox-contract.js";
 /**
- * Payloads accepted by a session driver's stable and channel aliases.
+ * Payloads accepted by a session owner's stable and channel aliases.
  *
- * This union is the hook's transport typing only. The driver routes payloads
+ * This union is the hook's transport typing only. The owner routes payloads
  * after the inbox surfaces them; the inbox owns no command semantics.
  */
-export type SessionInboxPayload =
-  | DeliverHookPayload
-  | RuntimeActionResultHookPayload
-  | SessionCommand
-  | SessionTimeoutHookPayload;
+export type SessionInboxPayload = HookPayload | SessionCommand;
 
 interface HookRead {
   readonly order: number;
@@ -36,7 +23,6 @@ interface SessionCommandHookState {
   closed: boolean;
   enabled: boolean;
   pending: boolean;
-  retired: boolean;
   resolved?: HookRead;
 }
 
@@ -44,20 +30,27 @@ interface SessionCommandHookState {
 export type SessionInboxSource = "authorization" | "session";
 
 /**
- * Multiplexes one stable session hook, one rekeyable channel alias, and one
- * window-gated authorization-callback hook.
+ * Multiplexes an additive set of session-address hooks and one window-gated
+ * authorization-callback hook. The stable session inbox is the first session
+ * hook; every continuation rekey adds another hook without retiring an older
+ * address.
  */
 export interface SessionCommandInbox {
+  /** Session-address hook tokens in claim order, beginning with the stable inbox. */
+  readonly sessionHookTokens: readonly string[];
   /**
    * Claims the session's authorization-callback hook as an inbox source.
    * Its reads stay stashed until {@link setAuthorizationWindow} opens, so
    * callbacks never surface as ordinary session activity.
    */
   claimAuthorization(token: string): Promise<void>;
-  claimStable(token: string): Promise<void>;
+  /** Adds one session address to the merged inbox. Repeated claims are idempotent. */
+  claimSessionHook(token: string): Promise<void>;
   consumeNext(): void;
   /** Whether an authorization read is already eligible to be consumed. */
   hasReadyAuthorization(): boolean;
+  /** Whether an accepted command is already waiting behind the current one. */
+  hasPending(): Promise<boolean>;
   next(): Promise<IteratorResult<SessionInboxPayload>>;
   /**
    * Like {@link next} but reports which hook family produced the read.
@@ -69,7 +62,8 @@ export interface SessionCommandInbox {
     result: IteratorResult<SessionInboxPayload>;
     source: SessionInboxSource;
   }>;
-  rekeyContinuation(token: string): Promise<void>;
+  /** Restores commands drained while an abandoned handoff released the hooks. */
+  restore(payloads: readonly SessionInboxPayload[]): void;
   /** Opens or closes the surfacing window for authorization-callback reads. */
   setAuthorizationWindow(open: boolean): void;
 }
@@ -77,20 +71,20 @@ export interface SessionCommandInbox {
 /** Adds workflow-entry lifecycle ownership to a session command inbox. */
 export interface SessionCommandInboxHandle extends SessionCommandInbox {
   dispose(): Promise<void>;
+  /** Releases all claims and returns accepted reads not yet consumed. */
+  release(): Promise<SessionInboxPayload[]>;
 }
 
 /**
- * Creates the command inbox owned by one session driver.
+ * Creates the command inbox owned by one session owner.
  *
- * The stable hook is retained for the session's lifetime. Rekeying replaces
- * only the channel alias. Reads already committed to a retired alias remain in
- * the multiplexed queue and are consumed exactly once.
+ * Every claimed session hook is retained for the session's lifetime. Each
+ * source keeps one pending iterator read so deliveries through any historical
+ * continuation address join the same ordered queue exactly once.
  */
-export function createSessionCommandInbox(): SessionCommandInboxHandle {
-  let stable: SessionCommandHookState | undefined;
-  let continuation: SessionCommandHookState | undefined;
+export function createSessionCommandInbox(sessionId: string): SessionCommandInboxHandle {
+  const sessionHooks: SessionCommandHookState[] = [];
   let authorization: SessionCommandHookState | undefined;
-  const retired: SessionCommandHookState[] = [];
   const ready: HookRead[] = [];
   let nextOrder = 0;
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
@@ -108,12 +102,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
 
     state.pending = true;
     state.resolved = undefined;
-    const next = state.retired
-      ? Promise.resolve(state.hook).then((value): IteratorResult<SessionInboxPayload> => ({
-          done: false,
-          value,
-        }))
-      : state.iterator.next();
+    const next = state.iterator.next();
     void next.then(
       (result) => {
         const read: HookRead = { order: nextOrder++, result, state };
@@ -121,7 +110,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         if (state.enabled) enqueue(read);
       },
       () => {
-        // Retired hooks reject after their committed payloads are exhausted.
+        // Hook disposal rejects any iterator read that did not commit a payload.
       },
     );
   };
@@ -132,14 +121,9 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   const createState = (token: string): SessionCommandHookState => {
-    // Stamp the consumer's wire capability so producers can select an encoder
-    // pre-resume. Hooks created before this stamp carry no wire marker:
-    // markerless means the consumer predates the capability and accepts a
-    // legacy shape.
     const hook = createHook<SessionInboxPayload>({
       metadata: {
-        [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
-        [WORKFLOW_TASK_AUTHORIZATION_METADATA_KEY]: true,
+        [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId,
       },
       token,
     });
@@ -149,18 +133,15 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       hook,
       iterator: hook[Symbol.asyncIterator](),
       pending: false,
-      retired: false,
     };
   };
 
   const states = (): readonly SessionCommandHookState[] =>
-    [stable, continuation, authorization, ...retired].filter(
-      (state): state is SessionCommandHookState => state !== undefined,
-    );
+    authorization === undefined ? sessionHooks : [...sessionHooks, authorization];
 
   const nextRead = (): Promise<IteratorResult<SessionInboxPayload>> => {
-    if (stable === undefined) {
-      throw new Error("Cannot wait for session commands before claiming the stable inbox.");
+    if (sessionHooks.length === 0) {
+      throw new Error("Cannot wait for session commands before claiming a session hook.");
     }
 
     if (offered !== null) return offered;
@@ -172,7 +153,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       offeredRead = {
         order: nextOrder++,
         result: { done: true, value: undefined },
-        state: stable,
+        state: sessionHooks[0]!,
       };
       offered = Promise.resolve(offeredRead.result);
       return offered;
@@ -193,6 +174,10 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   return {
+    get sessionHookTokens(): readonly string[] {
+      return sessionHooks.map((state) => state.hook.token);
+    },
+
     async claimAuthorization(token: string): Promise<void> {
       if (authorization !== undefined) {
         if (authorization.hook.token === token) return;
@@ -201,21 +186,20 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
 
       const candidate = createState(token);
       await claimHookOwnership(candidate.hook);
-      // Stays disabled until the driver opens the authorization window;
+      // Stays disabled until the owner opens the authorization window;
       // resolved reads stash on the state and enqueue when it opens.
       authorization = candidate;
+      arm(candidate);
     },
 
-    async claimStable(token: string): Promise<void> {
-      if (stable !== undefined) {
-        if (stable.hook.token === token) return;
-        throw new Error("A session command inbox cannot change its stable token.");
-      }
+    async claimSessionHook(token: string): Promise<void> {
+      if (!token || sessionHooks.some((state) => state.hook.token === token)) return;
 
       const candidate = createState(token);
       await claimHookOwnership(candidate.hook);
+      sessionHooks.push(candidate);
       enable(candidate);
-      stable = candidate;
+      arm(candidate);
     },
 
     consumeNext(): void {
@@ -223,30 +207,31 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("Cannot consume a session command before it resolves.");
       }
 
-      offeredRead.state.pending = false;
-      offeredRead.state.resolved = undefined;
-      if (offeredRead.result.done) offeredRead.state.closed = true;
+      const consumed = offeredRead;
+      consumed.state.pending = false;
+      consumed.state.resolved = undefined;
+      if (consumed.result.done) consumed.state.closed = true;
       offeredRead = undefined;
       offered = null;
+      if (!consumed.result.done) arm(consumed.state);
     },
 
     async dispose(): Promise<void> {
-      // Disposed without closing iterators: a session cancelled while a
-      // durable read is in flight only honors `return()` after that read
-      // settles, so hooks are swept instead.
-      const active = [continuation, stable, authorization].filter(
-        (state): state is SessionCommandHookState => state !== undefined,
-      );
-      continuation = undefined;
-      stable = undefined;
-      authorization = undefined;
-      await Promise.all(active.map(async (state) => await disposeHook(state.hook)));
+      await this.release();
     },
 
     hasReadyAuthorization(): boolean {
       if (authorization?.enabled !== true || authorization.resolved === undefined) return false;
       if (offeredRead !== undefined) return offeredRead.state === authorization;
       return ready[0]?.state === authorization;
+    },
+
+    async hasPending(): Promise<boolean> {
+      for (const state of states()) arm(state);
+      await Promise.resolve();
+      if (offeredRead !== undefined && !offeredRead.result.done) return true;
+      if (ready.some((read) => !read.result.done)) return true;
+      return states().some((state) => state.resolved !== undefined && !state.resolved.result.done);
     },
 
     next: nextRead,
@@ -295,39 +280,47 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       if (enqueued !== -1) ready.splice(enqueued, 1);
     },
 
-    async rekeyContinuation(token: string): Promise<void> {
-      if (!token || continuation?.hook.token === token) return;
-
-      const candidate = createState(token);
-      if (continuation === undefined) {
-        await claimHookOwnership(candidate.hook);
-        enable(candidate);
-        continuation = candidate;
-        if (offered !== null) arm(candidate);
-        return;
+    restore(payloads: readonly SessionInboxPayload[]): void {
+      if (sessionHooks.length === 0) {
+        throw new Error("Cannot restore session commands before reclaiming the session hooks.");
       }
+      for (const value of payloads) {
+        enqueue({
+          order: nextOrder++,
+          result: { done: false, value },
+          state: sessionHooks[0]!,
+        });
+      }
+    },
 
-      arm(candidate);
-      await claimHookOwnership(candidate.hook);
-      enable(candidate);
-
-      const previous = continuation;
-      continuation = candidate;
-      arm(previous);
-      try {
-        await disposeHook(previous.hook);
-      } catch (error) {
-        continuation = undefined;
-        try {
-          await disposeHook(candidate.hook);
-        } catch {
-          // The previous-alias release failure is authoritative.
+    async release(): Promise<SessionInboxPayload[]> {
+      const released = states();
+      const active =
+        authorization === undefined ? [...sessionHooks] : [...sessionHooks, authorization];
+      const accepted = new Set<HookRead>();
+      const collect = () => {
+        if (offeredRead !== undefined && !offeredRead.result.done) accepted.add(offeredRead);
+        for (const read of ready) if (!read.result.done) accepted.add(read);
+        for (const state of released) {
+          if (state.resolved !== undefined && !state.resolved.result.done)
+            accepted.add(state.resolved);
         }
-        throw error;
-      }
-
-      previous.retired = true;
-      retired.push(previous);
+      };
+      for (const state of released) arm(state);
+      await Promise.resolve();
+      collect();
+      await Promise.all(active.map(async (state) => await disposeHook(state.hook)));
+      await Promise.resolve();
+      collect();
+      sessionHooks.splice(0, sessionHooks.length);
+      authorization = undefined;
+      ready.splice(0, ready.length);
+      offered = null;
+      offeredRead = undefined;
+      wake = undefined;
+      return [...accepted]
+        .sort((left, right) => left.order - right.order)
+        .map((read) => read.result.value);
     },
   };
 }

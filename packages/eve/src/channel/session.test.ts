@@ -8,7 +8,13 @@ import {
 } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationHookTokensKey,
+  ContinuationTokenKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
@@ -269,7 +275,7 @@ describe("buildSessionHandle", () => {
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
 
-  it("is idempotent: a redundant continuation.rekey does not write", () => {
+  it("records every distinct continuation address without duplicating redundant rekeys", () => {
     // Authors call continuation.rekey from hot-path event handlers
     // (e.g. Slack's `message.completed`). The handler can't always
     // know whether the token has actually changed, so the SessionHandle
@@ -299,8 +305,16 @@ describe("buildSessionHandle", () => {
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
 
     session.continuation?.rekey("C1:T2");
-    expect(writeCount).toBe(1);
+    session.continuation?.rekey("C1:T3");
+    session.continuation?.rekey("C1:T2");
+
+    expect(writeCount).toBe(6);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T2");
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual([
+      "slack:C1:T1",
+      "slack:C1:T2",
+      "slack:C1:T3",
+    ]);
   });
 
   it("throws clearly when no namespaced placeholder token exists", () => {

@@ -53,7 +53,7 @@ export interface CancelledTurnSettleResult {
 /**
  * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
  * drops pending coordination state, and persists the between-turns
- * session. Runs in the *driver* run, whose wake sources exclude the
+ * session. Runs in the owner, whose wake sources exclude the
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(input: {

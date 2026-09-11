@@ -13,15 +13,15 @@ export async function sessionCommandInboxWorkflow(input: {
 }): Promise<string[]> {
   "use workflow";
 
-  const inbox = createSessionCommandInbox();
   const { workflowRunId } = getWorkflowMetadata();
+  const inbox = createSessionCommandInbox(workflowRunId);
 
   try {
-    await inbox.claimStable(sessionCommandHookToken(workflowRunId));
-    await inbox.rekeyContinuation(input.token);
+    await inbox.claimSessionHook(sessionCommandHookToken(workflowRunId));
+    await inbox.claimSessionHook(input.token);
     const pending = inbox.next();
     if (input.nextToken !== undefined) {
-      await inbox.rekeyContinuation(input.nextToken);
+      await inbox.claimSessionHook(input.nextToken);
     }
 
     const messages: string[] = [];

@@ -23,6 +23,7 @@ import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -77,7 +78,7 @@ export async function dispatchChannelRequest(
       span?.setAttribute("eve.channel.kind", channelKind);
     }
 
-    const routeArgs = buildRouteArgs(
+    const routeArgs = await buildRouteArgs(
       event,
       bundle,
       matchedChannel.name,
@@ -149,7 +150,7 @@ export async function dispatchChannelWebSocketRequest(
     getChannelInstrumentationKind(matchedChannel.definition) ??
     matchedChannel.adapter?.kind ??
     "channel";
-  const routeArgs = buildRouteArgs(
+  const routeArgs = await buildRouteArgs(
     event,
     bundle,
     matchedChannel.name,
@@ -206,14 +207,14 @@ async function withDevelopmentVercelOidcContext<T>(
   );
 }
 
-function buildRouteArgs(
+async function buildRouteArgs(
   event: H3Event,
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   channelName: string,
   channelKind: string,
   config: NitroArtifactsConfig,
   requestSpan: Span | undefined,
-): BuiltRouteArgs {
+): Promise<BuiltRouteArgs> {
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
   const backgroundTasks: Promise<unknown>[] = [];
@@ -229,7 +230,7 @@ function buildRouteArgs(
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
   const requestSpanContext = requestSpan?.spanContext();
-  const acceptedDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
+  const acceptedDeploymentId = await resolveAcceptedDeploymentId(config);
   const deliverySource = {
     acceptedDeploymentId,
     channelKind,
@@ -299,6 +300,28 @@ function buildRouteArgs(
     args,
     backgroundTasks,
   };
+}
+
+async function resolveAcceptedDeploymentId(
+  config: NitroArtifactsConfig,
+): Promise<string | undefined> {
+  const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  if (hosted !== undefined && hosted.length > 0) return validateDeploymentId(hosted);
+
+  // Scenario and inspection callers can invoke a development route directly,
+  // outside the dev worker whose transport secret proves that its World is
+  // installed. Those read-only calls keep the pre-existing unstamped shape.
+  if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
+    return undefined;
+  }
+  return validateDeploymentId(await (await getWorld()).getDeploymentId());
+}
+
+function validateDeploymentId(deploymentId: string): string {
+  if (deploymentId.length === 0 || deploymentId === "latest") {
+    throw new Error("Channel ingress could not resolve an exact deployment id.");
+  }
+  return deploymentId;
 }
 
 function readVercelRequestId(headers: Headers): string | undefined {

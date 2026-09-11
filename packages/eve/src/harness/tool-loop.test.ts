@@ -5704,7 +5704,7 @@ describe("createToolLoopHarness", () => {
 
         expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
         // A task cannot park for a user retry; the failure is the task's
-        // terminal result instead of a `next: null` park that turnWorkflow
+        // terminal result instead of a `next: null` park that session execution
         // would reject.
         expect(result.next).toEqual({
           done: true,

@@ -1,7 +1,7 @@
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
-/** `resumeHook` as a step, so the runtime API stays out of the driver. */
+/** `resumeHook` as a step, so the runtime API stays out of the owner. */
 export async function resumeHookStep(
   token: string,
   payload: unknown,
