@@ -236,4 +236,103 @@ body`;
     );
     expect(Reflect.get(globalThis, "__eveScheduleRce")).toBeUndefined();
   });
+
+  it("preserves flat string metadata in skill markdown frontmatter", () => {
+    const markdown = `---
+description: Use the weather tool before answering forecast questions.
+metadata:
+  version: "1.0"
+  author: eve
+---
+When the user asks about weather, call the weather tool before answering.`;
+
+    expect(lowerSkillMarkdown(markdown)).toEqual(
+      defineSkill({
+        description: "Use the weather tool before answering forecast questions.",
+        metadata: {
+          version: "1.0",
+          author: "eve",
+        },
+        markdown: "When the user asks about weather, call the weather tool before answering.",
+      }),
+    );
+  });
+
+  it("ignores nested metadata fields in skill markdown frontmatter", () => {
+    const markdown = `---
+name: demo
+description: Demo skill.
+metadata:
+  requires:
+    bins:
+      - some-cli
+  cliHelp: some-cli --help
+---
+Body.`;
+
+    expect(lowerSkillMarkdown(markdown)).toEqual(
+      defineSkill({
+        description: "Demo skill.",
+        metadata: {
+          cliHelp: "some-cli --help",
+        },
+        markdown: "Body.",
+      }),
+    );
+  });
+
+  it("omits metadata entirely when all entries are non-string or nested", () => {
+    const markdown = `---
+name: demo
+description: Demo skill.
+metadata:
+  requires:
+    bins:
+      - some-cli
+---
+Body.`;
+
+    expect(lowerSkillMarkdown(markdown)).toEqual(
+      defineSkill({
+        description: "Demo skill.",
+        markdown: "Body.",
+      }),
+    );
+  });
+
+  it("ignores non-object metadata frontmatter without failing", () => {
+    const markdown = `---
+description: Demo skill.
+metadata: not-an-object
+---
+Body.`;
+
+    expect(lowerSkillMarkdown(markdown)).toEqual(
+      defineSkill({
+        description: "Demo skill.",
+        markdown: "Body.",
+      }),
+    );
+  });
+
+  it("requires skill markdown description to be a string", () => {
+    expect(() =>
+      lowerSkillMarkdown(`---
+description:
+  text: invalid
+---
+Body.`),
+    ).toThrow('Expected "description" frontmatter to be a string.');
+  });
+
+  it("requires skill markdown license to be a string", () => {
+    expect(() =>
+      lowerSkillMarkdown(`---
+description: Demo skill.
+license:
+  name: MIT
+---
+Body.`),
+    ).toThrow('Expected "license" frontmatter to be a string.');
+  });
 });

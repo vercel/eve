@@ -238,4 +238,47 @@ describe("discoverSkills (memory)", () => {
       DISCOVER_SKILL_COLLISION,
     ]);
   });
+
+  it("discovers skills with nested metadata by ignoring non-string entries", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "skills/lark-skill/SKILL.md": [
+          "---",
+          "name: demo",
+          "description: Demo skill.",
+          "metadata:",
+          "  requires:",
+          "    bins:",
+          "      - some-cli",
+          "  cliHelp: some-cli --help",
+          "---",
+          "Body.",
+        ].join("\n"),
+      },
+    });
+
+    const result = await discoverSkills({
+      agentRoot: project.agentRoot,
+      source: project.source,
+    });
+    const larkSkillRoot = join(resolve(project.agentRoot), "skills", "lark-skill");
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.skills).toEqual([
+      {
+        description: "Demo skill.",
+        sourceKind: "skill-package",
+        logicalPath: "skills/lark-skill/SKILL.md",
+        markdown: "Body.",
+        metadata: {
+          cliHelp: "some-cli --help",
+        },
+        name: "lark-skill",
+        rootPath: larkSkillRoot,
+        skillFilePath: join(larkSkillRoot, "SKILL.md"),
+        skillId: "lark-skill",
+        sourceId: "skills/lark-skill/SKILL.md",
+      },
+    ]);
+  });
 });
