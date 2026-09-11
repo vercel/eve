@@ -1301,6 +1301,23 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("does not render framework background-task input as a user message", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      {
+        data: {
+          kind: "execution.background_task",
+          message: "Background task task_1 completed.",
+          sequence: 1,
+          turnId: "turn_1",
+        },
+        type: "message.received",
+      },
+    ]);
+
+    expect(data.messages).toEqual([]);
+  });
+
   it("falls back to a single text part when message.received omits parts", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [

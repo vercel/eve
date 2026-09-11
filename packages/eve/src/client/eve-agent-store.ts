@@ -1,17 +1,23 @@
+import { BackgroundTaskFollower } from "#client/background-task-follower.js";
 import { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import {
+  isCurrentTurnBoundaryEvent,
+  summarizeUserContent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
+import {
+  type ActiveTurn,
   assertExclusiveTurnInput,
   collectPendingAuthorizations,
   createAbortSignal,
   createSubmissionId,
   isAbortError,
   isSettledSessionTail,
-  summarizeUserContent,
+  type PendingMessageSubmission,
   toTerminalStreamFailureError,
   updatePendingAuthorizations,
 } from "#client/eve-agent-store-helpers.js";
@@ -39,13 +45,7 @@ export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" |
  */
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
-/**
- * Immutable projected state of an {@link EveAgentStore}, read on every render.
- *
- * `data` is the reducer output, `events` is the raw server stream-event log for
- * this session, `session` is the current serializable cursor, `status` is the
- * turn lifecycle state, and `error` is the last failure (or `undefined`).
- */
+/** Immutable projected state of an {@link EveAgentStore}, read on every render. */
 export interface EveAgentStoreSnapshot<TData> {
   readonly data: TData;
   readonly error: Error | undefined;
@@ -54,13 +54,7 @@ export interface EveAgentStoreSnapshot<TData> {
   readonly status: EveAgentStoreStatus;
 }
 
-/**
- * Hooks invoked while the store processes a turn.
- *
- * `onEvent`, `onError`, `onFinish`, and `onSessionChange` are observe-only.
- * `prepareSend` runs before each turn is sent and may return a modified
- * {@link SendTurnPayload} (for example to attach one-turn client context).
- */
+/** Hooks invoked while the store processes a turn. */
 export interface EveAgentStoreCallbacks<TData> {
   readonly onError?: (error: Error) => void;
   readonly onEvent?: (event: MessageStreamEvent) => void;
@@ -95,38 +89,16 @@ export interface EveAgentStoreInit<TData> {
   readonly session?: ClientSession;
 }
 
-interface PendingMessageSubmission {
-  readonly createdAt: number;
-  readonly id: string;
-  readonly message: string;
-}
-
 const detachStore = Symbol("detachEveAgentStore");
 
-interface ActiveTurn {
-  readonly abortController: AbortController;
-  acceptedFollowUps: number;
-  readonly cancel: () => Promise<CancelSessionResult>;
-  readonly completion: Promise<void>;
-  readonly followUpDispatches: Set<Promise<void>>;
-  receivedFollowUps: number;
-  readonly resolveCompletion: () => void;
-  readonly response: Promise<MessageResponse | undefined>;
-  readonly resolveResponse: (response: MessageResponse | undefined) => void;
-}
-
 /**
- * Framework-agnostic state machine for an eve agent session.
+ * Framework-agnostic state machine for an eve agent session. It manages the
+ * send/stream lifecycle, optimistic projection, and subscriber notification;
+ * framework integrations wrap it with their own reactivity primitives.
  *
- * Manages the send/stream lifecycle, optimistic projection, and subscriber
- * notification; framework integrations (React, Vue) wrap it with their own
- * reactivity primitives.
- *
- * Drives one turn at a time: `send` rejects while a turn is active, and
- * concurrent `resume` calls share one replay. Read the latest projection via
- * the `snapshot` getter, observe changes with `subscribe`, register lifecycle
- * hooks with `setCallbacks`, cancel the durable in-flight turn with `cancel`,
- * and discard all state with `reset`.
+ * `send` rejects while a turn is active; concurrent `resume` calls share one
+ * replay. Use `snapshot`, `subscribe`, `setCallbacks`, `cancel`, and `reset`
+ * to observe and control the store.
  */
 export class EveAgentStore<TData> {
   readonly #client: Client | undefined;
@@ -135,10 +107,9 @@ export class EveAgentStore<TData> {
   readonly #reducer: EveAgentReducer<TData>;
   readonly #subscribers = new Set<() => void>();
 
-  /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
-
   #activeTurn: ActiveTurn | undefined;
+  readonly #backgroundTaskFollower: BackgroundTaskFollower;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #data: TData;
   #error: Error | undefined;
@@ -159,8 +130,6 @@ export class EveAgentStore<TData> {
           headers: init.headers,
           host: init.host ?? "",
         });
-    // Seed the deduper from the saved log so a live stream that replays the
-    // same prefix does not double-apply it.
     const initialEvents: MessageStreamEvent[] = [];
     for (const event of init.initialEvents ?? []) {
       if (this.#seenEvents.admit(event)) initialEvents.push(event);
@@ -179,6 +148,23 @@ export class EveAgentStore<TData> {
 
     this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
     this.#snapshot = this.#createSnapshot();
+    this.#backgroundTaskFollower = new BackgroundTaskFollower({
+      acceptEvent: (event) => this.#acceptServerEvent(event),
+      getSession: () => (this.#activeTurn === undefined ? this.#session : undefined),
+      onError: (error) => {
+        this.#error = toError(error);
+        this.#status = "error";
+        this.#callbacks.onError?.(this.#error);
+        this.#publish();
+      },
+      onWaiting: (session) => {
+        this.#status = "ready";
+        this.#callbacks.onSessionChange?.(session.state);
+        this.#publish();
+        this.#callbacks.onFinish?.(this.#snapshot);
+      },
+    });
+    this.#backgroundTaskFollower.seed(initialEvents);
   }
 
   get snapshot(): EveAgentStoreSnapshot<TData> {
@@ -197,6 +183,8 @@ export class EveAgentStore<TData> {
   }
 
   async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> {
+    const stoppedBackgroundFollower = this.#backgroundTaskFollower.stop();
+    if (stoppedBackgroundFollower !== undefined) await stoppedBackgroundFollower;
     if (this.#activeTurn !== undefined) {
       if (this.#status === "resuming") {
         throw new Error("eve session is resuming.");
@@ -284,6 +272,7 @@ export class EveAgentStore<TData> {
         this.#publish();
         this.#callbacks.onFinish?.(this.#snapshot);
         turn.resolveCompletion();
+        this.#backgroundTaskFollower.start();
       }
     }
   }
@@ -302,6 +291,8 @@ export class EveAgentStore<TData> {
   }
 
   async #resume(): Promise<void> {
+    const stoppedBackgroundFollower = this.#backgroundTaskFollower.stop();
+    if (stoppedBackgroundFollower !== undefined) await stoppedBackgroundFollower;
     if (
       this.#status === "resuming" ||
       this.#status === "streaming" ||
@@ -401,6 +392,7 @@ export class EveAgentStore<TData> {
         this.#publish();
         this.#callbacks.onFinish?.(this.#snapshot);
         turn.resolveCompletion();
+        this.#backgroundTaskFollower.start();
       }
     }
   }
@@ -419,11 +411,13 @@ export class EveAgentStore<TData> {
 
   [detachStore](): void {
     this.#activeTurn?.abortController.abort();
+    void this.#backgroundTaskFollower.stop();
   }
 
   reset(): void {
     const turn = this.#activeTurn;
     this.#activeTurn = undefined;
+    this.#backgroundTaskFollower.reset();
     turn?.resolveResponse(undefined);
     turn?.resolveCompletion();
     turn?.abortController.abort();
@@ -575,6 +569,7 @@ export class EveAgentStore<TData> {
   ): void {
     if (!this.#seenEvents.admit(event)) return;
     this.#events = [...this.#events, event];
+    this.#backgroundTaskFollower.observe(event);
     this.#applyServerEvent(event);
     this.#callbacks.onEvent?.(event);
     if (options.transitionToStreaming ?? true) this.#status = "streaming";
@@ -584,7 +579,7 @@ export class EveAgentStore<TData> {
 
   #applyServerEvent(event: MessageStreamEvent): void {
     const pendingSubmission = this.#pendingMessageSubmissions[0];
-    if (event.type === "message.received" && pendingSubmission !== undefined) {
+    if (event.type === "message.received" && event.data.message === pendingSubmission?.message) {
       const submissionId = pendingSubmission.id;
       this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.slice(1);
       this.#replaceProjectionEvent(

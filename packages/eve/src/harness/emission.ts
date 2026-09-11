@@ -63,6 +63,7 @@ import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorizat
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import { frameworkMessageKindForStepInput } from "#harness/messages.js";
 
 export {
   getHarnessEmissionState,
@@ -91,8 +92,10 @@ export async function emitTurnPreamble(
   await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
+    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
+        ...(kind === "execution.background_task" ? { kind } : {}),
         message: input.message,
         sequence: state.sequence,
         turnId,
