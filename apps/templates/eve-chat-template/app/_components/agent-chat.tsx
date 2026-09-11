@@ -1,5 +1,6 @@
 "use client";
 
+import { Client } from "eve/client";
 import type {
   AuthorizationRequiredStreamEvent,
   ClientSession,
@@ -49,27 +50,6 @@ import type { ActiveChat, SetupStatus, Viewer } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
 type AgentSnapshot = EveAgentStoreSnapshot<EveMessageData>;
-type PersistedClientSession = {
-  readonly state: ClientSessionState | undefined;
-  readonly respond: ClientSession["respond"];
-  readonly send: ClientSession["send"];
-  setState: (session: ClientSessionState | undefined) => void;
-  stream: (options?: StreamSessionOptions) => AsyncIterable<MessageStreamEvent>;
-};
-type BrowserTurnInput =
-  | (SendTurnOptions & {
-      readonly inputResponses?: never;
-      readonly message: SendTurnInput["message"];
-    })
-  | (RespondTurnOptions & {
-      readonly inputResponses: Parameters<ClientSession["respond"]>[0];
-      readonly message?: never;
-    });
-type StreamSessionOptions = {
-  readonly ignoreLeadingWaiting?: boolean;
-  readonly signal?: AbortSignal;
-  readonly startIndex?: number;
-};
 
 export type DraftHandlers = {
   readonly clearDraft: () => void;
@@ -95,362 +75,7 @@ const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
   isEmpty: true,
 };
 
-const EVE_CREATE_SESSION_PATH = "/eve/v1/session";
-const EVE_SESSION_ID_HEADER = "x-eve-session-id";
-const STREAM_OPEN_RETRYABLE_STATUS = new Set([404, 409, 425, 500, 502, 503, 504]);
-const STREAM_DISCONNECT_RECONNECT_ATTEMPTS = 3;
-const STREAM_IDLE_TIMEOUT_MS = 120_000;
-const STREAM_RECONNECT_DELAY_MS = 350;
 const THINKING_EXIT_DURATION_MS = 180;
-
-function createPersistedClientSession({
-  initialSession,
-  onSessionStarted,
-}: {
-  readonly initialSession?: ClientSessionState;
-  readonly onSessionStarted: (session: ClientSessionState) => Promise<void> | void;
-}) {
-  let session = initialSession;
-
-  const dispatch = async (input: BrowserTurnInput) => {
-    const previousSession = session;
-    const response = await postSessionTurn(previousSession, input);
-    const startedSession: ClientSessionState = {
-      sessionId: response.sessionId,
-      streamIndex:
-        previousSession?.sessionId === response.sessionId ? previousSession.streamIndex : 0,
-    };
-
-    session = startedSession;
-
-    await onSessionStarted(startedSession);
-
-    return createBrowserMessageResponse({
-      ignoreLeadingWaiting:
-        previousSession !== undefined &&
-        previousSession.sessionId === response.sessionId &&
-        startedSession.streamIndex > 0,
-      onFinalize: (events) => {
-        session = advanceBrowserSession({
-          baseStreamIndex: startedSession.streamIndex,
-          events,
-          sessionId: response.sessionId,
-        });
-      },
-      sessionId: response.sessionId,
-      signal: input.signal,
-      startIndex: startedSession.streamIndex,
-    });
-  };
-
-  return {
-    get state() {
-      return session;
-    },
-    async respond(
-      inputResponses: Parameters<ClientSession["respond"]>[0],
-      options: RespondTurnOptions = {},
-    ) {
-      return dispatch({ ...options, inputResponses });
-    },
-    async send(message: SendTurnInput["message"], options: SendTurnOptions = {}) {
-      return dispatch({ ...options, message });
-    },
-    stream(options?: StreamSessionOptions) {
-      const currentSession = session;
-      const sessionId = currentSession?.sessionId;
-
-      if (!sessionId) {
-        throw new Error("Session has no session ID. Send a message first.");
-      }
-
-      const startIndex = options?.startIndex ?? currentSession.streamIndex;
-
-      return streamSessionEvents({
-        ignoreLeadingWaiting: options?.ignoreLeadingWaiting,
-        onFinalize: (events) => {
-          session = advanceBrowserSession({
-            baseStreamIndex: startIndex,
-            events,
-            sessionId,
-          });
-        },
-        sessionId,
-        signal: options?.signal,
-        startIndex,
-      });
-    },
-    setState(nextSession: ClientSessionState | undefined) {
-      session = nextSession;
-    },
-  } as unknown as PersistedClientSession;
-}
-
-async function postSessionTurn(session: ClientSessionState | undefined, input: BrowserTurnInput) {
-  const body = createHandleMessageBody({ input, isCreate: session === undefined });
-
-  if (!body) {
-    throw new Error("Session turn requires a message or input response.");
-  }
-
-  const response = await fetch(
-    session?.sessionId
-      ? `/eve/v1/session/${encodeURIComponent(session.sessionId)}`
-      : EVE_CREATE_SESSION_PATH,
-    {
-      body: JSON.stringify(body),
-      headers: {
-        "content-type": "application/json",
-        ...input.headers,
-      },
-      method: "POST",
-      signal: input.signal ?? null,
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(await readResponseError(response));
-  }
-
-  const payload = (await response.json()) as {
-    readonly sessionId?: unknown;
-  };
-  const sessionId =
-    (typeof payload.sessionId === "string" ? payload.sessionId : undefined) ??
-    response.headers.get(EVE_SESSION_ID_HEADER)?.trim();
-
-  if (!sessionId) {
-    throw new Error("Message route did not return a session id.");
-  }
-
-  return { sessionId };
-}
-
-function createHandleMessageBody({
-  input,
-  isCreate,
-}: {
-  readonly input: BrowserTurnInput;
-  readonly isCreate: boolean;
-}) {
-  const body: Record<string, unknown> = {};
-
-  if (input.message !== undefined) {
-    body.message = input.message;
-  }
-
-  if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
-    body.inputResponses = input.inputResponses;
-  }
-
-  if (input.clientContext !== undefined) {
-    body.clientContext = input.clientContext;
-  }
-
-  if (input.outputSchema !== undefined) {
-    body.outputSchema = input.outputSchema;
-  }
-
-  if (Object.keys(body).length === 0) {
-    return null;
-  }
-
-  if (isCreate && body.message === undefined) {
-    return null;
-  }
-
-  return body;
-}
-
-function createBrowserMessageResponse({
-  ignoreLeadingWaiting = false,
-  onFinalize,
-  sessionId,
-  signal,
-  startIndex,
-}: {
-  readonly ignoreLeadingWaiting?: boolean;
-  readonly onFinalize: (events: readonly MessageStreamEvent[]) => void;
-  readonly sessionId: string;
-  readonly signal?: AbortSignal;
-  readonly startIndex: number;
-}) {
-  let consumed = false;
-
-  return {
-    sessionId,
-    [Symbol.asyncIterator]() {
-      if (consumed) {
-        throw new Error("MessageResponse has already been consumed.");
-      }
-
-      consumed = true;
-
-      return streamSessionEvents({
-        ignoreLeadingWaiting,
-        onFinalize,
-        sessionId,
-        signal,
-        startIndex,
-      })[Symbol.asyncIterator]();
-    },
-  };
-}
-
-async function* streamSessionEvents({
-  ignoreLeadingWaiting = false,
-  onFinalize,
-  sessionId,
-  signal,
-  startIndex,
-}: {
-  readonly ignoreLeadingWaiting?: boolean;
-  readonly onFinalize: (events: readonly MessageStreamEvent[]) => void;
-  readonly sessionId: string;
-  readonly signal?: AbortSignal;
-  readonly startIndex: number;
-}) {
-  const events: MessageStreamEvent[] = [];
-  let nextIndex = startIndex;
-  let disconnectReconnectsRemaining = STREAM_DISCONNECT_RECONNECT_ATTEMPTS;
-  let lastProgressAt = Date.now();
-
-  try {
-    for (;;) {
-      let disconnected = false;
-      let foundBoundary = false;
-      const body = await openStreamBody({ sessionId, signal, startIndex: nextIndex });
-
-      try {
-        for await (const event of readNdjsonStream(body)) {
-          events.push(event);
-          nextIndex += 1;
-          lastProgressAt = Date.now();
-          disconnectReconnectsRemaining = STREAM_DISCONNECT_RECONNECT_ATTEMPTS;
-          yield event;
-
-          const isStaleLeadingWaiting =
-            ignoreLeadingWaiting && events.length === 1 && event.type === "session.waiting";
-
-          if (isChatTurnSettledEvent(event) && !isStaleLeadingWaiting) {
-            foundBoundary = true;
-            break;
-          }
-        }
-      } catch (error) {
-        if (!isStreamDisconnectError(error)) {
-          throw error;
-        }
-
-        disconnected = true;
-      }
-
-      if (foundBoundary || signal?.aborted) {
-        return;
-      }
-
-      if (Date.now() - lastProgressAt >= STREAM_IDLE_TIMEOUT_MS) {
-        return;
-      }
-
-      if (disconnected) {
-        if (disconnectReconnectsRemaining <= 0) {
-          return;
-        }
-
-        disconnectReconnectsRemaining -= 1;
-      }
-
-      await sleep(STREAM_RECONNECT_DELAY_MS);
-    }
-  } finally {
-    onFinalize(events);
-  }
-}
-
-async function openStreamBody({
-  sessionId,
-  signal,
-  startIndex,
-}: {
-  readonly sessionId: string;
-  readonly signal?: AbortSignal;
-  readonly startIndex: number;
-}) {
-  const path = `/eve/v1/session/${encodeURIComponent(sessionId)}/stream`;
-  const query = startIndex > 0 ? `?${new URLSearchParams({ startIndex: String(startIndex) })}` : "";
-  let status = 0;
-  let body = "Failed to open message stream.";
-
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const response = await fetch(`${path}${query}`, {
-      signal: signal ?? null,
-    });
-
-    if (response.ok) {
-      if (!response.body) {
-        throw new Error("Response body is null.");
-      }
-
-      return response.body;
-    }
-
-    status = response.status;
-    body = await response.text();
-
-    if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status)) {
-      throw new Error(formatResponseError(status, body));
-    }
-
-    if (attempt < 11) {
-      await sleep(250);
-    }
-  }
-
-  throw new Error(formatResponseError(status, body));
-}
-
-async function* readNdjsonStream(body: ReadableStream<Uint8Array>) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        buffer += decoder.decode();
-        break;
-      }
-
-      if (value) {
-        buffer += decoder.decode(value, { stream: true });
-      }
-
-      let newlineIndex = buffer.indexOf("\n");
-
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-
-        if (line.length > 0) {
-          yield JSON.parse(line) as MessageStreamEvent;
-        }
-
-        newlineIndex = buffer.indexOf("\n");
-      }
-    }
-
-    const line = buffer.trim();
-
-    if (line.length > 0) {
-      yield JSON.parse(line) as MessageStreamEvent;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 function advanceBrowserSession({
   baseStreamIndex,
@@ -490,6 +115,13 @@ function findBoundaryEvent(events: readonly MessageStreamEvent[]) {
       return event;
     }
   }
+}
+
+function attachClientSession(session: ClientSessionState | undefined): ClientSession | null {
+  if (!session) return null;
+  return new Client({ host: "" }).sessions.attach(session.sessionId, {
+    streamIndex: session.streamIndex,
+  });
 }
 
 function reduceEventsToMessageData(events: readonly MessageStreamEvent[]): EveMessageData {
@@ -663,14 +295,9 @@ export function AgentChatSession({
   const resumedEventsRef = useRef<MessageStreamEvent[]>([]);
   const streamEventsRef = useRef<MessageStreamEvent[]>([]);
   const localEventsRef = useRef<MessageStreamEvent[]>([]);
-  const onSessionStartedRef = useRef<(session: ClientSessionState) => Promise<void> | void>(
-    () => {},
+  const persistedSessionRef = useRef<ClientSession | null>(
+    attachClientSession(activeChat?.session),
   );
-  const persistedSessionRef = useRef<PersistedClientSession | null>(null);
-  persistedSessionRef.current ??= createPersistedClientSession({
-    initialSession: activeChat?.session,
-    onSessionStarted: (session) => onSessionStartedRef.current(session),
-  });
   const isSetupReady = setupStatus.appReady;
   const storageMode = setupStatus.storageMode;
   const router = useRouter();
@@ -808,12 +435,14 @@ export function AgentChatSession({
     [storageMode, viewer],
   );
 
-  onSessionStartedRef.current = persistSessionState;
-
   const agent = useEveAgent({
     initialEvents: activeChat?.events ?? [],
-    session: persistedSessionRef.current as unknown as ClientSession,
+    initialSession: activeChat?.session,
     onEvent: persistStreamEvent,
+    onSessionChange(session) {
+      persistedSessionRef.current = attachClientSession(session);
+      if (session) void persistSessionState(session);
+    },
     onFinish: (snapshot) => {
       void persistSnapshot(snapshot);
     },
@@ -871,7 +500,7 @@ export function AgentChatSession({
   const toastError = displayError && dismissedError !== displayError ? displayError : null;
 
   const resetSession = useCallback(() => {
-    persistedSessionRef.current?.setState(undefined);
+    persistedSessionRef.current = null;
     agent.reset();
     setActiveChatId(null);
     activeChatIdRef.current = null;
@@ -1128,7 +757,7 @@ export function AgentChatSession({
       const nextSession = undefined;
 
       agent.reset();
-      persistedSession.setState(nextSession);
+      persistedSessionRef.current = null;
 
       const nextLocalEvents = mergeLocalEvents(localEventsRef.current, events);
 
@@ -1170,7 +799,7 @@ export function AgentChatSession({
         onPendingUserMessageSettled?.();
       } catch (error) {
         if (previousSession) {
-          persistedSessionRef.current?.setState(previousSession);
+          persistedSessionRef.current = attachClientSession(previousSession);
         }
 
         const eventKeys = new Set(events.map(getLocalEventKey).filter(Boolean));
@@ -1258,13 +887,8 @@ export function AgentChatSession({
     }
 
     const startIndex = existingEvents.length;
-    const shouldIgnoreLeadingWaiting =
-      pendingMessageText !== null &&
-      !hasLatestUserMessage(reduceEventsToMessageData(existingEvents).messages, pendingMessageText);
-    const session = createPersistedClientSession({
-      initialSession: activeChat.session,
-      onSessionStarted: persistSessionState,
-    });
+    const session = attachClientSession(activeChat.session);
+    if (!session) return;
     let cancelled = false;
     let completed = false;
 
@@ -1276,13 +900,10 @@ export function AgentChatSession({
 
     void (async () => {
       try {
-        const resumeStreamOptions: StreamSessionOptions = {
-          ignoreLeadingWaiting: shouldIgnoreLeadingWaiting,
+        for await (const event of session.stream({
           signal: abortController.signal,
           startIndex,
-        };
-
-        for await (const event of session.stream(resumeStreamOptions)) {
+        })) {
           if (cancelled) {
             return;
           }
