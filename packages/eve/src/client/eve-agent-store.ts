@@ -45,13 +45,7 @@ export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" |
  */
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
-/**
- * Immutable projected state of an {@link EveAgentStore}, read on every render.
- *
- * `data` is the reducer output, `events` is the raw server stream-event log for
- * this session, `session` is the current serializable cursor, `status` is the
- * turn lifecycle state, and `error` is the last failure (or `undefined`).
- */
+/** Immutable projected state of an {@link EveAgentStore}, read on every render. */
 export interface EveAgentStoreSnapshot<TData> {
   readonly data: TData;
   readonly error: Error | undefined;
@@ -60,13 +54,7 @@ export interface EveAgentStoreSnapshot<TData> {
   readonly status: EveAgentStoreStatus;
 }
 
-/**
- * Hooks invoked while the store processes a turn.
- *
- * `onEvent`, `onError`, `onFinish`, and `onSessionChange` are observe-only.
- * `prepareSend` runs before each turn is sent and may return a modified
- * {@link SendTurnPayload} (for example to attach one-turn client context).
- */
+/** Hooks invoked while the store processes a turn. */
 export interface EveAgentStoreCallbacks<TData> {
   readonly onError?: (error: Error) => void;
   readonly onEvent?: (event: MessageStreamEvent) => void;
@@ -104,17 +92,13 @@ export interface EveAgentStoreInit<TData> {
 const detachStore = Symbol("detachEveAgentStore");
 
 /**
- * Framework-agnostic state machine for an eve agent session.
+ * Framework-agnostic state machine for an eve agent session. It manages the
+ * send/stream lifecycle, optimistic projection, and subscriber notification;
+ * framework integrations wrap it with their own reactivity primitives.
  *
- * Manages the send/stream lifecycle, optimistic projection, and subscriber
- * notification; framework integrations (React, Vue) wrap it with their own
- * reactivity primitives.
- *
- * Drives one turn at a time: `send` rejects while a turn is active, and
- * concurrent `resume` calls share one replay. Read the latest projection via
- * the `snapshot` getter, observe changes with `subscribe`, register lifecycle
- * hooks with `setCallbacks`, cancel the durable in-flight turn with `cancel`,
- * and discard all state with `reset`.
+ * `send` rejects while a turn is active; concurrent `resume` calls share one
+ * replay. Use `snapshot`, `subscribe`, `setCallbacks`, `cancel`, and `reset`
+ * to observe and control the store.
  */
 export class EveAgentStore<TData> {
   readonly #client: Client | undefined;
