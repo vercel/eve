@@ -5,9 +5,15 @@ import type { CliApplicationContext } from "./application-command.js";
 
 export type AgentCommandRequirement = (command: Command) => boolean;
 
-async function selectWorkspaceAgent(
+export interface AgentCommandOptions {
+  /** Leave a workspace root intact so the command can operate on every agent. */
+  readonly workspace?: "preserve";
+}
+
+export async function selectWorkspaceAgent(
   workspace: AgentWorkspace,
   requestedName: string | undefined,
+  options: { readonly required?: boolean } = {},
 ): Promise<string> {
   const names = workspace.members.map((member) => member.name);
   if (requestedName !== undefined) {
@@ -19,7 +25,8 @@ async function selectWorkspaceAgent(
     }
     return member.appRoot;
   }
-  if (workspace.members.length === 1) return workspace.members[0]!.appRoot;
+  if (workspace.members.length === 1 && options.required !== true)
+    return workspace.members[0]!.appRoot;
   if (!(process.stdin.isTTY && process.stdout.isTTY)) {
     throw new Error(
       `This command requires a specific agent. Pass --agent <name>. Available agents: ${names.join(", ")}.`,
@@ -39,6 +46,7 @@ export function agentCommand(
   command: Command,
   applicationContext: CliApplicationContext,
   requirement: AgentCommandRequirement = () => true,
+  options: AgentCommandOptions = {},
 ): Command {
   command.option("--agent <name>", "Select an agent from an agents/ workspace");
   return command.hook("preAction", async (_command, actionCommand) => {
@@ -52,6 +60,13 @@ export function agentCommand(
 
     const initialSelection = await applicationContext.resolveAgent();
     if (initialSelection.kind === "workspace") {
+      if (options.workspace === "preserve") {
+        if (requestedName !== undefined) {
+          await selectWorkspaceAgent(initialSelection.workspace, requestedName);
+        }
+        await applicationContext.resolve();
+        return;
+      }
       applicationContext.root = await selectWorkspaceAgent(
         initialSelection.workspace,
         requestedName,

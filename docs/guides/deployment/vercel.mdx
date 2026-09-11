@@ -67,6 +67,16 @@ In an eve workspace, eve discovers direct `agents/<name>/` children that contain
 
 Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
 
+## Run the workspace locally
+
+Run `eve dev` from the workspace root to start every agent behind one local Vercel service router. eve asks which agent to open in the interactive TUI; its public endpoint is `http://localhost:3000/<agent>/`.
+
+```bash
+npm exec eve dev
+```
+
+The command requires the Vercel CLI, but not a linked Vercel project: eve runs `vercel dev --local`. Without a root `vercel.json` or `vercel.ts`, eve writes an invocation-local service graph for the workspace and removes it when development stops. When either configuration file exists, Vercel uses that authored configuration unchanged. Pass `--agent <name>` to choose the TUI agent without a prompt, and pass `--host` or `--port` to select the local router address. Run `eve dev` from an agent directory to develop one agent without starting the whole graph.
+
 With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
 
 An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
