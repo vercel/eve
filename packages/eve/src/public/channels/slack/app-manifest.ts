@@ -3,12 +3,13 @@ import type { AppsManifestCreateArguments } from "@slack/web-api";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export interface SlackAppManifestOptions {
-  /** Display name used for the Slack bot. */
-  readonly botName?: string;
-  /** Additional Slack bot OAuth scopes required by this channel. */
-  readonly botScopes?: readonly string[];
-  /** Additional Slack Events API bot events delivered to this channel. */
+  readonly alwaysOnline?: boolean;
+  readonly backgroundColor?: string;
   readonly botEvents?: readonly string[];
+  readonly botScopes?: readonly string[];
+  readonly description?: string;
+  readonly displayName?: string;
+  readonly longDescription?: string;
 }
 
 export interface SlackAppManifestBuildDefinition {
@@ -20,16 +21,29 @@ export function defineSlackAppManifest(
 ): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
-      const name = (input.botName ?? channelName).slice(0, 35);
+      const name = (input.displayName ?? channelName).slice(0, 35);
+      const displayInformation: {
+        background_color?: string;
+        description?: string;
+        long_description?: string;
+        name: string;
+      } = { name };
+      if (input.backgroundColor !== undefined) {
+        displayInformation.background_color = input.backgroundColor;
+      }
+      if (input.description !== undefined) displayInformation.description = input.description;
+      if (input.longDescription !== undefined) {
+        displayInformation.long_description = input.longDescription;
+      }
       const manifest = {
-        display_information: { name },
+        display_information: displayInformation,
         features: {
           app_home: {
             home_tab_enabled: false,
             messages_tab_enabled: true,
             messages_tab_read_only_enabled: false,
           },
-          bot_user: { display_name: name, always_online: false },
+          bot_user: { display_name: name, always_online: input.alwaysOnline ?? false },
         },
         oauth_config: {
           scopes: { bot: unique(["app_mentions:read", "chat:write"], input.botScopes) },
