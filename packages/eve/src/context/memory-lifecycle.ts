@@ -114,9 +114,6 @@ export async function dispatchMemoryTurnStarted(input: {
               operationId,
               operationName: "search_memory",
               phase: "turn.started",
-              rootSessionId:
-                callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
-              sessionId: callbackContext.session.id,
               slot: memory.slot,
               storeId: lock.scope.key,
               turnId: turn.id,
@@ -215,9 +212,6 @@ export async function dispatchMemoryCompactionRequested(input: {
             operationId,
             operationName: "upsert_memory",
             phase: "compaction.requested",
-            rootSessionId:
-              callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
-            sessionId: callbackContext.session.id,
             slot: memory.slot,
             storeId: lock.scope.key,
             turnId: turn?.id,
@@ -280,9 +274,6 @@ export async function dispatchMemoryCompactionCompleted(input: {
               operationId,
               operationName: "search_memory",
               phase: "compaction.completed",
-              rootSessionId:
-                callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
-              sessionId: callbackContext.session.id,
               slot: memory.slot,
               storeId: lock.scope.key,
               turnId: turn?.id,
@@ -364,9 +355,6 @@ export async function dispatchMemoryTurnCompleted(input: {
             operationId,
             operationName: "upsert_memory",
             phase: "turn.completed",
-            rootSessionId:
-              callbackContext.session.parent?.rootSessionId ?? callbackContext.session.id,
-            sessionId: callbackContext.session.id,
             slot: memory.slot,
             storeId: lock.scope.key,
             turnId: lock.turn.id,
@@ -497,8 +485,6 @@ function memoryInstrumentationOperation(input: {
   readonly operationId: string;
   readonly operationName: InstrumentationMemoryOperation["operationName"];
   readonly phase: string;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
   readonly slot: string;
   readonly storeId: string;
   readonly turnId?: string;
@@ -507,8 +493,6 @@ function memoryInstrumentationOperation(input: {
     idempotencyKey: input.operationId,
     operationName: input.operationName,
     phase: input.phase,
-    rootSessionId: input.rootSessionId,
-    sessionId: input.sessionId,
     slot: input.slot,
     storeId: input.storeId,
     turnId: input.turnId,

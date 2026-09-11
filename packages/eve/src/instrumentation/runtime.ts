@@ -264,22 +264,27 @@ export function bindInstrumentationRuntime(
       ? {
           async execute(operation, execute) {
             const hooks = bindHooks(readSessionContext());
-            await hooks.publish({
+            const event = {
               ...operation,
+              rootSessionId: boundSession.rootSessionId,
+              sessionId: boundSession.sessionId,
+            };
+            await hooks.publish({
+              ...event,
               type: "memory.operation.started",
             });
             try {
               const result = await runtime.runInContext(
                 {
                   idempotencyKey: operation.idempotencyKey,
-                  sessionId: operation.sessionId,
+                  sessionId: boundSession.sessionId,
                   turnId: operation.turnId,
                   type: "memory.operation",
                 },
                 execute,
               );
               await hooks.publish({
-                ...operation,
+                ...event,
                 outputRecords: result.outputRecords,
                 recordCount: result.recordCount,
                 type: "memory.operation.completed",
@@ -287,7 +292,7 @@ export function bindInstrumentationRuntime(
               return result.value;
             } catch (error) {
               await hooks.publish({
-                ...operation,
+                ...event,
                 error,
                 type: "memory.operation.failed",
               });

@@ -246,8 +246,6 @@ describe("memory lifecycle", () => {
         idempotencyKey: "eve-memory-operation-v1:session_1:0:turn_0:turn.started:profile",
         operationName: "search_memory",
         phase: "turn.started",
-        rootSessionId: "session_1",
-        sessionId: "session_1",
         slot: "profile",
         storeId: expect.stringMatching(/^memscope1_/),
         turnId: "turn_0",

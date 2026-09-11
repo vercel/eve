@@ -59,7 +59,7 @@ import type {
   InstrumentationStepAttemptStartedEvent,
   InstrumentationStepAttemptTerminalEvent,
   InstrumentationContextRunner,
-  InstrumentationMemoryOperation,
+  InstrumentationMemoryOperationEvent,
   InstrumentationMemoryOperationStartedEvent,
   InstrumentationMemoryOperationTerminalEvent,
   InstrumentationModelCallTerminalEvent,
@@ -214,7 +214,7 @@ export function createAgentOtelInstrumentation(
   };
 
   const memoryParentContext = async (
-    event: InstrumentationMemoryOperation,
+    event: InstrumentationMemoryOperationEvent,
   ): Promise<Context | undefined> => {
     const active = context.active();
     if (isAgentTraceContext(active)) return active;

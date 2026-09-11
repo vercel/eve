@@ -65,16 +65,20 @@ export interface InstrumentationMemoryOperation {
   readonly slot: string;
   /** The opaque memory scope key, used as eve's memory-store identifier. */
   readonly storeId: string;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
   readonly turnId?: string;
 }
 
-export interface InstrumentationMemoryOperationStartedEvent extends InstrumentationMemoryOperation {
+/** Bound session identity added when eve publishes a memory operation. */
+export interface InstrumentationMemoryOperationEvent extends InstrumentationMemoryOperation {
+  readonly rootSessionId: string;
+  readonly sessionId: string;
+}
+
+export interface InstrumentationMemoryOperationStartedEvent extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation.started";
 }
 
-export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperation {
+export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation.completed";
   /** The number of records the operation returned or changed, when known. */
   readonly recordCount?: number;
@@ -82,7 +86,7 @@ export interface InstrumentationMemoryOperationCompletedEvent extends Instrument
   readonly outputRecords?: readonly InstrumentationMemoryRecord[];
 }
 
-export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperation {
+export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation.failed";
   /** Content. Absent unless this provider's trace policy records outputs. */
   readonly error?: unknown;

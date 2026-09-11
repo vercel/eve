@@ -586,8 +586,6 @@ describe("bindInstrumentationRuntime", () => {
             idempotencyKey: "memory:search",
             operationName: "search_memory",
             phase: "turn.started",
-            rootSessionId: "session-1",
-            sessionId: "session-1",
             slot: "profile",
             storeId: "memscope1_scope",
             turnId: "turn-1",
@@ -618,8 +616,6 @@ describe("bindInstrumentationRuntime", () => {
         idempotencyKey: "memory:search",
         operationName: "search_memory",
         phase: "turn.started",
-        rootSessionId: "session-1",
-        sessionId: "session-1",
         slot: "profile",
         storeId: "memscope1_scope",
         turnId: "turn-1",
@@ -632,9 +628,15 @@ describe("bindInstrumentationRuntime", () => {
     );
 
     expect(publish.mock.calls.map(([event]) => event)).toEqual([
-      expect.objectContaining({ type: "memory.operation.started" }),
+      expect.objectContaining({
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        type: "memory.operation.started",
+      }),
       expect.objectContaining({
         recordCount: 1,
+        rootSessionId: "session-1",
+        sessionId: "session-1",
         type: "memory.operation.completed",
       }),
     ]);

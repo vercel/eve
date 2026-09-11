@@ -1,7 +1,7 @@
 import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
-  InstrumentationMemoryOperation,
+  InstrumentationMemoryOperationEvent,
   InstrumentationMemoryOperationTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { genAiMemoryRecordsAttribute } from "#tracing/agent-otel-content.js";
@@ -11,7 +11,7 @@ import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 
 /** Attributes shared by eve-owned GenAI memory spans. */
 export function memorySpanAttributes(
-  event: InstrumentationMemoryOperation,
+  event: InstrumentationMemoryOperationEvent,
 ): Record<string, string | number> {
   const attributes: Record<string, string | number> = {
     "agent.memory.phase": event.phase,
