@@ -3,5 +3,6 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eSubagentConfig(),
-  description: "Help with a warehouse checklist by looking up one entry's inventory item.",
+  description:
+    "Nested specialist contacted by warehouse_lookup to find the third entry's inventory item. The checklist coordinator assigns all entries through agent instead.",
 });

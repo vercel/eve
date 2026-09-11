@@ -5,6 +5,25 @@ export type SessionEvents = Pick<EveEvalTurn, "sessionId" | "events">;
 export const CHECKS = ["first", "second", "third"] as const;
 export type Check = (typeof CHECKS)[number];
 
+export function requireOriginalTasksHealthy(
+  snapshots: readonly SessionEvents[],
+  sessionId: string,
+  taskIds: readonly string[],
+): void {
+  for (const event of eventsForSession(snapshots, sessionId)) {
+    if (event.type !== "message.received") continue;
+    for (const taskId of taskIds) {
+      const prefix = `Background task ${taskId} (agent) `;
+      const message = event.data.message;
+      if (message.startsWith(`${prefix}failed.`) || message.startsWith(`${prefix}is cancelled.`)) {
+        throw new Error(
+          `Original warehouse task failed or was cancelled; replacement tasks cannot satisfy this eval. ${message.slice(0, 1000)}`,
+        );
+      }
+    }
+  }
+}
+
 export function checkForTask(taskId: string, requests: readonly InputRequest[]): Check {
   // The parent proxy prefixes the original approval ID with its owning task ID.
   const owned = requests.filter((request) => request.requestId.startsWith(`${taskId}:`));

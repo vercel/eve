@@ -5,6 +5,7 @@ import {
   childActivations,
   checkForTask,
   eventsForSession,
+  requireOriginalTasksHealthy,
   toolEvidence,
 } from "./event-matching.ts";
 
@@ -170,6 +171,70 @@ test("exact evidence rejects the wrong check or a missing completion", () => {
   turns[1].events = [requested("request", "probe-call", "second")];
   assert.notDeepEqual(toolEvidence(turns, "child", "probe"), expected);
   assert.notDeepEqual(toolEvidence(snapshots().slice(0, 2), "child", "probe"), expected);
+});
+
+test("reports a filtered original task before attempting to join replacement approvals", () => {
+  const message =
+    'Background task task_original (agent) failed.\n\nError:\n{"code":"SUBAGENT_EXECUTION_FAILED","message":"The model provider filtered this response."}';
+  const turns = [
+    {
+      sessionId: "parent",
+      events: [
+        event("failure", "message.received", { message }),
+        event("replacement-approval", "input.requested", {
+          requests: [approval("task_replacement", "third")],
+        }),
+      ],
+    },
+  ];
+  assert.throws(
+    () => requireOriginalTasksHealthy(turns, "parent", ["task_original"]),
+    /replacement tasks cannot satisfy this eval.*task_original[\s\S]*provider filtered this response/,
+  );
+  assert.throws(() => checkForTask("task_original", [approval("task_replacement", "third")]));
+});
+
+test("reports cancellation of an original task before an approval join", () => {
+  const turns = [
+    {
+      sessionId: "parent",
+      events: [
+        event("cancel", "message.received", {
+          message: "Background task task_original (agent) is cancelled.",
+        }),
+      ],
+    },
+  ];
+  assert.throws(
+    () => requireOriginalTasksHealthy(turns, "parent", ["task_original"]),
+    /is cancelled/,
+  );
+});
+
+test("failure detection is scoped to the original task and its parent session", () => {
+  const failure = "Background task task_original (agent) failed.";
+  const turns = [
+    {
+      sessionId: "other-parent",
+      events: [event("other-failure", "message.received", { message: failure })],
+    },
+    {
+      sessionId: "parent",
+      events: [
+        event("completion", "message.received", {
+          message: "Background task task_original (agent) is completed.",
+        }),
+        event("other-task", "message.received", {
+          message: "Background task task_original_other (agent) failed.",
+        }),
+        event("quotation", "message.received", {
+          message: `Alice asks about this earlier note: ${failure}`,
+        }),
+        event("answer", "message.completed", { message: failure }),
+      ],
+    },
+  ];
+  assert.doesNotThrow(() => requireOriginalTasksHealthy(turns, "parent", ["task_original"]));
 });
 
 test("maps checks by task-scoped runtime approval, independent of assignment wording or order", () => {

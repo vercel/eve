@@ -7,6 +7,7 @@ import {
   childActivations,
   checkForTask,
   eventsForSession,
+  requireOriginalTasksHealthy,
   toolEvidence,
   type Check,
 } from "./event-matching.js";
@@ -45,7 +46,7 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
 
 1. check=first: Find the inventory item for the first entry using the inventory lookup tool (probe), and share the item it returns.
 2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.
-3. check=third: Use warehouse_lookup to get the third entry from the warehouse specialist, and share the item the specialist returns.
+3. check=third: Assign a third background assistant with agent, just like the first two entries. Ask that assistant to use warehouse_lookup; the workflow contacts the warehouse specialist and returns its item.
 
 Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
   started.expectOk();
@@ -93,6 +94,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
     probeSessions: new Map(),
     parentTurns: [],
   };
+  requireOriginalTasksHealthy([started], run.sessionId, run.taskIds);
   collectRequests(started);
   // Task receipts precede child startup; called events can arrive after the parent parks.
   for (
@@ -138,7 +140,17 @@ Once all three assignments are accepted, let Alice know the checks are underway.
       sessions: new Set(children.map((child) => child.sessionId)).size,
       checks: children.map((child) => child.check).sort(),
       mappedTasks: children.map((child) => child.taskId).sort(),
-      creatingTurns: new Set(calls.map((call) => call.turnId)).size,
+      // Child startup may be observed in later turns; assignment events own launch provenance.
+      creatingTurns: new Set(
+        started.events.flatMap((event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) => action.kind === "tool-call" && action.toolName === "agent",
+          )
+            ? [event.data.turnId]
+            : [],
+        ),
+      ).size,
     },
     equals({
       receipts: TASK_COUNT,
@@ -387,6 +399,7 @@ async function readCompletedChild(
 async function nextParentTurn(t: EveEvalContext, run: ReportingRun): Promise<EveEvalTurn> {
   const live = t.target.watchTurn(run.sessionId, { startIndex: requireStreamIndex(run.session) });
   const turn = (await live.result()).expectOk();
+  requireOriginalTasksHealthy([turn], run.sessionId, run.taskIds);
   turn.noFailedActions();
   assertModel(turn, run.modelId);
   run.session = live.session;
