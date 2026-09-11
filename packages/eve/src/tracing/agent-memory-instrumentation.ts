@@ -12,11 +12,8 @@ import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 /** Attributes shared by eve-owned GenAI memory spans. */
 export function memorySpanAttributes(
   event: InstrumentationMemoryOperation,
-  frameworkVersion: string,
 ): Record<string, string | number> {
   const attributes: Record<string, string | number> = {
-    "agent.framework.name": "eve",
-    "agent.framework.version": frameworkVersion,
     "agent.memory.phase": event.phase,
     "agent.memory.slot": event.slot,
     "agent.session.id": event.sessionId,

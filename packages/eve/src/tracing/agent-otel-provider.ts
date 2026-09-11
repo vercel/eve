@@ -241,7 +241,7 @@ export function createAgentOtelInstrumentation(
     const span = input.tracer.startSpan(
       event.operationName,
       {
-        attributes: memorySpanAttributes(event, input.frameworkVersion),
+        attributes: memorySpanAttributes(event),
         kind: SpanKind.CLIENT,
       },
       parent,

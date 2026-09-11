@@ -645,6 +645,8 @@ describe("createAgentOtelInstrumentation", () => {
       "operation.name": "search_memory",
       "resource.name": "search_memory",
     });
+    expect(memory.attributes).not.toHaveProperty("agent.framework.name");
+    expect(memory.attributes).not.toHaveProperty("agent.framework.version");
     expect(memory.attributes["gen_ai.memory.records"]).toBe(
       '[{"content":"The user prefers dark mode.","id":"preference"}]',
     );
