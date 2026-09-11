@@ -1330,7 +1330,7 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
-    const outer = byName(spans, "agent.action")[0]!;
+    const outer = byName(spans, "invoke_workflow coordinate")[0]!;
     const tool = byName(spans, "execute_tool coordinate")[0]!;
     const first = spans.find(
       (span) => span.attributes["agent.action.call_id"] === "workflow:first",
@@ -1338,7 +1338,16 @@ describe("createAgentOtelInstrumentation", () => {
     const second = spans.find(
       (span) => span.attributes["agent.action.call_id"] === "workflow:second",
     )!;
-    expect(byName(spans, "agent.action")).toHaveLength(3);
+    expect(byName(spans, "agent.action")).toHaveLength(2);
+    expect(outer.attributes).toMatchObject({
+      "agent.action.call_id": "workflow",
+      "agent.action.kind": "tool-call",
+      "agent.action.name": "coordinate",
+      "gen_ai.operation.name": "invoke_workflow",
+      "gen_ai.workflow.name": "coordinate",
+      "operation.name": "invoke_workflow",
+      "resource.name": "invoke_workflow coordinate",
+    });
     expect(first.attributes).not.toHaveProperty("gen_ai.operation.name");
     expect(second.attributes).not.toHaveProperty("gen_ai.operation.name");
     expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);

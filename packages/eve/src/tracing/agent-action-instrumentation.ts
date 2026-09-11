@@ -31,7 +31,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
+import { AGENT_SPAN_NAMES, workflowInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 export interface AgentActionInstrumentation {
@@ -92,6 +92,7 @@ export function createAgentActionInstrumentation(input: {
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
+      workflowName: event.isWorkflowTool === true ? event.name : undefined,
     };
     await input.stateStore.setAction(event.idempotencyKey, state);
     if (event.isWorkflowTool === true) {
@@ -115,9 +116,14 @@ export function createAgentActionInstrumentation(input: {
 
   const startSpan = (state: AgentActionTraceState): Span => {
     const invocation = isAgentInvocation(state.kind);
+    const workflowName = state.kind === "tool-call" ? state.workflowName : undefined;
+    const spanName =
+      workflowName === undefined
+        ? AGENT_SPAN_NAMES.action
+        : workflowInvocationSpanName(workflowName);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        AGENT_SPAN_NAMES.action,
+        spanName,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -128,11 +134,20 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes("agent.action"),
+            ...agentSpanNamingAttributes(
+              spanName,
+              workflowName === undefined ? undefined : "invoke_workflow",
+            ),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               sessionId: state.sessionId,
             }),
+            ...(workflowName === undefined
+              ? undefined
+              : {
+                  "gen_ai.operation.name": "invoke_workflow",
+                  "gen_ai.workflow.name": workflowName,
+                }),
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,

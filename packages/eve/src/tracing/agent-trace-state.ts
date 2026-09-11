@@ -63,11 +63,12 @@ export interface AgentActionTraceState {
   readonly startTimeMs: number;
   readonly stepIndex: number;
   readonly turnId: string;
+  readonly workflowName?: string;
 }
 
 export interface AgentInvocationTraceState extends Omit<
   AgentActionTraceState,
-  "inputAttribute" | "kind"
+  "inputAttribute" | "kind" | "workflowName"
 > {
   readonly kind: "remote-agent-call" | "subagent-call";
   readonly parentActionCallId: string;

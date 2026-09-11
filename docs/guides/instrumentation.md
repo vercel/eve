@@ -103,13 +103,14 @@ not mark the active span as failed.
 The built-in OpenTelemetry provider preserves each span's OTel name and adds
 `operation.name` and `resource.name` for Datadog's operation/resource mapping:
 
-| OTel span name                                                          | `operation.name`  | `resource.name`        |
-| ----------------------------------------------------------------------- | ----------------- | ---------------------- |
-| `invoke_agent weather`                                                  | `invoke_agent`    | `invoke_agent weather` |
-| `execute_tool search`                                                   | `execute_tool`    | `execute_tool search`  |
-| `chat <model>`                                                          | `chat`            | `chat <model>`         |
-| `search_memory`, `upsert_memory`                                        | Same as span name | Same as span name      |
-| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.request` | Same as span name | Same as span name      |
+| OTel span name                                                          | `operation.name`  | `resource.name`          |
+| ----------------------------------------------------------------------- | ----------------- | ------------------------ |
+| `invoke_agent weather`                                                  | `invoke_agent`    | `invoke_agent weather`   |
+| `invoke_workflow deploy`                                                | `invoke_workflow` | `invoke_workflow deploy` |
+| `execute_tool search`                                                   | `execute_tool`    | `execute_tool search`    |
+| `chat <model>`                                                          | `chat`            | `chat <model>`           |
+| `search_memory`, `upsert_memory`                                        | Same as span name | Same as span name        |
+| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.request` | Same as span name | Same as span name        |
 
 These rows apply to eve-owned spans in local tracing and the
 [instrumentation provider layout](./instrumentation-providers). They do not
@@ -151,22 +152,24 @@ Every memory span includes `gen_ai.operation.name` and `gen_ai.memory.store.id`.
 The provider layout and zero-config local tracing emit the following spans.
 The legacy `instrumentation.ts` layout still uses its authored OTel setup.
 
-| Span                    | Meaning                                                  |
-| ----------------------- | -------------------------------------------------------- |
-| `invoke_agent <agent>`  | One agent activation in its own trace                    |
-| `agent.step`            | One model attempt                                        |
-| `chat <model>`          | One model call beneath its step                          |
-| `agent.action`          | Durable action lifecycle, including dispatch and waiting |
-| `execute_tool <tool>`   | In-process tool execution beneath its action             |
-| `agent.approval`        | Approval waiting beneath its action                      |
-| `search_memory`         | Recall memory records before a turn or after compaction  |
-| `upsert_memory`         | Automatic memory capture                                 |
-| `agent.channel.request` | Optional HTTP request span in the provider layout        |
+| Span                     | Meaning                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `invoke_agent <agent>`   | One agent activation in its own trace                    |
+| `agent.step`             | One model attempt                                        |
+| `chat <model>`           | One model call beneath its step                          |
+| `invoke_workflow <tool>` | One authored workflow tool run                           |
+| `agent.action`           | Durable action lifecycle, including dispatch and waiting |
+| `execute_tool <tool>`    | In-process tool execution beneath its action             |
+| `agent.approval`         | Approval waiting beneath its action                      |
+| `search_memory`          | Recall memory records before a turn or after compaction  |
+| `upsert_memory`          | Automatic memory capture                                 |
+| `agent.channel.request`  | Optional HTTP request span in the provider layout        |
 
 For background tools and subagents, the AI SDK's `execute_tool` span ends when
-the model receives the task receipt. The enclosing `agent.action` span remains
-open until the background task completes, fails, or is cancelled. Its duration,
-outcome, and usage describe the background task rather than the receipt.
+the model receives the task receipt. The enclosing `agent.action` span, or
+`invoke_workflow` span for a workflow tool, remains open until the background
+task completes, fails, or is cancelled. Its duration, outcome, and usage
+describe the background task rather than the receipt.
 Background tool results follow the output-content policy. Recorded task failure
 details become bounded exception and status messages; redacted spans retain only
 the failure outcome, error status, and error type. The initiating turn can
@@ -174,10 +177,12 @@ finish or be cancelled while the action remains open. Ending the session closes
 an action whose task never reported a terminal result.
 
 Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.
-Only activations use the `invoke_agent` operation. Dispatch lifecycle spans use
-`agent.action` with `agent.invocation.role=caller`; the built-in `agent` tool
-executes under `execute_tool agent`. Turn IDs such as `turn_0` are local to a session,
-so correlate turns by session ID and turn ID together.
+Only activations use the `invoke_agent` operation. Authored workflow tools use
+`invoke_workflow` with their path-derived tool name in `gen_ai.workflow.name`.
+Dispatch lifecycle spans use `agent.action` with
+`agent.invocation.role=caller`; the built-in `agent` tool executes under
+`execute_tool agent`. Turn IDs such as `turn_0` are local to a session, so
+correlate turns by session ID and turn ID together.
 
 A conversation remains durable state; `gen_ai.conversation.id` joins the activations that operate on it.
 

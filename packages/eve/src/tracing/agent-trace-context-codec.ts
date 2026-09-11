@@ -186,6 +186,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     startTimeMs: value.startTimeMs,
     stepIndex: value.stepIndex,
     turnId: value.turnId,
+    workflowName: typeof value.workflowName === "string" ? value.workflowName : undefined,
   };
 }
 
