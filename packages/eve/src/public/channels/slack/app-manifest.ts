@@ -1,11 +1,6 @@
-export interface SlackAppManifestOptions {
-  /** Additional Slack bot OAuth scopes required by this channel. */
-  readonly botScopes?: readonly string[];
-  /** Additional Slack Events API bot events delivered to this channel. */
+export interface SlackAppManifestMetadata {
   readonly botEvents?: readonly string[];
-}
-
-export interface SlackAppManifestMetadata extends SlackAppManifestOptions {
+  readonly botScopes?: readonly string[];
   readonly displayName?: string;
 }
 

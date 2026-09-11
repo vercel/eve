@@ -443,10 +443,8 @@ describe("slackChannel()", () => {
     expect(
       slackChannel({
         botName: "Support agent",
-        appManifest: {
-          botEvents: ["message.channels"],
-          botScopes: ["channels:history"],
-        },
+        botEvents: ["message.channels"],
+        botScopes: ["channels:history"],
       }),
     ).toMatchObject({
       slackAppManifest: {
