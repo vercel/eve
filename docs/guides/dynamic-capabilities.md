@@ -180,8 +180,10 @@ export default defineDynamic({
 The returned definitions use the same auth, headers, filtering, provided
 arguments, and approval options as static [MCP](../connections/mcp) and
 [OpenAPI](../connections/openapi) connections. Each resolved connection joins
-the per-step connection registry, appears in `connection_search`, and exposes
-discovered tools as `<connection>__<tool>`.
+the per-step connection registry and appears in `connection_search`. Its tools
+are not exposed to the model up front: the model discovers them by calling
+`connection_search`, and matches become callable as `<connection>__<tool>` on
+the next model call.
 
 Set `instanceKey` on every authenticated dynamic connection. Use a stable,
 non-secret account or tenant identifier, and change it whenever the endpoint,
