@@ -603,6 +603,47 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toContain("Deploy 142 failed");
   });
 
+  it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
+    "keeps short shared-message content alongside a longer human comment for %s attachments",
+    (sharedMessageFlag) => {
+      const result = resolveSlackInboundMrkdwn("<@U123> :eyes:", {
+        attachments: [
+          {
+            [sharedMessageFlag]: true,
+            text: "Ship it",
+            from_url: "https://example.slack.com/archives/C123/p1234567890000100",
+          },
+        ],
+      });
+
+      expect(result).toBe("<@U123> :eyes:\nShip it");
+    },
+  );
+
+  it("deduplicates individual shared-message fields already present in the comment", () => {
+    const result = resolveSlackInboundMrkdwn("Please review: Ship it", {
+      attachments: [{ is_share: true, title: "Release", text: "Ship it" }],
+    });
+
+    expect(result).toBe("Please review: Ship it\nRelease");
+  });
+
+  it("keeps a shared-message line that only matches inside another word", () => {
+    const result = resolveSlackInboundMrkdwn("Please start here", {
+      attachments: [{ is_share: true, text: "art" }],
+    });
+
+    expect(result).toBe("Please start here\nart");
+  });
+
+  it("does not force content from an unflagged attachment beside a shared message", () => {
+    const result = resolveSlackInboundMrkdwn("<@U123> please review this deployment", {
+      attachments: [{ is_share: true }, { text: "ordinary preview" }],
+    });
+
+    expect(result).toBe("<@U123> please review this deployment");
+  });
+
   it("prefers extracted block content when whitespace differs from top-level text", () => {
     const result = resolveSlackInboundMrkdwn("Alert: latency high\nin checkout region now", {
       blocks: [
