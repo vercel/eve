@@ -106,17 +106,17 @@ export function buildVercelConnectRequirements(manifest: {
               path: slackAppManifestPath(channel.logicalPath),
             }
           : undefined;
+      const requirement = {
+        target: { mode: "direct" as const, locator: vercelConnect.connector },
+        connector: { type: vercelConnect.connectorType },
+        access: { principalTypes: vercelConnect.principalTypes },
+        triggers: [{ method: channel.method, path: channel.urlPath }],
+        uses: [{ kind: "channel" as const, name: channel.name, logicalPath: channel.logicalPath }],
+      };
       return [
-        {
-          target: { mode: "direct" as const, locator: vercelConnect.connector },
-          connector: { type: vercelConnect.connectorType },
-          access: { principalTypes: vercelConnect.principalTypes },
-          ...(providerConfiguration === undefined ? {} : { providerConfiguration }),
-          triggers: [{ method: channel.method, path: channel.urlPath }],
-          uses: [
-            { kind: "channel" as const, name: channel.name, logicalPath: channel.logicalPath },
-          ],
-        },
+        providerConfiguration === undefined
+          ? requirement
+          : { ...requirement, providerConfiguration },
       ];
     }),
   ];
@@ -127,19 +127,22 @@ export async function emitVercelConnectManifest(input: {
   readonly manifest: CompiledAgentManifest;
   readonly outputDirectory: string;
 }): Promise<void> {
-  const manifest = createVercelConnectManifest({
+  const connectManifest = createVercelConnectManifest({
     generatorVersion: input.generatorVersion,
     requirements: buildVercelConnectRequirements(input.manifest),
   });
-  if (manifest === undefined) return;
+  const slackManifests = buildSlackAppManifests(input.manifest);
+  if (connectManifest === undefined && slackManifests.size === 0) return;
   const { mkdir, writeFile } = await import("node:fs/promises");
   const { dirname, join } = await import("node:path");
   await mkdir(input.outputDirectory, { recursive: true });
-  await writeFile(
-    join(input.outputDirectory, VERCEL_CONNECT_MANIFEST_FILENAME),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
-  for (const [path, slackManifest] of buildSlackAppManifests(input.manifest)) {
+  if (connectManifest !== undefined) {
+    await writeFile(
+      join(input.outputDirectory, VERCEL_CONNECT_MANIFEST_FILENAME),
+      `${JSON.stringify(connectManifest, null, 2)}\n`,
+    );
+  }
+  for (const [path, slackManifest] of slackManifests) {
     const outputPath = join(input.outputDirectory, path);
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, `${JSON.stringify(slackManifest, null, 2)}\n`);
@@ -150,15 +153,13 @@ export function buildSlackAppManifests(manifest: {
   readonly channelRoutes: {
     readonly effective: readonly Pick<
       CompiledAgentManifest["channelRoutes"]["effective"][number],
-      "adapterKind" | "logicalPath" | "name" | "vercelConnect"
+      "adapterKind" | "logicalPath" | "name"
     >[];
   };
 }): ReadonlyMap<string, SlackAppManifest> {
   const manifests = new Map<string, SlackAppManifest>();
   for (const channel of manifest.channelRoutes.effective) {
-    if (channel.adapterKind !== "slack" || channel.vercelConnect?.connectorType !== "slack") {
-      continue;
-    }
+    if (channel.adapterKind !== "slack") continue;
     const name = channel.name.slice(0, 35);
     manifests.set(slackAppManifestPath(channel.logicalPath), {
       display_information: { name },
