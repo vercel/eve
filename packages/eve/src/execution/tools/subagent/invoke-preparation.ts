@@ -228,8 +228,8 @@ function isRecursiveAgentAction(
   );
 }
 
-function resolveAgentInvocationAction(input: {
-  readonly ctx: Awaited<ReturnType<typeof deserializeContext>>;
+export function resolveAgentInvocationAction(input: {
+  readonly ctx: ContextReader;
   readonly input: AgentInvocationRequest["input"];
   readonly invocationId: string;
 }): RuntimeAgentDispatchRequest {

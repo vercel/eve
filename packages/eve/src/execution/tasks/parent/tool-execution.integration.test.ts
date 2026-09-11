@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
+import {
+  sendTaskCommand,
+  startTaskRun,
+  waitForTaskCommandOwner,
+} from "#execution/tasks/parent/run-parent.js";
 import {
   backgroundToolExecutionProvider,
   readRetainedBackgroundToolResult,
 } from "#execution/tasks/parent/tool-execution.js";
-import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
+import { steerBackgroundAgent } from "#execution/tools/subagent/steer.js";
 import {
   BackgroundToolExecutorKey,
   createBackgroundToolCallBatch,
@@ -17,10 +20,8 @@ import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { getSessionTaskIndex, recordSessionTask } from "#tasks/session-index.js";
-vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: vi.fn() }));
-vi.mock("#execution/tools/subagent/task-cancel.js", () => ({ cancelBackgroundAgentTask: vi.fn() }));
+vi.mock("#execution/tools/subagent/steer.js", () => ({ steerBackgroundAgent: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   sendTaskCommand: vi.fn(async () => "delivered"),
   startTaskRun: vi.fn(),
@@ -47,11 +48,6 @@ const entry = {
   taskId: handle.ownerId,
   taskInboxToken: "original-task-inbox",
   taskRunId: "original-task-run",
-};
-const cancelledView = {
-  metadata: entry.metadata,
-  status: "cancelled" as const,
-  taskId: entry.taskId,
 };
 
 function createSession(owned = true): HarnessSession {
@@ -115,56 +111,45 @@ async function createScope(session = createSession()) {
 describe("background subagent steering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(cancelOwnedTask).mockResolvedValue(cancelledView);
+    vi.mocked(steerBackgroundAgent).mockResolvedValue(undefined);
     vi.mocked(startTaskRun).mockResolvedValue(undefined as never);
     vi.mocked(waitForTaskCommandOwner).mockResolvedValue({ runId: "steering-task-run" } as never);
   });
 
-  it("cancels the old task before starting a new task in the same child", async () => {
+  it("steers the existing child without replacing its task, claim, or receipt", async () => {
     const scope = await createScope();
-    const cancellation = Promise.withResolvers<typeof cancelledView>();
-    vi.mocked(cancelOwnedTask).mockReturnValue(cancellation.promise);
-    const steering = scope.execute();
-    expect(startTaskRun).not.toHaveBeenCalled();
-    expect(cancelOwnedTask).toHaveBeenCalledWith(
+    const receipt = await scope.execute();
+    expect(steerBackgroundAgent).toHaveBeenCalledWith(
       expect.objectContaining({
-        cancelOwnedWork: cancelBackgroundAgentTask,
-        entry,
-        serializedContext: {},
+        handle,
+        callId: "steering-call",
+        input: { agentId: identity.id, message: "Use the updated instruction" },
       }),
     );
-
-    cancellation.resolve(cancelledView);
-    const receipt = await steering;
-    expect(receipt).toMatchObject({ agentId: identity.id, status: "working" });
+    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.taskId });
     const session = await scope.commit();
-    const claimed = getAgentHandleStore(session.state)?.handles[0];
-    expect(claimed).toMatchObject({ address, identity, phase: "claimed", callId: "steering-call" });
-    expect(claimed).not.toHaveProperty("ownerId", entry.taskId);
-    expect(getSessionTaskIndex(session.state)).toHaveLength(2);
-
-    const released = applyTaskAgentHandleCommand(session, {
-      kind: "release-owner",
-      ownerId: entry.taskId,
-    });
-    expect(released.session).toBe(session);
+    expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
+    expect(getSessionTaskIndex(session.state)).toEqual([entry]);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
+    expect(sendTaskCommand).not.toHaveBeenCalled();
   });
 
-  it("keeps the original claim and starts no replacement when cancellation fails", async () => {
+  it("keeps the original claim and starts no replacement when delivery fails", async () => {
     const scope = await createScope();
-    vi.mocked(cancelOwnedTask).mockRejectedValue(new Error("Cancellation did not commit"));
-    await expect(scope.execute()).rejects.toThrow("Cancellation did not commit");
+    vi.mocked(steerBackgroundAgent).mockRejectedValueOnce(new Error("Delivery failed"));
+    await expect(scope.execute()).rejects.toThrow("Delivery failed");
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
-  it("does not cancel a task outside the parent task index", async () => {
+  it("does not steer a task outside the parent task index", async () => {
     const scope = await createScope(createSession(false));
     await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
-    expect(cancelOwnedTask).not.toHaveBeenCalled();
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
   });
 
-  it("does not cancel a task associated with another child", async () => {
+  it("does not steer a task associated with another child", async () => {
     const scope = await createScope(
       recordSessionTask(createSession(), {
         ...entry,
@@ -172,18 +157,18 @@ describe("background subagent steering", () => {
       }),
     );
     await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
-    expect(cancelOwnedTask).not.toHaveBeenCalled();
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
   });
 
-  it("rejects a different subagent tool before cancellation", async () => {
+  it("rejects a different subagent tool before delivery", async () => {
     const scope = await createScope();
     await expect(scope.execute("call-1", identity.id, "another-tool")).rejects.toThrow(
       "AGENT_MISMATCH",
     );
-    expect(cancelOwnedTask).not.toHaveBeenCalled();
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
   });
 
-  it("rejects a different local/remote target before cancellation", async () => {
+  it("rejects a different local/remote target before delivery", async () => {
     const session = createSession();
     const scope = await createScope({
       ...session,
@@ -202,7 +187,7 @@ describe("background subagent steering", () => {
       }),
     });
     await expect(scope.execute()).rejects.toThrow("AGENT_MISMATCH");
-    expect(cancelOwnedTask).not.toHaveBeenCalled();
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
   });
 
   it("does not steer a reservation before the child has an address", async () => {
@@ -215,10 +200,10 @@ describe("background subagent steering", () => {
       }),
     });
     await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
-    expect(cancelOwnedTask).not.toHaveBeenCalled();
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
   });
 
-  it("preserves a different child's claim made while cancellation was pending", async () => {
+  it("preserves a different child's claim made while steering was pending", async () => {
     const second = {
       address: { ...address, sessionId: "second-session" },
       identity: { ...identity, id: "agent-2" },
@@ -229,14 +214,14 @@ describe("background subagent steering", () => {
       ...session,
       state: setAgentHandleStore(session.state, { handles: [handle, second] }),
     });
-    const cancellation = Promise.withResolvers<typeof cancelledView>();
-    vi.mocked(cancelOwnedTask).mockReturnValue(cancellation.promise);
+    const delivery = Promise.withResolvers<void>();
+    vi.mocked(steerBackgroundAgent).mockReturnValueOnce(delivery.promise);
     const first = scope.execute();
     await scope.execute("second-call", second.identity.id);
-    cancellation.resolve(cancelledView);
+    delivery.resolve();
     await first;
     expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([
-      expect.objectContaining({ identity, phase: "claimed", callId: "steering-call" }),
+      handle,
       expect.objectContaining({
         identity: second.identity,
         phase: "claimed",
@@ -245,61 +230,41 @@ describe("background subagent steering", () => {
     ]);
   });
 
-  it("rejects competing steering before it can send a delayed child cancellation", async () => {
+  it("accepts concurrent steering without transferring ownership", async () => {
     const scope = await createScope();
-    const cancellation = Promise.withResolvers<typeof cancelledView>();
-    const delayedCancellation = Promise.withResolvers<typeof cancelledView>();
-    vi.mocked(cancelOwnedTask).mockImplementation(() =>
-      vi.mocked(cancelOwnedTask).mock.calls.length === 1
-        ? cancellation.promise
-        : delayedCancellation.promise,
-    );
-    const first = scope.execute("first-call");
-    const second = scope.execute("second-call");
-    const settled = Promise.allSettled([first, second]);
-    try {
-      expect(cancelOwnedTask).toHaveBeenCalledTimes(1);
-      await expect(second).rejects.toThrow("AGENT_BUSY");
-      expect(startTaskRun).not.toHaveBeenCalled();
-    } finally {
-      cancellation.resolve(cancelledView);
-      delayedCancellation.resolve(cancelledView);
-      await settled;
-    }
-    const results = await settled;
-    expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
-    expect(startTaskRun).toHaveBeenCalledTimes(1);
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles[0]).toMatchObject({
-      callId: "first-call",
-    });
+    const receipts = await Promise.all([scope.execute("first-call"), scope.execute("second-call")]);
+    expect(receipts).toEqual([
+      { agentId: identity.id, status: "working", taskId: entry.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.taskId },
+    ]);
+    expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
-  it("allows another steering attempt after cancellation fails", async () => {
+  it("allows another steering attempt after delivery fails", async () => {
     const scope = await createScope();
-    vi.mocked(cancelOwnedTask).mockRejectedValueOnce(new Error("Child cancellation failed"));
-    await expect(scope.execute("first-call")).rejects.toThrow("Child cancellation failed");
+    vi.mocked(steerBackgroundAgent).mockRejectedValueOnce(new Error("Delivery failed"));
+    await expect(scope.execute("first-call")).rejects.toThrow("Delivery failed");
 
     await expect(scope.execute("retry-call")).resolves.toMatchObject({
       agentId: identity.id,
       status: "working",
     });
-    expect(cancelOwnedTask).toHaveBeenCalledTimes(2);
-    expect(startTaskRun).toHaveBeenCalledTimes(1);
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles[0]).toMatchObject({
-      callId: "retry-call",
-    });
+    expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
-  it("retains the released child if the parent turn is cancelled before the replacement starts", async () => {
-    const scope = await createScope();
-    const cancellation = new TurnCancelledError();
-    vi.mocked(startTaskRun).mockRejectedValueOnce(cancellation);
-    await expect(scope.execute()).rejects.toThrow(cancellation);
-    await scope.rollback(cancellation);
-    const retained = scope.retained();
-    expect(retained?.backgroundTasks).toEqual([]);
-    expect(getAgentHandleStore(retained?.backgroundTaskSession.state)?.handles).toEqual([
-      { address, identity, phase: "available" },
-    ]);
-  });
+  it.each([new Error("Parent step failed"), new TurnCancelledError()])(
+    "does not compensate the pre-existing task on rollback: %s",
+    async (cause) => {
+      const scope = await createScope();
+      await scope.execute();
+      await scope.rollback(cause);
+      expect(sendTaskCommand).not.toHaveBeenCalled();
+      expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+      expect(scope.retained()).toBeUndefined();
+    },
+  );
 });

@@ -84,13 +84,20 @@ export async function dispatchToClaimedAgentAddress(input: {
   return await dispatchToAgentAddress(input);
 }
 
+/** Steering keeps the active turn's original result callback and owner. */
+export async function steerClaimedAgent(
+  input: Omit<Parameters<typeof dispatchToClaimedAgentAddress>[0], "parentToken" | "taskId">,
+): Promise<DispatchOutcome> {
+  return await dispatchToAgentAddress(input);
+}
+
 /** Delivers a continuation to an already-claimed local or remote agent address. */
 async function dispatchToAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
-  readonly parentToken: string;
+  readonly parentToken?: string;
   readonly handle: { readonly address: AgentAddress; readonly identity: AgentIdentity };
   readonly taskId?: string;
 }): Promise<DispatchOutcome> {
@@ -156,7 +163,7 @@ async function deliverToAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
-  readonly parentToken: string;
+  readonly parentToken?: string;
   readonly taskId?: string;
 }): Promise<
   Result<
@@ -182,16 +189,19 @@ async function deliverToAgentAddress(input: {
     try {
       await continueRemoteAgentSession({
         auth: input.auth,
-        callback: {
-          callId: action.callId,
-          subagentName: identity.name,
-          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
-          token: input.parentToken,
-          url: createWorkflowCallbackUrl(
-            address.callbackBaseUrl,
-            createEveCallbackRoutePath(input.parentToken),
-          ),
-        },
+        callback:
+          input.parentToken === undefined
+            ? undefined
+            : {
+                callId: action.callId,
+                subagentName: identity.name,
+                taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
+                token: input.parentToken,
+                url: createWorkflowCallbackUrl(
+                  address.callbackBaseUrl,
+                  createEveCallbackRoutePath(input.parentToken),
+                ),
+              },
         message: readSubagentMessage(action),
         outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         remote: { ...resolvedRemote, url: address.url },
@@ -215,12 +225,15 @@ async function deliverToAgentAddress(input: {
     const result = await childRuntime.dispatchSession({
       command: {
         auth: input.auth,
-        caller: {
-          callId: action.callId,
-          replyTo: { kind: "hook", token: input.parentToken },
-          subagentName: identity.name,
-          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
-        },
+        caller:
+          input.parentToken === undefined
+            ? undefined
+            : {
+                callId: action.callId,
+                replyTo: { kind: "hook", token: input.parentToken },
+                subagentName: identity.name,
+                taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
+              },
         kind: "send",
         payload: {
           message: readSubagentMessage(action),
