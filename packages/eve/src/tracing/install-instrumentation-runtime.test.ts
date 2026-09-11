@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { ConversationIdKey } from "#context/keys.js";
 import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
-const { forceFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
+const { forceFlush, invocationFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
   forceFlush: vi.fn(async () => undefined),
+  invocationFlush: vi.fn(async () => undefined),
   internalTerminalState: vi.fn(),
   shutdown: vi.fn(async () => undefined),
 }));
@@ -29,6 +31,7 @@ vi.mock("#tracing/otel-registration.js", async (importOriginal) => {
 vi.mock("#tracing/agent-otel-provider.js", () => ({
   createAgentOtelInstrumentation: () => ({
     hook: {
+      flush: invocationFlush,
       events: {
         "turn.completed": (_event: unknown, ctx: { state: { get(): unknown } }) => {
           internalTerminalState(ctx.state.get());
@@ -48,6 +51,7 @@ const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 describe("installInstrumentationRuntime", () => {
   beforeEach(() => {
     forceFlush.mockClear();
+    invocationFlush.mockClear();
     internalTerminalState.mockClear();
     shutdown.mockClear();
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
@@ -82,15 +86,36 @@ describe("installInstrumentationRuntime", () => {
     expect(providerShutdown).toHaveBeenCalledOnce();
   });
 
-  it.each(["session.completed", "session.failed"] as const)(
-    "releases local trace liveness after %s",
-    async (type) => {
-      const releaseSession = vi.fn(async () => true);
+  it("materializes settled invocations without draining authored providers or the exporter", async () => {
+    const providerFlush = vi.fn();
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [{ flush: providerFlush, name: "test" }],
+      serviceName: "weather",
+    });
+
+    await runtime.flushSettledInvocations!();
+
+    expect(invocationFlush).toHaveBeenCalledOnce();
+    expect(providerFlush).not.toHaveBeenCalled();
+    expect(forceFlush).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["session.completed", "conversation-1", true],
+    ["session.failed", "conversation-1", true],
+    ["session.completed", "child-1", false],
+    ["session.failed", "child-1", false],
+  ] as const)(
+    "releases conversation traces after %s for %s",
+    async (type, sessionId, expectedRelease) => {
+      const releaseConversation = vi.fn(async () => true);
       const processor = {
         forceFlush: vi.fn(async () => undefined),
         onEnd: vi.fn(),
         onStart: vi.fn(),
-        releaseSession,
+        releaseConversation,
         shutdown: vi.fn(async () => undefined),
       };
       const runtime = installInstrumentationRuntime({
@@ -101,15 +126,17 @@ describe("installInstrumentationRuntime", () => {
       });
       const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
       const event = {
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        sessionId: "session-1",
+        idempotencyKey: sessionIdempotencyKey(sessionId),
+        sessionId,
         type,
         ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
       };
 
-      await contextStorage.run(new ContextContainer(), () => hooks.publish(event));
+      const context = new ContextContainer();
+      context.set(ConversationIdKey, "conversation-1");
+      await contextStorage.run(context, () => hooks.publish(event));
 
-      expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+      expect(releaseConversation.mock.calls).toEqual(expectedRelease ? [["conversation-1"]] : []);
     },
   );
 

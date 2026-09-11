@@ -8,11 +8,12 @@ const replacementSchema = {
       type: "string",
       minLength: 1,
       description:
-        "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+        "Unique exact text from the current file. Encode control characters, quotes, and backslashes as JSON escapes.",
     },
     newText: {
       type: "string",
-      description: "Replacement text for this targeted edit.",
+      description:
+        "Exact replacement text. Encode control characters, quotes, and backslashes as JSON escapes.",
     },
   },
   required: ["oldText", "newText"],

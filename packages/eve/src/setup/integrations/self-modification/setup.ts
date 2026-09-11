@@ -131,7 +131,7 @@ export async function applySelfModificationSetup(
     };
   }
   if (plan.kind === "local") {
-    return { facts: [{ label: "Self-modification", value: "local editing" }] };
+    return { facts: [] };
   }
 
   const connector = await operations.findOrCreateConnector(plan.connectorName);

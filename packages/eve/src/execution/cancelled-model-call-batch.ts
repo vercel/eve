@@ -8,6 +8,7 @@ import type { DurableStepResult } from "#execution/next-driver-action.js";
 import { readRetainedBackgroundToolResult } from "#execution/tasks/parent/tool-execution.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
+import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 
 export interface CompletedModelCallCheckpoint {
@@ -46,6 +47,11 @@ export async function createCancelledModelCallBatchResult(input: {
     ...(backgroundTaskSession === undefined || backgroundTasks === undefined
       ? {}
       : {
+          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
+            input.beforeBatchContext,
+            interruptedContext,
+            backgroundTasks,
+          ),
           backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
           backgroundTasks,
         }),

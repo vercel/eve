@@ -21,6 +21,8 @@ import {
   findInstrumentationActionScopeForCall,
   instrumentationStateSlot,
   rememberInstrumentationActionScope,
+  rememberInstrumentationBackgroundTask,
+  takeInstrumentationActionScopeForTask,
 } from "#instrumentation/state.js";
 
 const { logDebug, logWarn } = vi.hoisted(() => ({ logDebug: vi.fn(), logWarn: vi.fn() }));
@@ -311,6 +313,55 @@ describe("provider state lifecycle", () => {
       outcome: "cancelled",
       type: "action.failed",
     });
+  });
+
+  it("keeps an admitted background action open when its initiating turn is cancelled", async () => {
+    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
+    const completed = vi.fn();
+    const failed = vi.fn();
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "action.completed": completed,
+          "action.failed": failed,
+          "action.started": (_event, ctx) => ctx.state.set("open"),
+        },
+        name: "sink",
+      },
+    ]);
+    await contextStorage.run(new ContextContainer(), async () => {
+      rememberInstrumentationActionScope(actionKey, scope);
+      await hooks.publish({
+        callId: "call-1",
+        idempotencyKey: actionKey,
+        input: {},
+        kind: "tool-call",
+        name: "tool",
+        scope,
+        type: "action.started",
+      });
+      rememberInstrumentationBackgroundTask("task-1", { idempotencyKey: actionKey, scope });
+      await hooks.publish({
+        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        type: "turn.cancelled",
+      });
+
+      expect(failed).not.toHaveBeenCalled();
+      expect(instrumentationStateSlot("sink", actionKey).get()).toBe("open");
+      const correlation = takeInstrumentationActionScopeForTask("task-1");
+      expect(correlation).toEqual({ idempotencyKey: actionKey, scope });
+      await hooks.publish({
+        idempotencyKey: correlation!.idempotencyKey,
+        outcome: "completed",
+        output: { output: "done", type: "result" },
+        scope: correlation!.scope,
+        type: "action.completed",
+      });
+      expect(instrumentationStateSlot("sink", actionKey).get()).toBeUndefined();
+    });
+    expect(completed).toHaveBeenCalledOnce();
   });
 });
 

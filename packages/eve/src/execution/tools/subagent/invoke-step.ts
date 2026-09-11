@@ -50,17 +50,24 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
+import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
+import {
+  flushAgentInvocationTraces,
+  settleAgentInvocationTrace,
+} from "#tracing/agent-invocation-terminal.js";
 
 export type AgentInvocationDispatchResult =
   | {
       readonly kind: "dispatched";
       readonly agentId: string;
       readonly event: SubagentCalledStreamEvent;
+      readonly serializedContext?: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "failed";
       readonly result: RuntimeSubagentResult;
+      readonly serializedContext?: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     };
 
@@ -92,6 +99,26 @@ export async function dispatchAgentInvocation(input: {
   if (entry === undefined) {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
+  if (entry.kind === "reject") {
+    return {
+      kind: "failed",
+      result: entry.result,
+      serializedContext: prepared.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
+  const invocationAction = entry.kind === "start" ? entry.target.action : entry.action;
+  const tracing = prepareAgentInvocationTrace({
+    channelMetadata: prepared.channelMetadata,
+    invocation: invocationAction,
+    ownerId: input.ownerId,
+    serializedContext: prepared.serializedContext,
+    sessionId: prepared.session.sessionId,
+    sessionState: durableSession.state,
+    startTimeMs: Date.now(),
+    taskId: input.taskId,
+    turnId: prepared.batch.event.turnId,
+  });
   let session = prepared.session;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
@@ -100,15 +127,17 @@ export async function dispatchAgentInvocation(input: {
       session: projectToDurableSession(session),
       state: input.sessionState,
     });
+  const failed = async (result: RuntimeSubagentResult): Promise<AgentInvocationDispatchResult> => ({
+    kind: "failed",
+    result,
+    serializedContext: await flushAgentInvocationTraces(tracing.fail(result)),
+    sessionState: sessionState(),
+  });
   const applyHandleCommand = (command: AgentHandleStoreCommand): AgentHandleStoreCommandResult => {
     const applied = applyTaskAgentHandleCommand(session, command);
     session = applied.session;
     return applied.result;
   };
-  if (entry.kind === "reject") {
-    return { kind: "failed", result: entry.result, sessionState: sessionState() };
-  }
-
   let outcome: DispatchOutcome;
   let agentId: string;
   if (entry.kind === "resume") {
@@ -145,11 +174,7 @@ export async function dispatchAgentInvocation(input: {
       });
       claimed = readClaimedHandle(claim);
       if (claimed === undefined) {
-        return {
-          kind: "failed",
-          result: createTaskClaimError(entry.action, entry.agentId, claim),
-          sessionState: sessionState(),
-        };
+        return failed(createTaskClaimError(entry.action, entry.agentId, claim));
       }
     }
     const bundle = createAgentContinuationBundle({
@@ -221,12 +246,11 @@ export async function dispatchAgentInvocation(input: {
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
       activityObserver: prepared.activityObserver,
-      parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
-      serializedContext: prepared.serializedContext,
       session,
       taskId: input.taskId,
       target: entry.target,
+      trace: tracing.dispatch,
     });
     agentId = start.identity.id;
     if (outcome.kind === "error") {
@@ -247,7 +271,7 @@ export async function dispatchAgentInvocation(input: {
   }
 
   if (outcome.kind === "error") {
-    return { kind: "failed", result: outcome.result, sessionState: sessionState() };
+    return failed(outcome.result);
   }
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
@@ -281,7 +305,13 @@ export async function dispatchAgentInvocation(input: {
   if (input.emit !== undefined) {
     await input.emit(event);
   }
-  return { kind: "dispatched", agentId, event, sessionState: sessionState() };
+  return {
+    kind: "dispatched",
+    agentId,
+    event,
+    serializedContext: tracing.serializedContext,
+    sessionState: sessionState(),
+  };
 }
 
 /**
@@ -314,12 +344,24 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
+  readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
+}): Promise<{
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
+  const serializedContext = await flushAgentInvocationTraces(
+    settleAgentInvocationTrace({
+      acceptedAtMs: Date.now(),
+      result: input.result,
+      serializedContext: input.serializedContext,
+      sessionId: durable.sessionId,
+    }),
+  );
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
     (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
@@ -328,7 +370,9 @@ export async function settleTaskAgentInvocationStep(input: {
     candidates.find(
       (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
     ) ?? (candidates.length === 1 ? candidates[0] : undefined);
-  if (handle?.phase !== "claimed") return { sessionState: input.sessionState };
+  if (handle?.phase !== "claimed") {
+    return { serializedContext, sessionState: input.sessionState };
+  }
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
@@ -371,6 +415,7 @@ export async function settleTaskAgentInvocationStep(input: {
     );
   }
   return {
+    serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }

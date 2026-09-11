@@ -90,6 +90,16 @@ describe("parseRegistryIndex", () => {
     expect(bundle?.components).toEqual(["channel/linear-agent", "connection/linear"]);
   });
 
+  it("recognizes memory registry items", () => {
+    expect(parseRegistryIndex({ items: [{ name: "memory/file", title: "File memory" }] })).toEqual([
+      {
+        address: "memory/file",
+        category: "memory",
+        title: "File memory",
+      },
+    ]);
+  });
+
   it("labels an item that publishes no title", () => {
     const entry = catalog().find((row) => row.address === "instrumentation/langfuse-tracing");
 
@@ -175,6 +185,20 @@ describe("selectIntegrations", () => {
     expect(
       selectIntegrations({ category: "channel", entries: catalog() }).map((row) => row.address),
     ).toEqual(["channel/slack", "channel/discord", "linear"]);
+  });
+
+  it("filters memory integrations", () => {
+    const entries = parseRegistryIndex({
+      items: [
+        { name: "memory/file", title: "File memory" },
+        { name: "extension/browser", title: "Browser" },
+      ],
+    });
+
+    expect(selectIntegrations({ category: "memory", entries })).toEqual([
+      { address: "memory/file", category: "memory", title: "File memory" },
+    ]);
+    expect(JSON.stringify(searchRegistry.inputSchema)).toContain('"memory"');
   });
 
   it("bounds the result count", () => {

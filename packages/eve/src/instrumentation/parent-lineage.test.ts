@@ -3,37 +3,49 @@ import { describe, expect, it } from "vitest";
 import { resolveParentLineage } from "#instrumentation/parent-lineage.js";
 
 const parent = {
-  callId: "call-1",
-  rootSessionId: "root-1",
-  sessionId: "session-1",
+  callId: "initial-call",
+  rootSessionId: "root",
+  sessionId: "parent",
   turn: { id: "turn-1", sequence: 0 },
 };
+const adapter = {
+  state: {
+    callId: "continued-local-call",
+    parentContinuationToken: "parent-token",
+    parentSessionId: "parent",
+    subagentName: "research",
+  },
+};
 
-describe("resolveParentLineage", () => {
-  it("reads the call and turn from the parent and the name from the adapter", () => {
-    expect(
-      resolveParentLineage(parent, {
-        state: {
-          callId: "call-1",
-          parentContinuationToken: "token-1",
-          parentSessionId: "session-1",
-          subagentName: "researcher",
-        },
-      }),
-    ).toEqual({
-      callId: "call-1",
-      sessionId: "session-1",
-      subagentName: "researcher",
+describe("parent trace lineage", () => {
+  it("uses the existing local adapter's current caller", () => {
+    expect(resolveParentLineage(parent, adapter)).toEqual({
+      callId: "continued-local-call",
+      sessionId: "parent",
+      subagentName: "research",
       turnId: "turn-1",
     });
   });
 
-  it("returns undefined for a top-level session", () => {
-    expect(resolveParentLineage(undefined, undefined)).toBeUndefined();
+  it("uses the current callback for remote continuations", () => {
+    expect(
+      resolveParentLineage(parent, undefined, {
+        callId: "continued-remote-call",
+        subagentName: "research",
+        token: "callback-token",
+        url: "https://parent.example/callback",
+      })?.callId,
+    ).toBe("continued-remote-call");
+  });
+
+  it("does not invent delegated lineage from callback metadata", () => {
+    expect(resolveParentLineage(undefined, adapter)).toBeUndefined();
+    expect(resolveParentLineage(parent, undefined)?.callId).toBe("initial-call");
   });
 
   it("omits the name when the child did not come through the subagent adapter", () => {
     expect(resolveParentLineage(parent, { state: { kind: "http" } })?.subagentName).toBeUndefined();
     expect(resolveParentLineage(parent, undefined)?.subagentName).toBeUndefined();
+    expect(resolveParentLineage(undefined, undefined)).toBeUndefined();
   });
 });

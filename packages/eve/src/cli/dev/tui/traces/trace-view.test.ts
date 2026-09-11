@@ -72,8 +72,8 @@ function viewerState(
   const trace: LocalTrace = {
     agentName: "weather",
     endTimeNs: ends.reduce((a, b) => (b > a ? b : a), 0n),
-    sessionId: "session-123",
-    sessionIds: ["session-123"],
+    conversationId: "session-123",
+    conversationIds: ["session-123"],
     spans,
     startTimeNs: starts.reduce((a, b) => (b < a ? b : a), starts[0] ?? 0n),
     traceId,
@@ -99,7 +99,7 @@ describe("renderTraceViewer", () => {
     const header = stripAnsi(frame.rows[1]!);
     expect(header).toContain("traces");
     expect(header).toContain("weather");
-    expect(header).toContain("session session-123");
+    expect(header).toContain("conversation session-123");
     expect(header).toContain(clockTimeOf(BASE));
     expect(header).toContain("5 spans");
     expect(header).toContain("[1/1]");

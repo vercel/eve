@@ -1,5 +1,9 @@
 import type { H3Event } from "nitro";
-import type { Span } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context as otelContext,
+  trace as otelTrace,
+  type SpanContext,
+} from "#compiled/@opentelemetry/api/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
@@ -51,6 +55,10 @@ export async function dispatchChannelRequest(
   config: NitroArtifactsConfig,
 ): Promise<Response> {
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
+    // Correlation does not require an eve-owned request span. Preserve any
+    // active platform request or function span before route resolution.
+    const requestTraceContext =
+      span?.spanContext() ?? otelTrace.getSpan(otelContext.active())?.spanContext();
     const bundle = await resolveNitroChannelRuntimeBundle(config);
 
     const matchedChannel = bundle.channels.find(
@@ -83,7 +91,7 @@ export async function dispatchChannelRequest(
       matchedChannel.name,
       channelKind ?? "channel",
       config,
-      span,
+      requestTraceContext,
     );
 
     let response: Response;
@@ -212,7 +220,7 @@ function buildRouteArgs(
   channelName: string,
   channelKind: string,
   config: NitroArtifactsConfig,
-  requestSpan: Span | undefined,
+  requestTraceContext: SpanContext | undefined,
 ): BuiltRouteArgs {
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
@@ -228,7 +236,6 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const requestSpanContext = requestSpan?.spanContext();
   const acceptedDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
   const deliverySource = {
     acceptedDeploymentId,
@@ -236,12 +243,12 @@ function buildRouteArgs(
     channelName,
     requestId,
     requestTraceContext:
-      requestSpanContext === undefined
+      requestTraceContext === undefined
         ? undefined
         : {
-            spanId: requestSpanContext.spanId,
-            traceFlags: requestSpanContext.traceFlags,
-            traceId: requestSpanContext.traceId,
+            spanId: requestTraceContext.spanId,
+            traceFlags: requestTraceContext.traceFlags,
+            traceId: requestTraceContext.traceId,
           },
   };
   const channelOperations = createChannelOperations({

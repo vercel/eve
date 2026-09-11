@@ -41,6 +41,8 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
+import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -81,7 +83,10 @@ import {
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
-import { runBackgroundStep } from "#execution/tasks/parent/tool-execution.js";
+import {
+  readRetainedBackgroundToolResult,
+  runBackgroundStep,
+} from "#execution/tasks/parent/tool-execution.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -569,6 +574,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       throw error;
     }
     writer.releaseLock();
+    const retained = readRetainedBackgroundToolResult(ctx);
+    instrumentation?.rememberBackgroundTasks(retained?.backgroundTasks ?? []);
     return createCancelledModelCallBatchResult({
       beforeBatchContext: input.serializedContext,
       checkpoint: completedModelCall,
@@ -578,8 +585,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
   }
 
+  instrumentation?.rememberBackgroundTasks(stepResult.backgroundTasks ?? []);
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
+  agentTraceState.pruneAgentTraceState(ctx, rekeyed.sessionId, rekeyed.state);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };
 
@@ -588,6 +597,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
       : {
+          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
+            input.serializedContext,
+            nextSerializedContext,
+            stepResult.backgroundTasks,
+          ),
           backgroundTaskState: createDurableSessionState({
             session: stepResult.backgroundTaskSession,
           }),

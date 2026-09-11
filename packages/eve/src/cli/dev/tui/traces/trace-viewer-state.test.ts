@@ -34,7 +34,7 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
   const ends = spans.map((s) => s.endTimeNs);
   return {
     endTimeNs: ends.reduce((a, b) => (b > a ? b : a), 0n),
-    sessionIds: [],
+    conversationIds: [],
     spans,
     startTimeNs: starts.reduce((a, b) => (b < a ? b : a), starts[0] ?? 0n),
     traceId,

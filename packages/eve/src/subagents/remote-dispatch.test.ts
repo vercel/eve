@@ -201,6 +201,65 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it.each([true, false])(
+    "preserves configured headers unless context replaces them (%s)",
+    async (hasContext) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "accepted-child",
+            status: "accepted",
+          },
+          { status: 202 },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const input = {
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parent: hasContext
+          ? {
+              conversationId: "logical-conversation",
+              traceContext: {
+                spanId: "2".repeat(16),
+                traceFlags: 1,
+                traceId: "1".repeat(32),
+              },
+            }
+          : undefined,
+        remote: {
+          ...createRemoteAgent(),
+          headers: {
+            Traceparent: "operator-context",
+            baggage: "eve.conversation.id=operator-id,vendor=value",
+          },
+        },
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+      };
+
+      await expect(startRemoteAgentSession(input)).resolves.toEqual({
+        sessionId: "accepted-child",
+      });
+      const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+      expect(headers.get("traceparent")).toBe(
+        hasContext ? `00-${"1".repeat(32)}-${"2".repeat(16)}-01` : "operator-context",
+      );
+      expect(headers.get("baggage")).toBe(
+        hasContext
+          ? "vendor=value,eve.conversation.id=logical-conversation"
+          : "eve.conversation.id=operator-id,vendor=value",
+      );
+    },
+  );
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -217,11 +276,6 @@ describe("startRemoteAgentSession", () => {
     const childSessionId = await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
-      parentTraceContext: {
-        spanId: "2".repeat(16),
-        traceFlags: 1,
-        traceId: "1".repeat(32),
-      },
       remote: {
         ...createRemoteAgent(),
         headers: { Traceparent: "00-authored", "x-static": "yes" },
@@ -240,6 +294,13 @@ describe("startRemoteAgentSession", () => {
         history: [],
         sessionId: "parent-session",
         state: {},
+      },
+      parent: {
+        traceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
       },
     });
 
@@ -289,7 +350,6 @@ describe("startRemoteAgentSession", () => {
     await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
-      callbackToken: "invocation-reply",
       remote: createRemoteAgent(),
       session: {
         agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
@@ -300,6 +360,7 @@ describe("startRemoteAgentSession", () => {
         state: {},
       },
       taskId: "task-1",
+      parent: { continuationToken: "invocation-reply" },
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
@@ -494,7 +555,6 @@ describe("startRemoteAgentSession", () => {
     await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
-      callbackToken: "turn-inbox",
       remote: createRemoteAgent(),
       session: {
         agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
@@ -503,6 +563,7 @@ describe("startRemoteAgentSession", () => {
         history: [],
         sessionId: "parent-session",
       },
+      parent: { continuationToken: "turn-inbox" },
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback).toEqual({
@@ -615,18 +676,20 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         callbackBaseUrl: "https://caller.example.com",
         originAudience: "private",
         initiatorAuth: INITIATOR_AUTH,
-        parentTraceContext: {
-          decision: { action: "record", recordInputs: true, recordOutputs: false },
-          spanId: "2".repeat(16),
-          traceFlags: 1,
-          traceId: "1".repeat(32),
-        },
         remote: {
           ...createRemoteAgent(),
           forwardPrincipal: true,
           headers: { baggage: "vendor=value,eve.audience=private" },
         },
         session: createSession(),
+        parent: {
+          traceContext: {
+            decision: { action: "record", recordInputs: true, recordOutputs: false },
+            spanId: "2".repeat(16),
+            traceFlags: 1,
+            traceId: "1".repeat(32),
+          },
+        },
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
 
@@ -652,20 +715,59 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       callbackBaseUrl: "https://caller.example.com",
       initiatorAuth: INITIATOR_AUTH,
       originAudience: "public",
-      parentTraceContext: {
-        decision: { action: "record", recordInputs: false, recordOutputs: false },
-        spanId: "2".repeat(16),
-        traceFlags: 1,
-        traceId: "1".repeat(32),
-      },
       remote: { ...createRemoteAgent(), forwardPrincipal: true },
       session: createSession(),
+      parent: {
+        traceContext: {
+          decision: { action: "record", recordInputs: false, recordOutputs: false },
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+      },
     });
 
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       baggage: "eve.audience=public;ceiling=i0o0",
     });
   });
+
+  it.each([false, true])(
+    "rejects baggage overflow before dispatch (conversation addition: %s)",
+    async (withConversation) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const assertion = "eve.audience=private;ceiling=i0o0";
+      const baggage = `vendor=${"a".repeat(
+        8192 - "vendor=,".length - assertion.length + (withConversation ? 0 : 1),
+      )}`;
+
+      await expect(
+        startRemoteAgentSession({
+          action: createAction(),
+          auth: CURRENT_AUTH,
+          callbackBaseUrl: "https://caller.example.com",
+          originAudience: "private",
+          remote: {
+            ...createRemoteAgent(),
+            forwardPrincipal: true,
+            headers: { baggage },
+          },
+          session: createSession(),
+          parent: {
+            conversationId: withConversation ? "logical-conversation" : undefined,
+            traceContext: {
+              decision: { action: "record", recordInputs: false, recordOutputs: false },
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+          },
+        }),
+      ).rejects.toThrow("Cannot forward baggage: header exceeds 8192 bytes");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses unsampled trace flags as the only propagated drop signal", async () => {
     const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
@@ -677,18 +779,20 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       callbackBaseUrl: "https://caller.example.com",
       initiatorAuth: INITIATOR_AUTH,
       originAudience: "private",
-      parentTraceContext: {
-        decision: { action: "drop" },
-        spanId: "2".repeat(16),
-        traceFlags: 0,
-        traceId: "1".repeat(32),
-      },
       remote: {
         ...createRemoteAgent(),
         forwardPrincipal: true,
         headers: { baggage: "vendor=value,eve.audience=public;ceiling=i1o1" },
       },
       session: createSession(),
+      parent: {
+        traceContext: {
+          decision: { action: "drop" },
+          spanId: "2".repeat(16),
+          traceFlags: 0,
+          traceId: "1".repeat(32),
+        },
+      },
     });
 
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
@@ -736,13 +840,15 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         callbackBaseUrl: "https://caller.example.com",
         originAudience: "public",
         initiatorAuth: null,
-        parentTraceContext: {
-          spanId: "2".repeat(16),
-          traceFlags: 1,
-          traceId: "1".repeat(32),
-        },
         remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
+        parent: {
+          traceContext: {
+            spanId: "2".repeat(16),
+            traceFlags: 1,
+            traceId: "1".repeat(32),
+          },
+        },
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
 
@@ -772,16 +878,18 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         callbackBaseUrl: "https://caller.example.com",
         originAudience: "public",
         initiatorAuth: INITIATOR_AUTH,
-        parentTraceContext: {
-          spanId: "2".repeat(16),
-          traceFlags: 1,
-          traceId: "1".repeat(32),
-        },
         remote: {
           ...createRemoteAgent(),
           headers: { baggage: "vendor=value,eve.audience=public" },
         },
         session: createSession(),
+        parent: {
+          traceContext: {
+            spanId: "2".repeat(16),
+            traceFlags: 1,
+            traceId: "1".repeat(32),
+          },
+        },
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
 
@@ -7,6 +7,10 @@ const { registerOTel } = vi.hoisted(() => ({ registerOTel: vi.fn() }));
 vi.mock("#compiled/@vercel/otel/index.js", () => ({ registerOTel }));
 
 describe("registerOtelPipeline", () => {
+  beforeEach(() => {
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.otel.replay-deduplication")];
+  });
+
   it("maps eve's option names onto the ones @vercel/otel accepts", () => {
     registerOTel.mockImplementation(() => undefined);
 
@@ -92,8 +96,14 @@ describe("registerOtelPipeline", () => {
     expect(configuration.spanProcessors[0]).toBe("auto");
   });
 
-  it("exports only the first terminal for a replay-stable span", () => {
-    const downstream = {
+  it("exports a unique span to every concrete destination", () => {
+    const first = {
+      forceFlush: vi.fn(async () => {}),
+      onEnd: vi.fn(),
+      onStart: vi.fn(),
+      shutdown: vi.fn(async () => {}),
+    };
+    const second = {
       forceFlush: vi.fn(async () => {}),
       onEnd: vi.fn(),
       onStart: vi.fn(),
@@ -103,22 +113,34 @@ describe("registerOtelPipeline", () => {
 
     expect(() =>
       registerOtelPipeline({
-        pipeline: { spanProcessors: [downstream] },
+        pipeline: { spanProcessors: [first, second] },
         serviceName: "weather",
       }),
     ).toThrow();
 
-    const processor = (
-      registerOTel.mock.calls.at(-1)![0] as {
-        spanProcessors: { onEnd(span: unknown): void }[];
-      }
-    ).spanProcessors[0]!;
-    const first = replaySpan("first");
-    const losingReplay = replaySpan("losing replay");
-    processor.onEnd(first);
-    processor.onEnd(losingReplay);
+    const configuration = registerOTel.mock.calls.at(-1)![0] as {
+      spanProcessors: { onEnd(span: unknown): void }[];
+    };
+    const processor = configuration.spanProcessors[0]!;
+    const span = replaySpan("first");
+    processor.onEnd(span);
 
-    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(first);
+    expect(configuration.spanProcessors).toHaveLength(1);
+    expect(first.onEnd).toHaveBeenCalledExactlyOnceWith(span);
+    expect(second.onEnd).toHaveBeenCalledExactlyOnceWith(span);
+  });
+
+  it("exports only the first terminal across replayed runtime registrations", () => {
+    const first = filteringProcessor();
+    const second = filteringProcessor();
+    const winner = replaySpan("first");
+    const losingReplay = replaySpan("losing replay");
+
+    first.processor.onEnd(winner);
+    second.processor.onEnd(losingReplay);
+
+    expect(first.downstream.onEnd).toHaveBeenCalledExactlyOnceWith(winner);
+    expect(second.downstream.onEnd).not.toHaveBeenCalled();
   });
 
   it("holds a physical child until its started parent completes", () => {

@@ -289,7 +289,7 @@ describe("multi-agent callback routing", () => {
         remoteAgentName: "research",
       },
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin),
-      callbackToken,
+      parent: { continuationToken: callbackToken },
       remote: {
         description: "remote research agent",
         kind: "remote",

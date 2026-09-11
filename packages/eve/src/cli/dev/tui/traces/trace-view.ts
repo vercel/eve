@@ -261,8 +261,8 @@ function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions
   if (state.trace?.agentName !== undefined) {
     segments.push(stripTerminalControls(state.trace.agentName));
   }
-  if (state.trace?.sessionId !== undefined) {
-    segments.push(`session ${stripTerminalControls(state.trace.sessionId)}`);
+  if (state.trace?.conversationId !== undefined) {
+    segments.push(`conversation ${stripTerminalControls(state.trace.conversationId)}`);
   }
   if (state.trace !== undefined) {
     const end =

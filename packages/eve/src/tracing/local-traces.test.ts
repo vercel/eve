@@ -25,7 +25,7 @@ vi.mock("#tracing/local-trace-retention.js", () => ({
 
 function agentSpan(sessionId: string, traceId: string): unknown {
   return {
-    attributes: { "agent.session.id": sessionId },
+    attributes: { "gen_ai.conversation.id": sessionId },
     spanContext: () => ({ traceId }),
   };
 }
@@ -40,10 +40,10 @@ describe("createLocalTracesProcessor", () => {
     spool.onStart(agentSpan("session-one", "a".repeat(32)), undefined);
 
     // A subagent child owns none, so releasing it leaves the trace pinned.
-    await expect(spool.releaseSession("child-one")).resolves.toBe(false);
-    await expect(spool.releaseSession("session-one")).resolves.toBe(true);
+    await expect(spool.releaseConversation("child-one")).resolves.toBe(false);
+    await expect(spool.releaseConversation("session-one")).resolves.toBe(true);
     // Releasing twice is not an error, it just owns nothing the second time.
-    await expect(spool.releaseSession("session-one")).resolves.toBe(false);
+    await expect(spool.releaseConversation("session-one")).resolves.toBe(false);
   });
 
   it("is a span processor, so it composes wherever one goes", () => {

@@ -28,9 +28,9 @@
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
  * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
- * - `$eve.trace_id` — trace id of the `agent.session` span, read from the pre-allocated
- *   trace seed in the serialized context. Present only when the trace is sampled;
- *   absence means no exported OTEL trace exists.
+ * - `$eve.trace_id` — sampled trace seed available in the serialized context when
+ *   tagging the run. This is a trace link, not a session-wide trace identity or
+ *   confirmation that a destination retained the trace.
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";

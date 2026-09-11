@@ -1,3 +1,5 @@
+import { contextStorage } from "#context/container.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
@@ -7,12 +9,17 @@ import {
   upsertProxyInputRequestState,
   type ProxyInputRequest,
 } from "#harness/proxy-input-requests.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import { createLogger } from "#internal/logging.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isInputRequest } from "#shared/input.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
+
+const log = createLogger("execution.tasks.parent");
 
 /** Validates and records a generic task-owned workflow request. */
 export async function recordTaskInputRequestStep(input: {
@@ -100,27 +107,79 @@ export async function recordTaskInputRequestStep(input: {
 
 /** Caches terminal task views before their workflow runs expire. */
 export async function recordTerminalTaskViewsStep(input: {
+  readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly views: readonly TaskView[];
-}): Promise<DurableSessionState> {
+}): Promise<{
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}> {
   "use step";
   const durableSession = await readDurableSession(input.sessionState);
   let session = durableSession;
+  const acceptedViews: TaskView[] = [];
   for (const view of input.views) {
     if (findSessionTaskEntry(session.state, view.taskId) === undefined) continue;
     const state = cacheTerminalTaskView(session.state, view);
     if (state !== session.state) session = { ...session, state };
+    acceptedViews.push(view);
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",
       ownerId: view.taskId,
     }).session;
   }
-  if (session === durableSession) return input.sessionState;
-  return {
-    ...input.sessionState,
-    snapshot: {
-      session,
-      version: input.sessionState.version,
-    },
-  };
+  const serializedContext = await settleBackgroundTaskActions({
+    serializedContext: input.serializedContext,
+    session,
+    views: acceptedViews,
+  });
+  const sessionState =
+    session === durableSession
+      ? input.sessionState
+      : {
+          ...input.sessionState,
+          snapshot: {
+            session,
+            version: input.sessionState.version,
+          },
+        };
+  return { serializedContext, sessionState };
+}
+
+async function settleBackgroundTaskActions(input: {
+  readonly serializedContext: Record<string, unknown>;
+  readonly session: Awaited<ReturnType<typeof readDurableSession>>;
+  readonly views: readonly TaskView[];
+}): Promise<Record<string, unknown>> {
+  if (input.views.length === 0) return input.serializedContext;
+  try {
+    const ctx = await deserializeContext(input.serializedContext);
+    const bundle = ctx.get(BundleKey);
+    if (bundle === undefined) return input.serializedContext;
+    const instrumentation = bindSessionInstrumentation({
+      agentName: bundle.turnAgent.id,
+      ctx,
+      rootSessionId: input.session.rootSessionId ?? input.session.sessionId,
+      sessionId: input.session.sessionId,
+    });
+    if (instrumentation === undefined) return input.serializedContext;
+    try {
+      await contextStorage.run(ctx, () =>
+        instrumentation.publishBackgroundTaskSettlements({
+          acceptedAtMs: Date.now(),
+          views: input.views,
+        }),
+      );
+    } finally {
+      await instrumentation.flush();
+    }
+    return serializeContext(ctx);
+  } catch (error) {
+    log.warn("failed to settle background task instrumentation", {
+      error,
+      sessionId: input.session.sessionId,
+      taskIds: input.views.map((view) => view.taskId),
+    });
+    return input.serializedContext;
+  }
 }
