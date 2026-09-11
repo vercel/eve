@@ -16,6 +16,7 @@ export default defineEval({
     const second = await t.send("What is my favorite word? Reply with just the word.");
 
     await t.require(second.sessionId, equals(first.sessionId));
+    second.messageIncludes(/marigold/i);
 
     const third = await t.send(
       "Alice is checking the saved conversation. What favorite word did I ask you to remember? Reply with just that word.",

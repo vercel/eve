@@ -11,7 +11,13 @@ const childModel = mockModel({
 });
 
 const config = e2eAgentConfig({
-  mock: ({ lastUserMessage, toolResults }) => {
+  mock: ({ lastUserMessage, toolResults, userMessages }) => {
+    if (lastUserMessage?.includes("favorite word") && lastUserMessage.includes("?")) {
+      const remembered = userMessages
+        .map((message) => /My favorite word is (\w+)/u.exec(message)?.[1])
+        .find((word) => word !== undefined);
+      return remembered ?? "No favorite word was provided.";
+    }
     if (lastUserMessage?.startsWith("Call call_child ")) {
       const result = toolResults.find((entry) => entry.name === "call_child");
       return result === undefined
