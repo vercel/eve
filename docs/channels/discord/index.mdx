@@ -1,10 +1,12 @@
 ---
 title: "Discord"
-description: "Reach your agent from Discord HTTP Interactions, including slash commands, components, and modals."
+description: "Reach your agent from Discord interactions, slash commands, or bot messages."
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve.
+
+Ordinary DMs, mentions, replies, and thread messages arrive over Discord's persistent Gateway WebSocket instead of the HTTP Interactions endpoint. Long-running outbound WebSockets need lifecycle and singleton ownership outside the eve application, so ordinary bot messages require a separately deployed relay. This path is experimental; see [Receive ordinary bot messages](#receive-ordinary-bot-messages-experimental) for the relay contract and limitations. See [Channels](./overview) for the channel contract.
 
 ## Set up Discord
 
@@ -51,6 +53,43 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
 ```
 
 Then configure the public `https://…/eve/v1/discord` route as the application's Interactions Endpoint URL. Pass `credentials: { applicationId, botToken, publicKey }` to `discordChannel`, or set the corresponding `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`, and `DISCORD_PUBLIC_KEY` environment variables.
+
+## Receive ordinary bot messages (experimental)
+
+Discord sends ordinary DMs, mentions, replies, and thread messages over a persistent Gateway WebSocket instead of the HTTP Interactions endpoint. Handling that long-running connection requires a supervised relay outside the eve application.
+
+Add `gateway` to the same channel that handles Discord interactions:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  gateway: {
+    secret: () => process.env.RELAY_FORWARD_SECRET!,
+  },
+});
+```
+
+This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. Gateway support does not require Vercel Connect: you can instead pass `{ applicationId, botToken, publicKey }` through `credentials`, or use the matching `DISCORD_*` environment variables. The Discord application ID namespaces conversations and must match the relay's signed application identity. Omitting `gateway` leaves the route unmounted and preserves interaction-only routing.
+
+### Native bot behavior
+
+With `gateway` enabled, the built-in policy behaves as follows:
+
+- Every non-bot DM is accepted and resumes by DM channel ID.
+- An explicit bot mention in an unthreaded guild channel starts a new session.
+- A reply in an unthreaded guild channel continues only when its referenced message is the current eve response anchor.
+- An unknown or old reply anchor returns `409 anchor_not_ready` instead of creating another session.
+- Ambient guild messages and bot-authored messages are ignored.
+- Slash commands in guild channels start new message-chain sessions; their first response becomes the current reply anchor.
+
+Only the current bot response anchors an unthreaded guild conversation. Replying to an older response does not recover that session. Discord threads remain the preferred surface for a shared group conversation, but the default policy still requires an explicit mention or a reply that resolves to the active response.
+
+Supplying `gateway.onMessage(ctx, message)` replaces the built-in acceptance policy. Return `{ auth }` to dispatch, optional `context` or `title` with it, or `null` to ignore the message. `DiscordMessage` is an eve-owned normalized shape with message, channel, guild/thread, author, mention, reply-reference, and attachment metadata plus `raw` for the original dispatch object.
+
+See [Discord Gateway relay](./discord/gateway) to build and operate the WebSocket relay, sign forwarded events, and handle retries.
 
 ## How the channel handles messages
 
