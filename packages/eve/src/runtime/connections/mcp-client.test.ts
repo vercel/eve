@@ -73,6 +73,31 @@ describe("McpConnectionClient", () => {
     createMCPClient.mockReset();
   });
 
+  it.each([false, true])(
+    "preserves protocol discovery %s when switching to SSE",
+    async (protocolVersionDiscovery) => {
+      createMCPClient.mockRejectedValueOnce({ response: { status: 405 } });
+      createMCPClient.mockResolvedValueOnce({ close: vi.fn() });
+      const client = new McpConnectionClient(makeConnection({ protocolVersionDiscovery }));
+      await client.connect();
+      expect(createMCPClient).toHaveBeenCalledTimes(2);
+      expect(createMCPClient).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          protocolVersionDiscovery,
+          transport: expect.objectContaining({ type: "http" }),
+        }),
+      );
+      expect(createMCPClient).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          protocolVersionDiscovery,
+          transport: expect.objectContaining({ type: "sse" }),
+        }),
+      );
+    },
+  );
+
   it("hides provided arguments from schemas and adds resolved values at execution", async () => {
     const execute = vi.fn().mockResolvedValue({ ok: true });
     const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
@@ -171,6 +196,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: {
           Authorization: "Bearer test-token",
@@ -197,6 +223,7 @@ describe("McpConnectionClient", () => {
 
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenNthCalledWith(1, {
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "http",
@@ -204,6 +231,7 @@ describe("McpConnectionClient", () => {
       },
     });
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
@@ -228,6 +256,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
@@ -250,6 +279,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
@@ -274,6 +304,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
@@ -293,6 +324,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).rejects.toBe(error);
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
+      protocolVersionDiscovery: undefined,
       transport: {
         headers: { Authorization: "Bearer test-token" },
         type: "http",
