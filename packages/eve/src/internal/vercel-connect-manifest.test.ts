@@ -75,7 +75,7 @@ describe("buildVercelConnectRequirements", () => {
       {
         target: { mode: "direct", locator: "oauth/linear" },
         connector: { type: "oauth" },
-        resource: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
+        interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
         access: { principalTypes: [principalType] },
         uses: [use],
       },
@@ -88,6 +88,7 @@ describe("buildVercelConnectRequirements", () => {
       channelRoutes: {
         effective: [
           {
+            adapterKind: "slack",
             name: "slack",
             logicalPath: "channels/slack.ts",
             method: "POST",
@@ -113,6 +114,38 @@ describe("buildVercelConnectRequirements", () => {
         },
         trigger: { method: "POST", path: "/eve/v1/slack" },
         uses: [{ kind: "channel", name: "slack", logicalPath: "channels/slack.ts" }],
+      },
+    ]);
+  });
+
+  it("does not reference a Slack app manifest for a non-Slack adapter", () => {
+    const manifest = {
+      connections: [],
+      channelRoutes: {
+        effective: [
+          {
+            adapterKind: "custom",
+            name: "custom",
+            logicalPath: "channels/custom.ts",
+            method: "POST",
+            urlPath: "/custom",
+            vercelConnect: {
+              connector: "slack/custom",
+              connectorType: "slack",
+              principalTypes: ["app"],
+            },
+          },
+        ],
+      },
+    } as const;
+
+    expect(buildVercelConnectRequirements(manifest)).toEqual([
+      {
+        target: { mode: "direct", locator: "slack/custom" },
+        connector: { type: "slack" },
+        access: { principalTypes: ["app"] },
+        trigger: { method: "POST", path: "/custom" },
+        uses: [{ kind: "channel", name: "custom", logicalPath: "channels/custom.ts" }],
       },
     ]);
   });
