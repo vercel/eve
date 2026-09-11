@@ -12,6 +12,7 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import {
   ALLOWED_DYNAMIC_CONNECTION_EVENTS,
   assertResolverOnlyDynamicSentinel,
@@ -114,36 +115,14 @@ export async function compileConnectionDefinition(
     auth = normalized.auth;
   }
 
-  const vercelConnect = extractVercelConnectMarker(auth);
+  const vercelConnect = extractVercelConnectMetadata(
+    auth === null || typeof auth !== "object"
+      ? undefined
+      : (auth as { readonly vercelConnect?: unknown }).vercelConnect,
+  );
   if (vercelConnect !== undefined) {
     compiled.vercelConnect = vercelConnect;
   }
 
   return { definition: compiled, kind: "connection" };
-}
-
-/**
- * Reads the optional `vercelConnect: { connector: string }` marker that
- * `@vercel/connect/eve`'s `connect()` helper attaches to its returned
- * authorization definition. Returns the parsed marker when present and
- * shaped correctly, otherwise `undefined`.
- *
- * The compiler does not import `@vercel/connect/eve` (it should not
- * depend on a specific auth provider). Detection is duck-typed against
- * the structural marker contract — any object with a non-empty
- * `vercelConnect.connector` string is recognized.
- */
-function extractVercelConnectMarker(auth: unknown): { readonly connector: string } | undefined {
-  if (auth === null || typeof auth !== "object") {
-    return undefined;
-  }
-  const marker = (auth as { vercelConnect?: unknown }).vercelConnect;
-  if (marker === null || typeof marker !== "object") {
-    return undefined;
-  }
-  const connector = (marker as { connector?: unknown }).connector;
-  if (typeof connector !== "string" || connector.length === 0) {
-    return undefined;
-  }
-  return { connector };
 }

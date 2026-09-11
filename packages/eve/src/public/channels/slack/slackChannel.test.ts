@@ -434,6 +434,17 @@ describe("slackChannel()", () => {
     expect(channel).toMatchObject({ turnPolicy: "queue" });
   });
 
+  it("preserves Connect credential metadata for compilation", () => {
+    const vercelConnect = {
+      connector: "slack/my-agent",
+      connectorType: "slack",
+      principalTypes: ["app" as const],
+    };
+    const credentials = { botToken: "xoxb-test", vercelConnect };
+
+    expect(slackChannel({ credentials })).toMatchObject({ vercelConnect });
+  });
+
   it("classifies from durable state through the audience hook", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 
