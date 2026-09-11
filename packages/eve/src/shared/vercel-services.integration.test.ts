@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("ensureEveVercelServicesConfig", () => {
-  it("generates the eve service when vercel.json is missing", async () => {
+  it("generates the eve service and isolated build root when vercel.json is missing", async () => {
     const hostRoot = await createTempHostRoot();
 
     const result = await ensureEveVercelServicesConfig({
@@ -66,17 +66,6 @@ describe("ensureEveVercelServicesConfig", () => {
         },
       },
     });
-  });
-
-  it("creates the isolated service build root", async () => {
-    const hostRoot = await createTempHostRoot();
-
-    await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
     expect(await directoryExists(join(hostRoot, ".eve", "vercel-services", "eve"))).toBe(true);
   });
 

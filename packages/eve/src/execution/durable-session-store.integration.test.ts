@@ -12,31 +12,7 @@ import {
  * a real workflow runtime, including returned state under step retry.
  */
 describe("durableSessionStore integration", () => {
-  it("each step's readDurableSession returns the immediately-preceding write", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
-
-    await runtime.run(async () => {
-      const run = await start(durableSessionStoreFixtureWorkflow, [
-        {
-          markers: [
-            { marker: "alpha", historyDepth: 1 },
-            { marker: "beta", historyDepth: 3 },
-            { marker: "gamma", historyDepth: 5 },
-          ],
-        },
-      ]);
-
-      const result = await run.returnValue;
-
-      expect(result.readsAfterEachWrite).toEqual([
-        { historyDepth: 1, marker: "alpha", sessionId: result.sessionId },
-        { historyDepth: 3, marker: "beta", sessionId: result.sessionId },
-        { historyDepth: 5, marker: "gamma", sessionId: result.sessionId },
-      ]);
-    });
-  });
-
-  it("a standalone read step after several writes returns the latest returned state", async () => {
+  it("reads each immediately preceding write and retains the latest state in a standalone read", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "durable-session-store-fixture-tail" },
     });
@@ -54,6 +30,13 @@ describe("durableSessionStore integration", () => {
       ]);
 
       const result = await run.returnValue;
+
+      expect(result.readsAfterEachWrite).toEqual([
+        { historyDepth: 0, marker: "first", sessionId: result.sessionId },
+        { historyDepth: 2, marker: "second", sessionId: result.sessionId },
+        { historyDepth: 4, marker: "third", sessionId: result.sessionId },
+        { historyDepth: 6, marker: "fourth", sessionId: result.sessionId },
+      ]);
 
       // The read step runs after the loop with no intervening write of
       // its own, so this asserts the returned state still carries the

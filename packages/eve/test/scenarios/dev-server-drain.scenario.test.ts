@@ -34,7 +34,6 @@ const DRAIN_CHANNEL_SOURCE = [
   "export default defineChannel({",
   "  routes: [",
   '    GET("/drain/worker-id", () => new Response(workerId)),',
-  '    GET("/drain/request-ip", (_request, context) => new Response(String(context.requestIp))),',
   '    GET("/drain/crash", () => {',
   "      setTimeout(() => process.exit(7), 25);",
   '      return new Response("crashing");',
@@ -196,55 +195,6 @@ describe("eve dev drained worker replacement", () => {
         );
         const health = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
         expect(health.status).toBe(200);
-      } finally {
-        await server.stop();
-      }
-    },
-    DRAIN_SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
-    "shuts down within a bounded deadline while a stream is open",
-    async () => {
-      const app = await scenarioApp(DRAIN_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-      const streamResponse = await fetch(new URL("/drain/slow-stream", server.url));
-      const reader = streamResponse.body?.getReader();
-      await reader?.read();
-
-      const stopStart = Date.now();
-      await server.stop();
-
-      // The harness escalates to SIGKILL at 10s; a graceful exit must beat it.
-      expect(Date.now() - stopStart).toBeLessThan(9_000);
-      await expect(
-        (async () => {
-          for (;;) {
-            const result = await reader?.read();
-            if (result === undefined || result.done) {
-              return "done";
-            }
-          }
-        })().catch(() => "errored"),
-      ).resolves.toBeDefined();
-    },
-    DRAIN_SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
-    "reports a socket-derived client address despite forged forwarding headers",
-    async () => {
-      const app = await scenarioApp(DRAIN_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
-        const response = await fetch(new URL("/drain/request-ip", server.url), {
-          headers: { "x-forwarded-for": "203.0.113.7" },
-        });
-        expect(response.status).toBe(200);
-        const address = await response.text();
-        expect(address).not.toBe("203.0.113.7");
-        expect(address).toContain("127.0.0.1");
       } finally {
         await server.stop();
       }

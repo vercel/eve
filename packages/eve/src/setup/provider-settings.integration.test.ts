@@ -40,22 +40,17 @@ describe("provider settings", () => {
     await expect(readProviderSelection(root)).resolves.toBe("chatgpt");
   });
 
-  it("stores one normalized provider selection under .eve", async () => {
+  it("reads no explicit selection until one normalized provider is stored under .eve", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-provider-settings-"));
     roots.push(root);
+
+    await expect(readProviderSelection(root)).resolves.toBeUndefined();
+    expect(readProviderSelectionSync(root)).toBeUndefined();
 
     await writeProviderSelection(root, "ai-gateway-project");
 
     await expect(readProviderSelection(root)).resolves.toBe("ai-gateway-project");
     expect(readProviderSelectionSync(root)).toBe("ai-gateway-project");
     expect(providerSettingsPath(root)).toBe(join(root, ".eve", "provider.json"));
-  });
-
-  it("treats missing settings as no explicit selection", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-provider-settings-"));
-    roots.push(root);
-
-    await expect(readProviderSelection(root)).resolves.toBeUndefined();
-    expect(readProviderSelectionSync(root)).toBeUndefined();
   });
 });

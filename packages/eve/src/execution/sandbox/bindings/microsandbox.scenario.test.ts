@@ -68,7 +68,7 @@ async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string
 }
 
 describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () => {
-  it("writes a file via the public session and reads it back", async () => {
+  it("round-trips text and binary files, returns null for missing paths, and removes nested trees", async () => {
     const appRoot = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedHandle({
       appRoot,
@@ -76,13 +76,39 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
       templateKey: "tpl-write-read",
     });
 
-    await handle.session.writeTextFile({ content: "hello world", path: "note.txt" });
-    const content = await handle.session.readTextFile({ path: "note.txt" });
+    try {
+      await expect(handle.session.readTextFile({ path: "does-not-exist.txt" })).resolves.toBeNull();
+      await handle.session.writeTextFile({ content: "hello world", path: "note.txt" });
+      await expect(handle.session.readTextFile({ path: "note.txt" })).resolves.toBe("hello world");
 
-    expect(content).toBe("hello world");
+      await handle.session.writeTextFile({
+        content: "dynamic skill",
+        path: "skills/tenant/SKILL.md",
+      });
+      await handle.session.writeTextFile({
+        content: "policy",
+        path: "skills/tenant/references/policy.md",
+      });
+      await handle.session.removePath({ force: true, path: "skills/tenant", recursive: true });
+      await expect(
+        handle.session.readTextFile({ path: "skills/tenant/SKILL.md" }),
+      ).resolves.toBeNull();
+      await expect(
+        handle.session.readTextFile({ path: "skills/tenant/references/policy.md" }),
+      ).resolves.toBeNull();
+
+      // Non-UTF-8 bytes must survive without a text encoding round trip.
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
+      await handle.session.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
+      const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
+      expect(result.exitCode).toBe(0);
+      expect(Number(result.stdout.trim())).toBe(bytes.length);
+    } finally {
+      await handle.shutdown();
+    }
   });
 
-  it("passes env vars to a command run via the public session", async () => {
+  it("passes distinct env vars to commands and spawned processes through the public session", async () => {
     const appRoot = await createTemporaryCacheDirectory("run-env");
     const handle = await createPrewarmedHandle({
       appRoot,
@@ -97,15 +123,6 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("staging");
-  });
-
-  it("passes env vars to a process spawned via the public session", async () => {
-    const appRoot = await createTemporaryCacheDirectory("spawn-env");
-    const handle = await createPrewarmedHandle({
-      appRoot,
-      sessionKey: "session-spawn-env",
-      templateKey: "tpl-spawn-env",
-    });
 
     const spawned = await handle.session.spawn({
       command: 'echo "$DEPLOY_ENV"',
@@ -127,45 +144,6 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     });
 
     await expect(handle.session.setNetworkPolicy("deny-all")).resolves.toBeUndefined();
-  });
-
-  it("readFile returns null for a missing file", async () => {
-    const appRoot = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedHandle({
-      appRoot,
-      sessionKey: "session-missing",
-      templateKey: "tpl-missing",
-    });
-
-    const content = await handle.session.readTextFile({ path: "does-not-exist.txt" });
-
-    expect(content).toBeNull();
-  });
-
-  it("removePath deletes a recursive directory tree", async () => {
-    const appRoot = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedHandle({
-      appRoot,
-      sessionKey: "session-remove",
-      templateKey: "tpl-remove",
-    });
-
-    await handle.session.writeTextFile({
-      content: "dynamic skill",
-      path: "skills/tenant/SKILL.md",
-    });
-    await handle.session.writeTextFile({
-      content: "policy",
-      path: "skills/tenant/references/policy.md",
-    });
-    await handle.session.removePath({ force: true, path: "skills/tenant", recursive: true });
-
-    await expect(
-      handle.session.readTextFile({ path: "skills/tenant/SKILL.md" }),
-    ).resolves.toBeNull();
-    await expect(
-      handle.session.readTextFile({ path: "skills/tenant/references/policy.md" }),
-    ).resolves.toBeNull();
   });
 
   it("preserves files across capture and reconnect", async () => {
@@ -206,25 +184,6 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const content = await reconnectedHandle.session.readTextFile({ path: "persisted.txt" });
 
     expect(content).toBe("survives reconnect");
-  });
-
-  it("preserves Buffer bytes written through the public session", async () => {
-    const appRoot = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedHandle({
-      appRoot,
-      sessionKey: "session-buffer",
-      templateKey: "tpl-buffer",
-    });
-
-    // A PNG header plus a handful of non-UTF-8 bytes. Reading this
-    // back as UTF-8 text would throw, so the roundtrip check uses the
-    // `wc -c` command to confirm the on-disk byte length matches.
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
-    await handle.session.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
-
-    const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
-    expect(result.exitCode).toBe(0);
-    expect(Number(result.stdout.trim())).toBe(bytes.length);
   });
 
   it("reports a fresh build on first prewarm and a reuse on the second", async () => {

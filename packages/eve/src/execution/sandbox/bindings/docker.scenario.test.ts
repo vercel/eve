@@ -183,13 +183,14 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
   );
 
   it(
-    "round-trips files, preserves binary bytes, and removes paths",
+    "round-trips files, preserves binary bytes, removes paths, and retains state across shutdown",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
       const engine = createEngine();
+      const sessionKey = nextSessionKey("files");
       const handle = await engine.create({
         runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("files"),
+        sessionKey,
         templateKey,
       });
 
@@ -211,6 +212,25 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
       await expect(
         handle.session.readTextFile({ path: "deep/nested/note.txt" }),
       ).resolves.toBeNull();
+
+      await handle.session.writeTextFile({
+        content: "survives reconnect",
+        path: "persisted.txt",
+      });
+      const state = await handle.captureState();
+      expect(state.metadata).toEqual({ containerName: sessionKey });
+      // Reattach must restart the container stopped by server shutdown.
+      await handle.shutdown();
+
+      const reconnected = await engine.create({
+        existingMetadata: state.metadata,
+        runtimeContext: { appRoot },
+        sessionKey,
+        templateKey,
+      });
+      await expect(reconnected.session.readTextFile({ path: "persisted.txt" })).resolves.toBe(
+        "survives reconnect",
+      );
     },
     5 * 60_000,
   );
@@ -242,41 +262,6 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
       await handle.session.setNetworkPolicy("deny-all");
       const deniedAgain = await handle.session.run({ command: "ip route 2>/dev/null | wc -l" });
       expect(deniedAgain.stdout.trim()).toBe("0");
-    },
-    5 * 60_000,
-  );
-
-  it(
-    "persists session state across shutdown and reattach",
-    async () => {
-      const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
-      const sessionKey = nextSessionKey("reconnect");
-
-      const firstHandle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey,
-        templateKey,
-      });
-      await firstHandle.session.writeTextFile({
-        content: "survives reconnect",
-        path: "persisted.txt",
-      });
-      const state = await firstHandle.captureState();
-      expect(state.metadata).toEqual({ containerName: sessionKey });
-      // Server shutdown stops the container; reattach must restart it
-      // transparently.
-      await firstHandle.shutdown();
-
-      const reconnected = await engine.create({
-        existingMetadata: state.metadata,
-        runtimeContext: { appRoot },
-        sessionKey,
-        templateKey,
-      });
-      await expect(reconnected.session.readTextFile({ path: "persisted.txt" })).resolves.toBe(
-        "survives reconnect",
-      );
     },
     5 * 60_000,
   );

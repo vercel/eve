@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 /**
  * HITL flow: `once()` approval semantics — a denial does not grant, so the
@@ -7,13 +8,20 @@ import { defineEval } from "eve/evals";
  */
 export default defineEval({
   tags: ["real-model"],
-  description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
+  description:
+    "Structured cancellation denies a once() call without executing or granting the next call.",
   async test(t) {
-    await t.send('Call the guarded-echo tool with note "denied-call".');
-    const request = t.requireInputRequest({ toolName: "guarded-echo" });
+    const parked = await t.send('Call the guarded-echo tool with note "denied-call".');
+    parked.calledTool("guarded-echo", { status: "pending", count: 1 });
+    const request = t.requireInputRequest({
+      display: "confirmation",
+      toolName: "guarded-echo",
+    });
 
-    const denied = await t.respondAll("cancel");
+    const denied = await t.respond([{ optionId: "cancel", requestId: request.requestId }]);
     denied.expectOk();
+    denied.succeeded().label("structured cancellation finishes before the next guarded call");
+    await t.require(t.pendingInputRequests, equals([]));
     denied.event("action.result", {
       data: {
         result: {

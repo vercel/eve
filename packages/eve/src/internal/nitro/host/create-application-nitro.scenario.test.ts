@@ -372,7 +372,7 @@ describe("application Nitro creation", () => {
     expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external");
   });
 
-  it("limits step-surface scan directories to the package execution directory", async () => {
+  it("limits step-surface scans and keeps Nitro dev watch off authored app sources", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -385,20 +385,6 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
       rootDir: preparedHost.appRoot,
       scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-    });
-  });
-
-  it("keeps Nitro dev watch off authored app sources", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = await createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    expect(createNitroMock).toHaveBeenCalledTimes(1);
-    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
       watchOptions: {
         ignored: [preparedHost.appRoot, join(preparedHost.appRoot, "**")],
       },

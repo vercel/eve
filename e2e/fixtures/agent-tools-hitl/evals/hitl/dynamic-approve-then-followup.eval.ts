@@ -12,6 +12,8 @@ const TOOL_NAME = "dynamic_guarded_echo";
  * approval request/response parts, and result; on Anthropic that replay is
  * where the reported `tool_use ids were found without tool_result blocks`
  * 400 lands, turning `session.waiting` into a terminal `session.failed`.
+ * The initial pending result also guards against durable replay dropping
+ * the dynamic tool's approval policy and executing it before approval.
  */
 export default defineEval({
   tags: ["real-model"],
@@ -26,6 +28,7 @@ export default defineEval({
 
     const approved = await t.respondAll("approve");
     approved.expectOk();
+    approved.succeeded();
     approved.event("action.result", {
       data: {
         result: {
@@ -43,5 +46,9 @@ export default defineEval({
     followup.messageIncludes(/DYNAMIC-REPLAY-OK/i);
 
     t.succeeded();
+    t.calledTool(TOOL_NAME, {
+      output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
+      count: 1,
+    });
   },
 });

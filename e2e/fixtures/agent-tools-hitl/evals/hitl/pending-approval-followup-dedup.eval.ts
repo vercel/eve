@@ -10,10 +10,15 @@ const FOLLOW_UP_QUESTIONS = [
   "What will happen after I approve the request?",
 ] as const;
 
-/** Regression coverage for https://github.com/vercel/eve/issues/2217. */
+/**
+ * Regression coverage for https://github.com/vercel/eve/issues/2217 and
+ * https://github.com/vercel/eve/issues/533: ordinary input must neither
+ * replay the unresolved call nor duplicate its approval projection.
+ */
 export default defineEval({
   tags: ["real-model"],
-  description: "One pending approval stays singular across many follow-up questions.",
+  description:
+    "One pending approval stays unresolved and singular across unrelated input and follow-up questions.",
   async test(t) {
     const parked = await t.send(`Call the ${TOOL_NAME} tool exactly once with marker "${MARKER}".`);
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
@@ -21,6 +26,16 @@ export default defineEval({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
+
+    const unrelated = await t.send(
+      "Note this unrelated marker and do not call any tools: ORBITAL-PINE-6C3R.",
+    );
+    unrelated.expectOk();
+    unrelated.notEvent("action.result", {
+      data: { result: { toolName: TOOL_NAME } },
+    });
+    unrelated.usedNoTools();
+    unrelated.event("session.waiting", { count: 1 });
 
     for (const question of FOLLOW_UP_QUESTIONS) {
       const followup = await t.send(question);
