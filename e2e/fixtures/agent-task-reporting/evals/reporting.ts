@@ -4,6 +4,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 import {
   CHECKS,
+  childActivations,
   checkForTask,
   eventsForSession,
   toolEvidence,
@@ -40,13 +41,13 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
   const modelId = e2eModel();
   if (typeof modelId !== "string") throw new Error("Warehouse reporting requires a real CI model.");
   const started =
-    await t.send(`Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment.
+    await t.send(`Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment. Keep this small checklist in the conversation rather than creating a separate todo list.
 
 1. check=first: Find the inventory item for the first entry using the inventory lookup tool (probe), and share the item it returns.
 2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.
 3. check=third: Use warehouse_lookup to get the third entry from the warehouse specialist, and share the item the specialist returns.
 
-Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, give Bob one short inventory report with each returned item listed once.`);
+Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
   started.expectOk();
   started.calledSubagent("agent", { count: TASK_COUNT });
   started.notCalledTool("probe");
@@ -75,9 +76,8 @@ Once all three assignments are accepted, let Alice know the checks are underway.
   const actions = started.events.flatMap((event) =>
     event.type === "actions.requested" ? event.data.actions : [],
   );
-  const calls = started.events.flatMap((event) =>
-    event.type === "subagent.called" ? [event.data] : [],
-  );
+  const setupTurns = [started];
+  let calls = childActivations(setupTurns, started.sessionId);
   const children: Child[] = [];
   const taskIds = receipts.map((receipt) => receipt.taskId);
   const requests = new Map<Check, InputRequest>();
@@ -101,9 +101,8 @@ Once all three assignments are accepted, let Alice know the checks are underway.
     attempt += 1
   ) {
     const turn = await nextParentTurn(t, run);
-    calls.push(
-      ...turn.events.flatMap((event) => (event.type === "subagent.called" ? [event.data] : [])),
-    );
+    setupTurns.push(turn);
+    calls = childActivations(setupTurns, started.sessionId);
     collectRequests(turn);
   }
   children.push(
@@ -313,9 +312,7 @@ async function releaseCheck(t: EveEvalContext, run: ReportingRun, check: Check):
   const turns = await readCompletedChild(t, child.sessionId, check, run.modelId);
   run.completedChildren.set(check, turns.at(-1)!);
   run.childTurns.push(...turns);
-  const nested = eventsForSession(turns, child.sessionId).flatMap((event) =>
-    event.type === "subagent.called" ? [event.data] : [],
-  );
+  const nested = childActivations(turns, child.sessionId);
   if (check !== "third") {
     await t.require(nested, equals([]));
     run.probeSessions.set(check, child.sessionId);

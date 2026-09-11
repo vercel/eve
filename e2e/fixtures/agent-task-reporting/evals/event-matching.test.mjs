@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { checkForTask, eventsForSession, toolEvidence } from "./event-matching.ts";
+import {
+  childActivations,
+  checkForTask,
+  eventsForSession,
+  toolEvidence,
+} from "./event-matching.ts";
 
 function event(id, type, data) {
   return { meta: { id, at: "2026-09-11T00:00:00.000Z" }, type, data };
@@ -59,6 +64,40 @@ function snapshots() {
     { sessionId: "child", events: [completed("result")] },
   ];
 }
+
+test("repeated activation events with new event IDs still identify one child", () => {
+  const child = {
+    callId: "call-a",
+    childSessionId: "child-a",
+    agentId: "agent-a",
+    name: "agent",
+    sessionId: "parent",
+    turnId: "turn_1",
+  };
+  const snapshots = [
+    {
+      sessionId: "parent",
+      events: [
+        event("activation-1", "subagent.called", child),
+        event("activation-2", "subagent.called", { ...child }),
+      ],
+    },
+  ];
+  assert.deepEqual(childActivations(snapshots, "parent"), [child]);
+  assert.deepEqual(childActivations(snapshots, "another-parent"), []);
+  for (const changed of [
+    { childSessionId: "child-b" },
+    { agentId: "agent-b" },
+    { name: "other" },
+    { sessionId: "other" },
+    { turnId: "turn_2" },
+  ]) {
+    snapshots[0].events[1] = event("activation-2", "subagent.called", { ...child, ...changed });
+    assert.throws(() => childActivations(snapshots, "parent"), /changed its identity/);
+  }
+  snapshots[0].events[1] = event("activation-2", "subagent.called", { ...child, callId: "call-b" });
+  assert.equal(childActivations(snapshots, "parent").length, 2);
+});
 
 test("joins a paused request to its result in a later approval turn", () => {
   assert.deepEqual(toolEvidence(snapshots(), "child", "probe"), expected);

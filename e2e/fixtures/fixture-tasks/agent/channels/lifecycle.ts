@@ -93,10 +93,10 @@ export default defineChannel({
 async function ownerDeliveries(runId: string) {
   const world = await getWorld();
   const [steps, events] = await Promise.all([
-    world.steps.list({ runId, pagination: { limit: 1000 }, resolveData: "none" }),
+    world.steps.list({ runId, pagination: { limit: 100 }, resolveData: "none" }),
     world.events.list({
       runId,
-      pagination: { limit: 1000, sortOrder: "asc" },
+      pagination: { limit: 100, sortOrder: "asc" },
       resolveData: "none",
     }),
   ]);

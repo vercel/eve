@@ -35,6 +35,31 @@ export function eventsForSession(snapshots: readonly SessionEvents[], sessionId:
   return [...events.values()];
 }
 
+export function childActivations(snapshots: readonly SessionEvents[], sessionId: string) {
+  type Called = Extract<Event, { type: "subagent.called" }>["data"];
+  const calls = new Map<string, Called>();
+  for (const event of eventsForSession(snapshots, sessionId)) {
+    if (event.type !== "subagent.called") continue;
+    const current = event.data;
+    const previous = calls.get(current.callId);
+    if (previous !== undefined) {
+      // A retried activation notification must still identify the very same child.
+      if (
+        previous.childSessionId !== current.childSessionId ||
+        previous.agentId !== current.agentId ||
+        previous.name !== current.name ||
+        previous.sessionId !== current.sessionId ||
+        previous.turnId !== current.turnId
+      ) {
+        throw new Error(`Child activation ${current.callId} changed its identity.`);
+      }
+    } else {
+      calls.set(current.callId, current);
+    }
+  }
+  return [...calls.values()];
+}
+
 export function toolEvidence(
   snapshots: readonly SessionEvents[],
   sessionId: string,
