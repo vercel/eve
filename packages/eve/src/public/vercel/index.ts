@@ -26,6 +26,7 @@ export interface EveVercelRouteConfig {
 /** A service accepted by eve's Vercel configuration composer. */
 export interface EveVercelServiceConfig {
   readonly buildCommand?: string;
+  readonly devCommand?: string;
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | { readonly path?: string; readonly subdomain?: string };
@@ -132,21 +133,25 @@ export async function withEve<TConfig extends EveVercelConfig>(
   const outputDirectory = join(root, ".vercel", "output");
   const internalConfig = toInternalConfig(config);
   const assembled = assembleEveVercelServices({
-    agents: workspace.members.map((member) => ({
-      agent: {
-        appRoot: member.appRoot,
-        buildCommand: `node ${quoteVercelShellArgument(
-          toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
-        )} build`,
-        name: member.name,
-        publicRoutePrefix: `/${member.name}`,
-        workspaceMember: true,
-      },
-      target: {
-        hostOutputDirectory: outputDirectory,
-        projectRoot: root,
-      },
-    })),
+    agents: workspace.members.map((member) => {
+      const binary = quoteVercelShellArgument(
+        toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+      );
+      return {
+        agent: {
+          appRoot: member.appRoot,
+          buildCommand: `node ${binary} build`,
+          devCommand: `node ${binary} dev --no-ui`,
+          name: member.name,
+          publicRoutePrefix: `/${member.name}`,
+          workspaceMember: true,
+        },
+        target: {
+          hostOutputDirectory: outputDirectory,
+          projectRoot: root,
+        },
+      };
+    }),
     routes: internalConfig.routes,
     services: createServiceConfigRecord(internalConfig.services),
   });
