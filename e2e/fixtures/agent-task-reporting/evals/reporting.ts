@@ -32,11 +32,13 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
   const modelId = e2eModel();
   if (typeof modelId !== "string") throw new Error("Warehouse reporting requires a real CI model.");
   const started =
-    await t.send(`Alice is preparing Bob's warehouse inventory handoff. Please start three independent background checks using the built-in agent tool, one call per check, before replying. Delegate instead of running the lookups yourself, passing each quoted request verbatim as the child's message. Each lookup needs Alice's approval. Acknowledge the accepted work, then give Bob one short report listing each inventory item once when all results arrive.
+    await t.send(`Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment.
 
-1. "For check=first, call probe with check=first and report its result value."
-2. "For check=second, call probe with check=second and report its result value."
-3. "For check=third, call warehouse_lookup with check=third. This tool waits for the warehouse specialist. Report its result value, not a launch acknowledgement."`);
+1. check=first: Find the inventory item for the first entry using the inventory lookup tool (probe), and share the item it returns.
+2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.
+3. check=third: Use warehouse_lookup to get the third entry from the warehouse specialist, and share the item the specialist returns.
+
+Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, give Bob one short inventory report with each returned item listed once.`);
   started.expectOk();
   started.calledSubagent("agent", { count: TASK_COUNT });
   started.notCalledTool("probe");

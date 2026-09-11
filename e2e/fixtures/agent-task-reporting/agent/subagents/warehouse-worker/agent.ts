@@ -3,5 +3,5 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eSubagentConfig(),
-  description: "Look up one warehouse with probe and report its inventory item.",
+  description: "Help with a warehouse checklist by looking up one entry's inventory item.",
 });

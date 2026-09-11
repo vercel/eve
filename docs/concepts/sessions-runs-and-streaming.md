@@ -101,6 +101,14 @@ A delegated subagent publishes progress on its own child-session stream. The par
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
+A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
+`details.semanticErrorId: "model-response-content-filtered"`, and
+`details.finishReason: "content-filter"`. Details also include the Gateway
+`generationId` when available. eve does not retry the filtered response or emit
+`message.completed` for its partial text; deltas already streamed remain visible.
+Conversation sessions wait for another user message, while task-mode runs return
+a failed result.
+
 ## The event envelope
 
 Alongside `type` and `data`, every event carries a `meta` envelope:

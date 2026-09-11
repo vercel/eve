@@ -3403,6 +3403,87 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it.each([
+    ["conversation", ""],
+    ["conversation", "Alice's inventory list is"],
+    ["task", ""],
+    ["task", "Alice's inventory list is"],
+  ] as const)(
+    "reports content-filter without retrying in %s mode (text: %j)",
+    async (mode, text) => {
+      setupMockAgent({
+        finishReason: "content-filter",
+        providerMetadata: {
+          gateway: { generationId: "gen_filtered", privateDetail: "not-for-clients" },
+        },
+        response: { messages: text === "" ? [] : [{ content: text, role: "assistant" }] },
+        text,
+        toolCalls: [],
+        toolResults: [],
+      });
+      const { emit, events } = createEventCollector();
+      const result = await createToolLoopHarness(createTestConfig(mode, emit))(
+        createTestSession(),
+        { message: "Help Alice prepare Bob's inventory list." },
+      );
+
+      expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+      expect(events.find((event) => event.type === "step.failed")).toMatchObject({
+        data: {
+          code: "MODEL_CALL_FAILED",
+          message: "The model provider filtered this response.",
+          details: {
+            finishReason: "content-filter",
+            generationId: "gen_filtered",
+            semanticErrorId: "model-response-content-filtered",
+          },
+        },
+      });
+      expect(
+        events.some(
+          (event) =>
+            event.type === "step.completed" ||
+            event.type === "turn.completed" ||
+            event.type === "message.completed",
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(events.filter((event) => event.type === "step.failed"))).not.toContain(
+        "not-for-clients",
+      );
+      if (mode === "task") {
+        expect(result.next).toMatchObject({
+          done: true,
+          isError: true,
+          output: expect.stringContaining("filtered this response"),
+        });
+      } else {
+        expect(result.next).toBeNull();
+        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+      }
+    },
+  );
+
+  it("throws a distinct content-filter error on the non-streaming path without reissue", async () => {
+    setupMockAgent({
+      finishReason: "content-filter",
+      providerMetadata: { gateway: { generationId: "gen_filtered" } },
+      response: { messages: [] },
+      text: "",
+      toolCalls: [],
+      toolResults: [],
+    });
+    await expect(
+      createToolLoopHarness(createTestConfig())(createTestSession(), {
+        message: "Help Alice prepare Bob's inventory list.",
+      }),
+    ).rejects.toMatchObject({
+      name: "ContentFilteredModelResponseError",
+      message: "The model provider filtered this response.",
+      generationId: "gen_filtered",
+    });
+    expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+  });
+
   it("emits session.completed instead of session.waiting in task mode", async () => {
     setupMockAgent({
       finishReason: "stop",

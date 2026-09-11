@@ -103,6 +103,14 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "empty-model-response",
     },
     {
+      title: "content-filtered model response",
+      error: named(
+        "ContentFilteredModelResponseError",
+        "The model provider filtered this response.",
+      ),
+      id: "model-response-content-filtered",
+    },
+    {
       title: "unsupported model capability",
       error: named("AI_UnsupportedFunctionalityError", "tool type not supported"),
       id: "model-capability-unsupported",

@@ -8,7 +8,7 @@ export default defineWorkflowTool({
     "use workflow";
     // Blocking delegation keeps the outer task open until the nested lookup finishes.
     return await ctx.agent("warehouse-worker", {
-      message: `Alice needs the inventory item for check=${check}. Call probe with that check and report its result value.`,
+      message: `Alice is preparing an inventory checklist for Bob's warehouse handoff. Your entry is check=${check}. Please use the inventory lookup tool (probe) for this entry and share the item it returns.`,
     });
   },
 });

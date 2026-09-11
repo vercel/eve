@@ -688,7 +688,11 @@ async function consumeStreamContent(
 
   // Channel adapters deliver terminal completions, so the reserved marker
   // becomes a null completion without delaying normal streaming deltas.
-  if (finishReason !== "tool-calls" && hasEmptyDeliverySentinel(currentMessage)) {
+  if (
+    finishReason !== "content-filter" &&
+    finishReason !== "tool-calls" &&
+    hasEmptyDeliverySentinel(currentMessage)
+  ) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,
@@ -698,7 +702,7 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
-  } else if (currentMessage.trim().length > 0) {
+  } else if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,

@@ -188,6 +188,7 @@ import {
 } from "#protocol/message.js";
 import {
   classifyModelCallError,
+  ContentFilteredModelResponseError,
   EmptyModelResponseError,
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
@@ -223,7 +224,12 @@ import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
-import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
+import {
+  buildStepHooks,
+  emitStepActions,
+  readGatewayGenerationId,
+  type HarnessStepResult,
+} from "#harness/step-hooks.js";
 import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import {
   buildToolApproval,
@@ -1509,6 +1515,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             hooks.stepResult,
             streamResult.responseMessages,
           ]);
+          if (stepResult.finishReason === "content-filter") {
+            throw new ContentFilteredModelResponseError(
+              readGatewayGenerationId(stepResult.providerMetadata),
+            );
+          }
           if (
             isEmptyModelResponse(stepResult) &&
             extractToolResultCallIds(accumulatedResponseMessages).size === 0 &&
@@ -1547,6 +1558,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
         throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
+        if (stepResult.finishReason === "content-filter") {
+          throw new ContentFilteredModelResponseError(
+            readGatewayGenerationId(stepResult.providerMetadata),
+          );
+        }
         if (
           isEmptyModelResponse(stepResult) &&
           extractToolResultCallIds(generateResult.responseMessages).size === 0
@@ -1765,12 +1781,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         if (config.mode === "task") {
           if (
             classification === "recoverable" &&
-            !(finalError instanceof EmptyModelResponseError)
+            !(finalError instanceof EmptyModelResponseError) &&
+            !(finalError instanceof ContentFilteredModelResponseError)
           ) {
             // Task runs cannot park for user-driven recovery. Let the durable
             // step retry from committed session state, but only for errors
             // that did not already consume the in-process transient budget or
-            // the dedicated empty-response reissue.
+            // the dedicated empty-response reissue. Filtering is an explicit
+            // rejection, so it must not receive durable retries either.
             log.warn(
               upstreamRejection?.message ??
                 "model call failed recoverably in task mode — rethrowing for durable step retry",
