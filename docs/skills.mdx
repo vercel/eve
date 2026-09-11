@@ -29,7 +29,7 @@ Use the weather tool before answering forecast or temperature questions.
 
 A flat markdown skill can skip the `description` frontmatter. When it does, eve advertises the first non-empty, non-code-fence line of the body with any leading `#`, `>`, `*`, or `-` marker stripped. If the body has no such line, eve falls back to the literal `Instructions for the <name> skill.`, which is a weak routing hint, so add a `description` when you want the model to route on intent.
 
-A packaged skill is a directory with a `SKILL.md` plus sibling files like `references/`, `assets/`, and `scripts/`. The packaged `SKILL.md` must carry `description` frontmatter; it has no filename slug to fall back on.
+A packaged skill is a directory with a `SKILL.md` plus sibling files like `references/`, `assets/`, and `scripts/`. The packaged `SKILL.md` must carry `description` frontmatter; it has no filename slug to fall back on. eve ignores frontmatter it does not use so skills authored for other Agent Skills clients remain importable.
 
 ```md title="agent/skills/research/SKILL.md"
 ---
