@@ -1,5 +1,12 @@
 # eve
 
+## 0.54.2
+
+### Patch Changes
+
+- 15e18d6: Treat recalled memory records as model input content when applying instrumentation trace policies.
+- 47b7a38: Emit OpenTelemetry GenAI `invoke_workflow` spans when a `defineWorkflowTool` run coordinates nested agents, using the path-derived tool name as `gen_ai.workflow.name`. Durable workflow tools without agent operations remain ordinary actions.
+
 ## 0.54.1
 
 ### Patch Changes
