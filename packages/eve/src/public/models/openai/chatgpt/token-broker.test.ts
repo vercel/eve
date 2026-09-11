@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChatGptCredentialStore } from "./credential-store.js";
-import type { ChatGptCredentials } from "./oauth.js";
+import type { ChatGptCredentials, ChatGptRefreshCredentials } from "./oauth.js";
 import { createCodexTokenBroker } from "./token-broker.js";
 
 const credentials: ChatGptCredentials = {
@@ -13,14 +13,15 @@ const credentials: ChatGptCredentials = {
 };
 
 function memoryStore(
-  initial: ChatGptCredentials | undefined = credentials,
+  initial: ChatGptCredentials | ChatGptRefreshCredentials | undefined = credentials,
 ): ChatGptCredentialStore {
   let value = initial;
   return {
     read: vi.fn(async () => value),
-    update: vi.fn(async (callback) => {
-      value = await callback(value);
-      return value;
+    update: vi.fn<ChatGptCredentialStore["update"]>(async (callback) => {
+      const next = await callback(value);
+      value = next;
+      return next;
     }),
   };
 }
@@ -46,8 +47,40 @@ describe("ChatGPT token broker", () => {
     });
     await broker.getToken({ reason: "request" });
     expect(store.read).toHaveBeenCalledOnce();
+    await expect(broker.refreshState()).resolves.toMatchObject({ kind: "ready" });
     expect(fetch).not.toHaveBeenCalled();
     expect(broker.state()).toEqual({ kind: "ready", accountLabel: "alice@example.com" });
+  });
+
+  it("exchanges a saved refresh token on a cold start and caches the access token", async () => {
+    const store = memoryStore({ refreshToken: "saved-refresh", accountId: "acct-1" });
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
+    const broker = createCodexTokenBroker({ store, fetch });
+    await expect(broker.getToken({ reason: "request" })).resolves.toMatchObject({
+      token: "new-access",
+      accountId: "acct-1",
+    });
+    expect(fetch.mock.calls[0]?.[1]?.body?.toString()).toContain("refresh_token=saved-refresh");
+    await broker.getToken({ reason: "request" });
+    await broker.refreshState();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("reads the latest saved refresh token after acquiring the update lock", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => refreshed());
+    const broker = createCodexTokenBroker({
+      fetch,
+      store: {
+        read: async () => ({ refreshToken: "previous-refresh" }),
+        update: async (callback) => callback({ refreshToken: "rotated-by-other-process" }),
+      },
+    });
+    await expect(broker.getToken({ reason: "request" })).resolves.toMatchObject({
+      token: "new-access",
+    });
+    expect(fetch.mock.calls[0]?.[1]?.body?.toString()).toContain(
+      "refresh_token=rotated-by-other-process",
+    );
   });
 
   it("refreshes within five minutes of expiry and persists rotated credentials", async () => {

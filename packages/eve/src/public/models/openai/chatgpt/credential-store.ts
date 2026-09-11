@@ -1,64 +1,105 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { secrets } from "#compiled/just-secrets/index.js";
 import { isErrnoCode, isObject } from "#shared/guards.js";
-import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
-import type { ChatGptCredentials } from "./oauth.js";
+import type { ChatGptCredentials, ChatGptRefreshCredentials } from "./oauth.js";
+
+const SECRET_ID = { service: "eve", name: "chatgpt" };
+const MAX_SECRET_BYTES = 2560;
+
+export class ChatGptInvalidStoredSessionError extends Error {
+  constructor() {
+    super(
+      "The ChatGPT session in the OS secret store is invalid. Sign in again from /model to replace it.",
+    );
+  }
+}
 
 export interface ChatGptCredentialStore {
-  read(): Promise<ChatGptCredentials | undefined>;
+  read(): Promise<ChatGptRefreshCredentials | ChatGptCredentials | undefined>;
   update(
-    callback: (current: ChatGptCredentials | undefined) => Promise<ChatGptCredentials>,
+    callback: (
+      current: ChatGptRefreshCredentials | ChatGptCredentials | undefined,
+    ) => Promise<ChatGptCredentials>,
+    options?: { replace?: boolean },
   ): Promise<ChatGptCredentials>;
+}
+
+interface SecretStore {
+  get(input: { service: string; name: string }): Promise<string | null>;
+  set(input: { service: string; name: string; value: string }): Promise<void>;
 }
 
 export function createChatGptCredentialStore(
   path = join(homedir(), ".eve", "auth", "chatgpt.json"),
+  secretStore: SecretStore = secrets,
 ): ChatGptCredentialStore {
-  async function read(): Promise<ChatGptCredentials | undefined> {
+  let cached: { sessionId: string; credentials: ChatGptCredentials } | undefined;
+
+  async function removeLegacyFile(): Promise<void> {
+    try {
+      await rm(path, { force: true });
+    } catch {
+      throw new Error(
+        "ChatGPT credentials are stored securely, but the old plaintext session could not be removed. Stop older eve processes, remove ~/.eve/auth/chatgpt.json, and retry.",
+      );
+    }
+  }
+
+  async function load() {
+    let raw: string | null;
+    try {
+      raw = await secretStore.get(SECRET_ID);
+    } catch {
+      throw secretStoreError();
+    }
+    if (raw === null) {
+      cached = undefined;
+      return undefined;
+    }
     let value: unknown;
     try {
-      const file = await open(path, "r");
-      try {
-        if ((await file.stat()).size > 64 * 1024) throw new Error("Credential file is too large.");
-        value = JSON.parse(await file.readFile("utf8"));
-      } finally {
-        await file.close();
-      }
-    } catch (error) {
-      if (isErrnoCode(error, "ENOENT")) return undefined;
-      throw new Error(
-        "Could not read the saved ChatGPT session. Check ~/.eve/auth/chatgpt.json permissions or remove it and sign in again from /model.",
-      );
+      if (Buffer.byteLength(raw) > MAX_SECRET_BYTES) throw new Error();
+      value = JSON.parse(raw);
+    } catch {
+      throw new ChatGptInvalidStoredSessionError();
     }
     if (
       !isObject(value) ||
-      typeof value.accessToken !== "string" ||
-      !value.accessToken ||
+      typeof value.sessionId !== "string" ||
+      !value.sessionId ||
       typeof value.refreshToken !== "string" ||
-      !value.refreshToken ||
-      typeof value.expiresAt !== "number" ||
-      !Number.isFinite(value.expiresAt)
+      !value.refreshToken
     ) {
-      throw new Error(
-        "The saved ChatGPT session is invalid. Remove ~/.eve/auth/chatgpt.json and sign in again from /model.",
-      );
+      throw new ChatGptInvalidStoredSessionError();
     }
-    return {
-      accessToken: value.accessToken,
+    const refresh: ChatGptRefreshCredentials = {
       refreshToken: value.refreshToken,
-      expiresAt: value.expiresAt,
       ...(typeof value.accountId === "string" && { accountId: value.accountId }),
       ...(typeof value.accountLabel === "string" && { accountLabel: value.accountLabel }),
     };
+    // Rotation in another process does not invalidate this process's live access token.
+    const credentials =
+      cached?.sessionId === value.sessionId
+        ? {
+            ...refresh,
+            accessToken: cached.credentials.accessToken,
+            expiresAt: cached.credentials.expiresAt,
+          }
+        : refresh;
+    await removeLegacyFile();
+    return { sessionId: value.sessionId, credentials };
   }
 
   return {
-    read,
-    async update(callback) {
+    async read() {
+      return (await load())?.credentials;
+    },
+    async update(callback, options) {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       const lockPath = `${path}.lock`;
       const deadline = Date.now() + 35_000;
@@ -68,12 +109,12 @@ export function createChatGptCredentialStore(
           break;
         } catch (error) {
           if (!isErrnoCode(error, "EEXIST")) throw error;
-          // Token requests time out after 30 seconds; a two-minute lock survived a crash.
+          // Native reads/writes can each wait two minutes for OS prompts, plus OAuth refresh.
           const info = await stat(lockPath).catch((error: unknown) => {
             if (isErrnoCode(error, "ENOENT")) return undefined;
             throw error;
           });
-          if (info && Date.now() - info.mtimeMs > 120_000) {
+          if (info && Date.now() - info.mtimeMs > 10 * 60_000) {
             await rm(lockPath, { recursive: true, force: true });
             continue;
           }
@@ -82,16 +123,50 @@ export function createChatGptCredentialStore(
           await delay(100);
         }
       }
-      const temporaryPath = `${path}.${randomUUID()}.tmp`;
       try {
-        const next = await callback(await read());
-        await writeFile(temporaryPath, `${JSON.stringify(next)}\n`, { mode: 0o600, flag: "wx" });
-        await renameWithTransientBusyRetry(temporaryPath, path);
+        const current = options?.replace ? undefined : await load();
+        const next = await callback(current?.credentials);
+        const sessionId = current?.sessionId ?? randomUUID();
+        const value = JSON.stringify({
+          sessionId,
+          refreshToken: next.refreshToken,
+          ...(next.accountId && { accountId: next.accountId }),
+          ...(next.accountLabel && { accountLabel: next.accountLabel }),
+        });
+        if (Buffer.byteLength(value) > MAX_SECRET_BYTES) {
+          throw new Error(
+            "The ChatGPT refresh session exceeds the OS secret store's 2,560-byte limit. Use an API-key model instead.",
+          );
+        }
+        try {
+          await secretStore.set({ ...SECRET_ID, value });
+        } catch {
+          throw secretStoreError();
+        }
+        cached = { sessionId, credentials: next };
+        await removeLegacyFile();
         return next;
       } finally {
-        await rm(temporaryPath, { force: true });
         await rm(lockPath, { recursive: true, force: true });
       }
     },
   };
+}
+
+let defaultStore: ChatGptCredentialStore | undefined;
+
+export function getDefaultChatGptCredentialStore(): ChatGptCredentialStore {
+  return (defaultStore ??= createChatGptCredentialStore());
+}
+
+function secretStoreError(): Error {
+  const recovery =
+    process.platform === "linux"
+      ? "Install libsecret-tools and start or unlock a Secret Service keyring with a session D-Bus. Headless sessions may need an API-key model."
+      : process.platform === "win32"
+        ? "Allow Windows PowerShell and Credential Manager access in your user session."
+        : "Unlock your login keychain and allow credential access.";
+  return new Error(
+    `Could not access ChatGPT credentials in the OS secret store. ${recovery} Retry from /model.`,
+  );
 }

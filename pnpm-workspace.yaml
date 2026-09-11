@@ -66,6 +66,7 @@ minimumReleaseAgeExclude:
   - "@upstash/*"
   - "@vercel/*"
   - "@workflow/*"
+  - just-secrets@0.0.2
   - nitro
   # Required by nitro@3.0.260903-beta, published September 3.
   - db0@0.4.1
