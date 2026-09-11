@@ -45,10 +45,12 @@ describe("withEveServices", () => {
         destination: { service: "eve-research", type: "service" },
         src: "^/research/eve/v1/(.*)$",
       },
+      { destination: { service: "eve-research", type: "service" }, src: "^/research/?$" },
       {
         destination: { service: "eve-support", type: "service" },
         src: "^/support/eve/v1/(.*)$",
       },
+      { destination: { service: "eve-support", type: "service" }, src: "^/support/?$" },
       { handle: "filesystem" },
     ]);
     expect(config.services.web).toEqual({ framework: "nextjs", root: "apps/web" });
@@ -58,6 +60,10 @@ describe("withEveServices", () => {
       framework: "eve",
       root: ".eve/vercel-services/eve-support",
       routes: [
+        {
+          src: "^/support/?$",
+          transforms: [{ args: "/", op: "set", type: "request.path" }],
+        },
         {
           src: "^/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
