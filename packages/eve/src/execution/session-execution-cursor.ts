@@ -1,4 +1,4 @@
-import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import { claimSessionHooks, type SessionInbox } from "#execution/session-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import {
@@ -7,14 +7,13 @@ import {
 } from "#execution/session-state-cursor.js";
 import type { TurnStepInput, TurnStepPayload } from "#execution/turn-step.js";
 
-type SessionHookClaims = Pick<SessionCommandInbox, "claimSessionHook" | "sessionHookTokens">;
+type SessionHookClaims = Pick<SessionInbox, "claimSessionHook" | "sessionHookTokens">;
 
 /** Mutable durable state owned by the one workflow executing a session. */
 export class SessionExecutionCursor extends SessionStateCursor {
   readonly parentWritable: WritableStream<Uint8Array>;
 
   private readonly commandInbox: SessionHookClaims;
-  private readonly claimedSessionHookTokens: Set<string>;
 
   constructor(input: {
     readonly commandInbox: SessionHookClaims;
@@ -24,7 +23,6 @@ export class SessionExecutionCursor extends SessionStateCursor {
   }) {
     super(input);
     this.commandInbox = input.commandInbox;
-    this.claimedSessionHookTokens = new Set(input.commandInbox.sessionHookTokens);
     this.parentWritable = input.parentWritable;
   }
 
@@ -38,11 +36,7 @@ export class SessionExecutionCursor extends SessionStateCursor {
       : [];
     if (sessionState.continuationToken !== "") candidates.push(sessionState.continuationToken);
 
-    for (const token of candidates) {
-      if (this.claimedSessionHookTokens.has(token)) continue;
-      await this.commandInbox.claimSessionHook(token);
-      this.claimedSessionHookTokens.add(token);
-    }
+    await claimSessionHooks(this.commandInbox, candidates);
     this.adoptState(transition);
   }
 

@@ -5,10 +5,11 @@ import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deploymen
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import { isSessionIdleForHandoffStep } from "#execution/session-handoff-eligibility-step.js";
-import type {
-  SessionCommandInboxHandle,
-  SessionInboxPayload,
-} from "#execution/session-command-inbox.js";
+import {
+  claimSessionHooks,
+  type SessionInboxHandle,
+  type SessionInboxPayload,
+} from "#execution/session-inbox.js";
 import { startSessionOwnerStep, type SessionOwnerStartInput } from "#execution/workflow-runtime.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -23,7 +24,6 @@ export interface SessionOwnership {
 
 /** Complete hook set a successor must claim before it can own the session. */
 export interface SessionHookClaims {
-  readonly authorization: string;
   /** The stable session inbox followed by every additive continuation address. */
   readonly session: readonly string[];
 }
@@ -71,18 +71,17 @@ export interface SessionHandoffCandidate {
 export class SessionHandoff {
   private readonly bufferedDeliveries: readonly DeliverHookPayload[];
   private readonly bufferedSessionControls: readonly unknown[];
-  private readonly commandInbox: SessionCommandInboxHandle;
+  private readonly commandInbox: SessionInboxHandle;
   private readonly checkpointState: Omit<SessionCheckpoint, "ownership">;
   private readonly ownership: SessionOwnership;
 
   constructor(input: {
     readonly anchorToken: string;
-    readonly authorizationHookToken: string;
     readonly bufferedDeliveries: readonly DeliverHookPayload[];
     readonly bufferedSessionControls: readonly unknown[];
     readonly caller?: TurnCaller;
     readonly capabilities?: SessionCapabilities;
-    readonly commandInbox: SessionCommandInboxHandle;
+    readonly commandInbox: SessionInboxHandle;
     readonly mode: RunMode;
     readonly ownership: SessionOwnership;
     readonly retention?: AgentWorkflowRetentionDefinition;
@@ -99,7 +98,6 @@ export class SessionHandoff {
       caller: input.caller,
       capabilities: input.capabilities,
       hooks: {
-        authorization: input.authorizationHookToken,
         session: [...input.commandInbox.sessionHookTokens],
       },
       mode: input.mode,
@@ -173,10 +171,7 @@ export class SessionHandoff {
   }
 
   async recover(payloads: readonly SessionInboxPayload[]): Promise<void> {
-    for (const token of this.checkpointState.hooks.session) {
-      await this.commandInbox.claimSessionHook(token);
-    }
-    await this.commandInbox.claimAuthorization(this.checkpointState.hooks.authorization);
+    await claimSessionHooks(this.commandInbox, this.checkpointState.hooks.session);
     this.commandInbox.restore(payloads);
   }
 }

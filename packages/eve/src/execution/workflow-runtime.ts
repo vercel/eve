@@ -33,7 +33,6 @@ import { createLogger, logError } from "#internal/logging.js";
 import {
   cancelRun,
   getHookByToken,
-  getRawHookByToken,
   getRun,
   getWorld,
   start,
@@ -71,8 +70,12 @@ import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/wire/session-inbox-contract.js";
+import {
+  AcceptedSessionIdentityError,
+  requireSessionId,
+  resumeSessionInbox,
+} from "#execution/wire/session-inbox-resume.js";
+import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -293,7 +296,7 @@ export function createWorkflowRuntime(config: {
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), input.command);
+      return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
     },
 
     async getEventStream(
@@ -322,15 +325,7 @@ export function createWorkflowRuntime(config: {
       try {
         const hook = await getHookByToken(continuationToken);
         const metadata: unknown = await hook.metadata;
-        const sessionId =
-          metadata !== null &&
-          typeof metadata === "object" &&
-          typeof (metadata as Record<string, unknown>)[SESSION_INBOX_SESSION_ID_METADATA_KEY] ===
-            "string"
-            ? ((metadata as Record<string, unknown>)[
-                SESSION_INBOX_SESSION_ID_METADATA_KEY
-              ] as string)
-            : hook.runId;
+        const sessionId = requireSessionId(metadata);
         return { sessionId };
       } catch (error) {
         if (HookNotFoundError.is(error)) {
@@ -394,7 +389,7 @@ async function cancelActivityCollector(runId: string | undefined): Promise<void>
 }
 
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
-  token: string,
+  token: string | SessionInboxAddress,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: SessionInboxOwnerRecord;
@@ -419,16 +414,17 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 }
 
 async function resumeSessionInboxWithHandoffRetry(
-  token: string,
+  token: string | SessionInboxAddress,
   command: SessionCommand,
 ): Promise<SessionInboxOwnerRecord> {
   const deadline = Date.now() + 1_000;
   while (true) {
     try {
       const resumed = await resumeSessionInbox(token, command);
-      return { runId: resumed.ownerRunId, sessionId: resumed.sessionId };
+      return { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
     } catch (error) {
-      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
+      if (typeof token === "string" || !HookNotFoundError.is(error) || Date.now() >= deadline)
+        throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -469,10 +465,11 @@ export async function requestWorkflowTurnCancellation(
   if (input.taskId !== undefined) command.taskId = input.taskId;
   if (input.tasks !== undefined) command.tasks = input.tasks;
   if (input.turnId !== undefined) command.turnId = input.turnId;
-  return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), command);
+  return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {
+  if (error instanceof AcceptedSessionIdentityError) return false;
   if (HookNotFoundError.is(error)) return true;
   for (const candidate of walkCauseChain(error)) {
     if (
@@ -495,7 +492,7 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      return normalizeWorkflowHook(await getRawHookByToken(token));
+      return normalizeWorkflowHook(await getHookByToken(token));
     } catch (error) {
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
@@ -507,7 +504,7 @@ async function waitForCommandHookRelease(token: string, sessionId: string): Prom
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      const owner = normalizeWorkflowHook(await getRawHookByToken(token));
+      const owner = normalizeWorkflowHook(await getHookByToken(token));
       if (owner.runId !== sessionId) return;
     } catch (error) {
       if (HookNotFoundError.is(error)) return;

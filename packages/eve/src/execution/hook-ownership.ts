@@ -13,12 +13,6 @@ export async function claimHookOwnership<T>(hook: Hook<T>): Promise<void> {
   }
 }
 
-export async function closeHookIterator<T>(iterator: AsyncIterator<T>): Promise<void> {
-  if (typeof iterator.return === "function") {
-    await iterator.return(undefined);
-  }
-}
-
 export async function disposeHook(hook: {
   dispose?: () => unknown;
   [Symbol.dispose]?: () => unknown;

@@ -78,7 +78,7 @@ describe("handleConnectionCallbackRequest", () => {
     // Exact match: only parsed params + method cross into the hook
     // payload. The inbound `x-probe` header (and any `Cookie`) is dropped.
     expect(payload).toEqual({
-      kind: "deliver",
+      kind: "authorization-callback",
       payloads: [
         {
           authorizationCallback: {
@@ -94,7 +94,7 @@ describe("handleConnectionCallbackRequest", () => {
     });
   });
 
-  it("keeps pre-attempt callback URLs resumable for pinned workflows", async () => {
+  it("projects legacy callback URLs into authorization-only messages", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
     const response = await handleLegacyConnectionCallbackRequest(
       new Request("https://app.example.com/eve/v1/connections/linear/callback/tok123?code=abc"),
@@ -103,7 +103,7 @@ describe("handleConnectionCallbackRequest", () => {
 
     expect(response.status).toBe(200);
     expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
-      kind: "deliver",
+      kind: "authorization-callback",
       payloads: [
         {
           authorizationCallback: {
@@ -130,7 +130,7 @@ describe("handleConnectionCallbackRequest", () => {
 
     const [, payload] = resumeHookMock.mock.calls[0] ?? [];
     expect(payload).toEqual({
-      kind: "deliver",
+      kind: "authorization-callback",
       payloads: [
         {
           authorizationCallback: {

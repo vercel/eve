@@ -29,7 +29,11 @@ describe("SessionExecutionCursor", () => {
       sessionState: nextState,
     });
 
-    expect(claimSessionHook.mock.calls).toEqual([["channel:second"], ["channel:third"]]);
+    expect(claimSessionHook.mock.calls).toEqual([
+      ["channel:initial"],
+      ["channel:second"],
+      ["channel:third"],
+    ]);
     expect(cursor.sessionState).toBe(nextState);
   });
 

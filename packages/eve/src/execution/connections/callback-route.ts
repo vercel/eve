@@ -75,16 +75,12 @@ async function handleCallbackRequest(
 
   const callback = await projectAuthorizationCallback(request);
 
-  // Deliver the callback through the per-session auth hook token
-  // embedded in the URL by getHookUrl(). The workflow body creates
-  // this hook upfront (before any turns run) so it always exists
-  // when the callback arrives.
   try {
     const authorizationCallback = legacy
       ? { callback, connectionName: name, legacy: true as const }
       : { attemptId: attemptId!, callback, connectionName: name };
     await resumeHook(token, {
-      kind: "deliver" as const,
+      kind: "authorization-callback" as const,
       payloads: [{ authorizationCallback }],
     });
   } catch {

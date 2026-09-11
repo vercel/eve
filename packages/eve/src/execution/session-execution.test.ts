@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { SessionInbox } from "#execution/session-inbox.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
@@ -16,9 +16,6 @@ vi.mock("#execution/tasks/parent/delegate.js", () => ({
 }));
 vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
   cancelDescendantTurnsStep: vi.fn(),
-}));
-vi.mock("#execution/tools/workflow/owner.js", () => ({
-  openWorkflowToolRunOwnerInbox: () => ({ dispose: vi.fn() }),
 }));
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,8 +40,7 @@ describe("SessionExecution background task checkpoints", () => {
       };
       const backgroundContext = { ...observability, state: "before" };
       const completedContext = { ...observability, state: "completed" };
-      const inbox: SessionCommandInbox = {
-        claimAuthorization: vi.fn(),
+      const inbox: SessionInbox = {
         claimSessionHook: vi.fn(),
         consumeNext: vi.fn(),
         drain: vi.fn(() => []),
@@ -54,7 +50,6 @@ describe("SessionExecution background task checkpoints", () => {
           .fn()
           .mockResolvedValueOnce({ done: false, value: { kind: "cancel" } })
           .mockImplementation(() => new Promise(() => {})),
-        nextWithSource: vi.fn(),
         restore: vi.fn(),
         sessionHookTokens: [],
         setAuthorizationWindow: vi.fn(),
@@ -87,30 +82,26 @@ describe("SessionExecution background task checkpoints", () => {
         };
       });
 
-      try {
-        const result = await execution.runTurn({
-          kind: "deliver",
-          payloads: [{ message: "work" }],
-        });
-        expect(result).toEqual({
-          cancelled: true,
-          kind: "park",
-          serializedContext: completedContext,
-          sessionState: backgroundState,
-        });
-        expect(adopt.mock.calls[0]?.[0]).toEqual({
-          serializedContext: backgroundContext,
-          sessionState: backgroundState,
-        });
-        expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks });
-        expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-          serializedContext: completedContext,
-          sessionState: backgroundState,
-        });
-        expect(settleTurnStep).not.toHaveBeenCalled();
-      } finally {
-        await execution.dispose();
-      }
+      const result = await execution.runTurn({
+        kind: "deliver",
+        payloads: [{ message: "work" }],
+      });
+      expect(result).toEqual({
+        cancelled: true,
+        kind: "park",
+        serializedContext: completedContext,
+        sessionState: backgroundState,
+      });
+      expect(adopt.mock.calls[0]?.[0]).toEqual({
+        serializedContext: backgroundContext,
+        sessionState: backgroundState,
+      });
+      expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks });
+      expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+        serializedContext: completedContext,
+        sessionState: backgroundState,
+      });
+      expect(settleTurnStep).not.toHaveBeenCalled();
     },
   );
 });

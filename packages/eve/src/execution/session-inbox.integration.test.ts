@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
+import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
@@ -29,7 +29,7 @@ describe("session command inbox integration", () => {
   });
 
   it("stamps the public session id onto every inbox hook", async () => {
-    const channelToken = "http:session-command-inbox:session-id";
+    const channelToken = "http:session-inbox:session-id";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
     const stableToken = sessionCommandHookToken(run.runId);
 
@@ -51,7 +51,7 @@ describe("session command inbox integration", () => {
   });
 
   it("accepts commands alternately through the stable ID and channel aliases", async () => {
-    const channelToken = "http:session-command-inbox:both-aliases";
+    const channelToken = "http:session-inbox:both-aliases";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
     const stableToken = sessionCommandHookToken(run.runId);
 
@@ -75,8 +75,8 @@ describe("session command inbox integration", () => {
   });
 
   it("keeps every claimed continuation address active", async () => {
-    const oldToken = "http:session-command-inbox:additive:old";
-    const replacementToken = "http:session-command-inbox:additive:replacement";
+    const oldToken = "http:session-inbox:additive:old";
+    const replacementToken = "http:session-inbox:additive:replacement";
     const run = await start(sessionCommandInboxWorkflow, [
       { messageCount: 3, nextToken: replacementToken, token: oldToken },
     ]);

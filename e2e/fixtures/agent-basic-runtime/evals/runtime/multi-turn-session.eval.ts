@@ -17,6 +17,14 @@ export default defineEval({
 
     await t.require(second.sessionId, equals(first.sessionId));
 
+    const third = await t.send(
+      "Alice is checking the saved conversation. What favorite word did I ask you to remember? Reply with just that word.",
+    );
+    await t.require(third.sessionId, equals(first.sessionId));
+    third.notEvent("session.started");
+    third.notEvent("session.failed");
+    third.messageIncludes(/marigold/i);
+
     t.succeeded();
     t.messageIncludes(/marigold/i);
     t.check(t.transcript, includes("User:\nMy favorite word is marigold. Remember it."));

@@ -8,6 +8,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -252,9 +253,10 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
         expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId), continuationToken]);
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -394,8 +396,8 @@ describe("workflowEntry integration", () => {
 
         // The callback still lands on the retained read and closes the
         // challenge exactly once.
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -499,8 +501,8 @@ describe("workflowEntry integration", () => {
           kind: "send",
           payload: { message: "This must not become a second task turn." },
         });
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -591,11 +593,17 @@ describe("workflowEntry integration", () => {
             connectionName: "weather",
           },
         };
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -669,8 +677,8 @@ describe("workflowEntry integration", () => {
         // mask a wait that ignores callbacks after a consumed cancel.
         await new Promise((resolve) => setTimeout(resolve, 250));
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -826,6 +834,7 @@ describe("workflowEntry integration", () => {
           data: { continuationToken: run.runId },
           type: "session.waiting",
         });
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -1496,6 +1505,22 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
       clearTimeout(timeout);
     }
   }
+}
+
+async function expectHookClaims(runId: string, tokens: string[]): Promise<void> {
+  const events = await (
+    await getWorld()
+  ).events.list({
+    runId,
+    pagination: { limit: 1000 },
+    resolveData: "all",
+  });
+  const claims = events.data.flatMap((event) =>
+    event.eventType === "hook_created" ? [event.eventData.token] : [],
+  );
+  const cancellation = claims.filter((token) => token.startsWith("abrt_"));
+  expect(cancellation).toHaveLength(1);
+  expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual([...tokens].sort());
 }
 
 async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {

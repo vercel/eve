@@ -12,10 +12,7 @@ export async function validateSessionCheckpointStep(input: {
   if (
     hooks.session.length === 0 ||
     hooks.session.some((token) => typeof token !== "string" || token.length === 0) ||
-    new Set(hooks.session).size !== hooks.session.length ||
-    typeof hooks.authorization !== "string" ||
-    hooks.authorization.length === 0 ||
-    hooks.session.includes(hooks.authorization)
+    new Set(hooks.session).size !== hooks.session.length
   ) {
     throw new Error("Session checkpoint contains an invalid hook claim set.");
   }

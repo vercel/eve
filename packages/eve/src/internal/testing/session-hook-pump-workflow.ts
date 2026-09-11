@@ -1,5 +1,5 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import { createSessionInbox } from "#execution/session-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 export async function sessionHookPumpWorkflow(input: {
@@ -7,7 +7,7 @@ export async function sessionHookPumpWorkflow(input: {
   readonly releaseToken: string;
 }): Promise<unknown[]> {
   "use workflow";
-  const inbox = createSessionCommandInbox(getWorkflowMetadata().workflowRunId);
+  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
   using gate = createHook<void>({ token: input.releaseToken });
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(getWorkflowMetadata().workflowRunId));

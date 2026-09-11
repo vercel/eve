@@ -554,7 +554,6 @@ describe("workflow tools", () => {
         expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
 
         const commandToken = sessionCommandHookToken(run.runId);
-        await waitForHook(run, { token: commandToken });
         await resumeSessionInbox(commandToken, {
           kind: "send",
           payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
@@ -693,7 +692,6 @@ describe("workflow tools", () => {
         const workflowToolRunId = await waitForNewWorkflowToolRun(before);
         await waitForHook({ runId: workflowToolRunId });
         const commandToken = sessionCommandHookToken(run.runId);
-        await waitForHook(run, { token: commandToken });
         await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });
 
         // The body is holding in a step that received ctx.abortSignal, so the

@@ -2,7 +2,8 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
@@ -13,7 +14,13 @@ import {
 import { coalesceDeliveries } from "#harness/messages.js";
 import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
+interface WorkflowMessageInstruction {
+  readonly kind: "workflow";
+  readonly message: WorkflowToolRunMessage;
+}
+
 type NextSessionAction =
+  | WorkflowMessageInstruction
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
@@ -27,13 +34,12 @@ type NextSessionAction =
 /** One authorization-callback read surfaced during a parked wait. */
 export interface AuthorizationCallbackInstruction {
   readonly kind: "authorization";
-  /** True when the authorization hook closed; no further callbacks can arrive. */
-  readonly closed: boolean;
   readonly payloads: readonly DeliverPayload[];
 }
 
 /** What the parked owner should do with the next session activity. */
 export type NextTurnInstruction =
+  | WorkflowMessageInstruction
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
@@ -67,7 +73,7 @@ export async function nextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds?: Set<string>;
-  readonly commandInbox: SessionCommandInbox;
+  readonly commandInbox: SessionInbox;
   readonly deferDeliveries?: boolean;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -89,7 +95,7 @@ async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds?: Set<string>;
-  readonly commandInbox: SessionCommandInbox;
+  readonly commandInbox: SessionInbox;
   readonly deferDeliveries?: boolean;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -108,7 +114,7 @@ async function awaitNextTurnDelivery(input: {
       stateCursor: input.stateCursor,
     });
 
-    if (nextAction.kind === "authorization") {
+    if (nextAction.kind === "authorization" || nextAction.kind === "workflow") {
       return nextAction;
     }
 
@@ -146,7 +152,7 @@ async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds: Set<string>;
-  readonly commandInbox: SessionCommandInbox;
+  readonly commandInbox: SessionInbox;
   readonly deferDeliveries?: boolean;
   readonly seenTaskDeliveries: Set<string>;
   readonly stateCursor: SessionStateCursor;
@@ -177,17 +183,17 @@ async function waitForNextSessionAction(input: {
   }
 
   while (true) {
-    const { result: first, source } = await input.commandInbox.nextWithSource();
-    input.commandInbox.consumeNext();
+    const first = await input.commandInbox.next("runtime");
+    if (!first.done) input.commandInbox.consumeNext("runtime");
 
-    if (source === "authorization") {
-      if (first.done) {
-        return { closed: true, kind: "authorization", payloads: [] };
-      }
+    if (!first.done && isWorkflowMessage(first.value)) {
+      return { kind: "workflow", message: first.value };
+    }
+
+    if (!first.done && first.value.kind === "authorization-callback") {
       return {
-        closed: false,
         kind: "authorization",
-        payloads: first.value.kind === "deliver" ? first.value.payloads : [],
+        payloads: first.value.payloads,
       };
     }
 

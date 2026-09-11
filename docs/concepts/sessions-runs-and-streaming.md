@@ -11,6 +11,11 @@ The HTTP API and TypeScript client use one durable `sessionId` for messages,
 controls, and streams. Every operation targets that exact session; none follows
 or creates a replacement implicitly.
 
+The session ID currently identifies the original Workflow run that owns the
+event stream. A deployment handoff changes the executing run, not the session
+ID or stream. Stream namespaces belong to a run; eve does not support
+caller-assigned session IDs or globally addressed streams.
+
 Authored channels also have channel-local continuation tokens. A token addresses
 whichever session currently owns a platform conversation, such as a Slack thread.
 That identity stays behind the channel boundary and is never accepted or returned

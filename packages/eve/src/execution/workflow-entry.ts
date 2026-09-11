@@ -1,4 +1,9 @@
-import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import {
+  createHook,
+  type Hook,
+  getWorkflowMetadata,
+  getWritable,
+} from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -37,10 +42,11 @@ import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { finalizeDone, finalizeExpiredSession } from "#execution/workflow-entry-finalization.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
-  createSessionCommandInbox,
-  type SessionCommandInboxHandle,
+  createSessionInbox,
+  claimSessionHooks,
+  type SessionInboxHandle,
   type SessionInboxPayload,
-} from "#execution/session-command-inbox.js";
+} from "#execution/session-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
@@ -129,14 +135,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     serializedContext,
     terminalEmitted: false,
   };
-  const anchor = isInitialOwner
-    ? createHook<WorkflowEntryResult>({ token: anchorToken })
-    : undefined;
+  let anchor: Hook<WorkflowEntryResult> | undefined;
+  const ensureAnchor = async (): Promise<void> => {
+    if (!isInitialOwner || anchor !== undefined) return;
+    anchor = createHook<WorkflowEntryResult>({ token: anchorToken });
+    await claimHookOwnership(anchor);
+  };
   let activationConfirmed = isInitialOwner;
   let failedActivationPayloads: readonly SessionInboxPayload[] = [];
 
   try {
-    const commandInbox = createSessionCommandInbox(sessionId);
+    const commandInbox = createSessionInbox(sessionId);
     const sessionHookTokens = isInitialOwner
       ? [sessionCommandHookToken(sessionId)]
       : input.checkpoint.hooks.session;
@@ -144,9 +153,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     if (stableCommandToken === undefined) {
       throw new Error("Session owner requires a stable inbox hook.");
     }
-    const authorizationHookToken = isInitialOwner
-      ? `${sessionId}:auth`
-      : input.checkpoint.hooks.authorization;
     let sessionState: DurableSessionState;
     let outcome: SessionLoopOutcome;
     try {
@@ -158,29 +164,27 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         const dynamicSubagentAgentConfig = serializedContext["eve.dynamicSubagentAgentConfig"] as
           | DynamicSubagentAgentConfig
           | undefined;
-        const [sessionCreation, stableClaim, authorizationClaim, anchorClaim] =
-          await Promise.allSettled([
-            createSessionStep({
-              compiledArtifactsSource: serializedBundle.source,
-              continuationToken,
-              dynamicSubagentAgentConfig,
-              inheritedLimits: input.limits,
-              nodeId: serializedBundle.nodeId,
-              outputSchema: input.input.outputSchema,
-              rootSessionId: readRootSessionId(serializedContext),
-              sessionId,
-              taskId: input.taskId,
-            }),
-            commandInbox.claimSessionHook(stableCommandToken),
-            commandInbox.claimAuthorization(authorizationHookToken),
-            claimHookOwnership(anchor!),
-          ]);
+        const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
+          createSessionStep({
+            compiledArtifactsSource: serializedBundle.source,
+            continuationToken,
+            dynamicSubagentAgentConfig,
+            inheritedLimits: input.limits,
+            nodeId: serializedBundle.nodeId,
+            outputSchema: input.input.outputSchema,
+            rootSessionId: readRootSessionId(serializedContext),
+            sessionId,
+            taskId: input.taskId,
+          }),
+          commandInbox.claimSessionHook(stableCommandToken),
+          continuationToken === ""
+            ? Promise.resolve()
+            : commandInbox.claimSessionHook(continuationToken),
+        ]);
         if (sessionCreation.status === "rejected") throw sessionCreation.reason;
         if (stableClaim.status === "rejected") throw stableClaim.reason;
-        if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
-        if (anchorClaim.status === "rejected") throw anchorClaim.reason;
         try {
-          if (continuationToken !== "") await commandInbox.claimSessionHook(continuationToken);
+          if (aliasClaim.status === "rejected") throw aliasClaim.reason;
         } catch (error) {
           if (isHookConflictError(error)) {
             if (
@@ -203,10 +207,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
           : undefined;
       } else {
         await validateSessionCheckpointStep({ checkpoint: input.checkpoint });
-        for (const token of sessionHookTokens) {
-          await commandInbox.claimSessionHook(token);
-        }
-        await commandInbox.claimAuthorization(authorizationHookToken);
+        await claimSessionHooks(commandInbox, sessionHookTokens);
         sessionState = input.checkpoint.sessionState;
         crashCleanupState.caller = input.checkpoint.caller;
         await signalSessionOwnerActivationStep({
@@ -222,7 +223,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       outcome = await runSessionLoop({
         anchorRunId,
         anchorToken,
-        authorizationHookToken,
+        ensureAnchor,
         capabilities,
         commandInbox,
         sessionWritable,
@@ -252,7 +253,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       try {
         return await anchor!;
       } finally {
-        await disposeHook(anchor!);
+        if (anchor !== undefined) await disposeHook(anchor);
       }
     }
     const result =
@@ -267,7 +268,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
             terminalState: crashCleanupState,
           });
     if (isInitialOwner) {
-      await disposeHook(anchor!);
+      if (anchor !== undefined) await disposeHook(anchor);
     } else {
       await signalSessionAnchorStep({ result, token: anchorToken });
     }
@@ -326,7 +327,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     if (!isInitialOwner) {
       await signalSessionAnchorStep({ result: { output: "" }, token: anchorToken });
     } else {
-      await disposeHook(anchor!);
+      if (anchor !== undefined) await disposeHook(anchor);
     }
     throw createSafeOuterWorkflowError();
   }
@@ -363,9 +364,9 @@ function createInitialDelivery(
 async function runSessionLoop(input: {
   readonly anchorRunId: string;
   readonly anchorToken: string;
-  readonly authorizationHookToken: string;
+  readonly ensureAnchor: () => Promise<void>;
   readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionCommandInboxHandle;
+  readonly commandInbox: SessionInboxHandle;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly initialInput: DeliverHookPayload;
   readonly crashCleanupState: CrashCleanupState;
@@ -390,14 +391,14 @@ async function runSessionLoop(input: {
    * which keeps the wait deterministic under workflow replay — and keep
    * surfacing across wait iterations that produce no parent turn (no-op
    * cancels, fully-routed descendant deliveries). Callbacks accumulate
-   * across intervening turns; once every expected challenge has reported
-   * (or the hook closed), the collected payloads resume the challenge.
+   * across intervening turns; once every expected challenge has reported,
+   * the collected payloads resume the challenge.
    */
   const nextParkedActivity = async (park: {
     readonly expectedAttemptIds: readonly string[];
   }): Promise<
     | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
-    | Exclude<NextTurnInstruction, { kind: "authorization" }>
+    | Exclude<NextTurnInstruction, { kind: "authorization" | "workflow" }>
   > => {
     const expectedAttemptIds = new Set(park.expectedAttemptIds);
     for (const attemptId of collectedAuthPayloads.keys()) {
@@ -427,6 +428,10 @@ async function runSessionLoop(input: {
         seenTaskDeliveries,
         stateCursor,
       });
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
       if (next.kind !== "authorization") return next;
 
       for (const payload of next.payloads) {
@@ -440,11 +445,6 @@ async function runSessionLoop(input: {
         ) {
           collectedAuthPayloads.set(callback.attemptId, payload);
         }
-      }
-      if (next.closed) {
-        const payloads = [...collectedAuthPayloads.values()];
-        collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads };
       }
     }
   };
@@ -496,9 +496,14 @@ async function runSessionLoop(input: {
   };
 
   try {
-    await sessionTimeout?.start();
-
-    let action: TurnOutcome = await runTurn(input.initialInput);
+    const initialTurn = runTurn(input.initialInput);
+    const [actionResult, timerResult] = await Promise.allSettled([
+      initialTurn,
+      sessionTimeout?.start(),
+    ]);
+    if (timerResult.status === "rejected") throw timerResult.reason;
+    if (actionResult.status === "rejected") throw actionResult.reason;
+    let action: TurnOutcome = actionResult.value;
 
     while (true) {
       if (action.kind === "done") {
@@ -633,7 +638,6 @@ async function runSessionLoop(input: {
 
       const handoff = new SessionHandoff({
         anchorToken: input.anchorToken,
-        authorizationHookToken: input.authorizationHookToken,
         bufferedDeliveries,
         bufferedSessionControls,
         caller: input.crashCleanupState.caller,
@@ -653,6 +657,7 @@ async function runSessionLoop(input: {
       });
       const checkpoint = await handoff.checkpoint(next.delivery);
       if (checkpoint.kind === "ready") {
+        await input.ensureAnchor();
         const acceptedDuringRelease = await handoff.release();
         if (acceptedDuringRelease.length > 0) {
           await handoff.recover(acceptedDuringRelease);
@@ -676,7 +681,6 @@ async function runSessionLoop(input: {
       action = await runTurn(next.delivery);
     }
   } finally {
-    await execution.dispose();
     await sessionTimeout?.dispose();
   }
 }

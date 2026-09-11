@@ -112,6 +112,18 @@ ends or resets. An ID-only HTTP session has the stable inbox and no channel
 continuation address. When cold starts race for the same address, the losing
 candidate forwards its accepted message to the owner and exits.
 
+Channel delivery attempts to resume the address before creating a session.
+After Workflow accepts the delivery, eve resolves the stable session ID for
+the returned handle. That identity lookup does not block workflow resumption.
+ID-addressed delivery already knows the session ID and needs no hook metadata
+lookup. An ambiguous delivery failure does not trigger session creation.
+
+Deployment handoff currently has a brief interval between releasing and
+reclaiming the addresses. ID-addressed requests retry missing hooks within a
+bounded window. An alias-only request cannot distinguish that interval from an
+unowned address and may start a competing candidate. Continuous alias ownership
+requires an atomic handoff primitive from Workflow.
+
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner buffers the message and applies it after the current workflow step commits. The model call and tool work complete safely, and steering continues the same turn with the same turn ID. Before emitting the turn's completion events, the owner checks for steering accepted at that boundary.
 
 `turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.

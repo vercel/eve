@@ -9,12 +9,13 @@ import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   type SessionInboxAddress,
 } from "#execution/wire/session-inbox-contract.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
-  readonly sessionId: string;
+  /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
+  readonly sessionId: Promise<string>;
 }
 
 /** Resumes the current owner with the current command shape. */
@@ -30,15 +31,35 @@ export async function resumeSessionInbox(
       throw new Error("Session inbox target has an invalid address.");
     token = sessionCommandHookToken(address.sessionId);
   }
-  const hook = await getHookByToken(token);
-  const metadata = await hook.metadata;
-  const sessionId = readSessionId(metadata) ?? hook.runId;
-  await resumeHook(hook, command);
-  return { ownerRunId: hook.runId, sessionId };
+  const hook = await resumeHook(token, command);
+  let identity: Promise<string> | undefined;
+  return {
+    ownerRunId: hook.runId,
+    get sessionId() {
+      return (identity ??= (async () => {
+        try {
+          return typeof address === "string"
+            ? requireSessionId(await hook.metadata)
+            : address.sessionId;
+        } catch (cause) {
+          // A failed identity read must never cause a second delivery.
+          throw new AcceptedSessionIdentityError(cause);
+        }
+      })());
+    },
+  };
 }
 
-function readSessionId(metadata: unknown): string | undefined {
-  if (!isObject(metadata)) return undefined;
-  const value = metadata[SESSION_INBOX_SESSION_ID_METADATA_KEY];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+export class AcceptedSessionIdentityError extends Error {
+  constructor(cause: unknown) {
+    super("Session command accepted, but its session identity could not be resolved.", { cause });
+    this.name = "AcceptedSessionIdentityError";
+  }
+}
+
+export function requireSessionId(metadata: unknown): string {
+  const value = isObject(metadata) ? metadata[SESSION_INBOX_SESSION_ID_METADATA_KEY] : undefined;
+  if (typeof value !== "string" || value.length === 0)
+    throw new Error("Session hook metadata is missing its session ID.");
+  return value;
 }

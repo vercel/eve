@@ -1,5 +1,3 @@
-import { defineHook } from "#compiled/@workflow/core/index.js";
-
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import type {
   AgentInvocationRequest,
@@ -94,8 +92,6 @@ export type WorkflowToolRunMessage =
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
-
-export const workflowToolRunHook = defineHook<WorkflowToolRunMessage>();
 
 export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };
 

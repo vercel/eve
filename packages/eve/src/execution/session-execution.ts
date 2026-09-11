@@ -5,14 +5,10 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
-import { ActiveTurnInbox } from "#execution/active-turn-inbox.js";
+import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox.js";
+import { TurnRouting } from "#execution/turn-routing.js";
 import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import {
-  openWorkflowToolRunOwnerInbox,
-  type WorkflowToolRunOwnerInbox,
-} from "#execution/tools/workflow/owner.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import type {
   DurableStepResult,
@@ -40,7 +36,7 @@ export interface SessionExecutionInput {
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds: Set<string>;
   readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionCommandInbox;
+  readonly commandInbox: SessionInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries: Set<string>;
@@ -58,12 +54,6 @@ export class SessionExecution {
   readonly cursor: SessionExecutionCursor;
 
   private readonly input: SessionExecutionInput;
-  private readonly workflowInbox: WorkflowToolRunOwnerInbox;
-  private pendingWorkflowRead:
-    | Promise<
-        IteratorResult<import("#execution/tools/workflow/messages.js").WorkflowToolRunMessage>
-      >
-    | undefined;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -75,15 +65,10 @@ export class SessionExecution {
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
       });
-    this.workflowInbox = openWorkflowToolRunOwnerInbox();
-  }
-
-  async dispose(): Promise<void> {
-    await this.workflowInbox.dispose();
   }
 
   async runTurn(delivery: TurnStepPayload): Promise<TurnOutcome> {
-    const control = new ActiveTurnInbox({
+    const control = new TurnRouting({
       bufferedDeliveries: this.input.bufferedDeliveries,
       bufferedSessionControls: this.input.bufferedSessionControls,
       cancelledTaskIds: this.input.cancelledTaskIds,
@@ -163,7 +148,7 @@ export class SessionExecution {
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          workflowToolRunOwner: this.workflowInbox.owner,
+          workflowToolRunOwner: { inbox: this.input.commandInbox.sessionHookTokens[0]! },
           parentWritable: this.cursor.parentWritable,
           serializedContext: this.cursor.serializedContext,
           sessionState: this.cursor.sessionState,
@@ -221,7 +206,17 @@ export class SessionExecution {
     }
   }
 
-  private async finishCancelledTurn(control: ActiveTurnInbox): Promise<TurnOutcome> {
+  async handleWorkflowMessage(
+    message: import("#execution/tools/workflow/messages.js").WorkflowToolRunMessage,
+  ): Promise<RuntimeActionResult | undefined> {
+    return await handleWorkflowToolRunMessage({
+      callbackMetadataUrl: getWorkflowMetadata().url,
+      cursor: this.cursor,
+      message,
+    });
+  }
+
+  private async finishCancelledTurn(control: TurnRouting): Promise<TurnOutcome> {
     if (control.cancellation?.tasks === true) {
       await cancelAllIndexedSessionTasksStep({
         serializedContext: this.cursor.serializedContext,
@@ -246,7 +241,7 @@ export class SessionExecution {
   }
 
   private async waitForRuntimeActionResults(input: {
-    readonly control: ActiveTurnInbox;
+    readonly control: TurnRouting;
     readonly initialAcceptedAtMs: number | undefined;
     readonly initialResults: readonly RuntimeActionResult[];
     readonly pendingCallIds: readonly string[];
@@ -296,11 +291,7 @@ export class SessionExecution {
         continue;
       }
 
-      const result = await handleWorkflowToolRunMessage({
-        callbackMetadataUrl: getWorkflowMetadata().url,
-        cursor: this.cursor,
-        message: next.message,
-      });
+      const result = await this.handleWorkflowMessage(next.message);
       if (result !== undefined) {
         results.push(result);
         acceptedAtMsByCallId.set(result.callId, Date.now());
@@ -308,7 +299,7 @@ export class SessionExecution {
     }
   }
 
-  private async nextRuntimeEvent(control: ActiveTurnInbox): Promise<
+  private async nextRuntimeEvent(control: TurnRouting): Promise<
     | RuntimeActionResultStepInput
     | {
         readonly kind: "workflow";
@@ -320,24 +311,11 @@ export class SessionExecution {
     while (true) {
       const buffered = control.takeRuntimeResult();
       if (buffered !== undefined) return buffered;
-      const winner = await Promise.race([
-        this.workflowRead().then((result) => ({ kind: "workflow" as const, result })),
-        this.input.commandInbox.next().then((result) => ({ kind: "command" as const, result })),
-      ]);
-
-      if (winner.kind === "workflow") {
-        this.pendingWorkflowRead = undefined;
-        if (winner.result.done) {
-          throw new Error("Workflow tool inbox closed before runtime actions completed.");
-        }
-        return { kind: "workflow", message: winner.result.value };
-      }
-
-      if (winner.result.done) {
-        throw new Error("Session command inbox closed before runtime actions completed.");
-      }
-      this.input.commandInbox.consumeNext();
-      const value = winner.result.value;
+      const result = await this.input.commandInbox.next("runtime");
+      if (result.done) throw new Error("Session inbox closed before runtime actions completed.");
+      this.input.commandInbox.consumeNext("runtime");
+      const value = result.value;
+      if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
       if (value.kind === "runtime-action-result") {
         return { kind: "runtime-action-result", results: value.results };
       }
@@ -345,10 +323,5 @@ export class SessionExecution {
       if (command === "cancel-turn") return command;
       if (control.signal.aborted) return "cancelled";
     }
-  }
-
-  private workflowRead() {
-    this.pendingWorkflowRead ??= this.workflowInbox.reader.iterator.next();
-    return this.pendingWorkflowRead;
   }
 }

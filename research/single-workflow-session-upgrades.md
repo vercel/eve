@@ -37,7 +37,7 @@ a deployment pays for the handoff, and a session with live work stays on its cur
 until it is idle again. The first version ships with a known no-owner interval during handoff and
 requests an atomic handoff primitive from Workflow in parallel.
 
-## Current topology
+## Former topology
 
 ```text
 channel request accepted on deployment B
@@ -193,8 +193,8 @@ two live owners; it does not provide atomic transfer (see [Open questions](#open
    upgrade.
 3. After release and a final safety check, start a candidate on the triggering delivery's
    deployment with the checkpoint, the stable session identity, and the original stream. The
-   checkpoint names the stable inbox, every continuation hook claimed during the session, and the
-   authorization hook. The candidate validates and hydrates, then claims that exact set in order.
+   checkpoint names the stable inbox and every continuation hook claimed during the session.
+   The candidate validates and hydrates, then registers that exact set as one batch.
    It performs no model or tool work until it owns every hook.
 4. The candidate activates and processes the triggering delivery before any later arrival.
 5. Once activation is confirmed, the old owner exits, or parks as the stream anchor if it is the
@@ -238,9 +238,10 @@ Still to settle:
   disposal. Step 2 depends on a reliable final drain, and the earlier successor-run prototype
   showed this is the hard race. If disposal cannot expose them, abandon-and-reclaim is
   insufficient and handoff must wait for the primitive.
-- Ingress behavior during the no-owner interval. Today a missing hook reads as an inactive or
-  absent session. Bounded retry is required, and ingress must never create a replacement session
-  for one that is upgrading.
+- Continuous alias ownership during the no-owner interval. ID-addressed dispatch retries
+  missing hooks within a bounded window. Alias-only dispatch cannot distinguish this interval
+  from an unowned address and may start a competing candidate. Atomic handoff is required to
+  remove that ambiguity without a session directory or a preflight lookup.
 - `Run.getWritable()` semantics. The repo pins `@workflow/core` 5.0.0-beta.50, and
   `workflow@5.0.0-beta.50` exposes `run.getWritable(options)` for writing to another run's stream.
   Implementation must still verify stream lifetime, permissions, and append behavior for the
@@ -262,7 +263,7 @@ a deleted path, not to wrap the Workflow SDK generally.
 | Contract                                                                                                                                                                   | Replaces                                                                                                           | Responsibility                                                                                                                                                                                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SessionExecution`: `runTurn(delivery) → TurnOutcome`                                                                                                                      | `turn-dispatch.ts`, `dispatch-turn-step.ts`, the inline/child split, turn-owned coordination in `turn-workflow.ts` | Run `turnStep`, service the inbox, coordinate waits, settle locally. No driver messages.                                                                                                                      |
-| `SessionCommandInbox` (extend existing)                                                                                                                                    | Turn-control hooks and `TurnControlReceiver`                                                                       | Retain an additive array beginning with the stable inbox, merge one pending iterator read from every session hook, gate authorization callbacks, and expose the exact claim set for transfer. No turn policy. |
+| `SessionInbox` (extend existing)                                                                                                                                           | Turn-control hooks and `TurnControlReceiver`                                                                       | Retain an additive array beginning with the stable inbox, merge one pending iterator read from every session hook, gate authorization callbacks, and expose the exact claim set for transfer. No turn policy. |
 | `SessionHandoff`: `checkpoint(delivery) → ready(checkpoint) \| skipped(reason)`, `release()`, `start(checkpoint) → candidate`, `activate(candidate)`, `recover(candidate)` | New                                                                                                                | Eligibility, hydration on the target, replay-safe transfer through the inbox. The only boundary that changes when the upstream primitive lands.                                                               |
 | Session-owner start and stream operations in the existing `workflow-runtime.ts`                                                                                            | Per-turn `start()` of the child turn workflow                                                                      | Start an exact-deployment owner; open and close session output; keep workflow-body and step-side execution contexts distinct.                                                                                 |
 
@@ -305,7 +306,7 @@ share the same payload contract, and failures wake the consumer. Authorization
 callbacks retain their separate eligibility window. Handoff releases the entire
 claim set and transfers accepted, unconsumed payloads with the exact tokens.
 
-`ActiveTurnInbox` admits buffered input only against committed state.
+`TurnRouting` admits input from the session's one queue only against committed state.
 `steer` preserves completed work, turn identity, and accumulated usage.
 `queue` remains pending until settlement. A different delegated caller also
 waits for its own turn. Runtime results and addressed responses retain their
@@ -323,6 +324,40 @@ boundaries without adopting its separate holder and turn topology. Upstream
 step results and other hooks, including layered async consumers. eve additionally
 tests merged alias bursts while the owner is waiting, same-turn steering,
 cancellation followed by new input, and clients following settlement races.
+
+## Unified inbox and resume-first delivery
+
+`SessionInbox` owns the additive address set and one bounded queue. Commands,
+authorization callbacks, and workflow-tool messages share that transport.
+Authorization eligibility is a message-routing rule, not a second hook source.
+`TurnRouting` owns turn policy and cancellation, not another transport buffer.
+Independent background task workflows keep their own executor inboxes.
+
+Startup claims one stable hook plus the initial alias, if present. The SDK also
+creates an `abrt_*` hook when serializing the active turn's abort signal into a
+step. That hook carries explicit cancellation, never steering. The original
+owner creates its terminal anchor hook only when it attempts handoff. Handoff
+activation remains a separate, handoff-only acknowledgement hook. The deadline
+workflow starts concurrently with the initial turn, and both operations are
+settled before leaving startup; the absolute deadline is unchanged.
+
+Ingress calls `resumeHook(token, command)` directly. The returned receipt carries
+the owning run ID and lazy `{ sessionId }` metadata. Only alias callers asking
+for a Session handle hydrate that metadata, after resumption. Known-session
+requests and internal fire-and-forget senders never hydrate it. Missing metadata
+is an identity error after acceptance, not permission to resend or create a run.
+`getRawHookByToken` is deleted: the SDK's standard lookup is already lazy.
+
+The only explicit hook lookups left in eve are requested alias resolution,
+reset's release acknowledgement, and replay-idempotent background-task ownership
+resolution. Registration barriers remain for competing claims and callbacks
+that must be registered before another run can signal them. Claims within an
+adoption or handoff batch run together rather than one durable barrier per alias.
+
+The [network-hop map](./session-network-hops.html) and its
+[machine-readable data](./session-network-hops.json) distinguish source-derived
+operations, cache-dependent work, and model-start dependencies. They do not
+claim measured latency or a fixed count for arbitrary authored integrations.
 
 ## Out of scope
 
@@ -359,8 +394,8 @@ cancellation followed by new input, and clients following settlement races.
 - Inject concurrent deliveries and replay failures at every handoff step. Verify FIFO order, no
   lost accepted commands, no duplicated model/tool work, and one activated owner. Cover
   disposal-time arrivals, partial claims, failed starts, and uncertain activation.
-- During the no-owner interval, ingress retries within bounds and never creates a replacement
-  session. With the upstream primitive, additionally assert continuous hook resolution, including
+- During the no-owner interval, ID-addressed ingress retries within bounds and never creates a
+  replacement session. With the upstream primitive, additionally assert continuous alias resolution, including
   mixed-deployment bursts and rollbacks.
 - Queue, steer, cancel, clear, compact, reset, timeout, input, authorization, task, subagent, and
   workflow-tool behavior are unchanged before, during, and after an upgrade.

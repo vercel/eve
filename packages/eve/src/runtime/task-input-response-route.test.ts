@@ -4,7 +4,6 @@ import type { RouteContext } from "#public/definitions/channel.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 
 const resumeHookMock = vi.fn();
-const getHookByTokenMock = vi.fn();
 const DIGEST = "0123456789abcdef0123456789abcdef";
 const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
 const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
@@ -15,27 +14,23 @@ const TARGET_HOOK = {
 };
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 describe("task input response capability", () => {
   beforeEach(() => {
-    getHookByTokenMock.mockReset();
-    getHookByTokenMock.mockResolvedValue(TARGET_HOOK);
     resumeHookMock.mockReset();
   });
 
   it("resumes only the addressed child input batch", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
+    resumeHookMock.mockResolvedValue(TARGET_HOOK);
     const response = await handleTaskInputResponseRequest(
       request({ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }),
       context(CAPABILITY_TOKEN),
     );
 
     expect(response.status).toBe(202);
-    expect(getHookByTokenMock).toHaveBeenCalledWith(TARGET_TOKEN);
-    expect(resumeHookMock).toHaveBeenCalledWith(TARGET_HOOK, {
+    expect(resumeHookMock).toHaveBeenCalledWith(TARGET_TOKEN, {
       kind: "send",
       payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
     });

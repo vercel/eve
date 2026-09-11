@@ -2,7 +2,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
+import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox.js";
 import type { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import type { RuntimeActionResultStepInput } from "#execution/turn-step.js";
 import {
@@ -19,16 +19,16 @@ interface TurnCancelPayload {
   readonly turnId?: string;
 }
 
-/** Buffers arrivals during a step and admits them against its committed state. */
-export class ActiveTurnInbox {
+/** Routes session messages against a turn's committed state. The session inbox
+ * retains arrivals until a boundary; this object owns no transport queue. */
+export class TurnRouting {
   private readonly admittedDeliveries = new Set<DeliverHookPayload>();
-  private readonly pending: SessionInboxPayload[] = [];
   private readonly runtimeResults: RuntimeActionResultStepInput[] = [];
   private readonly caller: DeliverHookPayload["caller"];
   private readonly bufferedDeliveries: DeliverHookPayload[];
   private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   private readonly cancelledTaskIds: Set<string>;
-  private readonly commandInbox: SessionCommandInbox;
+  private readonly commandInbox: SessionInbox;
   private readonly controller = new AbortController();
   private readonly cursor: SessionExecutionCursor;
   private readonly expectedTurnId: string;
@@ -39,7 +39,7 @@ export class ActiveTurnInbox {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly cancelledTaskIds: Set<string>;
-    readonly commandInbox: SessionCommandInbox;
+    readonly commandInbox: SessionInbox;
     readonly cursor: SessionExecutionCursor;
     readonly expectedTurnId: string;
     readonly seenTaskDeliveries: Set<string>;
@@ -73,7 +73,7 @@ export class ActiveTurnInbox {
   }
 
   async admitBoundary(): Promise<void> {
-    const pending = [...this.pending.splice(0), ...this.commandInbox.drain()];
+    const pending = this.commandInbox.drain();
     for (const [index, payload] of pending.entries()) {
       if (this.signal.aborted) {
         this.commandInbox.restore(pending.slice(index));
@@ -100,25 +100,17 @@ export class ActiveTurnInbox {
     while (true) {
       const winner = await Promise.race([
         settled,
-        this.commandInbox.next().then((result) => ({ kind: "command" as const, result })),
+        this.commandInbox
+          .next("interrupt")
+          .then((result) => ({ kind: "command" as const, result })),
       ]);
       if (winner.kind === "operation") return winner.value;
       if (winner.result.done) {
         throw new Error("Session command inbox closed before the active turn settled.");
       }
-      this.commandInbox.consumeNext();
+      this.commandInbox.consumeNext("interrupt");
       const payload = winner.result.value;
-      if (
-        payload.kind === "cancel" ||
-        payload.kind === "reset" ||
-        payload.kind === "session-timeout"
-      )
-        await this.handle(payload, false);
-      else {
-        if (this.pending.length >= 1024)
-          throw new Error("Session input capacity exceeded while awaiting an execution boundary.");
-        this.pending.push(payload);
-      }
+      await this.handle(payload, false);
     }
   }
 

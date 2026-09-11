@@ -3,11 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type {
-  SessionCommandInbox,
-  SessionInboxPayload,
-  SessionInboxSource,
-} from "#execution/session-command-inbox.js";
+import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
@@ -27,10 +23,9 @@ beforeEach(() => {
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
-  readonly source: SessionInboxSource;
 }
 
-interface MockInbox extends SessionCommandInbox {
+interface MockInbox extends SessionInbox {
   readonly windowTransitions: boolean[];
 }
 
@@ -44,7 +39,6 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
 
   return {
     windowTransitions,
-    async claimAuthorization() {},
     async claimSessionHook() {},
     consumeNext() {},
     drain() {
@@ -61,11 +55,6 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
       if (read === undefined) throw new Error("Mock inbox exhausted.");
       return read.result;
     },
-    async nextWithSource() {
-      const read = remaining.shift();
-      if (read === undefined) throw new Error("Mock inbox exhausted.");
-      return read;
-    },
     sessionHookTokens: ["stable"],
     restore() {},
     setAuthorizationWindow(open: boolean) {
@@ -79,7 +68,7 @@ function authorizationRead(): ScriptedRead {
     result: {
       done: false,
       value: {
-        kind: "deliver",
+        kind: "authorization-callback",
         payloads: [
           {
             authorizationCallback: {
@@ -88,23 +77,20 @@ function authorizationRead(): ScriptedRead {
             },
           },
         ],
-      } satisfies DeliverHookPayload,
+      } satisfies SessionInboxPayload,
     },
-    source: "authorization",
   };
 }
 
 function cancelRead(command: Record<string, unknown> = {}): ScriptedRead {
   return {
     result: { done: false, value: { kind: "cancel", ...command } },
-    source: "session",
   };
 }
 
 function messageRead(message: string): ScriptedRead {
   return {
     result: { done: false, value: { kind: "send", payload: { message } } },
-    source: "session",
   };
 }
 
@@ -112,7 +98,7 @@ function messageRead(message: string): ScriptedRead {
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
 
-function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelivery>[0] {
+function waitInput(inbox: SessionInbox): Parameters<typeof nextTurnDelivery>[0] {
   return {
     awaitAuthorizationCallbacks: true,
     bufferedDeliveries: [],
@@ -214,7 +200,6 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     if (next.kind !== "authorization") throw new Error("unreachable");
-    expect(next.closed).toBe(false);
     expect(next.payloads).toHaveLength(1);
     expect(inbox.windowTransitions).toEqual([true, false]);
   });
@@ -275,14 +260,12 @@ describe("nextTurnDelivery", () => {
     ]);
   });
 
-  it("reports a closed authorization hook", async () => {
-    const inbox = createMockInbox([
-      { result: { done: true, value: undefined }, source: "authorization" },
-    ]);
+  it("reports session closure while waiting for authorization", async () => {
+    const inbox = createMockInbox([{ result: { done: true, value: undefined } }]);
 
     const next = await nextTurnDelivery(waitInput(inbox));
 
-    expect(next).toMatchObject({ closed: true, kind: "authorization", payloads: [] });
+    expect(next).toMatchObject({ kind: "closed" });
   });
 
   it("never opens the window without an open challenge", async () => {
@@ -392,18 +375,13 @@ describe("nextTurnDelivery routing", () => {
       { kind: "send" as const, payload: { inputResponses: [{ requestId: "task-request" }] } },
       { kind: "send" as const, payload: { message: "ordinary" } },
     ];
-    const commandInbox: SessionCommandInbox = {
-      claimAuthorization: vi.fn(),
+    const commandInbox: SessionInbox = {
       claimSessionHook: vi.fn(),
       consumeNext: vi.fn(),
       drain: vi.fn(() => commands.splice(0)),
       hasReadyAuthorization: vi.fn(() => false),
       hasPending: vi.fn(async () => commands.length > 0),
       next: vi.fn(async () => ({ done: false as const, value: commands.shift()! })),
-      nextWithSource: vi.fn(async () => ({
-        result: { done: false as const, value: commands.shift()! },
-        source: "session" as const,
-      })),
       restore: vi.fn(),
       sessionHookTokens: ["stable"],
       setAuthorizationWindow: vi.fn(),

@@ -30,10 +30,8 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 
 const getHookByTokenMock = vi.fn();
-const getRawHookByTokenMock = vi.fn();
 const world = {
   getDeploymentId: vi.fn(async () => "dpl_current"),
-  hooks: { getByToken: getRawHookByTokenMock },
 };
 const getRunMock = vi.fn();
 const getWorldMock = vi.fn();
@@ -58,12 +56,11 @@ beforeEach(() => {
   cancelRunMock.mockResolvedValue(undefined);
   getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
   getWorldMock.mockResolvedValue(world);
-  getRawHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
+  resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
 
 afterEach(() => {
   getHookByTokenMock.mockReset();
-  getRawHookByTokenMock.mockReset();
   getRunMock.mockReset();
   getWorldMock.mockReset();
   resumeHookMock.mockReset();
@@ -200,8 +197,7 @@ describe("createWorkflowRuntime command dispatch", () => {
   }
 
   it("preserves the current send command through a continuation alias", async () => {
-    getHookByTokenMock.mockResolvedValue(currentSessionHook("test:token", "owner-run"));
-    resumeHookMock.mockResolvedValue({ runId: "owner-run" });
+    resumeHookMock.mockResolvedValue(currentSessionHook("test:token", "owner-run"));
     const caller = {
       callId: "call-1",
       replyTo: { kind: "hook" as const, token: "parent-turn" },
@@ -221,14 +217,14 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "owner-run", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("test:token", "owner-run"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
       caller,
       kind: "send",
       payload: { message: "hello" },
       requestId: "req_deliver",
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("dispatches commands through the stable session inbox", async () => {
@@ -241,13 +237,29 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      {
-        kind: "clear",
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      kind: "clear",
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("does not report an accepted command as missing when metadata hydration fails", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockResolvedValue({
+      runId: "owner",
+      get metadata() {
+        throw new HookNotFoundError("identity-read");
       },
-    );
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    });
+    await expect(
+      buildRuntime().dispatchContinuation({
+        continuationToken: "alias",
+        command: { kind: "send", payload: { message: "once" } },
+      }),
+    ).rejects.toThrow("command accepted");
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+    expect(startMock).not.toHaveBeenCalled();
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
@@ -260,14 +272,11 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      {
-        kind: "send",
-        payload: { message: "hello" },
-      },
-    );
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      kind: "send",
+      payload: { message: "hello" },
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("acknowledges the exact delivery accepted by the session inbox", async () => {
@@ -283,7 +292,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       deliveryId: delivery.deliveryId,
     });
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
+      sessionCommandHookToken("session-1"),
       expect.objectContaining({ delivery }),
     );
   });
@@ -295,7 +304,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     { command: { kind: "reset" as const }, status: "no_active_session" },
   ])("maps a missing $command.kind target to $status", async ({ command, status }) => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
+    resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -328,14 +337,11 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      {
-        kind: "cancel",
-        turnId: "turn-2",
-      },
-    );
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      kind: "cancel",
+      turnId: "turn-2",
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {
@@ -373,8 +379,8 @@ describe("createWorkflowRuntime command dispatch", () => {
 
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    getHookByTokenMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
-    getRawHookByTokenMock.mockRejectedValue(
+    resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
+    getHookByTokenMock.mockRejectedValue(
       new HookNotFoundError(sessionCommandHookToken("session-1")),
     );
 
@@ -384,11 +390,11 @@ describe("createWorkflowRuntime command dispatch", () => {
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("eve:token", "session-1"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", {
       kind: "reset",
       reason: "User requested /new",
     });
-    expect(getRawHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 });
 
@@ -435,7 +441,7 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
 
 describe("waitForCommandHookOwner", () => {
   it("resolves the winning run without hydrating hook metadata", async () => {
-    getRawHookByTokenMock.mockResolvedValue({
+    getHookByTokenMock.mockResolvedValue({
       get metadata() {
         throw new Error("Ownership must not read encrypted metadata.");
       },
@@ -443,15 +449,15 @@ describe("waitForCommandHookOwner", () => {
     });
 
     await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
   });
 
   it("does not turn storage failures into missing ownership", async () => {
     const failure = new Error("backing store unavailable");
-    getRawHookByTokenMock.mockRejectedValue(failure);
+    getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
-    expect(getRawHookByTokenMock).toHaveBeenCalledOnce();
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
   });
 });
 

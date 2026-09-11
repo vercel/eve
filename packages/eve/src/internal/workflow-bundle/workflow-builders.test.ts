@@ -541,7 +541,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
   it("keeps the session command inbox factory visible in workflow driver builds", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/session-command-inbox.ts";
+    const filename = "src/execution/session-inbox.ts";
     const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
     const transformed = await applyWorkflowTransform(
       filename,
@@ -551,7 +551,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
       eveRoot,
     );
 
-    expect(transformed.code).toContain("export function createSessionCommandInbox");
+    expect(transformed.code).toContain("export function createSessionInbox");
     expect(transformed.code).not.toContain("subagent");
     expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });

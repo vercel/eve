@@ -165,7 +165,6 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  getHookByToken: vi.fn(async (token: string) => currentSessionHook(token)),
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
@@ -278,6 +277,7 @@ function createStubBundle(): Awaited<ReturnType<typeof getCompiledRuntimeAgentBu
 }
 
 beforeEach(() => {
+  resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
   vi.mocked(getCompiledRuntimeAgentBundle).mockReset().mockResolvedValue(createStubBundle());
 });
 
@@ -328,7 +328,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook("eve:session:original-child:inbox"),
+      "eve:session:original-child:inbox",
       expect.objectContaining({
         kind: "deliver",
         payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
@@ -370,7 +370,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("child-token"), {
+    expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,
       deliveryMetadata: undefined,
       kind: "deliver",
@@ -435,7 +435,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook("child-token-a"),
+      "child-token-a",
       expect.objectContaining({
         ...delivery,
         deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
@@ -443,7 +443,7 @@ describe("routeProxiedDeliverStep", () => {
       }),
     );
     expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook("child-token-b"),
+      "child-token-b",
       expect.objectContaining({
         auth,
         caller,

@@ -50,7 +50,6 @@ function createCheckpoint(input: { readonly session?: readonly string[] } = {}):
   return {
     anchorToken: "session-1:anchor",
     hooks: {
-      authorization: "session-1:auth",
       session: input.session ?? ["stable", "channel:old", "channel:current"],
     },
     mode: "conversation",

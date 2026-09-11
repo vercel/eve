@@ -3,10 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionHandoff } from "#execution/session-handoff.js";
-import type {
-  SessionCommandInboxHandle,
-  SessionInboxPayload,
-} from "#execution/session-command-inbox.js";
+import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox.js";
 
 const claimHookOwnershipMock = vi.fn();
 const disposeHookMock = vi.fn();
@@ -42,7 +39,6 @@ describe("SessionHandoff", () => {
       checkpoint: {
         anchorToken: "session-1:anchor",
         hooks: {
-          authorization: "custom-auth",
           session: ["custom-stable", "continuation-1", "continuation-2"],
         },
         ownership: {
@@ -78,20 +74,19 @@ describe("SessionHandoff", () => {
     const handoff = createHandoff(inbox);
     const payloads: SessionInboxPayload[] = [{ kind: "clear" }];
 
+    await handoff.release();
     await handoff.recover(payloads);
 
     expect(inbox.claimSessionHook).toHaveBeenNthCalledWith(1, "custom-stable");
     expect(inbox.claimSessionHook).toHaveBeenNthCalledWith(2, "continuation-1");
     expect(inbox.claimSessionHook).toHaveBeenNthCalledWith(3, "continuation-2");
-    expect(inbox.claimAuthorization).toHaveBeenCalledWith("custom-auth");
     expect(inbox.restore).toHaveBeenCalledWith(payloads);
   });
 });
 
-function createHandoff(commandInbox: SessionCommandInboxHandle): SessionHandoff {
+function createHandoff(commandInbox: SessionInboxHandle): SessionHandoff {
   return new SessionHandoff({
     anchorToken: "session-1:anchor",
-    authorizationHookToken: "custom-auth",
     bufferedDeliveries: [],
     bufferedSessionControls: [],
     commandInbox,
@@ -110,9 +105,9 @@ function createHandoff(commandInbox: SessionCommandInboxHandle): SessionHandoff 
   });
 }
 
-function createInbox(input: { pending?: boolean } = {}): SessionCommandInboxHandle {
+function createInbox(input: { pending?: boolean } = {}): SessionInboxHandle {
+  const tokens = ["custom-stable", "continuation-1", "continuation-2"];
   return {
-    claimAuthorization: vi.fn(),
     claimSessionHook: vi.fn(),
     consumeNext: vi.fn(),
     drain: vi.fn(() => []),
@@ -120,10 +115,12 @@ function createInbox(input: { pending?: boolean } = {}): SessionCommandInboxHand
     hasPending: vi.fn(async () => input.pending === true),
     hasReadyAuthorization: vi.fn(() => false),
     next: vi.fn(),
-    nextWithSource: vi.fn(),
-    release: vi.fn(async () => []),
+    release: vi.fn(async () => {
+      tokens.length = 0;
+      return [];
+    }),
     restore: vi.fn(),
-    sessionHookTokens: ["custom-stable", "continuation-1", "continuation-2"],
+    sessionHookTokens: tokens,
     setAuthorizationWindow: vi.fn(),
   };
 }
