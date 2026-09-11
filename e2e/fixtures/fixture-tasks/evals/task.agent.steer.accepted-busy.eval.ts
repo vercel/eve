@@ -1,4 +1,4 @@
-import { satisfies } from "eve/evals/expect";
+import { equals, satisfies } from "eve/evals/expect";
 
 import { defineTaskEval } from "./task-transition.js";
 import {
@@ -8,13 +8,12 @@ import {
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
   waitForTaskInput,
-  waitForTaskNotification,
 } from "./shared.js";
 
 /** Same-batch calls compete for one claim; a later message steers the admitted task. */
 export default defineTaskEval({
   description:
-    "One same-batch continuation is admitted; later steering cancels its task and reuses the child.",
+    "One same-batch continuation is admitted; later steering preserves its task and pending approval.",
   transition: {
     primary: "task.agent.steer.accepted-busy",
     setup: [
@@ -72,21 +71,16 @@ export default defineTaskEval({
     later.turn.expectOk();
     later.turn.calledSubagent("busy-worker", { count: 1, status: "completed" });
     const steeredTaskId = requireBackgroundTaskId(later.turn);
-    await t.require(
-      steeredTaskId,
-      satisfies((taskId) => taskId !== admittedTaskId, "steering creates a new task identity"),
-    );
-
-    const cancelled = await waitForTaskNotification(
-      t,
-      later.session,
-      admittedTaskId,
-      "cancelled",
-      later.observedTurns,
-    );
+    await t.require(steeredTaskId, equals(admittedTaskId));
+    const pending = await waitForTaskInput(t, later.session, "hold");
+    await t.require(pending.request.requestId, equals(held.request.requestId));
+    const approved = await pending.session.respond([
+      { requestId: pending.request.requestId, optionId: "approve" },
+    ]);
+    approved.expectOk();
     const completed = await waitForCompletedTask(
       t,
-      cancelled.session,
+      pending.session,
       "CHILD-TASK-EXCLUSIVITY-VERIFY",
       steeredTaskId,
     );
@@ -103,7 +97,7 @@ export default defineTaskEval({
           value !== null &&
           typeof value === "object" &&
           Reflect.get(value, "data") === "BUSY-WORKER:Return BUSY-WORKER-LATER.",
-        "the replacement task completes with the steering message's result",
+        "the original task completes with the steering message's result",
       ),
     );
   },
