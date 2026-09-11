@@ -10,6 +10,11 @@ starts the same three warehouse lookups, observes an intermediate completion,
 asks an unrelated arithmetic question, and waits for the combined inventory
 report. The comparison trials do not request compaction.
 
+`structured-output.eval.ts` starts one background warehouse lookup from a turn
+with an output schema. It verifies that the initiating segment remains pending
+without a structured result, then that the task wake satisfies the original
+schema with the lookup result.
+
 The fixture model strips the trial marker from both variants before inference.
 The off variant also removes the current pending-cohort instruction. Task state,
 task results, launch guidance, settled guidance, model settings, and the runtime
