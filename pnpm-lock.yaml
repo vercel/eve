@@ -55,11 +55,11 @@ catalogs:
       specifier: 2.1.3
       version: 2.1.3
     '@vercel/sandbox':
-      specifier: 3.2.1
-      version: 3.2.1
+      specifier: 3.3.0
+      version: 3.3.0
     '@vercel/sandbox-drives':
-      specifier: npm:@vercel/sandbox@3.1.0-beta.1
-      version: 3.1.0-beta.1
+      specifier: npm:@vercel/sandbox@3.3.0
+      version: 3.3.0
     '@workflow/world-postgres':
       specifier: 5.0.0-beta.41
       version: 5.0.0-beta.41
@@ -234,7 +234,7 @@ importers:
     devDependencies:
       '@agent-browser/eve':
         specifier: ^0.33.0
-        version: 0.33.0(@vercel/sandbox@3.2.1)(eve@packages+eve)
+        version: 0.33.0(@vercel/sandbox@3.3.0)(eve@packages+eve)
       '@agentphone/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.93(zod@4.5.4))(chat@4.34.0(ai@7.0.93(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
@@ -1427,10 +1427,10 @@ importers:
         version: 2.1.3(@opentelemetry/api-logs@0.221.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       '@vercel/sandbox':
         specifier: 'catalog:'
-        version: 3.2.1
+        version: 3.3.0
       '@vercel/sandbox-drives':
         specifier: 'catalog:'
-        version: '@vercel/sandbox@3.1.0-beta.1'
+        version: '@vercel/sandbox@3.3.0'
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
@@ -8326,11 +8326,8 @@ packages:
   '@vercel/sandbox@3.0.0':
     resolution: {integrity: sha512-1pF3id7LIG2GfjkEAZW+ZngMDdywJw7aFLOyIlry/lj8v3b4GMn3WCuBbvG4N4wTmYUfFzHaVHfdwVpqALEFkw==}
 
-  '@vercel/sandbox@3.1.0-beta.1':
-    resolution: {integrity: sha512-rkota0zmKS0nkD9EeuRP4bdztsYpZc7A6wpBeAnpDWlZNsjUYOlJqS2ICmsBfEpW5a6aU7VGoBSYwCJ2nUKzdA==}
-
-  '@vercel/sandbox@3.2.1':
-    resolution: {integrity: sha512-Yw/UJl5T5OwO+TmnMAVgHTWlu2vYmMUAA9x7RhTHCge9y3cx90kvrjvNDDiqtt3euoFnLeoP2kvZFDbNwgWaww==}
+  '@vercel/sandbox@3.3.0':
+    resolution: {integrity: sha512-TclqRD2joExyECTrrHsioi3Onw20X2YfpOYEzs3JpJUtAjOKYw2bMeXldKrUg+TB/TT7tPdDu8uKNxj9NE7QUg==}
 
   '@vercel/sdk@1.28.8':
     resolution: {integrity: sha512-uAl+pEZZnFYRFzE/43ihP3aYTJ+4v0+coiMYobYMqtaERWknYKuRZWEj9Dk9r87yWXfxclsQugXkN42kaOcySw==}
@@ -16095,17 +16092,17 @@ ignoredOptionalDependencies:
 
 snapshots:
 
-  '@agent-browser/eve@0.33.0(@vercel/sandbox@3.2.1)(eve@packages+eve)':
+  '@agent-browser/eve@0.33.0(@vercel/sandbox@3.3.0)(eve@packages+eve)':
     dependencies:
-      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@3.2.1)
+      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@3.3.0)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
       - '@vercel/sandbox'
 
-  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@3.2.1)':
+  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@3.3.0)':
     optionalDependencies:
-      '@vercel/sandbox': 3.2.1
+      '@vercel/sandbox': 3.3.0
 
   '@agentclientprotocol/sdk@1.3.0(zod@4.5.4)':
     dependencies:
@@ -17782,7 +17779,7 @@ snapshots:
       '@jest/schemas': 29.6.3
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
@@ -21428,13 +21425,13 @@ snapshots:
 
   '@slack/logger@4.0.1':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
 
   '@slack/socket-mode@2.0.7(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)':
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       '@types/ws': 8.18.1
       eventemitter3: 5.0.4
       ws: 8.21.3(bufferutil@4.1.0)
@@ -21450,7 +21447,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.21.1
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       '@types/retry': 0.12.0
       axios: 1.16.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
       eventemitter3: 5.0.4
@@ -22118,7 +22115,7 @@ snapshots:
 
   '@types/pg@8.20.0':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       pg-protocol: 1.15.0
       pg-types: 2.2.0
 
@@ -22167,7 +22164,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -23047,25 +23044,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sandbox@3.1.0-beta.1':
-    dependencies:
-      '@vercel/oidc': 3.2.0
-      '@workflow/serde': 4.1.0-beta.2
-      async-retry: 1.3.3
-      jose: 6.2.3
-      jsonlines: 0.1.1
-      lru-cache: 10.4.3
-      ms: 2.1.3
-      picocolors: 1.1.1
-      tar-stream: 3.1.7
-      undici: 7.29.0
-      xdg-app-paths: 5.1.0
-      zod: 4.5.4
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - react-native-b4a
-
-  '@vercel/sandbox@3.2.1':
+  '@vercel/sandbox@3.3.0':
     dependencies:
       '@vercel/oidc': 3.2.0
       '@workflow/serde': 4.1.0-beta.2
@@ -24320,7 +24299,7 @@ snapshots:
 
   chrome-launcher@0.15.2(supports-color@10.2.2):
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@10.2.2)
@@ -24339,7 +24318,7 @@ snapshots:
 
   chromium-edge-launcher@0.3.0(supports-color@10.2.2):
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@10.2.2)
@@ -27409,7 +27388,7 @@ snapshots:
   jest-util@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       chalk: 4.1.2
       ci-info: 3.9.0
       graceful-fs: 4.2.11
@@ -27426,7 +27405,7 @@ snapshots:
 
   jest-worker@29.7.0:
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 25.9.1
       jest-util: 29.7.0
       merge-stream: 2.0.0
       supports-color: 8.1.1
