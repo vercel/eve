@@ -59,7 +59,7 @@ function toInternalConfig(config: EveVercelConfig): VercelServicesConfig {
 function assertComposableConfig(config: EveVercelConfig, agentNames: readonly string[]): void {
   if (config.experimentalServices !== undefined || config.experimentalServicesV2 !== undefined) {
     throw new Error(
-      "withEve cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
+      "withEveServices cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
     );
   }
 
@@ -69,14 +69,14 @@ function assertComposableConfig(config: EveVercelConfig, agentNames: readonly st
     const serviceName = createEveServiceName(name);
     if (Object.hasOwn(services, serviceName)) {
       throw new Error(
-        `Vercel service key ${JSON.stringify(serviceName)} conflicts with the service generated for eve workspace agent ${JSON.stringify(name)}. Remove or rename the authored service; withEve owns this key.`,
+        `Vercel service key ${JSON.stringify(serviceName)} conflicts with the service generated for eve workspace agent ${JSON.stringify(name)}. Remove or rename the authored service; withEveServices owns this key.`,
       );
     }
 
     const routeSrc = createEveServiceRouteSrc(`/${name}`);
     if (config.routes?.some((route) => route.src === routeSrc)) {
       throw new Error(
-        `Vercel route ${JSON.stringify(routeSrc)} conflicts with the transport route generated for eve workspace agent ${JSON.stringify(name)}. Remove the authored route; withEve adds it automatically.`,
+        `Vercel route ${JSON.stringify(routeSrc)} conflicts with the transport route generated for eve workspace agent ${JSON.stringify(name)}. Remove the authored route; withEveServices adds it automatically.`,
       );
     }
   }
@@ -88,7 +88,7 @@ function assertComposableConfig(config: EveVercelConfig, agentNames: readonly st
  * The returned object is a plain Vercel configuration. Vercel resolves it before independently
  * building the authored services and each generated eve agent service.
  */
-export async function withEve<TConfig extends EveVercelConfig>(
+export async function withEveServices<TConfig extends EveVercelConfig>(
   config: TConfig,
   options: WithEveOptions = {},
 ): Promise<
@@ -100,13 +100,13 @@ export async function withEve<TConfig extends EveVercelConfig>(
   const root = resolve(options.root ?? process.cwd());
   const context = await resolveEveProjectContext(root);
   if (context.kind !== "workspace" || context.workspace.root !== root) {
-    throw new Error(`withEve must run at an eve workspace root; received ${root}.`);
+    throw new Error(`withEveServices must run at an eve workspace root; received ${root}.`);
   }
 
   const { workspace } = context;
   if (workspace.members.length === 0) {
     throw new Error(
-      `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,
+      `withEveServices found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEveServices from vercel.ts.`,
     );
   }
 
