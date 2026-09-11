@@ -1,4 +1,3 @@
-import type { Dirent } from "node:fs";
 import { join } from "node:path";
 
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -152,17 +151,6 @@ export const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
  * Shared diagnostic emitted when discovery ignores one unsupported directory.
  */
 export const DISCOVER_UNSUPPORTED_DIRECTORY = "discover/unsupported-directory";
-
-/**
- * Structural `Dirent`-like entry used throughout discovery.
- *
- * Legacy alias preserved for backwards compatibility inside `src/discover/`.
- * Every discover function now consumes {@link ProjectSourceEntry}, which
- * has the same three properties (`name`, `isDirectory()`, `isFile()`). Real
- * `Dirent<string>` values from `node:fs` satisfy this shape, so
- * {@link createDiskProjectSource} returns them directly.
- */
-export type StringDirent = Dirent<string>;
 
 /**
  * Reads one directory through `source` and returns its entries sorted by name.
