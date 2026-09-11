@@ -326,6 +326,18 @@ describe("createFrameworkUserMessage", () => {
     expect(isFrameworkUserMessage(message)).toBe(false);
   });
 
+  it("recognizes unknown legacy provenance without treating it as framework-authored", () => {
+    const message = {
+      content: "A retained pre-0.54 message",
+      kind: "legacy.unknown",
+      role: "user",
+    } as const;
+
+    expect(isUserMessageKind(message.kind)).toBe(true);
+    expect(isUserModelMessage(message)).toBe(true);
+    expect(isFrameworkUserMessage(message)).toBe(false);
+  });
+
   it("rejects unclassified user messages before history retention", () => {
     expect(() =>
       validateHarnessModelMessages([{ content: "A user message", role: "user" }]),
