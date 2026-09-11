@@ -255,11 +255,29 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
   return false;
 }
 
+const STREAM_ASSEMBLER_DESYNC_PATTERN = /^text part \S+ not found$/;
+
+function isStreamAssemblerDesyncError(error: unknown): boolean {
+  for (const candidate of walkCauseChain(error)) {
+    if (STREAM_ASSEMBLER_DESYNC_PATTERN.test(readErrorMessage(candidate))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Classifies a model-call failure into the runtime's recovery policy.
  */
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
   if (isTurnCancellation(error)) {
+    return "terminal";
+  }
+
+  // The AI stream assembler cannot recover a part it never opened. Retrying
+  // this deterministic frame sequence only replays the task from its last
+  // durable snapshot.
+  if (isStreamAssemblerDesyncError(error)) {
     return "terminal";
   }
 
