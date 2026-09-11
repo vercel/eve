@@ -131,14 +131,14 @@ describe("renderMessageQueueRows", () => {
     expect(render(queue, false)[0]).not.toContain("esc");
   });
 
-  it("shows the steering header while cancellation is in flight", () => {
+  it("shows the steering header while awaiting an execution boundary", () => {
     const queue = new MessageQueue();
     queue.enqueue("go north");
     queue.enqueue("go south");
     queue.handleEscape();
 
     const rows = render(queue);
-    expect(rows[0]).toContain("Steering — cancelling the running turn…");
+    expect(rows[0]).toContain("Steering — waiting for the next boundary…");
     expect(rows[0]).toContain("1/5 still queued");
     expect(rows[1]).toContain("└ go south");
   });

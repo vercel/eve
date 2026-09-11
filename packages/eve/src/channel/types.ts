@@ -495,10 +495,10 @@ export interface RunInput {
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * add a continuation address during the first turn via
-   * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
+   * `ctx.session.continuation.alias(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
    * acceptable when full identity isn't known until the first message. Earlier
-   * addresses remain valid after a rekey. ID-only
+   * addresses remain valid after a alias. ID-only
    * transports omit this field.
    */
   readonly continuationToken?: string;

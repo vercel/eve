@@ -45,14 +45,19 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
-import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
+import { clearTurnClientContextState } from "#harness/turn-client-context.js";
+import type {
+  HandleEventFn,
+  HarnessSession,
+  HarnessSettlement,
+  StepInput,
+  StepResult,
+} from "#harness/types.js";
+import { takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/turn-step.js";
+import { resolveSessionStepResult } from "#execution/session-step-result.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
@@ -97,9 +102,6 @@ import {
 } from "#execution/cancelled-model-call-batch.js";
 import * as activityCohort from "#execution/activity-cohort.js";
 
-const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
-  "Task mode cannot complete while input requests remain pending.";
-
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = (error as { readonly code?: unknown }).code;
@@ -113,7 +115,23 @@ export type { TurnStepInput };
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
+  return runSessionStep(rawInput);
+}
 
+/** Commits terminal effects only after the owner has admitted boundary input. */
+export async function settleTurnStep(
+  input: Omit<TurnStepInput, "input"> & {
+    readonly settlement: HarnessSettlement;
+  },
+): Promise<DurableStepResult> {
+  "use step";
+  return runSessionStep({ ...input, input: undefined }, input.settlement);
+}
+
+async function runSessionStep(
+  rawInput: TurnStepInput,
+  commit?: HarnessSettlement,
+): Promise<DurableStepResult> {
   let input = rawInput;
 
   let durableSession = await readDurableSession(input.sessionState);
@@ -198,9 +216,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     rawInput.input?.kind === "deliver" &&
     rawInput.input.payloads.some((payload) => payload.message !== undefined)
   ) {
+    const ids = rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
     ctx.set(
       TurnDeliveryIdsKey,
-      rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [],
+      initialEmissionState.turnId
+        ? [...new Set([...(ctx.get(TurnDeliveryIdsKey) ?? []), ...ids])]
+        : ids,
     );
   } else if (!initialEmissionState.sessionStarted && ctx.get(ChannelDeliveryKey) !== undefined) {
     ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
@@ -312,16 +333,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       }),
     );
     await instrumentation?.flush();
-    const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
+    const aliased = reconcileSessionContinuationToken(ctx, initialSession);
     const nextSerializedContext = serializeContext(ctx);
     const nextState =
-      rekeyed === initialSession
+      aliased === initialSession
         ? input.sessionState
-        : createDurableSessionState({ session: rekeyed });
+        : createDurableSessionState({ session: aliased });
 
     return {
       action: "park",
-      ...derivePendingState(rekeyed),
+      ...derivePendingState(aliased),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
@@ -450,6 +471,39 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
 
   const mode = ctx.require(ModeKey);
+  if (commit !== undefined) {
+    try {
+      const committed = await runBackgroundStep(ctx, initialSession, async (session) => {
+        ctx.setVirtualContext(HandleEventKey, handleEvent);
+        for (const event of commit.events) await handleEvent(event, history.messages(session));
+        return {
+          next: null,
+          session: setHarnessEmissionState(
+            takeSessionUsageDelta(clearTurnClientContextState(session)).session,
+            commit.emissionAfter,
+          ),
+        };
+      });
+      if (
+        commit.events.some(
+          (event) => event.type === "session.completed" || event.type === "session.failed",
+        )
+      ) {
+        await writer.close();
+      }
+      return {
+        action: "continue",
+        serializedContext: serializeContext(ctx),
+        sessionState: createDurableSessionState({
+          session: reconcileSessionContinuationToken(ctx, committed.session),
+        }),
+      };
+    } finally {
+      writer.releaseLock();
+      await instrumentation?.flush();
+    }
+  }
+  let settlement: HarnessSettlement | undefined;
   const modelCallsPerStep =
     bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
   const capabilities = ctx.get(CapabilitiesKey);
@@ -475,6 +529,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       compactOnly: input.input?.kind === "compact",
       createRuntime: createWorkflowRuntime,
       handleEvent,
+      handleSettlement: async (proposal) => {
+        if (settlement !== undefined) throw new Error("A turn step proposed multiple settlements.");
+        settlement = proposal;
+      },
       historyProjector: history.projector,
       historyView: history.prepare(modelSession),
       instrumentation,
@@ -583,95 +641,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
   }
 
-  // Re-stamp the current address after `session.continuation.rekey(...)` (eg. Slack auto-anchor).
-  const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
+  // Re-stamp the current address after `session.continuation.alias(...)` (eg. Slack auto-anchor).
+  const aliased = reconcileSessionContinuationToken(ctx, stepResult.session);
   const nextSerializedContext = serializeContext(ctx);
-  stepResult = { ...stepResult, session: rekeyed };
-
-  const nextState = createDurableSessionState({ session: stepResult.session });
-  const backgroundTransition =
-    stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
-      ? {}
-      : {
-          backgroundTaskState: createDurableSessionState({
-            session: stepResult.backgroundTaskSession,
-          }),
-          backgroundTasks: stepResult.backgroundTasks,
-        };
-
-  if (
-    stepResult.next !== null &&
-    typeof stepResult.next === "object" &&
-    "done" in stepResult.next
-  ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
-      writer.releaseLock();
-      throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
-    }
-    await writer.close();
-    const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
-    return {
-      action: "done",
-      ...backgroundTransition,
-      output: stepResult.next.output,
-      isError: stepResult.next.isError,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-      usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
-      usageDelta: takeSessionUsageDelta(stepResult.session).delta,
-    };
-  }
-
-  if (stepResult.next === null) {
-    writer.releaseLock();
-
-    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
-    if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
-      return {
-        action: "dispatch-workflow-tasks",
-        ...backgroundTransition,
-        pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
-      };
-    }
-
-    const pending = derivePendingState(stepResult.session);
-
-    // `settledTurn` is the harness's explicit settlement verdict. Pending
-    // state may predate this turn, while newly created parks omit the verdict.
-    // `usage` carries only this turn's delta: the take marks the totals
-    // reported, so a persistent child never re-reports earlier spend.
-    if (stepResult.settledTurn !== undefined) {
-      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
-      return {
-        action: "park",
-        ...backgroundTransition,
-        ...pending,
-        serializedContext: nextSerializedContext,
-        sessionState: createDurableSessionState({ session: reportedSession }),
-        settled: {
-          output: stepResult.settledTurn.output,
-          isError: stepResult.settledTurn.isError,
-          usage: delta,
-        },
-      };
-    }
-
-    return {
-      action: "park",
-      ...backgroundTransition,
-      ...pending,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
-  }
+  stepResult = { ...stepResult, session: aliased };
 
   writer.releaseLock();
-  return {
-    action: "continue",
-    ...backgroundTransition,
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
+  return resolveSessionStepResult(stepResult, nextSerializedContext, mode, settlement);
 }

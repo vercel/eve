@@ -315,7 +315,7 @@ final-output rules of ordinary `defineTool` generators.
 
 ## Cancel and clean up: `ctx.abortSignal`
 
-`ctx.abortSignal` aborts when the run is cancelled: a steered turn for a waiting tool, `task_cancel`
+`ctx.abortSignal` aborts when the run is cancelled: explicit turn cancellation for a waiting tool, `task_cancel`
 or the session ending for a background one. It is durable — it survives replay, and a step that
 receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:

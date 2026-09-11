@@ -70,12 +70,12 @@ Each route receives these operation surfaces:
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
-`rekey()` when this channel needs to add another address. `session.failed`
+`alias()` when this channel needs to add another address. `session.failed`
 receives only `(eventData, channel)` because it runs outside session context;
 its event data contains `sessionId` directly.
 
 `channel.continuation.token` is always the channel-local address accepted by
-`from()`, `resolveSession()`, and `rekey()`. Framework namespace prefixes are not
+`from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not
 part of the authored channel API.
 
 ## Channel operations and session handles
@@ -127,7 +127,7 @@ const inputResponses = parseInputResponses(decodedResponses);
 await source.respond(inputResponses, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is buffered and applied at the next committed workflow boundary. The active model call and tools finish safely; the message joins the same turn and keeps its turn ID. Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 
 ```ts
 export default defineChannel({
@@ -328,11 +328,11 @@ twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557
 
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
-When another identity should address a session, add it with `channel.continuation?.rekey(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.
+When another identity should address a session, add it with `channel.continuation?.alias(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.
 
-Re-keying adds an address to the current session. Earlier addresses continue to resolve to the same session. `reset` is different: it terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
+Aliasing adds an address to the current session. Earlier addresses continue to resolve to the same session and accept the same payloads. `reset` terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
-The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelContinuationOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
+The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelContinuationOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that add an alias later. State mutations made through the returned context are written back to adapter state.
 
 ```ts
 import { defineChannel } from "eve/channels";
@@ -346,7 +346,7 @@ defineChannel<{ ref: string | null }>({
       state,
       registerAnchor(ref: string) {
         state.ref = ref;
-        session.continuation?.rekey(ref);
+        session.continuation?.alias(ref);
       },
     };
   },
@@ -359,7 +359,9 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the re-keying session fails instead of taking it over. Every address claimed by the session remains active, including across deployment handoffs, so senders can continue using an earlier token until the session ends or resets.
+At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active, including across deployment handoffs, so senders can continue using an earlier token until the session ends or resets.
+
+Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias does not consume another address.
 
 ## File uploads
 

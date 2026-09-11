@@ -56,7 +56,7 @@ import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/par
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import { settleTurnStep, turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -1030,7 +1030,7 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("checkpoints completed batched model calls when steering cancels the active call", async () => {
+  it("checkpoints completed batched model calls when explicit cancellation aborts the active call", async () => {
     const bundle = createTurnStepTestBundle(100);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
     installSessionStoreMocks([createStubSession()]);
@@ -1173,7 +1173,7 @@ describe("turnStep", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("retains coalesced delivery ownership across steps and replaces it for the next message", async () => {
+  it("retains coalesced delivery ownership when a message steers the active turn", async () => {
     const session = createStubSession({
       state: {
         "eve.harness.emission": {
@@ -1242,11 +1242,15 @@ describe("turnStep", () => {
       serializedContext: resumed.serializedContext,
       sessionState: resumed.sessionState,
     });
-    expect(next.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-c"]);
+    expect(next.serializedContext[TurnDeliveryIdsKey.name]).toEqual([
+      "delivery-a",
+      "delivery-b",
+      "delivery-c",
+    ]);
     for (const [namespace, deliveryIds] of [
       ["first", ["delivery-a", "delivery-b"]],
       ["resumed", ["delivery-a", "delivery-b"]],
-      ["next", ["delivery-c"]],
+      ["next", ["delivery-a", "delivery-b", "delivery-c"]],
     ] as const) {
       const events = (workflowWritesByNamespace.get(namespace) ?? []).map((chunk) =>
         JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
@@ -1959,6 +1963,33 @@ describe("turnStep", () => {
     });
   });
 
+  it.each(["session.completed", "session.failed"] as const)(
+    "closes the stream only when committing %s",
+    async (type) => {
+      installSessionStoreMocks([createStubSession()]);
+      const close = vi.fn();
+      const parentWritable = new WritableStream<Uint8Array>({ write() {}, close });
+      await settleTurnStep({
+        parentWritable,
+        serializedContext: createSerializedContext(),
+        sessionState: createStubSessionState(),
+        settlement: {
+          events: [
+            type === "session.completed"
+              ? { type }
+              : {
+                  type,
+                  data: { code: "TEST_FAILURE", message: "Failed", sessionId: "test-session" },
+                },
+          ],
+          emissionAfter: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+        },
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(parentWritable.locked).toBe(false);
+    },
+  );
+
   it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
     const usageStateAfterTurn = (
       totals: Readonly<Record<string, number>>,
@@ -2015,8 +2046,22 @@ describe("turnStep", () => {
 
     // Second turn: session totals are cumulative (150/60), but the settled
     // answer must only report what this turn added (50/20).
-    const firstSession = first.sessionState.snapshot?.session as HarnessSession;
-    installSessionStoreMocks([firstSession]);
+    installSessionStoreMocks([first.sessionState.snapshot?.session as HarnessSession]);
+    const committed = await settleTurnStep({
+      parentWritable: createTestWritable(),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+      settlement: {
+        events: [
+          {
+            type: "session.waiting",
+            data: { continuationToken: "test-token", wait: "next-user-message" },
+          },
+        ],
+        emissionAfter: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+      },
+    });
+    installSessionStoreMocks([committed.sessionState.snapshot?.session as HarnessSession]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
@@ -2035,7 +2080,7 @@ describe("turnStep", () => {
       input: { kind: "deliver", payloads: [{ message: "again" }] },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
-      sessionState: first.sessionState,
+      sessionState: committed.sessionState,
     });
 
     expect(second).toMatchObject({
@@ -3257,11 +3302,11 @@ describe("runProxySubagentEventStep", () => {
   });
 
   it("returns every continuation address claimed by the input.requested handler", async () => {
-    const rekeyingAdapter: ChannelAdapter = {
+    const aliasingAdapter: ChannelAdapter = {
       kind: "thread-context",
       async "input.requested"(_data, adapterCtx) {
-        adapterCtx.session.continuation?.rekey("proxy-first");
-        adapterCtx.session.continuation?.rekey("proxy-second");
+        adapterCtx.session.continuation?.alias("proxy-first");
+        adapterCtx.session.continuation?.alias("proxy-second");
       },
     };
 
@@ -3279,7 +3324,7 @@ describe("runProxySubagentEventStep", () => {
     const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
-      serializedContext: buildSerializedContextForAdapter(rekeyingAdapter),
+      serializedContext: buildSerializedContextForAdapter(aliasingAdapter),
       sessionState,
     });
 

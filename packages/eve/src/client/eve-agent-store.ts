@@ -1,4 +1,5 @@
 import { Client } from "#client/client.js";
+import type { ActiveTurn, PendingMessageSubmission } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
@@ -95,25 +96,7 @@ export interface EveAgentStoreInit<TData> {
   readonly session?: ClientSession;
 }
 
-interface PendingMessageSubmission {
-  readonly createdAt: number;
-  readonly id: string;
-  readonly message: string;
-}
-
 const detachStore = Symbol("detachEveAgentStore");
-
-interface ActiveTurn {
-  readonly abortController: AbortController;
-  acceptedFollowUps: number;
-  readonly cancel: () => Promise<CancelSessionResult>;
-  readonly completion: Promise<void>;
-  readonly followUpDispatches: Set<Promise<void>>;
-  receivedFollowUps: number;
-  readonly resolveCompletion: () => void;
-  readonly response: Promise<MessageResponse | undefined>;
-  readonly resolveResponse: (response: MessageResponse | undefined) => void;
-}
 
 /**
  * Framework-agnostic state machine for an eve agent session.
@@ -220,6 +203,7 @@ export class EveAgentStore<TData> {
       completion: completion.promise,
       followUpDispatches: new Set(),
       receivedFollowUps: 0,
+      followUpSubmissionIds: new Set(),
       resolveCompletion: completion.resolve,
       response: response.promise,
       resolveResponse: response.resolve,
@@ -323,6 +307,7 @@ export class EveAgentStore<TData> {
       completion: completion.promise,
       followUpDispatches: new Set(),
       receivedFollowUps: 0,
+      followUpSubmissionIds: new Set(),
       resolveCompletion: completion.resolve,
       response: response.promise,
       resolveResponse: response.resolve,
@@ -442,7 +427,7 @@ export class EveAgentStore<TData> {
   async #sendFollowUp<TOutput>(turn: ActiveTurn, input: SendTurnPayload<TOutput>): Promise<void> {
     if (input.message === undefined || input.turnPolicy !== "steer") {
       throw new Error(
-        'eve session is already processing a turn. Send a message with turnPolicy: "steer" to replace it.',
+        'eve session is already processing a turn. Send a message with turnPolicy: "steer" to guide it at the next boundary.',
       );
     }
 
@@ -454,6 +439,7 @@ export class EveAgentStore<TData> {
     if (!this.#isActiveTurn(turn)) return await this.send(preparedInput);
 
     const submissionId = this.#projectOptimisticMessage(preparedInput);
+    if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
 
     let dispatch!: Promise<void>;
@@ -488,7 +474,6 @@ export class EveAgentStore<TData> {
 
     for await (const event of this.#session.stream({ signal: turn.abortController.signal })) {
       if (!this.#isActiveTurn(turn)) return;
-      if (event.type === "message.received") turn.receivedFollowUps += 1;
       this.#acceptServerEvent(event);
 
       if (isCurrentTurnBoundaryEvent(event)) {
@@ -533,7 +518,7 @@ export class EveAgentStore<TData> {
   }
 
   #projectOptimisticMessage(input: SendTurnPayload): string | undefined {
-    if (!this.#optimistic || input.message === undefined) {
+    if (input.message === undefined) {
       return undefined;
     }
 
@@ -544,14 +529,15 @@ export class EveAgentStore<TData> {
       message: summarizeUserContent(input.message),
     };
     this.#pendingMessageSubmissions = [...this.#pendingMessageSubmissions, pending];
-    this.#appendProjectionEvent({
-      data: {
-        createdAt: pending.createdAt,
-        message: pending.message,
-        submissionId: pending.id,
-      },
-      type: "client.message.submitted",
-    });
+    if (this.#optimistic)
+      this.#appendProjectionEvent({
+        data: {
+          createdAt: pending.createdAt,
+          message: pending.message,
+          submissionId: pending.id,
+        },
+        type: "client.message.submitted",
+      });
     return id;
   }
 
@@ -586,6 +572,8 @@ export class EveAgentStore<TData> {
     const pendingSubmission = this.#pendingMessageSubmissions[0];
     if (event.type === "message.received" && pendingSubmission !== undefined) {
       const submissionId = pendingSubmission.id;
+      if (this.#activeTurn?.followUpSubmissionIds.delete(submissionId))
+        this.#activeTurn.receivedFollowUps += 1;
       this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.slice(1);
       this.#replaceProjectionEvent(
         (candidate) =>

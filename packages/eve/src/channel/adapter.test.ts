@@ -114,7 +114,7 @@ describe("ChannelAdapter helpers", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
   });
 
-  it("publishes a waiting handler's re-keyed channel address", async () => {
+  it("publishes a waiting handler's aliased channel address", async () => {
     let continuationToken = "slack:temporary";
     let observedToken: string | undefined;
     const context: ChannelAdapterContext = {
@@ -126,7 +126,7 @@ describe("ChannelAdapter helpers", () => {
           get token() {
             return continuationToken.slice("slack:".length);
           },
-          rekey(token: string) {
+          alias(token: string) {
             continuationToken = `slack:${token}`;
           },
         },
@@ -137,7 +137,7 @@ describe("ChannelAdapter helpers", () => {
       kind: "slack",
       "session.waiting"(data, ctx) {
         observedToken = data.continuationToken;
-        ctx.session.continuation?.rekey("C1:T1");
+        ctx.session.continuation?.alias("C1:T1");
       },
     };
 

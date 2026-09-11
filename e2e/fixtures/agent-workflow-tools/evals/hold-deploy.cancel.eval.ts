@@ -8,7 +8,7 @@ import { satisfies } from "eve/evals/expect";
  */
 export default defineEval({
   timeoutMs: 60_000,
-  description: "Steering a turn cancels the workflow tool run it is parked on.",
+  description: "Cancelling a turn cancels the workflow tool run it is parked on.",
   async test(t) {
     const live = await t.start("WORKFLOW-HOLD-START");
     await live.waitForEvent("actions.requested", {

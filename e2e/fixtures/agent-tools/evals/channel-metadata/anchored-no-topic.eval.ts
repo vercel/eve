@@ -11,7 +11,7 @@ import { METADATA_TOOL, PROMPT, startChannelSession } from "./shared";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Channel metadata smoke: missing topic takes the null path and rekey preserves the initial address.",
+    "Channel metadata smoke: missing topic takes the null path and alias preserves the initial address.",
   async test(t) {
     const threadId = `thread-${randomBytes(4).toString("hex")}`;
     const sessionId = await startChannelSession(t.target, "/anchor/start", {

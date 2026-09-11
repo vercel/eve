@@ -329,7 +329,7 @@ describe("defineChannel", () => {
     }
 
     const captured: {
-      sessions: Array<{ continuation?: { rekey(token: string): void } }>;
+      sessions: Array<{ continuation?: { alias(token: string): void } }>;
     } = {
       sessions: [],
     };
@@ -378,7 +378,7 @@ describe("defineChannel", () => {
     // The session is the one ctx.session exposes (same reference).
     expect(adapterCtx.session).toBe(captured.sessions[0]);
 
-    captured.sessions[0]!.continuation?.rekey("C123:T456");
+    captured.sessions[0]!.continuation?.alias("C123:T456");
     expect(writes).toEqual([
       ["eve.continuationHookTokens", ["slack:C123:", "slack:C123:T456"]],
       ["eve.continuationToken", "slack:C123:T456"],

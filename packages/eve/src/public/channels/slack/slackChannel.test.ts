@@ -162,7 +162,7 @@ function callCompletionHandler(
 
 /**
  * Accessor whose `set` writes are captured so tests can assert on
- * `continuation.rekey` flowing through the SessionHandle. Returns
+ * `continuation.alias` flowing through the SessionHandle. Returns
  * undefined for unset keys (matching the real `ContextContainer`
  * behavior), while seeding the current continuation token so
  * SessionHandle can preserve the runtime namespace.
@@ -1527,7 +1527,7 @@ describe("rebuildSlackContext", () => {
     expect("threadId" in ctx.thread).toBe(false);
   });
 
-  it("auto-anchors state.threadTs and re-keys the session on the first post", async () => {
+  it("auto-anchors state.threadTs and adds an alias for the session on the first post", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true, ts: "1800000000.123456" }), {
         headers: { "content-type": "application/json" },
@@ -1565,7 +1565,7 @@ describe("rebuildSlackContext", () => {
     expect((adapter.state as { threadTs: string | null }).threadTs).toBe("1800000000.123456");
 
     // The anchor moment wrote the new continuation token to context
-    // via `session.continuation.rekey(...)`. The workflow body picks
+    // via `session.continuation.alias(...)`. The workflow body picks
     // this up via `reconcileSessionContinuationToken` after the step.
     const tokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(tokenWrites).toEqual([["eve.continuationToken", "slack:C01:1800000000.123456"]]);
@@ -1592,7 +1592,7 @@ describe("rebuildSlackContext", () => {
     const secondBody = parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit);
     expect(secondBody.thread_ts).toBe("1800000000.123456");
 
-    // Once anchored, continuation.rekey does not fire again — the
+    // Once anchored, continuation.alias does not fire again — the
     // raw token is unchanged across subsequent posts.
     const allTokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(allTokenWrites).toHaveLength(1);

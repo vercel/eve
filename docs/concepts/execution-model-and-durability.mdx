@@ -72,9 +72,9 @@ executions from the same batch. Approval, input, blocking coordination, and
 background-task boundaries still force a checkpoint before eve waits or
 acknowledges the work.
 
-Steering does not replay or discard the whole batch. eve aborts the active
-model-and-tool cycle, commits earlier completed cycles in the batch, and starts
-the replacement turn from that state in the next Workflow step.
+Steering waits for the current batch to commit, then adds the accepted message
+to the active turn before the next model step. Increasing the batch size also
+increases the interval between steering boundaries.
 
 Durability itself needs no configuration. eve owns the workflow lifecycle, and
 sessions are durable by default; checkpoint batching is an explicit
@@ -106,13 +106,13 @@ session's current command inbox; neither is a general message queue.
 Only one active session can own a channel continuation token. A channel-created
 session claims both its stable session-ID inbox and its initial channel address
 before processing the first turn, and fails creation if another run already
-owns the channel address. Rekeying adds another continuation address to the
+owns the channel address. Aliasing adds another continuation address to the
 same session; every previously claimed address remains active until the session
 ends or resets. An ID-only HTTP session has the stable inbox and no channel
 continuation address. When cold starts race for the same address, the losing
 candidate forwards its accepted message to the owner and exits.
 
-When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
+When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner buffers the message and applies it after the current workflow step commits. The model call and tool work complete safely, and steering continues the same turn with the same turn ID. Before emitting the turn's completion events, the owner checks for steering accepted at that boundary.
 
 `turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
 

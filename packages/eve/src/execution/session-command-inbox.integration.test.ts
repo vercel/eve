@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
+import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/wire/session-inbox-contract.js";
 
 describe("session command inbox integration", () => {
+  it("pumps a burst across aliases while the owner waits on an independent hook", async () => {
+    const aliases = ["http:pump:first", "http:pump:second"];
+    const releaseToken = "pump:release";
+    const run = await start(sessionHookPumpWorkflow, [{ aliases, releaseToken }]);
+    const tokens = [sessionCommandHookToken(run.runId), ...aliases];
+    try {
+      for (const token of [...tokens, releaseToken]) await waitForHook(run, { token });
+      const messages = ["one", "two", "three", "four", "five", "six"].map((message) => ({
+        kind: "send",
+        payload: { message },
+      }));
+      for (const [index, message] of messages.entries())
+        await resumeHook(tokens[index % tokens.length]!, message);
+      await resumeHook(releaseToken, undefined);
+      await expect(run.returnValue).resolves.toEqual(messages);
+    } finally {
+      if ((await run.status) === "running") await run.cancel();
+    }
+  });
+
   it("stamps the public session id onto every inbox hook", async () => {
     const channelToken = "http:session-command-inbox:session-id";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);

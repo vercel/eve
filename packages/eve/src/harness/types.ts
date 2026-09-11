@@ -274,10 +274,18 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
-/**
- * Dependencies injected into the tool-loop harness at construction time.
- */
+/** Terminal effects proposed by the harness for the execution owner to commit. */
+export interface HarnessSettlement {
+  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly emissionAfter: import("#harness/emission-state.js").HarnessEmissionState;
+}
+
+/** Lets the execution owner admit steering before committing terminal effects. */
+export type HandleSettlementFn = (settlement: HarnessSettlement) => Promise<void>;
+
+/** Dependencies injected into the tool-loop harness at construction time. */
 export interface ToolLoopHarnessConfig {
+  readonly handleSettlement?: HandleSettlementFn;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**

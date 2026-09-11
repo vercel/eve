@@ -945,6 +945,60 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("keeps a proposed settlement open for steering without repeating the turn preamble", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Answer.", role: "assistant" }] },
+      text: "Answer.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const events: UnstampedMessageStreamEvent[] = [];
+    const proposals: import("#harness/types.js").HarnessSettlement[] = [];
+    const runStep = createToolLoopHarness(
+      createTestConfig(
+        "conversation",
+        async (event) => {
+          events.push(event);
+        },
+        {
+          handleSettlement: async (proposal) => {
+            proposals.push(proposal);
+          },
+        },
+      ),
+    );
+    const first = await runStep(createTestSession(), { message: "First" });
+    expect(getHarnessEmissionState(first.session.state)).toMatchObject({
+      turnId: "turn_0",
+      sequence: 0,
+      stepIndex: 1,
+    });
+    const second = await runStep(first.session, { message: "Use the updated instructions." });
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "message.received")).toHaveLength(2);
+    expect(
+      events.some((event) => event.type === "turn.completed" || event.type === "session.waiting"),
+    ).toBe(false);
+    expect(getHarnessEmissionState(second.session.state)).toMatchObject({
+      turnId: "turn_0",
+      sequence: 0,
+      stepIndex: 2,
+    });
+    expect(second.session.history).toEqual([
+      { role: "user", kind: "user", content: "First" },
+      { role: "assistant", content: "Answer." },
+      { role: "user", kind: "user", content: "Use the updated instructions." },
+      { role: "assistant", content: "Answer." },
+    ]);
+    expect(proposals).toHaveLength(2);
+    expect(proposals[1]!.events.map((event) => event.type)).toEqual([
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(proposals[1]!.emissionAfter).toMatchObject({ turnId: "", sequence: 1, stepIndex: 0 });
+  });
+
   it("omits user messages with no model-visible content", async () => {
     setupMockAgent({
       finishReason: "stop",

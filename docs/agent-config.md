@@ -275,10 +275,9 @@ events, and side effects. Use stable idempotency keys for non-idempotent tools.
 
 eve ends a batch before it waits for input, authorization, or blocking
 coordination, and before it acknowledges a background task. A batch can also
-end below the configured ceiling when the turn completes. Steering cancels the
-active model-and-tool cycle, commits earlier completed cycles in the batch, and
-starts the replacement turn from that state. It does not roll the session back
-to the beginning of the batch. This option is experimental and may change or
+end below the configured ceiling when the turn completes. Steering waits for the
+batch to commit, then applies accepted input within the same turn. Larger batches
+increase the interval between steering boundaries. This option is experimental and may change or
 disappear in any release. See [Execution model and
 durability](./concepts/execution-model-and-durability#resuming-after-a-crash)
 for the retry behavior.

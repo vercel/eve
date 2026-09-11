@@ -85,7 +85,7 @@ export type SessionRespondOptions = SessionDeliveryOptions;
  * Live handle to the current session, exposed on `ctx.session` to
  * `deliver` and event handlers. The framework hydrates the read-only
  * fields from the active context at step start. A write through
- * `continuation.rekey()` selects a new current address and records it so the
+ * `continuation.alias()` selects a new current address and records it so the
  * runtime can add its hook to the session inbox at the next step boundary.
  * Previously claimed addresses remain active.
  */
@@ -94,7 +94,7 @@ export interface SessionHandle {
   readonly auth: SessionAuth;
   readonly continuation?: {
     readonly token: string;
-    rekey(rawToken: string): void;
+    alias(rawToken: string): void;
   };
 }
 
@@ -226,7 +226,8 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
       if (currentToken === undefined || currentToken.length === 0) return undefined;
       return {
         token: toChannelLocalContinuationToken(currentToken),
-        rekey(rawToken: string): void {
+        alias(rawToken: string): void {
+          if (rawToken.length === 0) throw new Error("A session alias requires a nonempty token.");
           const token = namespaceContinuationToken(currentToken, rawToken);
           if (currentToken === token) return;
           accessor.set(ContinuationHookTokensKey, (claimed) => {

@@ -7,7 +7,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import type { HandleEventFn, HandleSettlementFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -72,6 +72,7 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly handleSettlement?: HandleSettlementFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -109,6 +110,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
+    handleSettlement: input.handleSettlement,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,

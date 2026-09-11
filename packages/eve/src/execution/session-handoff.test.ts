@@ -115,6 +115,7 @@ function createInbox(input: { pending?: boolean } = {}): SessionCommandInboxHand
     claimAuthorization: vi.fn(),
     claimSessionHook: vi.fn(),
     consumeNext: vi.fn(),
+    drain: vi.fn(() => []),
     dispose: vi.fn(),
     hasPending: vi.fn(async () => input.pending === true),
     hasReadyAuthorization: vi.fn(() => false),

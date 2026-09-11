@@ -22,8 +22,8 @@ interface SessionCommandHookState {
   readonly iterator: AsyncIterator<SessionInboxPayload>;
   closed: boolean;
   enabled: boolean;
-  pending: boolean;
-  resolved?: HookRead;
+  stopping: boolean;
+  readonly buffered: HookRead[];
 }
 
 /** Which hook family produced an inbox read. */
@@ -32,7 +32,7 @@ export type SessionInboxSource = "authorization" | "session";
 /**
  * Multiplexes an additive set of session-address hooks and one window-gated
  * authorization-callback hook. The stable session inbox is the first session
- * hook; every continuation rekey adds another hook without retiring an older
+ * hook; every continuation alias adds another hook without retiring an older
  * address.
  */
 export interface SessionCommandInbox {
@@ -47,6 +47,8 @@ export interface SessionCommandInbox {
   /** Adds one session address to the merged inbox. Repeated claims are idempotent. */
   claimSessionHook(token: string): Promise<void>;
   consumeNext(): void;
+  /** Consumes all eligible arrivals at a committed execution boundary. */
+  drain(): SessionInboxPayload[];
   /** Whether an authorization read is already eligible to be consumed. */
   hasReadyAuthorization(): boolean;
   /** Whether an accepted command is already waiting behind the current one. */
@@ -79,8 +81,8 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
  * Creates the command inbox owned by one session owner.
  *
  * Every claimed session hook is retained for the session's lifetime. Each
- * source keeps one pending iterator read so deliveries through any historical
- * continuation address join the same ordered queue exactly once.
+ * source has one background reader. The readers continuously merge deliveries
+ * into one queue, including while the owner is awaiting a model or tool step.
  */
 export function createSessionCommandInbox(sessionId: string): SessionCommandInboxHandle {
   const sessionHooks: SessionCommandHookState[] = [];
@@ -90,6 +92,9 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
+  let failure: { error: unknown } | undefined;
+  const capacityWaiters = new Set<() => void>();
+  const MAX_BUFFERED = 1024;
   const enqueue = (read: HookRead): void => {
     ready.push(read);
     ready.sort((left, right) => left.order - right.order);
@@ -97,27 +102,35 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
     wake = undefined;
   };
 
-  const arm = (state: SessionCommandHookState): void => {
-    if (state.closed || state.pending) return;
-
-    state.pending = true;
-    state.resolved = undefined;
-    const next = state.iterator.next();
-    void next.then(
-      (result) => {
+  const pump = async (state: SessionCommandHookState): Promise<void> => {
+    try {
+      while (!state.stopping && !state.closed) {
+        if (states().reduce((count, source) => count + source.buffered.length, 0) >= MAX_BUFFERED) {
+          await new Promise<void>((resolve) => capacityWaiters.add(resolve));
+          continue;
+        }
+        const result = await state.iterator.next();
+        if (result.done) {
+          state.closed = true;
+          wake?.();
+          wake = undefined;
+          return;
+        }
         const read: HookRead = { order: nextOrder++, result, state };
-        state.resolved = read;
+        state.buffered.push(read);
         if (state.enabled) enqueue(read);
-      },
-      () => {
-        // Hook disposal rejects any iterator read that did not commit a payload.
-      },
-    );
+      }
+    } catch (error) {
+      if (state.stopping) return;
+      failure = { error };
+      wake?.();
+      wake = undefined;
+    }
   };
 
   const enable = (state: SessionCommandHookState): void => {
     state.enabled = true;
-    if (state.resolved !== undefined) enqueue(state.resolved);
+    for (const read of state.buffered) enqueue(read);
   };
 
   const createState = (token: string): SessionCommandHookState => {
@@ -132,7 +145,8 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
       enabled: false,
       hook,
       iterator: hook[Symbol.asyncIterator](),
-      pending: false,
+      stopping: false,
+      buffered: [],
     };
   };
 
@@ -146,21 +160,11 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
 
     if (offered !== null) return offered;
 
-    const current = states();
-    for (const state of current) arm(state);
-
-    if (current.every((state) => state.closed)) {
-      offeredRead = {
-        order: nextOrder++,
-        result: { done: true, value: undefined },
-        state: sessionHooks[0]!,
-      };
-      offered = Promise.resolve(offeredRead.result);
-      return offered;
-    }
-
     offered = (async () => {
       while (ready.length === 0) {
+        if (failure !== undefined) throw failure.error;
+        if (states().every((state) => state.closed || state.stopping))
+          return { done: true as const, value: undefined };
         await new Promise<void>((resolve) => {
           wake = resolve;
         });
@@ -179,6 +183,8 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
     },
 
     async claimAuthorization(token: string): Promise<void> {
+      if (sessionHooks.some((state) => state.hook.token === token))
+        throw new Error("An authorization callback cannot share a session address token.");
       if (authorization !== undefined) {
         if (authorization.hook.token === token) return;
         throw new Error("A session command inbox cannot change its authorization token.");
@@ -189,17 +195,21 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
       // Stays disabled until the owner opens the authorization window;
       // resolved reads stash on the state and enqueue when it opens.
       authorization = candidate;
-      arm(candidate);
+      void pump(candidate);
     },
 
     async claimSessionHook(token: string): Promise<void> {
-      if (!token || sessionHooks.some((state) => state.hook.token === token)) return;
+      if (!token) throw new Error("A session alias requires a nonempty continuation token.");
+      if (sessionHooks.some((state) => state.hook.token === token)) return;
+      if (sessionHooks.length >= 256) throw new Error("A session may claim at most 256 addresses.");
+      if (authorization?.hook.token === token)
+        throw new Error("A session address cannot share its authorization callback token.");
 
       const candidate = createState(token);
       await claimHookOwnership(candidate.hook);
       sessionHooks.push(candidate);
       enable(candidate);
-      arm(candidate);
+      void pump(candidate);
     },
 
     consumeNext(): void {
@@ -208,12 +218,29 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
       }
 
       const consumed = offeredRead;
-      consumed.state.pending = false;
-      consumed.state.resolved = undefined;
-      if (consumed.result.done) consumed.state.closed = true;
+      const index = consumed.state.buffered.indexOf(consumed);
+      if (index !== -1) consumed.state.buffered.splice(index, 1);
       offeredRead = undefined;
       offered = null;
-      if (!consumed.result.done) arm(consumed.state);
+      for (const resolve of capacityWaiters) resolve();
+      capacityWaiters.clear();
+    },
+
+    drain(): SessionInboxPayload[] {
+      if (failure !== undefined) throw failure.error;
+      const reads = offeredRead === undefined ? [...ready] : [offeredRead, ...ready];
+      ready.length = 0;
+      if (offeredRead !== undefined) {
+        offeredRead = undefined;
+        offered = null;
+      }
+      for (const read of reads) {
+        const index = read.state.buffered.indexOf(read);
+        if (index !== -1) read.state.buffered.splice(index, 1);
+      }
+      for (const resolve of capacityWaiters) resolve();
+      capacityWaiters.clear();
+      return reads.sort((a, b) => a.order - b.order).map((read) => read.result.value);
     },
 
     async dispose(): Promise<void> {
@@ -221,17 +248,17 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
     },
 
     hasReadyAuthorization(): boolean {
-      if (authorization?.enabled !== true || authorization.resolved === undefined) return false;
+      if (authorization?.enabled !== true || authorization.buffered.length === 0) return false;
       if (offeredRead !== undefined) return offeredRead.state === authorization;
       return ready[0]?.state === authorization;
     },
 
     async hasPending(): Promise<boolean> {
-      for (const state of states()) arm(state);
       await Promise.resolve();
+      if (failure !== undefined) throw failure.error;
       if (offeredRead !== undefined && !offeredRead.result.done) return true;
       if (ready.some((read) => !read.result.done)) return true;
-      return states().some((state) => state.resolved !== undefined && !state.resolved.result.done);
+      return states().some((state) => state.buffered.length > 0);
     },
 
     next: nextRead,
@@ -262,22 +289,21 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
         if (
           offeredRead !== undefined &&
           offeredRead.state !== authorization &&
-          authorization.resolved !== undefined &&
-          authorization.resolved.order < offeredRead.order
+          authorization.buffered[0] !== undefined &&
+          authorization.buffered[0].order < offeredRead.order
         ) {
           enqueue(offeredRead);
           offeredRead = undefined;
           offered = null;
         }
-        if (offered !== null) arm(authorization);
         return;
       }
       authorization.enabled = false;
       // Un-surface a stashed read that was enqueued but not consumed so it
       // re-enqueues when the window reopens. Callers close the window only
       // after consuming any authorization read they were offered.
-      const enqueued = ready.findIndex((read) => read.state === authorization);
-      if (enqueued !== -1) ready.splice(enqueued, 1);
+      for (let index = ready.length - 1; index >= 0; index--)
+        if (ready[index]!.state === authorization) ready.splice(index, 1);
     },
 
     restore(payloads: readonly SessionInboxPayload[]): void {
@@ -285,31 +311,32 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
         throw new Error("Cannot restore session commands before reclaiming the session hooks.");
       }
       for (const value of payloads) {
-        enqueue({
+        const read: HookRead = {
           order: nextOrder++,
           result: { done: false, value },
           state: sessionHooks[0]!,
-        });
+        };
+        read.state.buffered.push(read);
+        enqueue(read);
       }
     },
 
     async release(): Promise<SessionInboxPayload[]> {
       const released = states();
-      const active =
-        authorization === undefined ? [...sessionHooks] : [...sessionHooks, authorization];
       const accepted = new Set<HookRead>();
       const collect = () => {
         if (offeredRead !== undefined && !offeredRead.result.done) accepted.add(offeredRead);
         for (const read of ready) if (!read.result.done) accepted.add(read);
         for (const state of released) {
-          if (state.resolved !== undefined && !state.resolved.result.done)
-            accepted.add(state.resolved);
+          for (const read of state.buffered) accepted.add(read);
         }
       };
-      for (const state of released) arm(state);
+      for (const state of released) state.stopping = true;
+      for (const resolve of capacityWaiters) resolve();
+      capacityWaiters.clear();
       await Promise.resolve();
       collect();
-      await Promise.all(active.map(async (state) => await disposeHook(state.hook)));
+      await Promise.all(released.map(async (state) => await disposeHook(state.hook)));
       await Promise.resolve();
       collect();
       sessionHooks.splice(0, sessionHooks.length);
@@ -317,6 +344,7 @@ export function createSessionCommandInbox(sessionId: string): SessionCommandInbo
       ready.splice(0, ready.length);
       offered = null;
       offeredRead = undefined;
+      wake?.();
       wake = undefined;
       return [...accepted]
         .sort((left, right) => left.order - right.order)

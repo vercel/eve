@@ -5,9 +5,8 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
+import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import { ActiveTurnInbox } from "#execution/active-turn-inbox.js";
 import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import {
@@ -16,37 +15,24 @@ import {
 } from "#execution/tools/workflow/owner.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import type {
+  DurableStepResult,
   RuntimeActionResultStepInput,
   TurnOutcome,
   TurnStepPayload,
 } from "#execution/turn-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { turnStep } from "#execution/workflow-steps.js";
-import {
-  decodeSessionInboxPayload,
-  SessionInboxPayloadError,
-} from "#execution/wire/session-inbox-wire.js";
+import { settleTurnStep, turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   isInboxSubagentResultFromRecordedWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import {
-  findRunningAgentHandle,
-  isInboxSubagentResultFromRunningHandle,
-} from "#subagents/handles/query.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
-
-interface TurnCancelPayload {
-  readonly tasks?: boolean;
-  readonly turnId?: string;
-}
 
 /** Inputs shared by every turn executed inside the owning session workflow. */
 export interface SessionExecutionInput {
@@ -97,7 +83,7 @@ export class SessionExecution {
   }
 
   async runTurn(delivery: TurnStepPayload): Promise<TurnOutcome> {
-    const control = new ActiveTurnControl({
+    const control = new ActiveTurnInbox({
       bufferedDeliveries: this.input.bufferedDeliveries,
       bufferedSessionControls: this.input.bufferedSessionControls,
       cancelledTaskIds: this.input.cancelledTaskIds,
@@ -105,6 +91,7 @@ export class SessionExecution {
       cursor: this.cursor,
       expectedTurnId: activeTurnId(this.cursor.sessionState.emissionState),
       seenTaskDeliveries: this.input.seenTaskDeliveries,
+      caller: delivery.kind === "deliver" ? delivery.caller : undefined,
     });
     let nextStepInput: TurnStepPayload | undefined = delivery;
 
@@ -113,7 +100,7 @@ export class SessionExecution {
         serializedContext: this.cursor.serializedContext,
         sessionState: this.cursor.sessionState,
       };
-      const result = await control.waitFor(
+      const result: DurableStepResult = await control.waitFor(
         turnStep(this.cursor.createStepInput(nextStepInput, control.signal)),
       );
       const pendingCallIds =
@@ -135,24 +122,31 @@ export class SessionExecution {
         await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
       }
 
+      await this.cursor.adopt({
+        serializedContext: result.serializedContext,
+        sessionState:
+          result.action === "cancelled"
+            ? (result.backgroundTaskState ?? result.sessionState)
+            : result.sessionState,
+      });
+      await control.admitBoundary();
+
       if (result.action === "cancelled") {
-        await this.cursor.adopt({
-          serializedContext: result.serializedContext,
-          sessionState: result.backgroundTaskState ?? result.sessionState,
-        });
         return await this.finishCancelledTurn(control);
       }
 
       if (control.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
-        await this.cursor.adopt({
-          serializedContext: result.serializedContext,
-          sessionState: result.backgroundTaskState ?? result.sessionState,
-        });
         return await this.finishCancelledTurn(control);
       }
 
       if (result.action === "done") {
-        await this.cursor.adopt(result);
+        if (result.settlement !== undefined)
+          await this.cursor.adopt(
+            await settleTurnStep({
+              ...this.cursor.createStepInput(undefined),
+              settlement: result.settlement,
+            }),
+          );
         return this.outcome({
           isError: result.isError,
           kind: "done",
@@ -166,7 +160,6 @@ export class SessionExecution {
         pendingCallIds !== undefined &&
         (result.action === "park" || result.action === "dispatch-workflow-tasks")
       ) {
-        await this.cursor.adopt(result);
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
@@ -200,7 +193,22 @@ export class SessionExecution {
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
           this.input.mode === "conversation";
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
-        await this.cursor.adopt(result);
+        const steering: DeliverHookPayload | undefined =
+          this.input.mode === "task" &&
+          (result.hasPendingAuthorization || result.hasPendingInputBatch)
+            ? undefined
+            : control.takeSteering();
+        if (steering !== undefined) {
+          nextStepInput = steering;
+          continue;
+        }
+        if (result.settlement !== undefined)
+          await this.cursor.adopt(
+            await settleTurnStep({
+              ...this.cursor.createStepInput(undefined),
+              settlement: result.settlement,
+            }),
+          );
         return this.outcome({
           authorizationAttemptIds: result.authorizationAttemptIds,
           authorizationNames: result.authorizationNames,
@@ -209,12 +217,11 @@ export class SessionExecution {
         });
       }
 
-      await this.cursor.adopt(result);
-      nextStepInput = undefined;
+      nextStepInput = control.takeSteering();
     }
   }
 
-  private async finishCancelledTurn(control: ActiveTurnControl): Promise<TurnOutcome> {
+  private async finishCancelledTurn(control: ActiveTurnInbox): Promise<TurnOutcome> {
     if (control.cancellation?.tasks === true) {
       await cancelAllIndexedSessionTasksStep({
         serializedContext: this.cursor.serializedContext,
@@ -239,7 +246,7 @@ export class SessionExecution {
   }
 
   private async waitForRuntimeActionResults(input: {
-    readonly control: ActiveTurnControl;
+    readonly control: ActiveTurnInbox;
     readonly initialAcceptedAtMs: number | undefined;
     readonly initialResults: readonly RuntimeActionResult[];
     readonly pendingCallIds: readonly string[];
@@ -301,7 +308,7 @@ export class SessionExecution {
     }
   }
 
-  private async nextRuntimeEvent(control: ActiveTurnControl): Promise<
+  private async nextRuntimeEvent(control: ActiveTurnInbox): Promise<
     | RuntimeActionResultStepInput
     | {
         readonly kind: "workflow";
@@ -311,6 +318,8 @@ export class SessionExecution {
     | "cancel-turn"
   > {
     while (true) {
+      const buffered = control.takeRuntimeResult();
+      if (buffered !== undefined) return buffered;
       const winner = await Promise.race([
         this.workflowRead().then((result) => ({ kind: "workflow" as const, result })),
         this.input.commandInbox.next().then((result) => ({ kind: "command" as const, result })),
@@ -342,178 +351,4 @@ export class SessionExecution {
     this.pendingWorkflowRead ??= this.workflowInbox.reader.iterator.next();
     return this.pendingWorkflowRead;
   }
-}
-
-class ActiveTurnControl {
-  private readonly bufferedDeliveries: DeliverHookPayload[];
-  private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  private readonly cancelledTaskIds: Set<string>;
-  private readonly commandInbox: SessionCommandInbox;
-  private readonly controller = new AbortController();
-  private readonly cursor: SessionExecutionCursor;
-  private readonly expectedTurnId: string;
-  private readonly seenTaskDeliveries: Set<string>;
-  private currentCancellation: TurnCancelPayload | undefined;
-
-  constructor(input: {
-    readonly bufferedDeliveries: DeliverHookPayload[];
-    readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-    readonly cancelledTaskIds: Set<string>;
-    readonly commandInbox: SessionCommandInbox;
-    readonly cursor: SessionExecutionCursor;
-    readonly expectedTurnId: string;
-    readonly seenTaskDeliveries: Set<string>;
-  }) {
-    this.bufferedDeliveries = input.bufferedDeliveries;
-    this.bufferedSessionControls = input.bufferedSessionControls;
-    this.cancelledTaskIds = input.cancelledTaskIds;
-    this.commandInbox = input.commandInbox;
-    this.cursor = input.cursor;
-    this.expectedTurnId = input.expectedTurnId;
-    this.seenTaskDeliveries = input.seenTaskDeliveries;
-  }
-
-  get cancellation(): TurnCancelPayload | undefined {
-    return this.currentCancellation;
-  }
-
-  get signal(): AbortSignal {
-    return this.controller.signal;
-  }
-
-  async waitFor<T>(operation: Promise<T>): Promise<T> {
-    const settled = operation.then((value) => ({ kind: "operation" as const, value }));
-    while (true) {
-      const winner = await Promise.race([
-        settled,
-        this.commandInbox.next().then((result) => ({ kind: "command" as const, result })),
-      ]);
-      if (winner.kind === "operation") return winner.value;
-      if (winner.result.done) {
-        throw new Error("Session command inbox closed before the active turn settled.");
-      }
-      this.commandInbox.consumeNext();
-      await this.handle(winner.result.value, false);
-    }
-  }
-
-  async handle(
-    value: SessionInboxPayload,
-    routeDeliveries: boolean,
-  ): Promise<"cancel-turn" | void> {
-    if (value.kind === "runtime-action-result") return;
-    if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-      const handle = findRunningAgentHandle(this.cursor.sessionState.snapshot?.session.state, {
-        callId: value.callId,
-      });
-      if (
-        handle?.identity.name !== value.subagentName ||
-        handle.address.sessionId !== value.childSessionId
-      ) {
-        return;
-      }
-      await this.cursor.adopt(
-        await runProxySubagentEventStep({
-          hookPayload: value,
-          parentWritable: this.cursor.parentWritable,
-          serializedContext: this.cursor.serializedContext,
-          sessionState: this.cursor.sessionState,
-        }),
-      );
-      return;
-    }
-    let command;
-    try {
-      command = decodeSessionInboxPayload(value);
-    } catch (error) {
-      if (!(error instanceof SessionInboxPayloadError)) throw error;
-      await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-      return;
-    }
-
-    if (command.kind === "deliver") {
-      if (!this.acceptTaskDelivery(command)) return;
-      let delivery: DeliverHookPayload | undefined = command;
-      if (routeDeliveries) {
-        const routed = await routeDeliverToChildren({
-          delivery,
-          parentWritable: this.cursor.parentWritable,
-          serializedContext: this.cursor.serializedContext,
-          sessionState: this.cursor.sessionState,
-        });
-        await this.cursor.adopt(routed);
-        if (routed.kind === "cancel-turn") {
-          this.abort({});
-          return "cancel-turn";
-        }
-        delivery = routed.remainder;
-      }
-      if (delivery === undefined) return;
-      this.bufferedDeliveries.push(delivery);
-      if (delivery.turnPolicy === "steer" && deliveryHasMessage(delivery)) this.abort({});
-      return;
-    }
-    if (command.kind === "clear" || command.kind === "compact") {
-      this.bufferedSessionControls.push(command.kind);
-      return;
-    }
-    if (command.kind === "session-timeout") {
-      this.bufferedSessionControls.push("expired");
-      return;
-    }
-    if (command.kind === "reset") {
-      this.bufferedSessionControls.push("reset");
-      this.abort({});
-      return;
-    }
-
-    if (command.tasks === true) {
-      await cancelAllIndexedSessionTasksStep({
-        serializedContext: this.cursor.serializedContext,
-        sessionState: this.cursor.sessionState,
-      });
-    }
-    if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
-    if (command.turnId !== undefined && command.turnId !== this.expectedTurnId) return;
-    this.abort(
-      command.turnId === undefined
-        ? { tasks: command.tasks }
-        : { tasks: command.tasks, turnId: command.turnId },
-    );
-  }
-
-  private abort(payload: TurnCancelPayload): void {
-    if (this.controller.signal.aborted) return;
-    this.currentCancellation = payload;
-    this.controller.abort(new TurnCancelledError());
-  }
-
-  private acceptTaskDelivery(delivery: DeliverHookPayload): boolean {
-    const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
-    if (deliveryId === undefined) return true;
-    if (this.originatesFromCancelledTask(deliveryId) || this.seenTaskDeliveries.has(deliveryId)) {
-      return false;
-    }
-    this.seenTaskDeliveries.add(deliveryId);
-    return true;
-  }
-
-  private discardTaskDeliveries(taskId: string): void {
-    this.cancelledTaskIds.add(taskId);
-    const kept = this.bufferedDeliveries.filter((delivery) => {
-      const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
-      return deliveryId === undefined || !this.originatesFromCancelledTask(deliveryId);
-    });
-    this.bufferedDeliveries.splice(0, this.bufferedDeliveries.length, ...kept);
-  }
-
-  private originatesFromCancelledTask(deliveryId: string): boolean {
-    return [...this.cancelledTaskIds].some(
-      (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
-    );
-  }
-}
-
-function deliveryHasMessage(delivery: DeliverHookPayload): boolean {
-  return delivery.payloads.some((payload) => payload.message !== undefined);
 }

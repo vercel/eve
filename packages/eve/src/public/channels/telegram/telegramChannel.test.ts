@@ -672,7 +672,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.pendingFreeformReplies).toEqual({ "51": "call_1" });
   });
 
-  it("hydrates unknown private message posts without re-keying the session", async () => {
+  it("hydrates unknown private message posts without aliasing the session", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -740,7 +740,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBeNull();
   });
 
-  it("hydrates unknown group message posts and re-keys to the posted message id", async () => {
+  it("hydrates unknown group message posts and adds an alias for to the posted message id", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -808,7 +808,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBe("caller-selected");
   });
 
-  it("group message posts re-key the session to the posted message id", async () => {
+  it("group message posts alias the session to the posted message id", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(

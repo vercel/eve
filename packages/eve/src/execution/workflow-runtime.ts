@@ -58,7 +58,7 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
-} from "#execution/workflow-entry.js";
+} from "#execution/workflow-entry-input.js";
 import type { SessionCheckpoint } from "#execution/session-handoff.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";

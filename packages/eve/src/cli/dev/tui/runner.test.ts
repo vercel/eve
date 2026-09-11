@@ -4241,7 +4241,7 @@ describe("EveTUIRunner session id reporting", () => {
 });
 
 describe("EveTUIRunner cancelled-turn subagent settling", () => {
-  it("settles subagent sections when the turn is cancelled by a steer", async () => {
+  it("settles subagent sections when the turn is explicitly cancelled", async () => {
     // A child stream that never ends on its own — it only stops when the
     // pump aborts it (the scoped cancellation path under test).
     const client = stubClient();

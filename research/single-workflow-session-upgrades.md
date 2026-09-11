@@ -79,8 +79,10 @@ loop:
   wait for a command
   if it is a conversational delivery from another deployment and the session is idle:
     attempt handoff; on skip or failure, continue here
-  run turnStep, racing the active step against the inbox for queue, steer, cancel,
-    clear, compact, and reset
+  pump every claimed hook continuously into a merged inbox
+  run turnStep; buffer incoming messages and respond to explicit cancellation
+  admit steering against committed state, preserving the active turn
+  commit the proposed settlement only when no eligible steering remains
   apply coordination: task acks, workflow-tool and subagent results, input,
     authorization, cancellation rollback, caller settlement
   adopt state through the one SessionStateCursor
@@ -288,18 +290,50 @@ can still be newer than a busy owner, so the owner validates that one envelope a
 unsupported commands instead of translating them. Nothing deleted here is replaced by wait
 migration, callback rebinding, or cross-version coordination.
 
+## Alias and steering follow-through
+
+Channel handlers add addresses with `session.continuation.alias(rawToken)`
+or `channel.continuation.alias(rawToken)`. The runtime namespaces the token,
+records it in the serialized context, and claims every new address when the
+step commits. The most recently selected alias is exposed as `continuation.token`;
+all earlier addresses remain valid. There is no rekey API or replacement claim.
+The stable session inbox is always first in the checkpoint's exact hook list.
+
+Each claimed hook has one continuously running iterator reader. Readers merge
+accepted payloads into a bounded queue while model and tool steps run. They
+share the same payload contract, and failures wake the consumer. Authorization
+callbacks retain their separate eligibility window. Handoff releases the entire
+claim set and transfers accepted, unconsumed payloads with the exact tokens.
+
+`ActiveTurnInbox` admits buffered input only against committed state.
+`steer` preserves completed work, turn identity, and accumulated usage.
+`queue` remains pending until settlement. A different delegated caller also
+waits for its own turn. Runtime results and addressed responses retain their
+existing routing. Explicit cancellation uses the abort signal; steering does not.
+
+The harness proposes settlement events and the next emission state. The owner
+may admit steering before committing a conversational settlement; once it starts
+the commit step, later messages belong to a later turn. Model-call batching defines
+the checkpoint interval and therefore the steering latency.
+
+This follows the holder attempt's continuous-reader and settlement-proposal
+boundaries without adopting its separate holder and turn topology. Upstream
+`step-delivery-ordering.test.ts`, `step-delivery-hop-count.test.ts`, and
+`delivery-barrier-coverage.test.ts` cover iterator delivery order against cached
+step results and other hooks, including layered async consumers. eve additionally
+tests merged alias bursts while the owner is waiting, same-turn steering,
+cancellation followed by new input, and clients following settlement races.
+
 ## Out of scope
 
-- The general holder runtime from [PR #3063](https://github.com/vercel/eve/pull/3063), background
-  write queues, detached persistence, and per-turn snapshot storage are not ported here. The
-  session inbox does keep one pending iterator read on every claimed hook so all stable and
-  continuation addresses feed its existing merged queue.
+- The general holder topology from [PR #3063](https://github.com/vercel/eve/pull/3063), background
+  write queues, detached persistence, and per-turn snapshot storage are not ported here.
+  Its continuously owned inbox readers and deferred settlement inform the session pump.
 - Public upgrade or state-migration APIs: `Session.upgrade()`, a channel operation, or a route.
 - A session directory and caller-assigned session ids. Separating `sessionId`, `anchorRunId`, and
   `ownerRunId` keeps that future change from depending on Workflow run identity without adding the
   directory here.
-- Changes to `turnStep`, harness semantics, or the independent runs for tasks, subagents, workflow
-  tools, timeout, and activity collection.
+- Changes to the independent runs for tasks, subagents, workflow tools, timeout, and activity collection.
 
 ## Invariants
 

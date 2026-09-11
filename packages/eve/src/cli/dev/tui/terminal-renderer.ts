@@ -565,6 +565,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #messageQueue = new MessageQueue();
   /** The streaming result's cooperative cancel, available to Esc and Ctrl+C. */
   #requestTurnCancel?: () => void;
+  #sendSteering?: (message: string) => Promise<void>;
   /** Set by the `turn-cancelled` stream event: settle in-flight tool blocks. */
   #turnCancelled = false;
   /** Server session id backing the conversation; named in the parting line. */
@@ -575,7 +576,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * the user block can carry its steer/queue gutter arrow.
    */
   #nextSubmittedPromptOrigin?: "steer" | "queue";
-  /** True once this stream's prompt requested cancellation or steering. */
+  /** True once this stream's prompt requested cancellation. */
   #cancelRequestedByUser = false;
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
@@ -944,6 +945,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#currentSubmittedPrompt = options?.submittedPrompt;
     this.#messageQueue.beginTurn();
     this.#requestTurnCancel = result.cancel;
+    this.#sendSteering = result.steer;
     this.#totalTokens = undefined;
     this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
@@ -993,6 +995,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#resolveStreamInterrupt = undefined;
       if (this.#interrupted) result.abort?.();
       this.#requestTurnCancel = undefined;
+      this.#sendSteering = undefined;
       this.#detachInput();
       this.#stopTicker();
       this.#streamDraftActive = false;
@@ -3227,14 +3230,27 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#paint();
           break;
         }
-        // Esc and Ctrl+C drive steering and cancellation: pop the oldest
-        // queued message and cancel the running turn so the runner submits it
-        // as the replacement turn; with nothing queued, cancel immediately.
+        // Send queued input through the active session. With nothing queued,
+        // the same keys request explicit cancellation.
         // Without a cancel capability an empty queue leaves either key inert.
         if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
-        this.#messageQueue.handleEscape();
-        this.#cancelRequestedByUser = true;
-        this.#requestTurnCancel?.();
+        const outcome = this.#messageQueue.handleEscape();
+        if (outcome === "steer") {
+          const send = this.#sendSteering;
+          if (send !== undefined) {
+            const message = this.#messageQueue.takeSteering()!;
+            this.#nextSubmittedPromptOrigin = "steer";
+            this.#addSubmittedPrompt(message);
+            void send(message).catch((error) => {
+              this.#messageQueue.restoreSteering(message);
+              this.#addErrorBlock("Steering failed", toErrorMessage(error));
+              this.#paint();
+            });
+          }
+        } else {
+          this.#cancelRequestedByUser = true;
+          this.#requestTurnCancel?.();
+        }
         this.#paint();
         break;
       }

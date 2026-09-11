@@ -4,7 +4,6 @@ import type {
   DeliverHookPayload,
   DeliverPayload,
   RunInput,
-  SessionCommand,
   SessionCapabilities,
 } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -50,7 +49,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import { SESSION_INBOX_CONTEXT_KEY } from "#execution/wire/session-inbox-contract.js";
-import { SessionHandoff, type SessionCheckpoint } from "#execution/session-handoff.js";
+import { SessionHandoff } from "#execution/session-handoff.js";
 import {
   signalSessionAnchorStep,
   signalSessionOwnerActivationStep,
@@ -61,38 +60,11 @@ import { validateSessionCheckpointStep } from "#execution/session-checkpoint-val
 // node built-ins here, so `internal/logging.ts` cannot be imported.
 // Error logging happens inside `emitTerminalSessionFailureStep`.
 
-/**
- * Serializable workflow-entry input. All runtime state travels via
- * `serializedContext`, which is produced by `serializeContext(ctx)`
- * and deserialized at each `"use step"` boundary.
- */
-export interface InitialWorkflowEntryInput {
-  readonly activityCollectorRunId?: string;
-  readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
-  readonly input: RunInput["input"];
-  readonly kind: "initial";
-  readonly limits?: RunInput["limits"];
-  readonly ownerDeploymentId: string;
-  readonly retention?: AgentWorkflowRetentionDefinition;
-  readonly sessionTimeoutMs?: number | false;
-  readonly serializedContext: Record<string, unknown>;
-  readonly taskId?: string;
-}
-
-export interface HandoffWorkflowEntryInput {
-  readonly activationToken: string;
-  readonly checkpoint: SessionCheckpoint;
-  readonly delivery: DeliverHookPayload;
-  readonly kind: "handoff";
-  readonly ownerDeploymentId: string;
-  readonly parentWritable: WritableStream<Uint8Array>;
-}
-
-export type WorkflowEntryInput = InitialWorkflowEntryInput | HandoffWorkflowEntryInput;
-
-export interface WorkflowEntryResult {
-  readonly output: unknown;
-}
+import type {
+  InitialWorkflowEntryInput,
+  WorkflowEntryInput,
+  WorkflowEntryResult,
+} from "#execution/workflow-entry-input.js";
 
 type SessionLoopOutcome =
   | {
@@ -208,7 +180,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
         if (anchorClaim.status === "rejected") throw anchorClaim.reason;
         try {
-          await commandInbox.claimSessionHook(continuationToken);
+          if (continuationToken !== "") await commandInbox.claimSessionHook(continuationToken);
         } catch (error) {
           if (isHookConflictError(error)) {
             if (
@@ -219,8 +191,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
                 activityCollectorRunId: input.activityCollectorRunId,
                 command: input.continuationConflictCommand,
                 continuationToken,
-                ownerSessionId:
-                  typeof error.conflictingRunId === "string" ? error.conflictingRunId : undefined,
               });
             }
             return { output: "" };

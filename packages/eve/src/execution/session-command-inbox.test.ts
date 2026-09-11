@@ -37,6 +37,39 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
+  it("pumps several messages before the owner reads and drains them exactly once", async () => {
+    const first = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const second = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const third = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({ token: "stable", reads: [first.promise, third.promise] }),
+      createMockHook({ token: "alias", reads: [second.promise] }),
+    );
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHook("alias");
+    first.resolve(resolved(send("first")));
+    await first.promise;
+    second.resolve(resolved(send("second")));
+    await second.promise;
+    third.resolve(resolved(send("third")));
+    await third.promise;
+    expect(inbox.drain()).toEqual([send("first"), send("second"), send("third")]);
+    expect(inbox.drain()).toEqual([]);
+    expect(await inbox.release()).toEqual([]);
+  });
+
+  it("surfaces a failed reader instead of silently leaving the owner asleep", async () => {
+    const read = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ token: "stable", reads: [read.promise] }));
+    const inbox = createSessionCommandInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    const pending = expect(inbox.next()).rejects.toThrow("reader failed");
+    read.reject(new Error("reader failed"));
+    await pending;
+    await inbox.dispose();
+  });
+
   it("accounts for an accepted unread command before releasing ownership", async () => {
     installHooks(
       createMockHook({
@@ -139,6 +172,28 @@ describe("createSessionCommandInbox", () => {
       metadata: { sessionId: "session-1" },
       token: "stable",
     });
+    await inbox.dispose();
+  });
+
+  it("rejects empty tokens and overlapping session and authorization addresses", async () => {
+    installHooks(createMockHook({ token: "stable" }), createMockHook({ token: "auth" }));
+    const inbox = createSessionCommandInbox("session-1");
+    await expect(inbox.claimSessionHook("")).rejects.toThrow("nonempty");
+    await inbox.claimSessionHook("stable");
+    await expect(inbox.claimAuthorization("stable")).rejects.toThrow("cannot share");
+    await inbox.claimAuthorization("auth");
+    await expect(inbox.claimSessionHook("auth")).rejects.toThrow("cannot share");
+    await inbox.dispose();
+  });
+
+  it("bounds the address set without charging repeated claims", async () => {
+    const tokens = Array.from({ length: 256 }, (_, index) => `token-${index}`);
+    installHooks(...tokens.map((token) => createMockHook({ token })));
+    const inbox = createSessionCommandInbox("session-1");
+    for (const token of tokens) await inbox.claimSessionHook(token);
+    await inbox.claimSessionHook(tokens[0]!);
+    await expect(inbox.claimSessionHook("one-too-many")).rejects.toThrow("at most 256");
+    expect(inbox.sessionHookTokens).toEqual(tokens);
     await inbox.dispose();
   });
 
@@ -354,10 +409,6 @@ function resolved(value: SessionInboxPayload): IteratorResult<SessionInboxPayloa
   return { done: false, value };
 }
 
-function createDeferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
+function createDeferred<T>() {
+  return Promise.withResolvers<T>();
 }

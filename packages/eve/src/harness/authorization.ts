@@ -189,7 +189,7 @@ export function consumeAuthorizationResult(
  *
  * By default the URL embeds the session's authorization hook token (`${sessionId}:auth`).
  * A runtime with its own continuation supplies that hook through AuthorizationHookKey.
- * It is independent of the continuation token, so channel re-keying mid-turn
+ * It is independent of the continuation token, so channel aliasing mid-turn
  * does not invalidate the callback URL.
  *
  * Returns `undefined` if no callback address is available.
