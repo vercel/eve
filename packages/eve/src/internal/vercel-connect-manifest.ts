@@ -15,6 +15,7 @@ export interface VercelConnectRequirement {
     readonly configuration?: JsonObject;
   };
   readonly resource?: { readonly protocol: "mcp" | "openapi"; readonly url: string };
+  readonly providerConfiguration?: { readonly format: string; readonly path: string };
   readonly access: { readonly principalTypes: readonly ("app" | "user")[] };
   readonly triggers?: readonly { readonly method: string; readonly path: string }[];
   readonly uses: readonly {
