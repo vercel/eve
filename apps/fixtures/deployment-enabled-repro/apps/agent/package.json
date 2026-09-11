@@ -1,0 +1,11 @@
+{
+  "name": "deployment-enabled-repro-agent",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/connect": "0.4.2",
+    "ai": "^7.0.34",
+    "eve": "^0.27.6",
+    "zod": "4.4.3"
+  }
+}
