@@ -1,6 +1,9 @@
 import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import {
   isStepCount,
+  type Agent,
+  type AgentCallParameters,
+  type AgentStreamParameters,
   type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
@@ -13,6 +16,10 @@ import {
   type TypedToolError,
   type TypedToolResult,
 } from "ai";
+import {
+  HarnessAgent,
+  HarnessAgentSession,
+} from "@ai-sdk/harness/agent";
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -250,6 +257,10 @@ import {
   type StepResult,
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
+
+type HarnessAgentCallExtensions = {
+  session?: HarnessAgentSession;
+};
 
 /**
  * Creates a tool-loop harness step function backed by AI SDK `ToolLoopAgent`.
@@ -582,11 +593,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         turnId: `turn_${emissionState.sequence}`,
       });
     };
-
-    if (config.harness !== undefined) {
-      void config.harness;
-      throw new Error("Harness-backed agent execution is not implemented.");
-    }
 
     if (config.clearOnly === true) {
       session = {
@@ -1415,48 +1421,84 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
       });
 
-      const agentSettings = {
-        headers: attributionHeaders,
-        instructions,
-        model,
-        onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
-          for (const part of event.content) {
-            if (
-              part.type !== "tool-call" ||
-              part.providerExecuted === true ||
-              isInvalidToolCall(part)
-            ) {
-              continue;
-            }
-            backgroundBatch.register({
-              callId: part.toolCallId,
-              input: part.input,
-              toolName: part.toolName,
-            });
-          }
-        },
-        onToolExecutionEnd: logToolExecutionError,
-        // Replaces the AI SDK's default `console.error`; the harness still
-        // emits stream events, this just keeps the raw error from being silent.
-        onError(event: { error: unknown }) {
-          // Recognized configuration failures (gateway auth, missing API key)
-          // skip the raw inspector dump — its stack points at the harness, not
-          // the fix, and the terminal-failure path logs the one-line summary
-          // and emits the structured step.failed. Unrecognized errors keep
-          // the full dump so they stay loud.
-          if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
-          logError(log, "tool-loop stream error", event.error);
-        },
-        onStepFinish: hooks.onStepFinish,
-        prepareStep: hooks.prepareStep,
-        reasoning: session.agent.reasoning,
-        runtimeContext: telemetryRuntimeContext,
-        stopWhen: isStepCount(1),
-        telemetry: attempt?.telemetry,
-        toolApproval: buildToolApproval(modelTools),
-        tools: effectiveTools,
+      let agent: Agent;
+      const turnInput: AgentCallParameters<never> & HarnessAgentCallExtensions | AgentStreamParameters<never, any> & HarnessAgentCallExtensions = {
+        abortSignal: config.abortSignal,
+        messages: callMessages,
       };
-      const agent = new ToolLoopAgent(agentSettings);
+      if (config.harness) {
+        agent = new HarnessAgent({
+          headers: attributionHeaders,
+          instructions: typeof instructions === "string" ? instructions : instructions?.content,
+          harness: config.harness,
+          onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
+            for (const part of event.content) {
+              if (
+                part.type !== "tool-call" ||
+                part.providerExecuted === true ||
+                isInvalidToolCall(part)
+              ) {
+                continue;
+              }
+              backgroundBatch.register({
+                callId: part.toolCallId,
+                input: part.input,
+                toolName: part.toolName,
+              });
+            }
+          },
+          onToolExecutionEnd: logToolExecutionError,
+          //onStepFinish: hooks.onStepFinish,
+          //prepareStep: hooks.prepareStep,
+          stopWhen: isStepCount(1),
+          telemetry: attempt?.telemetry,
+        });
+
+        turnInput.session = await (agent as HarnessAgent).createSession();
+      } else {
+        const agentSettings = {
+          headers: attributionHeaders,
+          instructions,
+          model,
+          onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
+            for (const part of event.content) {
+              if (
+                part.type !== "tool-call" ||
+                part.providerExecuted === true ||
+                isInvalidToolCall(part)
+              ) {
+                continue;
+              }
+              backgroundBatch.register({
+                callId: part.toolCallId,
+                input: part.input,
+                toolName: part.toolName,
+              });
+            }
+          },
+          onToolExecutionEnd: logToolExecutionError,
+          // Replaces the AI SDK's default `console.error`; the harness still
+          // emits stream events, this just keeps the raw error from being silent.
+          onError(event: { error: unknown }) {
+            // Recognized configuration failures (gateway auth, missing API key)
+            // skip the raw inspector dump — its stack points at the harness, not
+            // the fix, and the terminal-failure path logs the one-line summary
+            // and emits the structured step.failed. Unrecognized errors keep
+            // the full dump so they stay loud.
+            if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
+            logError(log, "tool-loop stream error", event.error);
+          },
+          onStepFinish: hooks.onStepFinish,
+          prepareStep: hooks.prepareStep,
+          reasoning: session.agent.reasoning,
+          runtimeContext: telemetryRuntimeContext,
+          stopWhen: isStepCount(1),
+          telemetry: attempt?.telemetry,
+          toolApproval: buildToolApproval(modelTools),
+          tools: effectiveTools,
+        };
+        agent = new ToolLoopAgent(agentSettings);
+      }
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
@@ -1471,10 +1513,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             FINAL_OUTPUT_TOOL_NAME,
             ...hiddenRuntimeActionToolNames,
           ]);
-          const streamResult = await agent.stream({
-            abortSignal: config.abortSignal,
-            messages: callMessages,
-          });
+          const streamResult = await agent.stream(turnInput);
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
@@ -1522,10 +1561,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             toolResults: [...toolResultsByCallId.values()],
           });
         }
-        const generateResult = await agent.generate({
-          abortSignal: config.abortSignal,
-          messages: callMessages,
-        });
+        const generateResult = await agent.generate(turnInput);
         throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
         if (
