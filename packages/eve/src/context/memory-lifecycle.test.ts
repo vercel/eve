@@ -318,6 +318,97 @@ describe("memory lifecycle", () => {
     expect(JSON.stringify(capture.mock.calls[0]?.[0].messages)).not.toContain("eve.memory");
   });
 
+  it("waits for sibling captures before propagating a failure", async () => {
+    const ctx = createContext();
+    const failure = new Error("alpha capture failed");
+    let releaseBravo!: () => void;
+    const bravoBlocked = new Promise<void>((resolve) => {
+      releaseBravo = resolve;
+    });
+    const bravoCapture = vi.fn(async () => await bravoBlocked);
+    const memories = [
+      memory("alpha", {
+        provider: {
+          capture: {
+            "turn.completed": async () => {
+              throw failure;
+            },
+          },
+          recall: { "turn.started": async () => null },
+        },
+        scope: "user_1",
+      }),
+      memory("bravo", {
+        provider: {
+          capture: { "turn.completed": bravoCapture },
+          recall: { "turn.started": async () => null },
+        },
+        scope: "user_1",
+      }),
+    ];
+    const turn = { id: "turn_0", input: [], sequence: 0 };
+    ctx.set(TurnMemoryLocksKey, {
+      alpha: createMemoryLock({
+        namespace: "app",
+        scope: "user_1",
+        slot: "alpha",
+        turn,
+        visibility: "scope",
+      }),
+      bravo: createMemoryLock({
+        namespace: "app",
+        scope: "user_1",
+        slot: "bravo",
+        turn,
+        visibility: "scope",
+      }),
+    });
+    const terminals: string[] = [];
+    const instrumentation: MemoryInstrumentation = {
+      async execute(operation, execute) {
+        try {
+          const result = await execute();
+          terminals.push(`${operation.slot}:completed`);
+          return result.value;
+        } catch (error) {
+          terminals.push(`${operation.slot}:failed`);
+          throw error;
+        }
+      },
+    };
+
+    const pending = contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchMemoryTurnCompleted({
+          ctx,
+          event: { data: { sequence: 0, turnId: "turn_0" }, type: "turn.completed" },
+          instrumentation,
+          memories,
+          messages: [],
+        }),
+    );
+    let outcome:
+      | { readonly error?: unknown; readonly status: "fulfilled" | "rejected" }
+      | undefined;
+    const observed = pending.then(
+      () => {
+        outcome = { status: "fulfilled" };
+      },
+      (error: unknown) => {
+        outcome = { error, status: "rejected" };
+      },
+    );
+
+    await vi.waitFor(() => expect(bravoCapture).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(terminals).toEqual(["alpha:failed"]));
+    expect(outcome).toBeUndefined();
+    releaseBravo();
+    await observed;
+    expect(outcome).toEqual({ error: failure, status: "rejected" });
+    expect(terminals).toEqual(["alpha:failed", "bravo:completed"]);
+  });
+
   it("captures before compaction and recalls again after the checkpoint", async () => {
     const ctx = createContext();
     const phases: string[] = [];

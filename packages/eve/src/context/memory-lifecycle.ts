@@ -22,11 +22,12 @@ import {
   type MemoryRecallResult,
   type MemoryScopeContext,
 } from "#public/memory/index.js";
-import type {
-  InstrumentationMemoryOperation,
-  InstrumentationMemoryRecord,
-} from "#instrumentation/lifecycle.js";
-import { instrumentMemoryOperation, type MemoryInstrumentation } from "#instrumentation/memory.js";
+import {
+  instrumentMemoryOperation,
+  type InstrumentationMemoryOperation,
+  type InstrumentationMemoryRecord,
+  type MemoryInstrumentation,
+} from "#instrumentation/memory.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
   applyMemoryRecallBatches,
@@ -95,7 +96,7 @@ export async function dispatchMemoryTurnStarted(input: {
   const preRecallMessages = projectMemoryHistory({ locks, messages: prepared.history });
   const callbackContext = buildCallbackContext();
   const batches = (
-    await Promise.all(
+    await settleMemoryOperations(
       [...input.memories]
         .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
         .map(async (memory): Promise<MemoryRecallBatch | null> => {
@@ -192,7 +193,7 @@ export async function dispatchMemoryCompactionRequested(input: {
   const locks = await resolveCompactionLocks(input);
   input.ctx.set(TurnMemoryLocksKey, locks);
   const turn = input.event.data.turnId.length === 0 ? null : firstLockedTurn(locks);
-  await Promise.all(
+  await settleMemoryOperations(
     [...input.memories]
       .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
       .map(async (memory) => {
@@ -254,7 +255,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
   const callbackContext = buildCallbackContext();
   const turn = input.event.data.turnId.length === 0 ? null : firstLockedTurn(activeLocks);
   const batches = (
-    await Promise.all(
+    await settleMemoryOperations(
       [...input.memories]
         .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
         .map(async (memory): Promise<MemoryRecallBatch | null> => {
@@ -335,7 +336,7 @@ export async function dispatchMemoryTurnCompleted(input: {
   >;
   const callbackContext = buildCallbackContext();
   const projected = projectMemoryHistory({ locks, messages: input.messages });
-  await Promise.all(
+  await settleMemoryOperations(
     [...input.memories]
       .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
       .map(async (memory) => {
@@ -462,6 +463,21 @@ async function resolveMemoryLock(input: {
 function reportDisabledMemorySlot(slot: string, resolver: "namespace" | "scope"): void {
   if (!isEveDevEnvironment()) return;
   log.info("Memory slot is disabled for this operation", { resolver, slot });
+}
+
+async function settleMemoryOperations<T>(operations: readonly Promise<T>[]): Promise<T[]> {
+  const results = await Promise.allSettled(operations);
+  const values: T[] = [];
+  let firstFailure: PromiseRejectedResult | undefined;
+  for (const result of results) {
+    if (result.status === "rejected") {
+      firstFailure ??= result;
+    } else {
+      values.push(result.value);
+    }
+  }
+  if (firstFailure !== undefined) throw firstFailure.reason;
+  return values;
 }
 
 export function memoryOperationId(input: {

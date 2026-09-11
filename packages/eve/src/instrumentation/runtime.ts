@@ -50,7 +50,10 @@ import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
-import type { MemoryInstrumentation } from "#instrumentation/memory.js";
+import {
+  createMemoryInstrumentation,
+  type MemoryInstrumentation,
+} from "#instrumentation/memory.js";
 import {
   ChannelInstrumentationKey,
   ConversationIdKey,
@@ -261,46 +264,17 @@ export function bindInstrumentationRuntime(
   };
   const memory: MemoryInstrumentation | undefined =
     runtime.memoryOperations === true
-      ? {
-          async execute(operation, execute) {
+      ? createMemoryInstrumentation({
+          resolveContext: () => {
             const sessionContext = readSessionContext();
-            const hooks = bindHooks(sessionContext);
-            const event = {
-              ...operation,
+            return {
+              hooks: bindHooks(sessionContext),
               rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
-              sessionId: boundSession.sessionId,
             };
-            await hooks.publish({
-              ...event,
-              type: "memory.operation.started",
-            });
-            try {
-              const result = await runtime.runInContext(
-                {
-                  idempotencyKey: operation.idempotencyKey,
-                  sessionId: boundSession.sessionId,
-                  turnId: operation.turnId,
-                  type: "memory.operation",
-                },
-                execute,
-              );
-              await hooks.publish({
-                ...event,
-                outputRecords: result.outputRecords,
-                recordCount: result.recordCount,
-                type: "memory.operation.completed",
-              });
-              return result.value;
-            } catch (error) {
-              await hooks.publish({
-                ...event,
-                error,
-                type: "memory.operation.failed",
-              });
-              throw error;
-            }
           },
-        }
+          runInContext: runtime.runInContext,
+          sessionId: boundSession.sessionId,
+        })
       : undefined;
   const prepareExecution = (): SessionInstrumentation => {
     const executionRuntime = captureExecutionRuntime();

@@ -1,4 +1,5 @@
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
+import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -40,61 +41,6 @@ export interface InstrumentationModelRef {
   readonly modelId: string;
   readonly provider: string;
 }
-
-/** Standard GenAI memory operations that eve can identify from its lifecycle. */
-export type InstrumentationMemoryOperationName = "search_memory" | "upsert_memory";
-
-/** One memory record in the OpenTelemetry GenAI memory-records shape. */
-export interface InstrumentationMemoryRecord {
-  readonly content: string;
-  readonly id?: string;
-}
-
-/** Stable framework context for one memory operation. */
-export interface InstrumentationMemoryOperation {
-  readonly idempotencyKey: string;
-  readonly operationName: InstrumentationMemoryOperationName;
-  /**
-   * The operation phase that caused eve to call the memory provider.
-   *
-   * This is eve-specific context; `operationName` is the corresponding
-   * OpenTelemetry GenAI operation.
-   */
-  readonly phase: string;
-  /** The path-derived memory slot. */
-  readonly slot: string;
-  /** The opaque memory scope key, used as eve's memory-store identifier. */
-  readonly storeId: string;
-  readonly turnId?: string;
-}
-
-/** Bound session identity added when eve publishes a memory operation. */
-export interface InstrumentationMemoryOperationEvent extends InstrumentationMemoryOperation {
-  readonly rootSessionId: string;
-  readonly sessionId: string;
-}
-
-export interface InstrumentationMemoryOperationStartedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.started";
-}
-
-export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.completed";
-  /** The number of records the operation returned or changed, when known. */
-  readonly recordCount?: number;
-  /** Content. Absent unless this provider's trace policy records outputs. */
-  readonly outputRecords?: readonly InstrumentationMemoryRecord[];
-}
-
-export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.failed";
-  /** Content. Absent unless this provider's trace policy records outputs. */
-  readonly error?: unknown;
-}
-
-export type InstrumentationMemoryOperationTerminalEvent =
-  | InstrumentationMemoryOperationCompletedEvent
-  | InstrumentationMemoryOperationFailedEvent;
 
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
@@ -635,9 +581,9 @@ export interface InstrumentationProviderDefinition {
     readonly "model.call.started"?: InstrumentationEventHandler<InstrumentationModelCallStartedEvent>;
     readonly "model.call.completed"?: InstrumentationEventHandler<InstrumentationModelCallCompletedEvent>;
     readonly "model.call.failed"?: InstrumentationEventHandler<InstrumentationModelCallFailedEvent>;
-    readonly "memory.operation.started"?: InstrumentationEventHandler<InstrumentationMemoryOperationStartedEvent>;
-    readonly "memory.operation.completed"?: InstrumentationEventHandler<InstrumentationMemoryOperationCompletedEvent>;
-    readonly "memory.operation.failed"?: InstrumentationEventHandler<InstrumentationMemoryOperationFailedEvent>;
+    readonly "memory.operation.started"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationStartedEvent>;
+    readonly "memory.operation.completed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationCompletedEvent>;
+    readonly "memory.operation.failed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationFailedEvent>;
     readonly "input.requested"?: InstrumentationEventHandler<InstrumentationInputRequestedEvent>;
     readonly "input.resolved"?: InstrumentationEventHandler<InstrumentationInputResolvedEvent>;
     readonly "session.completed"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
@@ -683,8 +629,8 @@ export type InstrumentationCorrelatedEvent =
   | InstrumentationInputResolvedEvent
   | InstrumentationActionStartedEvent
   | InstrumentationActionTerminalEvent
-  | InstrumentationMemoryOperationStartedEvent
-  | InstrumentationMemoryOperationTerminalEvent
+  | memory.InstrumentationMemoryOperationStartedEvent
+  | memory.InstrumentationMemoryOperationTerminalEvent
   | InstrumentationModelCallStartedEvent
   | InstrumentationModelCallTerminalEvent
   | InstrumentationToolCallStartedEvent
@@ -719,12 +665,7 @@ export type InstrumentationExecutionOperation =
       readonly scope: InstrumentationAttemptScope;
       readonly type: "model.call";
     }
-  | {
-      readonly idempotencyKey: string;
-      readonly sessionId: string;
-      readonly turnId?: string;
-      readonly type: "memory.operation";
-    };
+  | memory.InstrumentationMemoryExecutionOperation;
 
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {
