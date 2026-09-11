@@ -1466,7 +1466,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
           logError(log, "tool-loop stream error", event.error);
         },
-        onStepFinish: hooks.onStepFinish,
+        onStepEnd: hooks.onStepEnd,
+        onStepStart: hooks.onStepStart,
         prepareStep: hooks.prepareStep,
         reasoning: session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
@@ -2314,7 +2315,7 @@ function isEmptyModelResponse(step: HarnessStepResult): boolean {
  * (vercel/ai#15938) a stream that closes after metadata without output or
  * a finish chunk rejects — the SDK enqueues the error onto `fullStream`
  * (so `emitStreamContent` throws it) and never emits `finish-step`, so
- * `onStepFinish` does not fire and the step hooks' `stepResult` promise
+ * `onStepEnd` does not fire and the step hooks' `stepResult` promise
  * would never settle. The same condition previously completed as an empty
  * step caught by {@link isEmptyModelResponse}; normalizing here funnels
  * both shapes into the one-shot empty-response reissue.

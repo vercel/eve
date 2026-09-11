@@ -61,20 +61,31 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
     const prepareStep = settings.prepareStep as
       | ((...args: unknown[]) => Promise<unknown>)
       | undefined;
-    const onStepFinish = settings.onStepFinish as
+    const onStepStart = settings.onStepStart as
       | ((...args: unknown[]) => Promise<unknown>)
       | undefined;
+    const onStepEnd = settings.onStepEnd as ((...args: unknown[]) => Promise<unknown>) | undefined;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      let preparedMessages = options.messages;
       if (prepareStep) {
-        await prepareStep({
+        const prepared = await prepareStep({
           messages: options.messages,
           steps: [],
           stepNumber: 0,
           model: {},
           context: undefined,
         });
+        if (
+          prepared !== null &&
+          typeof prepared === "object" &&
+          "messages" in prepared &&
+          Array.isArray(prepared.messages)
+        ) {
+          preparedMessages = prepared.messages;
+        }
       }
+      if (onStepStart) await onStepStart({ messages: preparedMessages });
 
       const tools = (
         settings as {
@@ -106,7 +117,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
         usage: undefined,
       };
 
-      if (onStepFinish) await onStepFinish(result);
+      if (onStepEnd) await onStepEnd(result);
       return { ...result, responseMessages: result.response.messages };
     });
 

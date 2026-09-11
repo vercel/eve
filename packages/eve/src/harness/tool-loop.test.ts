@@ -547,7 +547,8 @@ async function* createMockFullStream(
 }
 
 type MockAgentSettings = {
-  onStepFinish?: (step: unknown) => Promise<void> | void;
+  onStepStart?: (input: unknown) => Promise<void> | void;
+  onStepEnd?: (step: unknown) => Promise<void> | void;
   output?: unknown;
   prepareStep?: (input: unknown) => Promise<unknown> | unknown;
 };
@@ -558,42 +559,51 @@ type MockAgentConstructor =
     : never;
 type MockAgentInstance = ToolLoopAgent & Record<string, unknown>;
 
+async function invokeMockStepStart(
+  settings: MockAgentSettings,
+  options: { readonly messages: unknown[] },
+): Promise<void> {
+  let preparedMessages = options.messages;
+  if (settings.prepareStep) {
+    const prepared = await settings.prepareStep({
+      messages: options.messages,
+      steps: [],
+      stepNumber: 0,
+      model: {},
+      context: undefined,
+    });
+    if (
+      prepared !== null &&
+      typeof prepared === "object" &&
+      "messages" in prepared &&
+      Array.isArray(prepared.messages)
+    ) {
+      preparedMessages = prepared.messages;
+    }
+  }
+  await settings.onStepStart?.({ messages: preparedMessages });
+}
+
 function setupMockAgent(result: Record<string, unknown>): void {
   vi.mocked(ToolLoopAgent).mockImplementation(function (
     this: Record<string, unknown>,
     settings: MockAgentSettings,
   ) {
-    const { onStepFinish, prepareStep } = settings;
+    const { onStepEnd } = settings;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      if (prepareStep) {
-        await prepareStep({
-          messages: options.messages,
-          steps: [],
-          stepNumber: 0,
-          model: {},
-          context: undefined,
-        });
-      }
-      if (onStepFinish) await onStepFinish(result);
+      await invokeMockStepStart(settings, options);
+      if (onStepEnd) await onStepEnd(result);
       return createMockGenerateResult(result);
     });
 
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      if (prepareStep) {
-        await prepareStep({
-          messages: options.messages,
-          steps: [],
-          stepNumber: 0,
-          model: {},
-          context: undefined,
-        });
-      }
+      await invokeMockStepStart(settings, options);
       const mockResult = createMockStreamResult(result);
-      // Schedule onStepFinish to fire after a microtask so the stream
+      // Schedule onStepEnd to fire after a microtask so the stream
       // can start being consumed first by emitStreamContent.
-      if (onStepFinish) {
-        void Promise.resolve().then(() => onStepFinish(result));
+      if (onStepEnd) {
+        void Promise.resolve().then(() => onStepEnd(result));
       }
       return mockResult;
     });
@@ -612,18 +622,10 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
     if (result === undefined) {
       throw new Error("ToolLoopAgent mock exhausted its scripted results.");
     }
-    const { onStepFinish, prepareStep } = settings;
+    const { onStepEnd } = settings;
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      if (prepareStep) {
-        await prepareStep({
-          messages: options.messages,
-          steps: [],
-          stepNumber: 0,
-          model: {},
-          context: undefined,
-        });
-      }
-      if (onStepFinish) await onStepFinish(result);
+      await invokeMockStepStart(settings, options);
+      if (onStepEnd) await onStepEnd(result);
       return createMockGenerateResult(result);
     });
     return this;
@@ -4237,7 +4239,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("propagates streamed cancellation without waiting for onStepFinish or emitting failures", async () => {
+  it("propagates streamed cancellation without waiting for onStepEnd or emitting failures", async () => {
     const abortController = new AbortController();
     const abortReason = new TurnCancelledError();
 
@@ -4330,7 +4332,7 @@ describe("createToolLoopHarness", () => {
       this: ToolLoopAgent,
       settings: MockAgentSettings,
     ) {
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
@@ -4344,8 +4346,8 @@ describe("createToolLoopHarness", () => {
         if (modelCallMock.mock.calls.length === 1) {
           throw timeout;
         }
-        if (onStepFinish) {
-          void Promise.resolve().then(() => onStepFinish(success));
+        if (onStepEnd) {
+          void Promise.resolve().then(() => onStepEnd(success));
         }
         return createMockGenerateResult(success);
       });
@@ -4838,7 +4840,7 @@ describe("createToolLoopHarness", () => {
         this: Record<string, unknown>,
         settings: MockAgentSettings,
       ) {
-        const { onStepFinish, prepareStep } = settings;
+        const { onStepEnd, prepareStep } = settings;
         const isFirst = constructionIndex === 0;
         constructionIndex += 1;
         if (isFirst) {
@@ -4882,7 +4884,7 @@ describe("createToolLoopHarness", () => {
                 context: undefined,
               });
             }
-            if (onStepFinish) await onStepFinish(input.successResult);
+            if (onStepEnd) await onStepEnd(input.successResult);
             return input.successResult;
           });
           this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
@@ -4896,8 +4898,8 @@ describe("createToolLoopHarness", () => {
               });
             }
             const mockResult = createMockStreamResult(input.successResult);
-            if (onStepFinish) {
-              void Promise.resolve().then(() => onStepFinish(input.successResult));
+            if (onStepEnd) {
+              void Promise.resolve().then(() => onStepEnd(input.successResult));
             }
             return mockResult;
           });
@@ -7436,7 +7438,7 @@ describe("createToolLoopHarness", () => {
     });
 
     /*
-     * Override the agent mock so `onStepFinish` receives a class
+     * Override the agent mock so `onStepEnd` receives a class
      * instance — matching the AI SDK runtime shape — instead of the
      * plain object produced by `setupMockAgent`. This is what makes
      * the getter trap reachable from the test.
@@ -7445,7 +7447,7 @@ describe("createToolLoopHarness", () => {
       this: Record<string, unknown>,
       settings: MockAgentSettings,
     ) {
-      const { onStepFinish } = settings;
+      const { onStepEnd } = settings;
       this.stream = vi.fn().mockImplementation(async () => {
         const stepInstance = new FakeStepResult();
         const fullStream = createExplicitMockFullStream([
@@ -7458,8 +7460,8 @@ describe("createToolLoopHarness", () => {
           { id: "text-1", text: "`/workspace`", type: "text-delta" },
           { finishReason: "stop", type: "finish-step" },
         ]);
-        if (onStepFinish) {
-          void Promise.resolve().then(() => onStepFinish(stepInstance as unknown));
+        if (onStepEnd) {
+          void Promise.resolve().then(() => onStepEnd(stepInstance as unknown));
         }
         return {
           fullStream,
@@ -8183,7 +8185,7 @@ describe("createToolLoopHarness", () => {
         >;
       },
     ) {
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       const executeStatus = settings.tools?.["status"]?.execute;
       if (executeStatus === undefined) {
         throw new Error("status tool was not executable.");
@@ -8228,7 +8230,7 @@ describe("createToolLoopHarness", () => {
           toolCalls: [toolCall],
           toolResults: [toolResult],
         };
-        if (onStepFinish) await onStepFinish(result);
+        if (onStepEnd) await onStepEnd(result);
         return createMockGenerateResult(result);
       });
       return this;
@@ -8349,7 +8351,7 @@ describe("createToolLoopHarness", () => {
       if (result === undefined) {
         throw new Error("ToolLoopAgent mock exhausted its scripted results.");
       }
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
@@ -8361,7 +8363,7 @@ describe("createToolLoopHarness", () => {
           });
         }
         generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepFinish) await onStepFinish(result);
+        if (onStepEnd) await onStepEnd(result);
         return createMockGenerateResult(result);
       });
       return this;
@@ -8486,7 +8488,7 @@ describe("createToolLoopHarness", () => {
       this: MockAgentInstance,
       settings: MockAgentSettings,
     ) {
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
@@ -8498,7 +8500,7 @@ describe("createToolLoopHarness", () => {
           });
         }
         generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepFinish) await onStepFinish(stillHere);
+        if (onStepEnd) await onStepEnd(stillHere);
         return createMockGenerateResult(stillHere);
       });
       return this;
@@ -8582,7 +8584,7 @@ describe("createToolLoopHarness", () => {
       this: Record<string, unknown>,
       settings: MockAgentSettings,
     ) {
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
@@ -8601,7 +8603,7 @@ describe("createToolLoopHarness", () => {
           toolCalls: [],
           toolResults: [],
         };
-        if (onStepFinish) await onStepFinish(result);
+        if (onStepEnd) await onStepEnd(result);
         return createMockGenerateResult(result);
       });
       return this as unknown as ToolLoopAgent;
@@ -8862,7 +8864,7 @@ describe("createToolLoopHarness", () => {
       if (result === undefined) {
         throw new Error("ToolLoopAgent mock exhausted its scripted results.");
       }
-      const { onStepFinish, prepareStep } = settings;
+      const { onStepEnd, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
@@ -8874,7 +8876,7 @@ describe("createToolLoopHarness", () => {
           });
         }
         generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepFinish) await onStepFinish(result);
+        if (onStepEnd) await onStepEnd(result);
         return createMockGenerateResult(result);
       });
       return this as unknown as ToolLoopAgent;
@@ -9054,7 +9056,7 @@ describe("createToolLoopHarness", () => {
       ) {
         const result = agentResults[resultIndex++];
         if (result === undefined) throw new Error("ToolLoopAgent mock exhausted its results.");
-        const { onStepFinish, prepareStep } = settings;
+        const { onStepEnd, prepareStep } = settings;
         this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
           if (prepareStep) {
             await prepareStep({
@@ -9066,7 +9068,7 @@ describe("createToolLoopHarness", () => {
             });
           }
           generateCalls.push(input.messages as Array<{ content: unknown; role: string }>);
-          if (onStepFinish) await onStepFinish(result);
+          if (onStepEnd) await onStepEnd(result);
           return createMockGenerateResult(result);
         });
         return this;
