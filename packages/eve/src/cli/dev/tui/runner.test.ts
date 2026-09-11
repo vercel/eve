@@ -892,6 +892,120 @@ describe("EveTUIRunner idle session follow", () => {
     expect(renderIdleStream).not.toHaveBeenCalled();
   });
 
+  it("renders background completion after two quiet minutes without another user message", async () => {
+    vi.useFakeTimers();
+    const session = stubSession();
+    const prompt = createDeferred<string | undefined>();
+    const idleEvents: AgentTUIStreamEvent[] = [];
+    const wakeEvents = [
+      { type: "turn.started", data: { sequence: 1, turnId: "wake-turn" } },
+      {
+        type: "step.started",
+        data: { modelId: "test-model", sequence: 1, stepIndex: 0, turnId: "wake-turn" },
+      },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "Alice's background review is ready for Bob.",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "wake-turn",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 1, turnId: "wake-turn" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ].map((event, index) => stampTestEvent(event as UnstampedMessageStreamEvent, index));
+    let connections = 0;
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        connections += 1;
+        if (init?.signal) signals.push(init.signal);
+        if (connections === 8) return messageStreamResponseOf(wakeEvents);
+        let removeAbortListener: (() => void) | undefined;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const abort = () => controller.close();
+              init?.signal?.addEventListener("abort", abort, { once: true });
+              removeAbortListener = () => init?.signal?.removeEventListener("abort", abort);
+            },
+            cancel() {
+              removeAbortListener?.();
+            },
+          }),
+          { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+        );
+      }),
+    );
+    const send = vi.spyOn(session, "send");
+    const runner = new EveTUIRunner({
+      session,
+      name: "Research Agent",
+      renderer: fakeRenderer({
+        readPrompt: () => prompt.promise,
+        renderIdleStream: async (result) => {
+          for await (const event of result.events) idleEvents.push(event);
+        },
+      }),
+    });
+    const running = runner.run();
+    try {
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(connections).toBeGreaterThanOrEqual(8);
+      expect(idleEvents).toContainEqual({
+        type: "assistant-complete",
+        id: "text:wake-turn:0",
+        text: "Alice's background review is ready for Bob.",
+      });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      prompt.resolve(undefined);
+      await running;
+    }
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(session.state.streamIndex).toBe(wakeEvents.length);
+  });
+
+  it.each(["session.completed", "session.failed"] as const)(
+    "stops idle following at %s even while the prompt remains open",
+    async (type) => {
+      vi.useFakeTimers();
+      const prompt = createDeferred<string | undefined>();
+      const fetch = vi.fn(async () =>
+        messageStreamResponseOf([
+          stampTestEvent({
+            type,
+            data: { sessionId: "session_test", code: "SESSION_FAILED", message: "Session ended." },
+          } as UnstampedMessageStreamEvent),
+        ]),
+      );
+      vi.stubGlobal("fetch", fetch);
+      const runner = new EveTUIRunner({
+        session: stubSession(),
+        name: "Research Agent",
+        renderer: fakeRenderer({
+          readPrompt: () => prompt.promise,
+          renderIdleStream: async (result) => {
+            for await (const event of result.events) {
+              void event;
+            }
+          },
+        }),
+      });
+      const running = runner.run();
+      try {
+        await vi.advanceTimersByTimeAsync(130_000);
+        expect(fetch).toHaveBeenCalledOnce();
+      } finally {
+        prompt.resolve(undefined);
+        await running;
+      }
+    },
+  );
+
   it("renders a wake turn while prompting, then stops before send without replay", async () => {
     const client = stubClient();
     const session = client.sessions.attach("session_test");

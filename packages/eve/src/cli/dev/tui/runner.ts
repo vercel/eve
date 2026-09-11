@@ -1373,7 +1373,16 @@ export class EveTUIRunner {
   async #followIdleSession(signal: AbortSignal, options: AgentTUISessionOptions): Promise<void> {
     const sourceSession = this.#session;
     if (sourceSession === undefined) return;
-    const source = sourceSession.stream({ signal })[Symbol.asyncIterator]();
+    // The open prompt owns this reader's lifetime. Quiet background work must
+    // not exhaust the SDK's finite idle-reconnect budget.
+    const source = sourceSession
+      .stream({
+        signal,
+        streamReconnectPolicy: {
+          streamIdleReconnectPolicy: { maxAttempts: Number.POSITIVE_INFINITY },
+        },
+      })
+      [Symbol.asyncIterator]();
     try {
       while (!signal.aborted) {
         let consumed = false;
@@ -1393,6 +1402,12 @@ export class EveTUIRunner {
           ...options,
           continueSession: true,
         });
+        if (
+          result.turnState?.boundaryEvent === "session.completed" ||
+          result.turnState?.boundaryEvent === "session.failed"
+        ) {
+          return;
+        }
         this.#enterPendingConnectionAuthorization(result);
         if (
           (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
