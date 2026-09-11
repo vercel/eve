@@ -73,17 +73,17 @@ describe("withoutDeclinedContent", () => {
     expect(attributes).toEqual(ATTRIBUTES);
   });
 
-  it("redacts recalled memory records as output content", () => {
+  it("redacts recalled memory records as input content", () => {
     const searched = {
       "gen_ai.memory.records": '[{"content":"Private preference"}]',
       "gen_ai.operation.name": "search_memory",
     };
 
-    expect(
-      withoutDeclinedContent(searched, { recordInputs: false, recordOutputs: true }),
-    ).toBeUndefined();
-    expect(withoutDeclinedContent(searched, { recordInputs: true, recordOutputs: false })).toEqual({
+    expect(withoutDeclinedContent(searched, { recordInputs: false, recordOutputs: true })).toEqual({
       "gen_ai.operation.name": "search_memory",
     });
+    expect(
+      withoutDeclinedContent(searched, { recordInputs: true, recordOutputs: false }),
+    ).toBeUndefined();
   });
 });

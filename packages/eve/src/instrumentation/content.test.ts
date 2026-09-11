@@ -77,6 +77,37 @@ describe("withInstrumentationDecision", () => {
     );
   });
 
+  it("treats recalled memory records as inputs", () => {
+    const completed = {
+      idempotencyKey: "memory-1",
+      operationName: "search_memory",
+      outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+      phase: "turn.started",
+      recordCount: 1,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      slot: "profile",
+      storeId: "memscope1_scope",
+      turnId: "turn-1",
+      type: "memory.operation.completed",
+    } as const;
+
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }),
+    ).toBe(completed);
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ outputRecords: undefined }));
+  });
+
   it("reduces provider metadata to structural output when outputs are disabled", () => {
     const projected = withInstrumentationDecision(
       {
