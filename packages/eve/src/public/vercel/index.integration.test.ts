@@ -8,7 +8,7 @@ vi.mock("#shared/resolve-eve-binary.js", () => ({
   resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
 }));
 
-import { withEveServices } from "./index.js";
+import { withEve } from "./index.js";
 
 async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "eve-vercel-config-"));
@@ -23,10 +23,10 @@ async function createWorkspace(): Promise<string> {
   return root;
 }
 
-describe("withEveServices", () => {
+describe("withEve", () => {
   it("composes workspace agents with authored Vercel services and routes", async () => {
     const root = await createWorkspace();
-    const config = await withEveServices(
+    const config = await withEve(
       {
         crons: [{ path: "/api/dispatch", schedule: "* * * * *" }],
         routes: [
@@ -81,7 +81,7 @@ describe("withEveServices", () => {
     await mkdir(join(marker, ".."), { recursive: true });
     await writeFile(marker, "web output");
 
-    await withEveServices({}, { root });
+    await withEve({}, { root });
 
     await expect(access(marker)).resolves.toBeUndefined();
   });
@@ -90,9 +90,9 @@ describe("withEveServices", () => {
     const root = await createWorkspace();
 
     await expect(
-      withEveServices({ services: { "eve-support": { framework: "nextjs" } } }, { root }),
+      withEve({ services: { "eve-support": { framework: "nextjs" } } }, { root }),
     ).rejects.toThrow(
-      'Vercel service key "eve-support" conflicts with the service generated for eve workspace agent "support". Remove or rename the authored service; withEveServices owns this key.',
+      'Vercel service key "eve-support" conflicts with the service generated for eve workspace agent "support". Remove or rename the authored service; withEve owns this key.',
     );
   });
 
@@ -100,9 +100,9 @@ describe("withEveServices", () => {
     const root = await createWorkspace();
 
     await expect(
-      withEveServices({ routes: [{ src: "^/support/eve/v1/(.*)$" }] }, { root }),
+      withEve({ routes: [{ src: "^/support/eve/v1/(.*)$" }] }, { root }),
     ).rejects.toThrow(
-      'Vercel route "^/support/eve/v1/(.*)$" conflicts with the transport route generated for eve workspace agent "support". Remove the authored route; withEveServices adds it automatically.',
+      'Vercel route "^/support/eve/v1/(.*)$" conflicts with the transport route generated for eve workspace agent "support". Remove the authored route; withEve adds it automatically.',
     );
   });
 
@@ -110,7 +110,7 @@ describe("withEveServices", () => {
     const root = await createWorkspace();
 
     await expect(
-      withEveServices(
+      withEve(
         {
           services: [
             { framework: "nextjs", name: "web", root: "apps/first" },
@@ -125,8 +125,8 @@ describe("withEveServices", () => {
   it("rejects obsolete service fields", async () => {
     const root = await createWorkspace();
 
-    await expect(withEveServices({ experimentalServicesV2: {} }, { root })).rejects.toThrow(
-      "withEveServices cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
+    await expect(withEve({ experimentalServicesV2: {} }, { root })).rejects.toThrow(
+      "withEve cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
     );
   });
 
@@ -135,8 +135,8 @@ describe("withEveServices", () => {
     await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
     await mkdir(join(root, "agents"));
 
-    await expect(withEveServices({}, { root })).rejects.toThrow(
-      `withEveServices found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEveServices from vercel.ts.`,
+    await expect(withEve({}, { root })).rejects.toThrow(
+      `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,
     );
   });
 
@@ -145,6 +145,6 @@ describe("withEveServices", () => {
     await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
     await mkdir(join(root, "agent"), { recursive: true });
 
-    await expect(withEveServices({}, { root })).rejects.toThrow(/workspace root/);
+    await expect(withEve({}, { root })).rejects.toThrow(/workspace root/);
   });
 });

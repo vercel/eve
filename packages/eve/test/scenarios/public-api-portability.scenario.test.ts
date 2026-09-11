@@ -42,20 +42,20 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
   {
     descriptor: {
       files: {
-        "agent/vercel.ts": `import { withEveServices, type EveVercelConfig } from "eve/vercel";
+        "agent/vercel.ts": `import { withEve, type EveVercelConfig } from "eve/vercel";
 
 const config = {
   routes: [{ destination: { service: "web", type: "service" }, src: "^(.*)$" }],
   services: { web: { framework: "nextjs", root: "apps/web" } },
 } satisfies EveVercelConfig;
 
-export default withEveServices(config);
+export default withEve(config);
 `,
       },
       name: "vercel-composer-public-api-portability",
     },
     include: ["src/public/vercel/index.ts"],
-    name: "lets tsc typecheck withEveServices from the public Vercel subpath",
+    name: "lets tsc typecheck withEve from the public Vercel subpath",
     packageExports: {
       "./vercel": {
         types: "./dist/src/public/vercel/index.d.ts",
