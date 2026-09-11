@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -239,3 +241,74 @@ describe("discoverSkills (memory)", () => {
     ]);
   });
 });
+
+describe("discoverSkills (disk)", () => {
+  it("discovers symlinked flat and packaged markdown skills", async (context) => {
+    const root = await mkdtemp(join(tmpdir(), "eve-skill-discovery-"));
+    const agentRoot = join(root, "agent");
+    const sharedSkillsRoot = join(root, "shared-skills");
+
+    try {
+      await mkdir(join(agentRoot, "skills", "linked-skill"), { recursive: true });
+      await mkdir(join(sharedSkillsRoot, "linked-package"), { recursive: true });
+      await Promise.all([
+        writeFile(
+          join(sharedSkillsRoot, "flat.md"),
+          "Use the shared flat skill before answering.\n",
+          "utf8",
+        ),
+        writeFile(
+          join(sharedSkillsRoot, "linked-package", "SKILL.md"),
+          "---\ndescription: Use the shared package skill.\n---\nUse the shared package skill.\n",
+          "utf8",
+        ),
+        writeFile(
+          join(sharedSkillsRoot, "skill.md"),
+          "---\ndescription: Use the linked package markdown.\n---\nUse the linked package markdown.\n",
+          "utf8",
+        ),
+      ]);
+      try {
+        await Promise.all([
+          symlink(join(sharedSkillsRoot, "flat.md"), join(agentRoot, "skills", "linked-flat.md")),
+          symlink(
+            join(sharedSkillsRoot, "linked-package"),
+            join(agentRoot, "skills", "linked-package"),
+            process.platform === "win32" ? "junction" : "dir",
+          ),
+          symlink(
+            join(sharedSkillsRoot, "skill.md"),
+            join(agentRoot, "skills", "linked-skill", "SKILL.md"),
+          ),
+        ]);
+      } catch (error) {
+        if (process.platform === "win32" && isLinkPermissionError(error)) {
+          context.skip("Windows does not permit file symlinks in this environment.");
+          return;
+        }
+
+        throw error;
+      }
+
+      const result = await discoverSkills({ agentRoot });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.skills.map((skill) => skill.sourceId)).toEqual([
+        "skills/linked-flat.md",
+        "skills/linked-package/SKILL.md",
+        "skills/linked-skill/SKILL.md",
+      ]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+});
+
+function isLinkPermissionError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "EACCES" || error.code === "EPERM")
+  );
+}
