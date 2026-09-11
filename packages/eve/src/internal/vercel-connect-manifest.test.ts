@@ -28,6 +28,10 @@ describe("createVercelConnectManifest", () => {
     {
       target: { mode: "binding", reference: "connections/linear" },
       connector: { type: "oauth", configuration: { service: "mcp.linear.app" } },
+      providerConfiguration: {
+        format: "slack-app-manifest",
+        path: "channels/support.slack-app-manifest.json",
+      },
       access: { principalTypes: ["user"] },
       uses: [use],
     },
