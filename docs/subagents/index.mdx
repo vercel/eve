@@ -69,13 +69,13 @@ A mounted extension can also contribute declared subagents from `extension/subag
 
 ### Vercel workspace peers
 
-In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `path` addresses the peer's workspace directory.
+In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve";
 
 export default defineWorkspaceAgent({
-  path: "agents/research",
+  name: "research",
 });
 ```
 
@@ -86,7 +86,7 @@ import { defineWorkspaceAgent } from "eve";
 import { bearer } from "eve/agents/auth";
 
 export default defineWorkspaceAgent({
-  path: "agents/research",
+  name: "research",
   transport: {
     url: () => process.env.RESEARCH_AGENT_URL!,
     auth: bearer(() => process.env.RESEARCH_AGENT_TOKEN!),
@@ -96,7 +96,7 @@ export default defineWorkspaceAgent({
 
 An explicit transport replaces the environment default completely. The receiving peer must still accept the transport's credentials through its channel authentication policy. Set `forwardPrincipal: true` only when the peer trusts the caller to forward user identity, as described in [Remote agents](./guides/remote-agents#forward-the-callers-identity).
 
-Use the peer's workspace-relative path. eve resolves that exact path but does not scan or expand workspace paths, so add another declared subagent file for each additional peer. `eve dev` does not provide local workspace routing; configure an explicit transport to target a separately running peer.
+Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. `eve dev` does not provide local workspace routing; configure an explicit transport to target a separately running peer.
 
 ### Conditional availability
 

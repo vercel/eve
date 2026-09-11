@@ -45,7 +45,7 @@ import {
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
 import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-subagent.js";
-import { workspaceSubagentPath } from "#public/definitions/workspace-agent.js";
+import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
@@ -247,13 +247,13 @@ class AgentGraphCompiler {
       );
 
       if (normalized.kind === "remote") {
-        const workspacePath = workspaceSubagentPath(phaseOne.selectedConfig.definition);
+        const workspaceName = workspaceSubagentName(phaseOne.selectedConfig.definition);
         const remoteDefinition =
-          workspacePath === undefined
+          workspaceName === undefined
             ? normalized
             : await resolveWorkspaceSubagentDefinition({
                 definition: normalized,
-                path: workspacePath,
+                name: workspaceName,
                 registries: this.registries,
                 source,
               });

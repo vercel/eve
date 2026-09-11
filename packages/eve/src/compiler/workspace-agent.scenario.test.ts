@@ -29,7 +29,7 @@ describe("Vercel workspace subagent compilation", () => {
       files: workspaceFiles(
         [
           'import { defineWorkspaceAgent } from "eve";',
-          'export default defineWorkspaceAgent({ path: "agents/research" });',
+          'export default defineWorkspaceAgent({ name: "research" });',
           "",
         ].join("\n"),
       ),
@@ -50,7 +50,7 @@ describe("Vercel workspace subagent compilation", () => {
           'import { defineWorkspaceAgent } from "eve";',
           "export default defineWorkspaceAgent({",
           '  description: "Research urgent support escalations.",',
-          '  path: "agents/research",',
+          '  name: "research",',
           "});",
           "",
         ].join("\n"),
@@ -75,7 +75,7 @@ describe("Vercel workspace subagent compilation", () => {
           'import { defineWorkspaceAgent } from "eve";',
           "export default defineWorkspaceAgent({",
           '  description: "Research urgent support escalations.",',
-          '  path: "agents/missing",',
+          '  name: "missing",',
           "});",
           "",
         ].join("\n"),
@@ -84,6 +84,6 @@ describe("Vercel workspace subagent compilation", () => {
 
     await expect(
       compileAgent({ startPath: join(app.appRoot, "agents", "support") }),
-    ).rejects.toThrow('targets unknown workspace member "agents/missing"');
+    ).rejects.toThrow('targets unknown workspace member "missing"');
   });
 });

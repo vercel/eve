@@ -9,10 +9,10 @@ import {
 } from "#public/definitions/remote-agent.js";
 import type { JsonObject } from "#shared/json.js";
 
-const WORKSPACE_PATH = Symbol.for("eve.workspace-agent.path");
+const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 
 type BrandedWorkspaceSubagent = RemoteAgentDefinition & {
-  readonly [WORKSPACE_PATH]: string;
+  readonly [WORKSPACE_AGENT_NAME]: string;
 };
 
 /** Runtime transport for one workspace peer. */
@@ -28,15 +28,15 @@ export interface WorkspaceAgentDefinition {
   readonly description?: string;
   readonly forwardPrincipal?: boolean;
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
-  /** Workspace-relative path to the peer, such as `agents/research`. */
-  readonly path: string;
+  /** Name of the peer workspace member, such as `research`. */
+  readonly name: string;
   /** Overrides environment-aware workspace routing and service authentication. */
   readonly transport?: WorkspaceAgentTransport;
 }
 
 /** Defines one workspace peer as a remote subagent. */
 export function defineWorkspaceAgent(definition: WorkspaceAgentDefinition): RemoteAgentDefinition {
-  const transport = definition.transport ?? defaultWorkspaceAgentTransport(definition.path);
+  const transport = definition.transport ?? defaultWorkspaceAgentTransport(definition.name);
   const remote = defineRemoteAgent({
     auth: transport.auth,
     description: definition.description ?? "",
@@ -45,20 +45,19 @@ export function defineWorkspaceAgent(definition: WorkspaceAgentDefinition): Remo
     outputSchema: definition.outputSchema,
     url: transport.url,
   }) as BrandedWorkspaceSubagent;
-  Object.defineProperty(remote, WORKSPACE_PATH, { value: definition.path });
+  Object.defineProperty(remote, WORKSPACE_AGENT_NAME, { value: definition.name });
   return remote;
 }
 
-export function workspaceSubagentPath(value: unknown): string | undefined {
-  return isBrandedWorkspaceSubagent(value) ? value[WORKSPACE_PATH] : undefined;
+export function workspaceSubagentName(value: unknown): string | undefined {
+  return isBrandedWorkspaceSubagent(value) ? value[WORKSPACE_AGENT_NAME] : undefined;
 }
 
 function isBrandedWorkspaceSubagent(value: unknown): value is BrandedWorkspaceSubagent {
-  return typeof value === "object" && value !== null && Reflect.has(value, WORKSPACE_PATH);
+  return typeof value === "object" && value !== null && Reflect.has(value, WORKSPACE_AGENT_NAME);
 }
 
-function defaultWorkspaceAgentTransport(path: string): WorkspaceAgentTransport {
-  const name = path.slice(path.lastIndexOf("/") + 1);
+function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const auth = vercelOidc();
   return {
     auth: async () => {
