@@ -1894,6 +1894,7 @@ describe("slackChannel() inbound mention pipeline", () => {
         installationTeamId: null,
         teamId: "T01",
         threadTs: "1700000000.000300",
+        triggeringMessageTs: "1700000000.000005",
         triggeringUserId: "U01",
       },
     });
@@ -3382,7 +3383,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     });
   });
 
-  it("opens freeform modals with installation-scoped credentials and metadata", async () => {
+  it("opens routed freeform modals with installation-scoped credentials and metadata", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({ credentials: { botToken } });
 
@@ -3401,7 +3402,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         },
         actions: [
           {
-            action_id: `${HITL_FREEFORM_ACTION_PREFIX}call_abc123`,
+            action_id: `${HITL_FREEFORM_ACTION_PREFIX}route:C_ORIGINAL:1700000000.000001:call_abc123`,
             text: { type: "plain_text", text: "Type your answer" },
             value: "call_abc123",
           },
@@ -3418,7 +3419,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
       view: { private_metadata: string };
     };
     expect(JSON.parse(body.view.private_metadata)).toMatchObject({
+      channelId: "C_ORIGINAL",
+      continuationToken: "C_ORIGINAL:1700000000.000001",
       installationTeamId: "T_INSTALLATION",
+      messageChannelId: "C01",
+      requestId: "call_abc123",
+      threadTs: "1700000000.000001",
     });
   });
 
@@ -3835,8 +3841,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
           app_installed_team_id: "T_INSTALLATION",
           callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
           private_metadata: JSON.stringify({
-            channelId: "C01",
-            continuationToken: "C01:1700000000.000001",
+            channelId: "C_ORIGINAL",
+            continuationToken: "C_ORIGINAL:1700000000.000001",
+            messageChannelId: "D_REVIEW",
             messageTs: "1700000000.000010",
             requestId: "call_abc123",
             threadTs: "1700000000.000001",
@@ -3854,12 +3861,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
-    expect(continuationToken).toBe("C01:1700000000.000001");
+    expect(continuationToken).toBe("C_ORIGINAL:1700000000.000001");
     expect(input).toMatchObject({
       auth: {
         attributes: {
           author_type: "user",
-          channel_id: "C01",
+          channel_id: "C_ORIGINAL",
           team_id: "T_ACTOR",
           thread_ts: "1700000000.000001",
           user_id: "U_SUBMITTER",
@@ -3873,6 +3880,10 @@ describe("slackChannel() HITL interaction pipeline", () => {
       inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
     });
     expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.objectContaining({ body: expect.stringContaining('"channel":"D_REVIEW"') }),
+    );
   });
 
   it("authorizes freeform modal answers before resuming", async () => {
