@@ -1,0 +1,65 @@
+diff --git a/dist/flushable-stream.d.ts b/dist/flushable-stream.d.ts
+index d82398406ec54763e762291ce98cd8285405c1f7..3bb6c67b87fd832a3f537c24240311a78ca33a96 100644
+--- a/dist/flushable-stream.d.ts
++++ b/dist/flushable-stream.d.ts
+@@ -110,6 +110,8 @@ export declare function createFlushableState(): FlushableStreamState;
+  * is used to avoid creating multiple simultaneous polling operations.
+  */
+ export declare function pollWritableLock(writable: WritableStream, state: FlushableStreamState): void;
++/** Waits for released writable prefixes to become durable before step completion. */
++export declare function flushReleasedWritables(ops: Promise<void>[]): Promise<void>;
+ /**
+  * Polls a ReadableStream to check if the user has released their lock.
+  * Resolves the done promise when lock is released and no pending ops remain.
+diff --git a/dist/flushable-stream.js b/dist/flushable-stream.js
+index 2fc027796b4592abec327634df4862a50e7cfb61..4a518cc88a533216f8019760171ffffb70b21e8d 100644
+--- a/dist/flushable-stream.js
++++ b/dist/flushable-stream.js
+@@ -173,7 +173,27 @@ function resolveAfterDrain(state) {
+  * Protection: If polling is already active on this state, the existing interval
+  * is used to avoid creating multiple simultaneous polling operations.
+  */
++const writableOperations = new WeakMap();
++
++// A released writer's accepted prefix must precede step completion. Polling
++// alone is insufficient: it can resolve before the step first takes the lock,
++// and the executor's best-effort ops timeout can let a later writer overtake it.
++export async function flushReleasedWritables(ops) {
++    await Promise.all(ops.map(async (op) => {
++        const entry = writableOperations.get(op);
++        if (!entry || entry.writable.locked) return;
++        // Let the serialization pipe consume its final accepted write before
++        // testing its sink's in-flight count and durability barrier.
++        await new Promise((resolve) => setTimeout(resolve, 0));
++        while (entry.state.pendingOps > 0) {
++            await new Promise((resolve) => setTimeout(resolve, 0));
++        }
++        await entry.state.drainBarrier?.();
++    }));
++}
++
+ export function pollWritableLock(writable, state) {
++    writableOperations.set(state.promise, { writable, state });
+     // Prevent multiple simultaneous polling on the same state
+     if (state.writablePollingInterval !== undefined) {
+         return;
+diff --git a/dist/runtime/step-executor.js b/dist/runtime/step-executor.js
+index b4e78fc4d0c3efbe6c37a304ecbc7682452bf618..f8ff09a5e9f4d82fdacfdee14655bda0a5a45835 100644
+--- a/dist/runtime/step-executor.js
++++ b/dist/runtime/step-executor.js
+@@ -4,6 +4,7 @@ import { EntityConflictError, FatalError, RetryableError, RunExpiredError, Seria
+ import { createWorkflowBaseUrl, pluralize, stepDisplayName, } from '@workflow/utils';
+ import { requireEventSlot, SPEC_VERSION_CURRENT, SPEC_VERSION_SUPPORTS_COMPRESSION, } from '@workflow/world';
+ import { runtimeLogger, stepLogger } from '../logger.js';
++import { flushReleasedWritables } from '../flushable-stream.js';
+ import { getStepFunction } from '../private.js';
+ import { formatSerializationError } from '../serialization/errors.js';
+ import { cancelAbortReaders, dehydrateStepError, dehydrateStepReturnValue, hydrateStepArguments, hydrateStepError, } from '../serialization.js';
+@@ -791,6 +792,7 @@ export async function executeStep(params) {
+                 });
+                 return dehydrated;
+             });
++            await flushReleasedWritables(ops);
+             // Flush pending ops (stream writes, etc.) with a short inline wait.
+             // WorkflowServerWritableStream acks writes on buffer entry
+             // (group-commit batching); durability is enforced by its drain

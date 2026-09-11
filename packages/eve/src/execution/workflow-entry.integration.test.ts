@@ -203,6 +203,49 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
+    const world = await getWorld();
+    const append = world.streams.writeMulti!.bind(world.streams);
+    let delayedAppend: Promise<void> | undefined;
+    const write = vi.spyOn(world.streams, "writeMulti").mockImplementation(async (...args) => {
+      if (args[1].endsWith("_user") && delayedAppend === undefined) {
+        delayedAppend = new Promise((resolve) => setTimeout(resolve, 1_200));
+        await delayedAppend;
+      }
+      return await append(...args);
+    });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Say hello to Alice." },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const events = await stream.nextTurn();
+          expect(delayedAppend).toBeDefined();
+          expect(filterEventsByType(events, "message.completed")).toHaveLength(1);
+          expectSingleTurn(events, "turn_0");
+          expect(events.at(-1)?.type).toBe("session.waiting");
+        } finally {
+          await delayedAppend;
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-followup",
