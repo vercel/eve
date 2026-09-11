@@ -129,6 +129,15 @@ export async function addAgentsToWorkspace(
       error instanceof Error ? error.message : String(error),
     );
   }
+  for (const name of names) {
+    const appRoot = join(workspaceRoot, "agents", name);
+    if (await pathExists(appRoot)) {
+      throw new InitTargetError(
+        "target_conflict",
+        `Cannot create agent ${JSON.stringify(name)} because ${appRoot} already exists.`,
+      );
+    }
+  }
   for (const name of names) await writeWorkspaceAgent(workspaceRoot, name, options);
   logger.log(
     `${pc.green("✓")} Added ${names.length === 1 ? "agent" : "agents"} ${names.map((name) => pc.bold(name)).join(", ")}`,

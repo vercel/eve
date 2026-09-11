@@ -96,8 +96,11 @@ export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<
   let kind: Awaited<ReturnType<typeof pathKind>>;
   try {
     kind = await pathKind(projectPath);
-  } catch {
-    throw new InitTargetError("target_filesystem", "Could not access the initialization target.");
+  } catch (error) {
+    throw new InitTargetError(
+      "target_filesystem",
+      `Could not access the initialization target: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   if (kind === "other") {
@@ -131,8 +134,11 @@ export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<
   let entries: string[];
   try {
     entries = (await readdir(projectPath)).sort();
-  } catch {
-    throw new InitTargetError("target_filesystem", "Could not read the initialization target.");
+  } catch (error) {
+    throw new InitTargetError(
+      "target_filesystem",
+      `Could not read the initialization target: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (entries.length === 0 || isEnvironmentOnly(entries)) {
     let projectName: string;

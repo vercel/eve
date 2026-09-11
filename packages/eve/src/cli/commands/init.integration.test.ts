@@ -194,6 +194,37 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
   });
 
+  it("reports a target conflict when a workspace agent already exists", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-conflict-"));
+    await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      '{"name":"workspace","dependencies":{"eve":"*"}}\n',
+    );
+    const output = logger();
+    const deps = dependencies();
+    const terminalEvents: Array<{ failureCode?: string; result: string; step: string }> = [];
+
+    await expect(
+      runInitCommand(
+        output,
+        workspaceRoot,
+        "support",
+        {},
+        deps,
+        undefined,
+        (step, result, failureCode) => {
+          terminalEvents.push({ failureCode, result, step });
+        },
+      ),
+    ).rejects.toThrow('Cannot create agent "support"');
+
+    expect(terminalEvents).toEqual([
+      { step: "resolve_target", result: "error", failureCode: "target_conflict" },
+    ]);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
   it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();

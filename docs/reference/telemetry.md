@@ -12,7 +12,7 @@ eve collects usage data from its CLI to help improve its commands and developmen
 eve sends the following information to Vercel:
 
 - The eve version, operating system, CPU architecture, and whether stdin is a terminal.
-- The command you ran, its outcome, and setup or onboarding steps when applicable. When setup or onboarding fails, eve sends a bounded failure category such as target conflict, invalid target, workspace input, target filesystem access, target resolution, scaffolding, package-manager startup, workspace probing, dependency installation, Git initialization, handoff, or onboarding. It does not send the underlying error.
+- The command you ran, its outcome, and setup or onboarding steps when applicable. When setup or onboarding fails, eve sends a bounded category describing the failed step. It does not send the underlying error.
 - For `eve dev`, whether you connected to a local or remote agent and whether the UI was interactive or headless.
 - Random identifiers for the CLI session, installation, and project, plus whether the installation and project identifiers are ephemeral or persistent.
 
