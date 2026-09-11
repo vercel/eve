@@ -264,6 +264,26 @@ stop-specific state is needed. Lifecycle `use()` calls return the I/O-only
 `SandboxSession` because bootstrap and session initialization do not own runtime
 teardown.
 
+Lifecycle hooks can stop an existing durable sandbox without opening it first:
+
+```ts
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "session.waiting"(_event, ctx) {
+      await ctx.stopSandbox();
+    },
+  },
+});
+```
+
+`ctx.stopSandbox()` is safe for repeated lifecycle events and for sessions that
+did not use a sandbox. It preserves the sandbox filesystem and reconnect state,
+and the next call to `ctx.getSandbox()` reopens the existing sandbox. It does
+not call `ctx.getSandbox()` internally, so it cannot provision or resume a
+sandbox only to stop it.
+
 ### Delete a sandbox
 
 Permanently delete the current session sandbox from an authored runtime callback:

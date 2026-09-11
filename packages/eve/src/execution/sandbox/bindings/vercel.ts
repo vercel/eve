@@ -22,6 +22,7 @@ import type {
   SandboxBackendPrewarmResult,
   SandboxBackendTags,
   SandboxSeedFile,
+  SandboxBackendStopExistingInput,
 } from "#public/definitions/sandbox-backend.js";
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import type {
@@ -53,6 +54,7 @@ import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup
 import {
   deleteUnusableVercelSandbox,
   deleteVercelSandbox,
+  stopExistingVercelSandbox,
   stopVercelSandbox,
 } from "#execution/sandbox/bindings/vercel-lifecycle.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
@@ -172,6 +174,13 @@ export function createVercelSandbox(
         loadDeleteSandboxModule,
         sandbox: session.sandbox,
         sessionKey: createInput.sessionKey,
+      });
+    },
+    async stopExisting(stopInput: SandboxBackendStopExistingInput) {
+      return await stopExistingVercelSandbox({
+        createOptions,
+        loadSandboxModule,
+        state: stopInput.existingState,
       });
     },
     async prewarm(

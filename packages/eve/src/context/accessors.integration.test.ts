@@ -140,6 +140,30 @@ describe("buildCallbackContext – getSandbox", () => {
     expect(stops).toBe(1);
   });
 
+  it("stops persisted sandbox compute without opening a sandbox", async () => {
+    let stops = 0;
+    const sandbox = mockSandbox({
+      stop: () => {
+        stops += 1;
+      },
+    });
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession({ sandbox }, async () => {
+      await buildCallbackContext().stopSandbox();
+    });
+
+    expect(stops).toBe(1);
+  });
+
+  it("does nothing when the session has no sandbox", async () => {
+    const runtime = await createTestRuntime();
+
+    await expect(
+      runtime.runAsSession({}, () => buildCallbackContext().stopSandbox()),
+    ).resolves.toBe(undefined);
+  });
+
   it("deletes the active sandbox through the runtime session", async () => {
     let deletions = 0;
     const sandbox = mockSandbox({

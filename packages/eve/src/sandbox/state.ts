@@ -35,4 +35,5 @@ export interface SandboxAccess {
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
   stop(): Promise<void>;
+  stopExisting?(): Promise<void>;
 }

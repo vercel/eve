@@ -159,6 +159,7 @@ const TEST_SANDBOX_BACKEND: SandboxBackend = {
       delete: async (options) => await sandbox.access.delete?.(options),
       shutdown: async () => undefined,
       stop: async () => undefined,
+      stopExisting: async () => "not-running",
     };
   },
   prewarm: async () => ({ reused: true }),

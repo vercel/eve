@@ -52,6 +52,20 @@ export interface SandboxBackendSessionState {
 }
 
 /**
+ * Input passed to a backend when eve needs to stop an existing durable
+ * sandbox without opening it first.
+ */
+export interface SandboxBackendStopExistingInput {
+  readonly existingState: SandboxBackendSessionState;
+  readonly runtimeContext: SandboxBackendRuntimeContext;
+}
+
+/**
+ * Result of a non-provisioning stop request.
+ */
+export type SandboxBackendStopExistingResult = "stopped" | "not-running" | "not-found";
+
+/**
  * One file written into a sandbox template before template state capture.
  */
 export interface SandboxSeedFile {
@@ -173,6 +187,14 @@ export interface SandboxBackend<BO = Record<string, never>, SO = Record<string, 
    * template is missing.
    */
   create(input: SandboxBackendCreateInput): Promise<SandboxBackendHandle<SO>>;
+  /**
+   * Stops an existing durable session without creating or resuming it.
+   *
+   * Backends that cannot address a persisted session without opening it may
+   * omit this capability. eve then leaves the provider-side lifecycle to the
+   * backend's normal timeout or shutdown behavior.
+   */
+  stopExisting?(input: SandboxBackendStopExistingInput): Promise<SandboxBackendStopExistingResult>;
   /**
    * Build-time prewarm hook. eve invokes this for every authored
    * sandbox in the compiled graph before serving traffic so the backend

@@ -30,6 +30,16 @@ export interface SessionContext {
   getSandbox(): Promise<RuntimeSandboxSession>;
 
   /**
+   * Stops this session's sandbox compute without opening or resuming a
+   * sandbox that is not already live in the current callback.
+   *
+   * The durable sandbox state remains available for the next callback. This
+   * method is safe to call when the session has no sandbox, when its sandbox
+   * is already stopped, and from repeated lifecycle events.
+   */
+  stopSandbox(): Promise<void>;
+
+  /**
    * Returns a {@link SkillHandle} for the named authored skill.
    */
   getSkill(identifier: string): SkillHandle;

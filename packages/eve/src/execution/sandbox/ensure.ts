@@ -54,6 +54,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
 
   const registered = input.registry.sandbox;
   let handlePromise: Promise<SandboxBackendHandle | null> | undefined;
+  let stopExistingPromise: Promise<void> | undefined;
 
   function getHandle(): Promise<SandboxBackendHandle | null> {
     if (handlePromise !== undefined) {
@@ -168,6 +169,49 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     await callback();
   }
 
+  async function stopExisting(): Promise<void> {
+    if (input.ownsSandbox === false) return;
+
+    if (stopExistingPromise !== undefined) {
+      return await stopExistingPromise;
+    }
+
+    stopExistingPromise = stopExistingOnce();
+    try {
+      await stopExistingPromise;
+    } finally {
+      stopExistingPromise = undefined;
+    }
+  }
+
+  async function stopExistingOnce(): Promise<void> {
+    // A live handle is already available in this authored step. Reuse it so
+    // the backend can stop the exact resource it opened, but never invoke
+    // createHandle solely to perform teardown.
+    if (handlePromise !== undefined) {
+      const handle = await handlePromise;
+      if (handle !== null) {
+        await handle.stop();
+        return;
+      }
+    }
+
+    if (!initialized || persistedSession === null) return;
+
+    const registered = input.registry.sandbox;
+    if (registered === null) return;
+
+    const inheritance = registered.inheritance;
+    const definition = inheritance?.definition ?? registered.definition;
+    const backend = definition.backend;
+    if (persistedSession.backendName !== backend.name) return;
+
+    await backend.stopExisting?.({
+      existingState: persistedSession,
+      runtimeContext: { appRoot },
+    });
+  }
+
   return {
     async captureState() {
       if (handlePromise !== undefined) {
@@ -209,6 +253,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       }
       await handle.stop();
     },
+    stopExisting,
   };
 }
 
