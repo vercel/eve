@@ -155,6 +155,70 @@ describe("TurnControlReceiver", () => {
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+    expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
+      payload: {},
+      token: "turn-control:cancel",
+    });
+  });
+
+  it("does not forward buffered input after the session expires", async () => {
+    installControlHook([deliveryRequest("req-1"), parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [
+      {
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ requestId: "input-1", text: "late answer" }] }],
+      },
+    ];
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        { kind: "session-timeout" },
+        { kind: "send", payload: { message: "late message" }, turnPolicy: "steer" },
+        { kind: "session-timeout" },
+      ]),
+    });
+    expect(forwardTurnCancellationStep).toHaveBeenCalledOnce();
+    expect(forwardTurnDeliveryStep).not.toHaveBeenCalled();
+    expect(bufferedDeliveries).toHaveLength(1);
+  });
+
+  it("stops an input-response relay when expiry arrives during its wait", async () => {
+    const timeout = Promise.withResolvers<IteratorResult<SessionInboxPayload>>();
+    const reads: Promise<IteratorResult<SessionInboxPayload>>[] = [
+      timeout.promise,
+      Promise.resolve({
+        done: false,
+        value: {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "input-1", text: "late answer" }] },
+        },
+      }),
+    ];
+    const commands = createCommandInbox([], {
+      next: () => reads[0] ?? new Promise(() => {}),
+      consumeNext: () => {
+        reads.shift();
+      },
+      rekeyContinuation: async () => {
+        timeout.resolve({ done: false, value: { kind: "session-timeout" } });
+      },
+    });
+    let read = 0;
+    createHookMock.mockReturnValue({
+      token: "turn-control",
+      dispose: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            if (read++ === 0) return { done: false, value: deliveryRequest("req-1") };
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            return { done: false, value: parkResult() };
+          },
+        };
+      },
+    });
+    await runReceiver([], { commandInbox: commands });
+    expect(forwardTurnCancellationStep).toHaveBeenCalledOnce();
+    expect(forwardTurnDeliveryStep).not.toHaveBeenCalled();
   });
 
   it("consumes a replayed task delivery only once", async () => {

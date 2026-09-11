@@ -24,7 +24,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
 
 export default defineEval({
   description:
-    "Session TTL lets an active turn settle, then the same channel thread starts a new session.",
+    "Session expiry cancels active work, then the same channel thread starts a new session.",
 
   async test(t) {
     const threadId = crypto.randomUUID();
@@ -40,18 +40,13 @@ export default defineEval({
     );
     const expiredSessionId = initial.sessionId!;
 
-    const activeTurn = await t.target.watchTurn(expiredSessionId).result();
-    activeTurn.expectOk();
-    activeTurn.notEvent("turn.failed");
-    await t.require(activeTurn.message, equals("timeout-ack:SLOW-TURN"));
-
-    const terminal = await t.target
-      .watchTurn(expiredSessionId, { startIndex: activeTurn.events.length })
-      .result();
+    const terminal = await t.target.watchTurn(expiredSessionId).result();
     await t.require(terminal.status, equals("completed"));
     terminal.event("session.completed");
     terminal.notEvent("turn.failed");
     terminal.notEvent("session.failed");
+    terminal.notEvent("turn.completed");
+    await t.require(terminal.message, equals(""));
 
     let owner: OwnerResponse = { sessionId: expiredSessionId };
     for (let attempt = 0; attempt < 50 && owner.sessionId !== null; attempt += 1) {

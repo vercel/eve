@@ -91,6 +91,7 @@ export class TurnControlReceiver {
   private async handleSessionCommand(
     command: DecodedSessionInbox,
   ): Promise<TurnDriverAction | undefined> {
+    if (this.bufferedSessionControls.includes("expired")) return undefined;
     if (command.kind === "deliver") {
       if (!this.acceptTaskDelivery(command)) return undefined;
       await this.bufferDelivery(command);
@@ -102,6 +103,10 @@ export class TurnControlReceiver {
     }
     if (command.kind === "session-timeout") {
       this.bufferedSessionControls.push("expired");
+      await forwardTurnCancellationStep({
+        payload: {},
+        token: turnCancellationHookToken(this.control.token),
+      });
       return undefined;
     }
     if (command.kind === "cancel") {
@@ -219,10 +224,12 @@ export class TurnControlReceiver {
   private async serviceDeliveryRequest(
     request: DeliveryRequest,
   ): Promise<TurnDriverAction | undefined> {
+    if (this.bufferedSessionControls.includes("expired")) return undefined;
     await this.commandInbox.rekeyContinuation(request.continuationToken);
 
     let delivery = this.takeInputResponseDelivery();
     while (delivery === undefined) {
+      if (this.bufferedSessionControls.includes("expired")) return undefined;
       const winner = await Promise.race([
         this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
         this.commandInbox.next().then((value) => ({ kind: "command" as const, value })),

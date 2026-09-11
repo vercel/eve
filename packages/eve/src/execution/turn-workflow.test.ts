@@ -727,6 +727,33 @@ describe("turnWorkflow", () => {
     expect(inbox.createIterator).toHaveBeenCalledOnce();
   });
 
+  it("does not dispatch a pending action batch after cancellation", async () => {
+    const pendingState = createSessionState();
+    installInbox([], { cancelPayloads: [{}], stayOpen: true });
+    vi.mocked(turnStep).mockImplementationOnce(async ({ abortSignal }) => {
+      await vi.waitFor(() => expect(abortSignal?.aborted).toBe(true));
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      };
+    });
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+    });
+    await turnWorkflow(input);
+
+    expect(turnStep).toHaveBeenCalledOnce();
+    expect(dispatchCoordinationStep).not.toHaveBeenCalled();
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+    });
+  });
+
   it("waits for dispatch adoption before cascading a cancellation", async () => {
     const initialState = createSessionState({ continuationToken: "http:parent" });
     const pendingState = createSessionState({ continuationToken: "http:parent:turn" });
@@ -745,7 +772,17 @@ describe("turnWorkflow", () => {
     }>((resolve) => {
       finishDispatch = resolve;
     });
-    installInbox([], { cancelPayloads: [{}], stayOpen: true });
+    const inbox = installInbox([], { stayOpen: true });
+    const cancelRead = Promise.withResolvers<IteratorResult<unknown>>();
+    const cancelHook = createCancelHookMock("turn-token:cancel") as object;
+    createHookMock.mockImplementation(({ token }: { token: string }) =>
+      token.endsWith(":cancel")
+        ? {
+            ...cancelHook,
+            [Symbol.asyncIterator]: () => ({ next: () => cancelRead.promise }),
+          }
+        : inbox.hook,
+    );
     vi.mocked(dispatchCoordinationStep).mockReturnValue(dispatchResult);
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -769,6 +806,10 @@ describe("turnWorkflow", () => {
     });
     const workflow = turnWorkflow(input);
     await vi.waitFor(() => expect(dispatchCoordinationStep).toHaveBeenCalledOnce());
+    cancelRead.resolve({ done: false, value: {} });
+    await vi.waitFor(() =>
+      expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal?.aborted).toBe(true),
+    );
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
 
     finishDispatch?.({ results: [], sessionState: adoptedState, pendingTasks: [] });
