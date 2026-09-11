@@ -56,7 +56,7 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
-After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+After scaffolding, a human terminal usually continues into `eve dev`. Enable the self-modification subagent to edit your agent from the dev session. Otherwise, if a coding-agent REPL is on `PATH`, you can launch it to make changes instead of opening the TUI. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
 | Flag                   | Type   | Default                    | Description                                                                                                              |
 | ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
