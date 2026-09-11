@@ -106,10 +106,10 @@ describe("GenAI message attributes", () => {
     const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({
-      ...(kind === undefined ? {} : { kind }),
       parts: [{ content: expect.stringMatching(/… \[truncated\]$/u), type: "text" }],
       role: "user",
     });
+    expect(parsed[0]?.kind).toBe(kind);
     expect(attribute).not.toContain("older message");
   });
 
