@@ -20,21 +20,21 @@
  * output.
  */
 
-const ESC = "\x1b";
-const HIDE_CURSOR = `${ESC}[?25l`;
-const SHOW_CURSOR = `${ESC}[?25h`;
-const CLEAR_TO_END = `${ESC}[0J`;
+import type { TerminalWriteTarget } from "#cli/ui/ansi.js";
+import {
+  CLEAR_TO_END,
+  CURSOR_HOME,
+  ESC,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+  SYNC_END,
+  SYNC_START,
+} from "#cli/ui/ansi.js";
+
 const CLEAR_SCREEN = `${ESC}[2J`;
 const CLEAR_SCROLLBACK = `${ESC}[3J`;
-const CURSOR_HOME = `${ESC}[H`;
-const SYNC_START = `${ESC}[?2026h`;
-const SYNC_END = `${ESC}[?2026l`;
 const BRACKETED_PASTE_ON = `${ESC}[?2004h`;
 const BRACKETED_PASTE_OFF = `${ESC}[?2004l`;
-
-export interface LiveRegionOutput {
-  write(chunk: string): boolean;
-}
 
 export interface LiveRegionOptions {
   /** Wrap each paint in synchronized-update markers to avoid flicker. */
@@ -47,7 +47,7 @@ export class LiveRegion {
   /** Rows the live region currently occupies on screen. */
   #liveRowCount = 0;
 
-  constructor(output: LiveRegionOutput, options?: LiveRegionOptions) {
+  constructor(output: TerminalWriteTarget, options?: LiveRegionOptions) {
     this.#write = output.write.bind(output);
     this.#synchronized = options?.synchronized ?? true;
   }
