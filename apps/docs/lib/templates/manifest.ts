@@ -50,19 +50,19 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-chat-template",
     title: "Chat",
     setupPrompt:
-      "Set up the eve chat template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the eve chat template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A persisted Next.js chat template for eve, with per-user long-term memory, Better Auth, Drizzle, Neon, and Upstash Redis.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-chat-template",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template",
     category: "Chat",
     model: "anthropic/claude-sonnet-5",
     integrations: ["Web chat", "Slack"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-chat-template",
+      pathPrefix: "apps/templates/eve-chat-template",
     },
     files: [
       "agent/agent.ts",
@@ -78,19 +78,19 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-llm-council-template",
     title: "LLM council",
     setupPrompt:
-      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Next.js LLM council that sends one prompt to four models in parallel, streams their answers, and asks a judge model for a concise answer with per-model agreement scores.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template",
     category: "Example",
     model: "anthropic/claude-opus-5",
     integrations: ["Web chat"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-llm-council-template",
+      pathPrefix: "apps/templates/eve-llm-council-template",
     },
     files: [
       "agent/agent.ts",
@@ -134,19 +134,19 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-slack-agent",
     title: "Slack",
     setupPrompt:
-      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template",
     category: "Collaboration",
     model: "anthropic/claude-sonnet-5",
     integrations: ["Slack"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-slack-agent-template",
+      pathPrefix: "apps/templates/eve-slack-agent-template",
     },
     files: [
       "agent/agent.ts",

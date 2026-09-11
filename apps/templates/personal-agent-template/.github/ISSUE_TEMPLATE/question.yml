@@ -1,0 +1,15 @@
+name: ❓ Question
+description: Ask a question about setup, customization, or deployment.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [README](https://github.com/vercel-labs/personal-agent-template#readme) and [docs/](https://github.com/vercel-labs/personal-agent-template/tree/main/docs) first. For open-ended discussion, consider [GitHub Discussions](https://github.com/vercel-labs/personal-agent-template/discussions).
+  - type: textarea
+    id: description
+    attributes:
+      label: Question
+      description: What are you trying to do, and where are you stuck?
+    validations:
+      required: true

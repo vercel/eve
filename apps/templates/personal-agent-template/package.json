@@ -1,0 +1,62 @@
+{
+  "name": "personal-agent-template",
+  "version": "0.0.0",
+  "description": "A durable personal AI assistant template built with Eve, Nuxt 4, and Better Auth",
+  "bugs": {
+    "url": "https://github.com/vercel-labs/personal-agent-template/issues"
+  },
+  "license": "MIT",
+  "author": "Hugo Richard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel-labs/personal-agent-template"
+  },
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*"
+  },
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "start": "nuxt preview",
+    "typecheck": "nuxt typecheck",
+    "db:generate": "nuxt db generate",
+    "db:migrate": "nuxt db migrate"
+  },
+  "dependencies": {
+    "@comark/nuxt": "^0.6.2",
+    "@github-tools/sdk": "^1.11.1",
+    "@libsql/client": "^0.17.4",
+    "@nuxt/ui": "^4.11.1",
+    "@nuxthub/core": "^0.10.8",
+    "@shikijs/langs": "^4.4.3",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/connect": "0.8.0",
+    "ai": "^7.0.70",
+    "better-auth": "^1.7.1",
+    "chat": "^4.38.1",
+    "chat-adapter-sendblue": "^0.2.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "eve": "^0.54.2",
+    "maska": "^3.2.0",
+    "nuxt": "4.5.2",
+    "shiki": "^4.4.3",
+    "tailwindcss": "^4.3.3",
+    "vue": "^3.5.41",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@iconify-json/lucide": "^1.2.124",
+    "@iconify-json/simple-icons": "^1.2.93",
+    "@types/node": "26.2.0",
+    "microsandbox": "^0.6.12",
+    "rolldown": "~1.2.5",
+    "typescript": "^6.0.3",
+    "vue-tsc": "^3.3.10"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

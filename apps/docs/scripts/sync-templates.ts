@@ -11,6 +11,7 @@ import {
 } from "../lib/templates/sync-core";
 
 const token = process.env.GITHUB_TOKEN;
+const deployedCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
 const headers: Record<string, string> = {
   Accept: "application/vnd.github+json",
   "X-GitHub-Api-Version": "2022-11-28",
@@ -50,16 +51,20 @@ console.log(`Syncing templates from GitHub (${token ? "authenticated" : "unauthe
 const syncedTemplates = await Promise.all(
   templateManifest.map(async (entry) => {
     const { github } = entry;
+    const source =
+      deployedCommit && github.owner === "vercel" && github.repo === "eve"
+        ? { ...github, ref: deployedCommit }
+        : github;
     const commit = await githubJson<{ sha: string }>(
-      commitUrl(github),
-      `Ref "${github.ref}" not found in ${github.owner}/${github.repo} (template "${entry.slug}")`,
+      commitUrl(source),
+      `Ref "${source.ref}" not found in ${source.owner}/${source.repo} (template "${entry.slug}")`,
     );
 
     const [files, readme] = await Promise.all([
       Promise.all(
         entry.files.map(async (relativePath): Promise<TemplateFile> => ({
           contents: await githubText(
-            rawContentsUrl(github, commit.sha, relativePath),
+            rawContentsUrl(source, commit.sha, relativePath),
             `Curation drift: "${relativePath}" is listed in the manifest for template ` +
               `"${entry.slug}" but does not exist in ` +
               `${github.owner}/${github.repo}@${commit.sha}`,
@@ -69,7 +74,7 @@ const syncedTemplates = await Promise.all(
         })),
       ),
       githubText(
-        rawContentsUrl(github, commit.sha, "README.md"),
+        rawContentsUrl(source, commit.sha, "README.md"),
         `README.md not found for template "${entry.slug}" in ` +
           `${github.owner}/${github.repo}@${commit.sha}`,
       ),
@@ -82,7 +87,7 @@ const syncedTemplates = await Promise.all(
         readme,
         sourceRevision: commit.sha,
       },
-      log: `${entry.slug} ${github.ref} → ${commit.sha.slice(0, 7)} (${files.length} files)`,
+      log: `${entry.slug} ${source.ref} → ${commit.sha.slice(0, 7)} (${files.length} files)`,
     };
   }),
 );

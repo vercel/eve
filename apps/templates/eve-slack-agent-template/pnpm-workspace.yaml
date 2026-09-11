@@ -1,0 +1,10 @@
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - eve
+  - workflow
+
+allowBuilds:
+  esbuild: true

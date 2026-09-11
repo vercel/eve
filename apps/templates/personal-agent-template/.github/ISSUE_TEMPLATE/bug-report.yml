@@ -1,0 +1,55 @@
+name: 🐛 Bug report
+description: Report a bug to help us improve the template.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before reporting a bug, please search existing [issues](https://github.com/vercel-labs/personal-agent-template/issues). If the bug was already reported, add your reaction instead of opening a duplicate.
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        For example:
+        - OS: macOS 15
+        - Browser: Chrome 131
+        - Node.js: 24.x
+        - Package manager: pnpm 9.x
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: main or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Clone the repo and follow Quick Start in README
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened vs what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, logs, or related configuration.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant terminal or browser logs (avoid screenshots of text).
+      render: shell
