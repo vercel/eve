@@ -13,6 +13,7 @@ import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
+  getWorkflowActivityStream,
   waitForCommandHookOwner,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
@@ -30,7 +31,11 @@ import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 
 const getHookByTokenMock = vi.fn();
 const getRawHookByTokenMock = vi.fn();
-const world = { hooks: { getByToken: getRawHookByTokenMock } };
+const getWorldRunMock = vi.fn();
+const world = {
+  hooks: { getByToken: getRawHookByTokenMock },
+  runs: { get: getWorldRunMock },
+};
 const getRunMock = vi.fn();
 const getWorldMock = vi.fn();
 const resumeHookMock = vi.fn();
@@ -60,6 +65,7 @@ beforeEach(() => {
 afterEach(() => {
   getHookByTokenMock.mockReset();
   getRawHookByTokenMock.mockReset();
+  getWorldRunMock.mockReset();
   getRunMock.mockReset();
   getWorldMock.mockReset();
   resumeHookMock.mockReset();
@@ -130,6 +136,33 @@ describe("startWorkflowOnCurrentDeployment", () => {
       contextManager.disable();
     }
     expect(observedParents).toEqual([caller, undefined]);
+  });
+});
+
+describe("createWorkflowRuntime activity streams", () => {
+  it("resolves the collector through the root session attribute", async () => {
+    const readable = new ReadableStream();
+    const getReadable = vi.fn().mockReturnValue(readable);
+    getWorldRunMock.mockResolvedValue({
+      attributes: { "$eve.activity_collector": "collector-run" },
+    });
+    getRunMock.mockReturnValue({ getReadable });
+    await expect(getWorkflowActivityStream("session-run", { startIndex: 3 })).resolves.toBe(
+      readable,
+    );
+    expect(getReadable).toHaveBeenCalledWith({
+      namespace: "eve.activity.snapshots",
+      startIndex: 3,
+    });
+    expect(getRunMock).toHaveBeenCalledWith("collector-run");
+  });
+
+  it("rejects sessions without a collector association", async () => {
+    getWorldRunMock.mockResolvedValue({ attributes: {} });
+    await expect(getWorkflowActivityStream("session-run")).rejects.toThrow(
+      "Session activity not found.",
+    );
+    expect(getRunMock).not.toHaveBeenCalled();
   });
 });
 
@@ -609,7 +642,9 @@ describe("createWorkflowRuntime#createSession", () => {
     });
     expect(collectorInput.token).toHaveLength(43);
     const workflowInput = startMock.mock.calls[1]?.[1][0];
+    const workflowOptions = startMock.mock.calls[1]?.[2];
     expect(workflowInput.activityCollectorRunId).toBe("collector-run");
+    expect(workflowOptions.attributes["$eve.activity_collector"]).toBe("collector-run");
     expect(workflowInput.serializedContext[ActivityObserverKey.name]).toEqual({
       sink: {
         url: `https://agent.example.com/eve/v1/activity/${collectorInput.token}`,

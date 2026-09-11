@@ -10,6 +10,9 @@ import type { ActivityBatchV1 } from "#protocol/activity.js";
 const mocks = vi.hoisted(() => ({
   createHook: vi.fn(),
   disposeSessionActivityStep: vi.fn(),
+  getWritable: vi.fn(),
+  releaseLock: vi.fn(),
+  write: vi.fn(),
   renderSessionActivityStep: vi.fn(),
   sleep: vi.fn(),
 }));
@@ -17,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: mocks.createHook,
+  getWritable: mocks.getWritable,
   sleep: mocks.sleep,
 }));
 vi.mock("#execution/session-activity-renderer-step.js", () => ({
@@ -27,6 +31,10 @@ vi.mock("#execution/session-activity-renderer-step.js", () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.disposeSessionActivityStep.mockResolvedValue(undefined);
+  mocks.getWritable.mockReturnValue({
+    getWriter: () => ({ releaseLock: mocks.releaseLock, write: mocks.write }),
+  });
+  mocks.write.mockResolvedValue(undefined);
 });
 
 const work = {
@@ -73,6 +81,7 @@ describe("activityCollectorWorkflow", () => {
         rendererStates: {},
         serializedContext: {},
       });
+      expect(mocks.write).toHaveBeenCalledTimes(debouncing ? 1 : 0);
     },
     1_000,
   );

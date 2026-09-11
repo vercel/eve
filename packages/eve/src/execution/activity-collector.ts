@@ -1,4 +1,4 @@
-import { createHook, sleep } from "#compiled/@workflow/core/index.js";
+import { createHook, getWritable, sleep } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
@@ -9,6 +9,9 @@ import {
 } from "#execution/session-activity-renderer-step.js";
 
 const RENDER_DEBOUNCE_MS = 350;
+
+export const ACTIVITY_SNAPSHOT_STREAM_NAMESPACE = "eve.activity.snapshots";
+export const ACTIVITY_COLLECTOR_RUN_ATTRIBUTE = "$eve.activity_collector";
 
 export interface ActivityCollectorInput {
   readonly expiresAt: string;
@@ -26,6 +29,9 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   const expiry = sleep(new Date(input.expiresAt)).then(() => ({ kind: "expired" as const }));
   let snapshot = createActivitySnapshot();
   let rendererStates: Readonly<Record<string, unknown>> = {};
+  const snapshotStream = getWritable<ActivitySnapshotV1>({
+    namespace: ACTIVITY_SNAPSHOT_STREAM_NAMESPACE,
+  });
 
   try {
     await claimHookOwnership(batches);
@@ -46,6 +52,7 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       const reduced = reduceCollectorActivity(snapshot, next.value.value);
       snapshot = reduced.snapshot;
       if (!reduced.presentationChanged) continue;
+      await publishActivitySnapshotStep(snapshotStream, snapshot);
 
       const debounce = sleep(RENDER_DEBOUNCE_MS).then(() => ({ kind: "render" as const }));
       while (true) {
@@ -59,7 +66,11 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
         if (buffered.kind === "render") break;
         if (buffered.value.done === true) return;
         pendingRead = undefined;
-        snapshot = reduceActivityBatch(snapshot, buffered.value.value);
+        const bufferedReduction = reduceCollectorActivity(snapshot, buffered.value.value);
+        snapshot = bufferedReduction.snapshot;
+        if (bufferedReduction.presentationChanged) {
+          await publishActivitySnapshotStep(snapshotStream, snapshot);
+        }
       }
 
       const rendered = await renderSessionActivityStep({
@@ -74,6 +85,20 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       rendererStates,
       serializedContext: input.serializedContext,
     }).catch(() => {});
+  }
+}
+
+async function publishActivitySnapshotStep(
+  writable: WritableStream<ActivitySnapshotV1>,
+  snapshot: ActivitySnapshotV1,
+): Promise<void> {
+  "use step";
+
+  const writer = writable.getWriter();
+  try {
+    await writer.write(snapshot);
+  } finally {
+    writer.releaseLock();
   }
 }
 

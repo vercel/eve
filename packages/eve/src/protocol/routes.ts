@@ -40,6 +40,9 @@ export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 /** Stable event-stream route pattern for one exact session ID. */
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
+/** Stable activity-snapshot stream route pattern for one exact root session ID. */
+export const EVE_SESSION_ACTIVITY_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/activity/stream`;
+
 /**
  * Parent-origin proxy route for one remotely executed child session stream.
  */
@@ -161,6 +164,11 @@ export function createEveSessionResetRoutePath(sessionId: string): string {
 /** Builds the ID-addressed event-stream route for one session. */
 export function createEveSessionStreamRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/stream`;
+}
+
+/** Builds the activity-snapshot stream route for one root session. */
+export function createEveSessionActivityStreamRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/activity/stream`;
 }
 
 /**

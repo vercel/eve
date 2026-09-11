@@ -1,4 +1,11 @@
 export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
+export const MAX_ACTIVITY_EVENT_IDS = 1_000;
+export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
+export const MAX_ACTIVITY_ENTITIES = 500;
+
+export const EVE_ACTIVITY_STREAM_CONTENT_TYPE = "application/x-ndjson";
+export const EVE_ACTIVITY_STREAM_FORMAT = "eve-activity-snapshot-ndjson";
+export const EVE_ACTIVITY_STREAM_VERSION = "1";
 
 export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
 export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
@@ -123,6 +130,68 @@ export interface ActivitySnapshotV1 {
   readonly seenEventIds: readonly string[];
   readonly version: 1;
   readonly work: Readonly<Record<string, ActivityWorkStateV1>>;
+}
+
+/** Parses a complete persisted activity snapshot at the version 1 protocol boundary. */
+export function parseActivitySnapshotV1(value: unknown): ActivitySnapshotV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "actions",
+      "blockers",
+      "pendingSettlements",
+      "revision",
+      "seenEventIds",
+      "version",
+      "work",
+    ]) ||
+    value.version !== 1 ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) < 0 ||
+    !isBoundedStringArray(value.seenEventIds, MAX_ACTIVITY_EVENT_IDS)
+  )
+    return undefined;
+
+  const actions = parseStateRecord(value.actions, MAX_ACTIVITY_ENTITIES, (candidate, key) => {
+    const state = parseActionState(candidate);
+    return state?.id === key ? state : undefined;
+  });
+  const blockers = parseStateRecord(value.blockers, MAX_ACTIVITY_ENTITIES, (candidate, key) => {
+    const state = parseBlockerState(candidate);
+    return state?.id === key ? state : undefined;
+  });
+  const pendingSettlements = parseStateRecord(
+    value.pendingSettlements,
+    MAX_ACTIVITY_PENDING_SETTLEMENTS,
+    (candidate, key) => {
+      const state = parsePendingSettlement(candidate);
+      return state !== undefined && isPendingSettlementKey(key, state.entityKind)
+        ? state
+        : undefined;
+    },
+    isPotentialPendingSettlementKey,
+  );
+  const work = parseStateRecord(value.work, MAX_ACTIVITY_ENTITIES, (candidate, key) => {
+    const state = parseWorkState(candidate);
+    return state?.id === key ? state : undefined;
+  });
+  if (
+    actions === undefined ||
+    blockers === undefined ||
+    pendingSettlements === undefined ||
+    work === undefined
+  )
+    return undefined;
+
+  return {
+    actions,
+    blockers,
+    pendingSettlements,
+    revision: value.revision as number,
+    seenEventIds: value.seenEventIds,
+    version: 1,
+    work,
+  };
 }
 
 export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentityV1 | undefined {
@@ -291,6 +360,139 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
   }
 }
 
+function parseWorkState(value: unknown): ActivityWorkStateV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "callId",
+      "id",
+      "kind",
+      "name",
+      "parentId",
+      "phase",
+      "rootSessionId",
+      "rootTurnId",
+      "sessionId",
+      "settledAt",
+      "startedAt",
+      "turnId",
+    ])
+  )
+    return undefined;
+  const identity = parseActivityWorkIdentityV1(
+    omitStateKeys(value, ["phase", "settledAt", "startedAt"]),
+  );
+  if (
+    identity === undefined ||
+    !isOneOf(value.phase, ["running", "completed", "failed", "cancelled"] as const) ||
+    !isOptionalBoundedString(value.settledAt) ||
+    !isBoundedString(value.startedAt) ||
+    !hasConsistentSettlement(value.phase, value.settledAt, "running")
+  )
+    return undefined;
+  return {
+    ...identity,
+    phase: value.phase,
+    settledAt: value.settledAt,
+    startedAt: value.startedAt,
+  };
+}
+
+function parseActionState(value: unknown): ActivityActionStateV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "id",
+      "kind",
+      "label",
+      "name",
+      "parentWorkId",
+      "phase",
+      "rootTurnId",
+      "settledAt",
+      "startedAt",
+      "stepIndex",
+    ])
+  )
+    return undefined;
+  const identity = parseActionIdentity(
+    omitStateKeys(value, ["label", "phase", "settledAt", "startedAt"]),
+  );
+  if (
+    identity === undefined ||
+    !isOptionalBoundedString(value.label) ||
+    !isOneOf(value.phase, ["running", "completed", "failed", "rejected", "cancelled"] as const) ||
+    !isOptionalBoundedString(value.settledAt) ||
+    !isBoundedString(value.startedAt) ||
+    !hasConsistentSettlement(value.phase, value.settledAt, "running")
+  )
+    return undefined;
+  return {
+    ...identity,
+    label: value.label,
+    phase: value.phase,
+    settledAt: value.settledAt,
+    startedAt: value.startedAt,
+  };
+}
+
+function parseBlockerState(value: unknown): ActivityBlockerStateV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "id",
+      "kind",
+      "label",
+      "parentActionId",
+      "parentWorkId",
+      "phase",
+      "rootTurnId",
+      "settledAt",
+      "startedAt",
+    ])
+  )
+    return undefined;
+  const identity = parseBlockerIdentity(omitStateKeys(value, ["phase", "settledAt", "startedAt"]));
+  if (
+    identity === undefined ||
+    !isOneOf(value.phase, ["blocked", "completed", "cancelled", "failed"] as const) ||
+    !isOptionalBoundedString(value.settledAt) ||
+    !isBoundedString(value.startedAt) ||
+    !hasConsistentSettlement(value.phase, value.settledAt, "blocked")
+  )
+    return undefined;
+  return {
+    ...identity,
+    phase: value.phase,
+    settledAt: value.settledAt,
+    startedAt: value.startedAt,
+  };
+}
+
+function parsePendingSettlement(value: unknown): PendingActivitySettlementV1 | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ["entityKind", "eventId", "outcome", "settledAt"]) ||
+    !isOneOf(value.entityKind, ["action", "blocker", "work"] as const) ||
+    !isIdentity(value.eventId) ||
+    !isBoundedString(value.settledAt)
+  )
+    return undefined;
+  const validOutcome =
+    value.entityKind === "action"
+      ? isOneOf(value.outcome, ["completed", "failed", "rejected", "cancelled"] as const)
+      : value.entityKind === "blocker"
+        ? isOneOf(value.outcome, ["completed", "cancelled", "failed"] as const)
+        : isOneOf(value.outcome, ["completed", "failed", "cancelled"] as const);
+  if (!validOutcome) return undefined;
+  return {
+    entityKind: value.entityKind,
+    eventId: value.eventId,
+    outcome: value.outcome as PendingActivitySettlementV1["outcome"],
+    settledAt: value.settledAt,
+  };
+}
+
 function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefined {
   if (
     !isRecord(value) ||
@@ -303,7 +505,7 @@ function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefin
     !isBoundedString(value.name) ||
     !isIdentity(value.parentWorkId) ||
     !isIdentity(value.rootTurnId) ||
-    !Number.isInteger(value.stepIndex) ||
+    !Number.isSafeInteger(value.stepIndex) ||
     (value.stepIndex as number) < 0
   )
     return undefined;
@@ -340,6 +542,57 @@ function parseBlockerIdentity(value: unknown): ActivityBlockerIdentityV1 | undef
     parentWorkId: value.parentWorkId,
     rootTurnId: value.rootTurnId,
   };
+}
+
+function parseStateRecord<T>(
+  value: unknown,
+  maxSize: number,
+  parse: (value: unknown, key: string) => T | undefined,
+  isValidKey: (key: string) => boolean = isIdentity,
+): Readonly<Record<string, T>> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value);
+  if (entries.length > maxSize) return undefined;
+  const parsed: Array<readonly [string, T]> = [];
+  for (const [key, candidate] of entries) {
+    if (!isValidKey(key)) return undefined;
+    const state = parse(candidate, key);
+    if (state === undefined) return undefined;
+    parsed.push([key, state]);
+  }
+  return Object.fromEntries(parsed);
+}
+
+function omitStateKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
+}
+
+function hasConsistentSettlement(phase: unknown, settledAt: unknown, activePhase: string): boolean {
+  return phase === activePhase ? settledAt === undefined : isBoundedString(settledAt);
+}
+
+function isPendingSettlementKey(
+  key: string,
+  entityKind: PendingActivitySettlementV1["entityKind"],
+): boolean {
+  const prefix = `${entityKind}:`;
+  return key.startsWith(prefix) && isIdentity(key.slice(prefix.length));
+}
+
+function isPotentialPendingSettlementKey(key: string): boolean {
+  return (["action", "blocker", "work"] as const).some((kind) => isPendingSettlementKey(key, kind));
+}
+
+function isBoundedStringArray(value: unknown, maxSize: number): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= maxSize &&
+    new Set(value).size === value.length &&
+    value.every((candidate) => isIdentity(candidate))
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

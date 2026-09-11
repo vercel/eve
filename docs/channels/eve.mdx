@@ -31,6 +31,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
 - `POST /eve/v1/session/:sessionId/reset` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
+- `GET /eve/v1/session/:sessionId/activity/stream` (stream enabled activity snapshots as NDJSON)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
@@ -88,6 +89,18 @@ creates or follows a replacement session.
 ### Stream events
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
+
+### Stream activity
+
+`GET /eve/v1/session/:sessionId/activity/stream` exposes complete
+`ActivitySnapshotV1` revisions when the root session's channel enabled an
+activity renderer. The route uses the same authentication, durable cursor, and
+bounded-read query parameters as the session event stream. It returns `404` for
+unknown sessions, child sessions, and root sessions without activity enabled.
+
+Activity snapshots summarize work, actions, and blockers. They do not contain
+assistant text, reasoning, tool inputs, or tool results. Use the ordinary
+session stream for transcript content.
 
 ### Cancel a turn
 

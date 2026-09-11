@@ -5,7 +5,10 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { readClientContext } from "#internal/client-context.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachSessionActivityReader,
+} from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
@@ -365,6 +368,31 @@ function createEveStreamHandler(input: EveChannelInput) {
   };
 }
 
+function createEveActivityStreamHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const route = channel.routes.find(
+    (candidate) =>
+      candidate.method === "GET" && candidate.path === "/eve/v1/session/:sessionId/activity/stream",
+  );
+  if (!route) throw new Error("No session activity stream GET route found");
+
+  const getActivityStream = vi.fn().mockResolvedValue(new ReadableStream());
+  const getActivityStreamTailIndex = vi.fn().mockResolvedValue(-1);
+  return {
+    getActivityStream,
+    getActivityStreamTailIndex,
+    async fetch(url: string) {
+      return (route as any).handler(
+        new Request(url),
+        attachSessionActivityReader(
+          { ...createRouteArgs(), params: { sessionId: "test-session-id" } },
+          { getStream: getActivityStream, getTailIndex: getActivityStreamTailIndex },
+        ),
+      );
+    },
+  };
+}
+
 function filePartBody(
   overrides: Partial<FilePart> & { data: FilePart["data"] } & { mediaType: FilePart["mediaType"] },
 ): {
@@ -523,6 +551,64 @@ describe("eveChannel — events", () => {
     });
 
     expect(observed).toEqual(["done", "continuation", "sess-eve-event"]);
+  });
+});
+
+describe("eveChannel — activity stream", () => {
+  it("serves persisted snapshots with an independent durable cursor", async () => {
+    const handler = createEveActivityStreamHandler({ auth: none() });
+    handler.getActivityStreamTailIndex.mockResolvedValueOnce(0);
+    handler.getActivityStream.mockResolvedValueOnce(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            actions: {},
+            blockers: {},
+            pendingSettlements: {},
+            revision: 1,
+            seenEventIds: [],
+            version: 1,
+            work: {},
+          });
+          controller.close();
+        },
+      }),
+    );
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/activity/stream?includeTailIndex=1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-format")).toBe("eve-activity-snapshot-ndjson");
+    expect(response.headers.get("x-eve-stream-version")).toBe("1");
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("0");
+    expect(handler.getActivityStream).toHaveBeenCalledWith("test-session-id", {
+      startIndex: undefined,
+    });
+    await expect(response.text()).resolves.toContain('"revision":1');
+  });
+
+  it("authenticates before resolving session activity", async () => {
+    const handler = createEveActivityStreamHandler({ auth: () => null });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/activity/stream",
+    );
+
+    expect(response.status).toBe(401);
+    expect(handler.getActivityStream).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when activity is not enabled or mapped", async () => {
+    const handler = createEveActivityStreamHandler({ auth: none() });
+    handler.getActivityStream.mockRejectedValueOnce(new Error("missing"));
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/activity/stream",
+    );
+
+    expect(response.status).toBe(404);
   });
 });
 

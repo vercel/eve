@@ -17,6 +17,7 @@ import {
   readAgentInfoRouteResponse,
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
+  readSessionActivityReader,
 } from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_SESSION_ID_HEADER,
@@ -33,6 +34,7 @@ import {
   EVE_INFO_ROUTE_PATH,
   EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATH,
+  EVE_SESSION_ACTIVITY_STREAM_ROUTE_PATTERN,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
@@ -60,6 +62,7 @@ import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
   checkUploadPolicy,
+  createSessionActivityStreamResponse,
   createSessionStreamResponse,
   deriveOperationContinuationToken,
   parseCancelTurnBody,
@@ -504,6 +507,21 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : ({ ok: true, status: "no_active_session" } satisfies ResetResponse),
           { headers: { "cache-control": "no-store" } },
         );
+      }),
+
+      GET(EVE_SESSION_ACTIVITY_STREAM_ROUTE_PATTERN, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(args.params);
+        if (sessionId instanceof Response) return sessionId;
+        const activity = readSessionActivityReader(args);
+        if (activity === undefined) {
+          return Response.json(
+            { error: "Session activity requires internal channel dispatch context.", ok: false },
+            { status: 500 },
+          );
+        }
+        return await createSessionActivityStreamResponse(req, sessionId, activity);
       }),
 
       GET(EVE_SESSION_STREAM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
