@@ -695,7 +695,7 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("parks in conversation mode and resumes via runtime delivery", async () => {
+  it("parks with rewind-stable event IDs and resumes through an attributed runtime delivery", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
@@ -742,6 +742,28 @@ describe("workflowEntry integration", () => {
         const workflowRuntime = createWorkflowRuntime({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
+        expect(firstTurn.length).toBeGreaterThan(1);
+        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
+        const ids = firstTurn.map((event) => event.meta.id);
+        expect(new Set(ids).size).toBe(firstTurn.length);
+
+        const replayed = await workflowRuntime.getEventStream(run.runId, { startIndex: 0 });
+        const replayedIds: string[] = [];
+        const reader = replayed.getReader();
+        try {
+          while (replayedIds.length < firstTurn.length) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            replayedIds.push(value.meta.id);
+          }
+        } finally {
+          await reader.cancel();
+        }
+        // Separate steps may append after other steps mint IDs, so mint order
+        // is not an append-order contract. A rewind preserves membership and count.
+        expect(replayedIds).toHaveLength(ids.length);
+        expect(new Set(replayedIds)).toEqual(new Set(ids));
+
         await expect(
           workflowRuntime.dispatchContinuation({
             command: {
@@ -814,69 +836,6 @@ describe("workflowEntry integration", () => {
         });
       } finally {
         stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-
-  it("stamps every stream event with an id that survives a rewind", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
-    const continuationToken = "http:workflow-entry-event-ids";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "identify these events" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-      let firstTurn: readonly MessageStreamEvent[];
-      try {
-        firstTurn = await stream.nextTurn();
-      } finally {
-        stream.dispose();
-      }
-
-      try {
-        expect(firstTurn.length).toBeGreaterThan(1);
-        // No two events share an id, including appends that share
-        // `(turnId, sequence, stepIndex)`.
-        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
-        expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
-
-        // No stream-order assertion on the ids: they sort in mint order per
-        // process, but a turn's events are appended by separate steps whose
-        // writes can interleave behind minting (see #protocol/event-id.js),
-        // so append order is not contractually sorted.
-        const ids = firstTurn.map((event) => event.meta.id);
-
-        // Re-reading the durable stream returns the same ids.
-        const workflowRuntime = createWorkflowRuntime({
-          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-        });
-        const replayed = await workflowRuntime.getEventStream(run.runId, { startIndex: 0 });
-        const replayedIds: string[] = [];
-        const reader = replayed.getReader();
-        try {
-          while (replayedIds.length < firstTurn.length) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            replayedIds.push(value.meta.id);
-          }
-        } finally {
-          await reader.cancel();
-        }
-
-        // Order is not contractual across separate steps (see comment above):
-        // compare membership and count, not append order.
-        expect(replayedIds).toHaveLength(ids.length);
-        expect(new Set(replayedIds)).toEqual(new Set(ids));
-      } finally {
         await run.cancel();
       }
     });

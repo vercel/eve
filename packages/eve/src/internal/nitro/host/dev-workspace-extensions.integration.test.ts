@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 describe("prepareDevelopmentWorkspaceExtensions", () => {
-  it("builds initial mounts and only rebuilds the extension affected by a source edit", async () => {
+  it("builds initial mounts, ignores unrelated edits, and distinguishes selective from forced rebuilds", async () => {
     const appRoot = await createWorkspaceAgent(["alpha", "beta"]);
 
     const mounts = await discoverExtensionMountDeclarations({
@@ -77,6 +77,14 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
 
     mocks.buildExtensionPackage.mockClear();
+    await prepareDevelopmentWorkspaceExtensions({
+      appRoot,
+      changedPaths: [join(appRoot, "packages", "shared", "src", "index.ts")],
+      previousExtensions: initial,
+    });
+    expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
+
+    mocks.buildExtensionPackage.mockClear();
     const alphaSourcePath = join(appRoot, "packages", "alpha", "extension", "tools", "marker.ts");
     const next = await prepareDevelopmentWorkspaceExtensions({
       appRoot,
@@ -90,6 +98,14 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
       join(appRoot, "packages", "alpha"),
       expect.objectContaining({ packageName: "@acme/alpha" }),
     );
+
+    mocks.buildExtensionPackage.mockClear();
+    await prepareDevelopmentWorkspaceExtensions({
+      appRoot,
+      changedPaths: [],
+      previousExtensions: next,
+    });
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
   });
 
   it("builds workspace extensions mounted by local subagents", async () => {
@@ -108,20 +124,6 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
       join(appRoot, "packages", "alpha"),
       expect.objectContaining({ packageName: "@acme/alpha" }),
     );
-  });
-
-  it("does not rebuild an extension for an unrelated workspace dependency edit", async () => {
-    const appRoot = await createWorkspaceAgent(["alpha"]);
-    const initial = await prepareDevelopmentWorkspaceExtensions({ appRoot });
-    mocks.buildExtensionPackage.mockClear();
-
-    await prepareDevelopmentWorkspaceExtensions({
-      appRoot,
-      changedPaths: [join(appRoot, "packages", "shared", "src", "index.ts")],
-      previousExtensions: initial,
-    });
-
-    expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
   });
 
   it("does not build a source-backed package installed inside node_modules", async () => {
@@ -160,20 +162,6 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
 
     expect(extensions).toEqual([]);
     expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
-  });
-
-  it("rebuilds every mounted workspace extension for a forced reload", async () => {
-    const appRoot = await createWorkspaceAgent(["alpha", "beta"]);
-    const initial = await prepareDevelopmentWorkspaceExtensions({ appRoot });
-    mocks.buildExtensionPackage.mockClear();
-
-    await prepareDevelopmentWorkspaceExtensions({
-      appRoot,
-      changedPaths: [],
-      previousExtensions: initial,
-    });
-
-    expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
   });
 });
 

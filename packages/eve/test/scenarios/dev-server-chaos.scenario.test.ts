@@ -339,12 +339,20 @@ describe("eve dev server chaos", () => {
   );
 
   it(
-    "reports the socket peer as the client address despite forged headers",
+    "uses socket-derived client addresses and rejects untrusted internal transport requests",
     async () => {
       const app = await scenarioApp(CHAOS_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
 
       try {
+        const forwarded = await fetch(new URL("/chaos/request-ip", server.url), {
+          headers: { "x-forwarded-for": "203.0.113.7" },
+        });
+        expect(forwarded.status).toBe(200);
+        const address = await forwarded.text();
+        expect(address).not.toBe("203.0.113.7");
+        expect(address).toContain("127.0.0.1");
+
         // Forged client-address metadata is stripped and re-stamped by the
         // parent from the accepted socket, so the handler observes the real
         // peer even when a client supplies every trusted header name.
@@ -357,20 +365,7 @@ describe("eve dev server chaos", () => {
         });
         expect(response.status).toBe(200);
         await expect(response.text()).resolves.toBe("127.0.0.1");
-      } finally {
-        await server.stop();
-      }
-    },
-    CHAOS_SCENARIO_TIMEOUT_MS,
-  );
 
-  it(
-    "rejects untrusted internal transport requests on the public listener",
-    async () => {
-      const app = await scenarioApp(CHAOS_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
         const worldCall = await fetch(new URL("/eve/v1/dev/internal/workflow-world", server.url), {
           body: "{}",
           method: "POST",

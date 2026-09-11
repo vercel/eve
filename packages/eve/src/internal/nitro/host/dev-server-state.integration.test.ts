@@ -22,14 +22,10 @@ afterEach(async () => {
 });
 
 describe("DevelopmentServerState", () => {
-  it("returns no URL when no state file exists", async () => {
+  it("reads absent state, persists the ready URL, and removes the state record", async () => {
     const state = await createState();
 
     await expect(state.read()).resolves.toBeUndefined();
-  });
-
-  it("writes and reads the ready server URL", async () => {
-    const state = await createState();
 
     await state.write("http://127.0.0.1:2000/");
 
@@ -37,21 +33,15 @@ describe("DevelopmentServerState", () => {
     await expect(readFile(join(state.appRoot, ".eve", STATE_FILE_NAME), "utf8")).resolves.toBe(
       '{"url":"http://127.0.0.1:2000/"}\n',
     );
+
+    await state.remove();
+    await expect(state.read()).resolves.toBeUndefined();
   });
 
   it("treats malformed state as stale", async () => {
     const state = await createState();
     await mkdir(join(state.appRoot, ".eve"), { recursive: true });
     await writeFile(join(state.appRoot, ".eve", STATE_FILE_NAME), "{ not json", "utf8");
-
-    await expect(state.read()).resolves.toBeUndefined();
-  });
-
-  it("removes the state record", async () => {
-    const state = await createState();
-    await state.write("http://127.0.0.1:2000/");
-
-    await state.remove();
 
     await expect(state.read()).resolves.toBeUndefined();
   });

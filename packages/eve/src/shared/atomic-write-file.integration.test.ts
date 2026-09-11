@@ -6,26 +6,13 @@ import { describe, expect, it } from "vitest";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 describe("atomicWriteFile", () => {
-  it("writes the requested contents to the target path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "eve-atomic-write-"));
-    const target = join(dir, "output.txt");
-
-    try {
-      await atomicWriteFile(target, "hello");
-      const result = await readFile(target, "utf8");
-
-      expect(result).toBe("hello");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("replaces an existing file without leaving a tmp artifact behind", async () => {
+  it("writes and replaces the requested contents without leaving a tmp artifact behind", async () => {
     const dir = await mkdtemp(join(tmpdir(), "eve-atomic-write-"));
     const target = join(dir, "output.txt");
 
     try {
       await atomicWriteFile(target, "first");
+      expect(await readFile(target, "utf8")).toBe("first");
       await atomicWriteFile(target, "second");
 
       expect(await readFile(target, "utf8")).toBe("second");

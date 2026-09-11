@@ -17,24 +17,18 @@ describe("resolveWorkflowBuildDirectory prune (integration)", () => {
     createdEntries.length = 0;
   });
 
-  it("removes a sibling workflow-cache directory whose eveVersion mismatches", () => {
+  it("prunes mismatched cache versions while preserving siblings without version metadata", () => {
     mkdirSync(workflowCacheRoot, { recursive: true });
     const staleDir = mkdtempSync(join(workflowCacheRoot, "stale-test-"));
     createdEntries.push(staleDir);
     writeFileSync(join(staleDir, "eve-cache.json"), JSON.stringify({ eveVersion: "0.0.0-stale" }));
 
-    resolveWorkflowBuildDirectory("/tmp/eve-app");
-
-    expect(readdirSync(workflowCacheRoot)).not.toContain(basename(staleDir));
-  });
-
-  it("preserves a sibling workflow-cache directory without eve-cache.json", () => {
-    mkdirSync(workflowCacheRoot, { recursive: true });
     const unknownDir = mkdtempSync(join(workflowCacheRoot, "unknown-test-"));
     createdEntries.push(unknownDir);
 
     resolveWorkflowBuildDirectory("/tmp/eve-app");
 
+    expect(readdirSync(workflowCacheRoot)).not.toContain(basename(staleDir));
     expect(readdirSync(workflowCacheRoot)).toContain(basename(unknownDir));
   });
 });

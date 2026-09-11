@@ -62,7 +62,7 @@ async function createExtensionPackage(pkg?: Record<string, unknown>): Promise<st
 }
 
 describe("extension build output", () => {
-  it("emits an agent-shaped runnable distribution and thin package entrypoints", async () => {
+  it("publishes runnable entries, portable declarations, and exports while preserving dist on rebuild failure", async () => {
     const root = await createExtensionPackage();
     const config = await tryReadExtensionBuildConfig(root);
     const outDir = await buildExtensionPackage(root, config!);
@@ -79,6 +79,33 @@ describe("extension build output", () => {
     expect(await readFile(join(outDir, "extension", "tools", "crm_search.mjs"), "utf8")).toContain(
       "Search the CRM",
     );
+
+    const indexDts = await readFile(join(outDir, "index.d.ts"), "utf8");
+    expect(indexDts).toContain('export { default } from "./extension/extension.js"');
+    expect(indexDts).toContain('export { default as crm } from "./extension/extension.js"');
+    const toolsDts = await readFile(join(outDir, "tools", "index.d.ts"), "utf8");
+    expect(toolsDts).toContain(
+      'export { default as crm_search } from "../extension/tools/crm_search.js"',
+    );
+    expect(await readFile(join(outDir, "extension", "extension.d.ts"), "utf8")).toContain(
+      "export default",
+    );
+    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+    expect(pkg.exports).toEqual({
+      ".": { types: "./dist/index.d.ts", default: "./dist/index.mjs" },
+      "./tools": { types: "./dist/tools/index.d.ts", default: "./dist/tools/index.mjs" },
+    });
+
+    await writeFile(join(outDir, "last-success.txt"), "keep\n", "utf8");
+    await writeFile(
+      join(root, "extension", "tools", "crm_search.ts"),
+      'const invalid: "expected" = "actual";\nexport default { description: invalid, async execute() { return {}; } };\n',
+      "utf8",
+    );
+    await expect(buildExtensionPackage(root, config!)).rejects.toThrow(/TS2322/);
+    await expect(readFile(join(outDir, "last-success.txt"), "utf8")).resolves.toBe("keep\n");
   });
 
   it("stamps extension-owned external dependencies into compatibility metadata", async () => {
@@ -156,24 +183,6 @@ describe("extension build output", () => {
     await expect(second.default.execute()).resolves.toBe(2);
   });
 
-  it("emits declaration barrels and declarations entirely inside dist", async () => {
-    const root = await createExtensionPackage();
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-
-    const indexDts = await readFile(join(outDir, "index.d.ts"), "utf8");
-    expect(indexDts).toContain('export { default } from "./extension/extension.js"');
-    expect(indexDts).toContain('export { default as crm } from "./extension/extension.js"');
-
-    const toolsDts = await readFile(join(outDir, "tools", "index.d.ts"), "utf8");
-    expect(toolsDts).toContain(
-      'export { default as crm_search } from "../extension/tools/crm_search.js"',
-    );
-    expect(await readFile(join(outDir, "extension", "extension.d.ts"), "utf8")).toContain(
-      "export default",
-    );
-  });
-
   it("emits portable declarations for default-exported hooks", async () => {
     const root = await createExtensionPackage();
     await mkdir(join(root, "extension", "hooks"), { recursive: true });
@@ -203,7 +212,7 @@ describe("extension build output", () => {
     expect(declaration).not.toContain("protocol/message");
   });
 
-  it("copies data files and stamps only the extension capabilities in use", async () => {
+  it("preserves data and JavaScript skill resources while stamping only the capabilities in use", async () => {
     const root = await createExtensionPackage();
     await writeFile(
       join(root, "extension", "extension.ts"),
@@ -247,12 +256,19 @@ describe("extension build output", () => {
     });
     await writeFile(
       join(root, "extension", "skills", "triage", "SKILL.md"),
-      "---\nname: triage\ndescription: Triage a request.\n---\n\n# Triage\n",
+      "---\nname: triage\ndescription: Triage a request.\n---\n\n# Triage\n\nRun scripts/check.js.\n",
       "utf8",
     );
     await writeFile(
       join(root, "extension", "skills", "triage", "references", "prompt.txt"),
       "runtime data\n",
+      "utf8",
+    );
+    await mkdir(join(root, "extension", "skills", "triage", "scripts"), { recursive: true });
+    const script = 'export const token = "skill-script-resource";\n';
+    await writeFile(
+      join(root, "extension", "skills", "triage", "scripts", "check.js"),
+      script,
       "utf8",
     );
     const config = await tryReadExtensionBuildConfig(root);
@@ -287,27 +303,6 @@ describe("extension build output", () => {
         "utf8",
       ),
     ).toBe("runtime data\n");
-  });
-
-  it("preserves JavaScript files inside packaged skill resource trees", async () => {
-    const root = await createExtensionPackage();
-    await mkdir(join(root, "extension", "skills", "triage", "scripts"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(root, "extension", "skills", "triage", "SKILL.md"),
-      "---\ndescription: Triage a request.\n---\n\nRun scripts/check.js.\n",
-      "utf8",
-    );
-    const script = 'export const token = "skill-script-resource";\n';
-    await writeFile(
-      join(root, "extension", "skills", "triage", "scripts", "check.js"),
-      script,
-      "utf8",
-    );
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-
     await expect(
       readFile(join(outDir, "extension", "skills", "triage", "scripts", "check.js"), "utf8"),
     ).resolves.toBe(script);
@@ -329,35 +324,6 @@ describe("extension build output", () => {
     const toolsDts = await readFile(join(outDir, "tools", "index.d.ts"), "utf8");
     expect(toolsDts).toContain("as get_weather ");
     expect(toolsDts).not.toContain("as get-weather ");
-  });
-
-  it("fills the exports map with runnable + types conditions", async () => {
-    const root = await createExtensionPackage();
-    const config = await tryReadExtensionBuildConfig(root);
-    await buildExtensionPackage(root, config!);
-
-    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
-      exports?: Record<string, unknown>;
-    };
-    expect(pkg.exports).toEqual({
-      ".": { types: "./dist/index.d.ts", default: "./dist/index.mjs" },
-      "./tools": { types: "./dist/tools/index.d.ts", default: "./dist/tools/index.mjs" },
-    });
-  });
-
-  it("preserves the last successful dist when a rebuild fails", async () => {
-    const root = await createExtensionPackage();
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-    await writeFile(join(outDir, "last-success.txt"), "keep\n", "utf8");
-    await writeFile(
-      join(root, "extension", "tools", "crm_search.ts"),
-      'const invalid: "expected" = "actual";\nexport default { description: invalid, async execute() { return {}; } };\n',
-      "utf8",
-    );
-
-    await expect(buildExtensionPackage(root, config!)).rejects.toThrow(/TS2322/);
-    await expect(readFile(join(outDir, "last-success.txt"), "utf8")).resolves.toBe("keep\n");
   });
 
   it("explains a tsconfig whose include misses the extension source", async () => {

@@ -63,37 +63,21 @@ describe("resolveInstrumentationLayout with providers on", () => {
     });
   });
 
-  it("keys each file by the slot its name derives", () => {
+  it("derives sorted provider slots across module extensions and ignores non-module files", () => {
     const otel = writeInstrumentationProvider("otel.ts");
+    const agentRuns = writeInstrumentationProvider("agent-runs.ts");
     const local = writeInstrumentationProvider("local.mts");
-
-    expect(resolveInstrumentationLayout({ agentRoot, providersEnabled: true })).toEqual({
-      kind: "directory",
-      modulePathsBySlot: { local, otel },
-    });
-  });
-
-  it("orders slots independently of directory enumeration", () => {
-    writeInstrumentationProvider("otel.ts");
-    writeInstrumentationProvider("agent-runs.ts");
-    writeInstrumentationProvider("local.ts");
-
-    const layout = resolveInstrumentationLayout({ agentRoot, providersEnabled: true });
-
-    expect(Object.keys(layout?.kind === "directory" ? layout.modulePathsBySlot : {})).toEqual([
-      "agent-runs",
-      "local",
-      "otel",
-    ]);
-  });
-
-  it("ignores files that are not instrumentation modules", () => {
-    writeInstrumentationProvider("otel.ts");
     writeInstrumentationProvider("README.md");
 
     const layout = resolveInstrumentationLayout({ agentRoot, providersEnabled: true });
 
+    expect(layout).toEqual({
+      kind: "directory",
+      modulePathsBySlot: { "agent-runs": agentRuns, local, otel },
+    });
     expect(Object.keys(layout?.kind === "directory" ? layout.modulePathsBySlot : {})).toEqual([
+      "agent-runs",
+      "local",
       "otel",
     ]);
   });

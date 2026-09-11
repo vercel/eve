@@ -27,29 +27,25 @@ describe("discoverEvalFiles", () => {
     expect(files).toEqual([]);
   });
 
-  it("discovers *.eval.ts files under evals/", async () => {
+  it("discovers root and nested eval files in relative-path order without including helpers", async () => {
     const evalsDir = join(tempDir, "evals");
-    await mkdir(evalsDir, { recursive: true });
+    await mkdir(join(evalsDir, "sub"), { recursive: true });
+    await writeFile(join(evalsDir, "z-eval.eval.ts"), "export default {}");
     await writeFile(join(evalsDir, "alpha.eval.ts"), "export default {}");
+    await writeFile(join(evalsDir, "sub", "nested.eval.ts"), "export default {}");
     await writeFile(join(evalsDir, "beta.eval.ts"), "export default {}");
+    await writeFile(join(evalsDir, "a-eval.eval.ts"), "export default {}");
     await writeFile(join(evalsDir, "helper.ts"), "export {}");
 
     const files = await discoverEvalFiles(tempDir);
 
-    expect(files).toHaveLength(2);
-    expect(files[0]).toContain("alpha.eval.ts");
-    expect(files[1]).toContain("beta.eval.ts");
-  });
-
-  it("discovers nested eval files", async () => {
-    const nestedDir = join(tempDir, "evals", "sub");
-    await mkdir(nestedDir, { recursive: true });
-    await writeFile(join(nestedDir, "nested.eval.ts"), "export default {}");
-
-    const files = await discoverEvalFiles(tempDir);
-
-    expect(files).toHaveLength(1);
-    expect(files[0]).toContain("nested.eval.ts");
+    expect(files).toEqual([
+      join(evalsDir, "a-eval.eval.ts"),
+      join(evalsDir, "alpha.eval.ts"),
+      join(evalsDir, "beta.eval.ts"),
+      join(evalsDir, "sub", "nested.eval.ts"),
+      join(evalsDir, "z-eval.eval.ts"),
+    ]);
   });
 
   it("ignores non-eval.ts files", async () => {
@@ -63,19 +59,7 @@ describe("discoverEvalFiles", () => {
     expect(files).toEqual([]);
   });
 
-  it("returns files sorted alphabetically by relative path", async () => {
-    const evalsDir = join(tempDir, "evals");
-    await mkdir(evalsDir, { recursive: true });
-    await writeFile(join(evalsDir, "z-eval.eval.ts"), "export default {}");
-    await writeFile(join(evalsDir, "a-eval.eval.ts"), "export default {}");
-
-    const files = await discoverEvalFiles(tempDir);
-
-    expect(files[0]).toContain("a-eval.eval.ts");
-    expect(files[1]).toContain("z-eval.eval.ts");
-  });
-
-  it("imports eval files that use extensionless local TypeScript helpers", async () => {
+  it("imports extensionless TypeScript helpers and derives nested and dataset eval identities", async () => {
     await writeFile(
       join(tempDir, "package.json"),
       JSON.stringify(
@@ -107,43 +91,12 @@ describe("discoverEvalFiles", () => {
       'export const helperValue = "prompt-from-helper";\n',
     );
 
-    const evaluations = await discoverAndImportEvals(tempDir);
-    const evaluation = evaluations[0];
-
-    expect(evaluations).toHaveLength(1);
-    if (evaluation === undefined) {
-      throw new Error("Expected one eval to be discovered.");
-    }
-    expect(evaluation.id).toBe("demo");
-    expect("description" in evaluation && evaluation.description).toBe("prompt-from-helper");
-  });
-
-  it("derives nested eval ids from the path under evals/", async () => {
-    await writeFile(
-      join(tempDir, "package.json"),
-      JSON.stringify({ name: "eve-eval-nested-id-test", type: "module" }, null, 2),
-    );
-
-    const evalsDir = join(tempDir, "evals");
     await mkdir(join(evalsDir, "weather"), { recursive: true });
     await writeFile(
       join(evalsDir, "weather", "forecast.eval.ts"),
       ["export default {", '  _tag: "EveEval",', "  test: async () => {},", "};\n"].join("\n"),
     );
 
-    const evaluations = await discoverAndImportEvals(tempDir);
-    expect(evaluations).toHaveLength(1);
-    expect(evaluations[0]?.id).toBe("weather/forecast");
-  });
-
-  it("derives zero-padded index ids for array exports", async () => {
-    await writeFile(
-      join(tempDir, "package.json"),
-      JSON.stringify({ name: "eve-eval-array-test", type: "module" }, null, 2),
-    );
-
-    const evalsDir = join(tempDir, "evals");
-    await mkdir(evalsDir, { recursive: true });
     // Dataset evals build their rows with top-level await (ESM), so the
     // authored-module bundler must support it.
     await writeFile(
@@ -164,7 +117,14 @@ describe("discoverEvalFiles", () => {
       "dataset/0000",
       "dataset/0001",
       "dataset/0002",
+      "demo",
+      "weather/forecast",
     ]);
+    const evaluation = evaluations.find((entry) => entry.id === "demo");
+    if (evaluation === undefined) {
+      throw new Error("Expected the helper-backed eval to be discovered.");
+    }
+    expect("description" in evaluation && evaluation.description).toBe("prompt-from-helper");
   });
 
   it("rejects array exports containing non-eval entries", async () => {
@@ -256,14 +216,7 @@ describe("findMisplacedEvalDirs", () => {
     expect(await findMisplacedEvalDirs(tempDir)).toEqual([]);
   });
 
-  it("detects an evals directory nested directly in agent/", async () => {
-    await mkdir(join(tempDir, "agent", "evals"), { recursive: true });
-    await writeFile(join(tempDir, "agent", "evals", "weather.eval.ts"), "export default {}");
-
-    expect(await findMisplacedEvalDirs(tempDir)).toEqual(["agent/evals"]);
-  });
-
-  it("detects eval files nested deeper in the agent tree", async () => {
+  it("detects misplaced evals both directly under agent and deeper in its tree", async () => {
     await mkdir(join(tempDir, "agent", "skills", "weather"), { recursive: true });
     await writeFile(
       join(tempDir, "agent", "skills", "weather", "forecast.eval.ts"),

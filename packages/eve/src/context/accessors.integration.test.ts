@@ -76,14 +76,11 @@ describe("buildCallbackContext – session", () => {
 });
 
 describe("buildCallbackContext – getSandbox", () => {
-  it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active eve context");
-  });
-
-  it("returns the active authored sandbox across async boundaries", async () => {
+  it("resolves the active sandbox across async boundaries and forwards commands and file operations", async () => {
     const sandboxId = "sbx_public_sandbox";
     const sandbox = mockSandbox({
       id: sandboxId,
+      initialFiles: { "note.txt": "file content" },
       commands: {
         "echo ready": { exitCode: 0, stderr: "", stdout: "ready" },
       },
@@ -99,19 +96,6 @@ describe("buildCallbackContext – getSandbox", () => {
 
     expect(sandbox.commandLog).toEqual(["echo ready"]);
     expect(live.id).toBe(sandboxId);
-  });
-
-  it("passes file operations through the expanded session surface", async () => {
-    const sandbox = mockSandbox({
-      id: "sbx_public_sandbox_file",
-      initialFiles: { "note.txt": "file content" },
-    });
-    const runtime = await createTestRuntime();
-
-    const live = (await runtime.runAsSession(
-      { sandbox },
-      async () => await buildCallbackContext().getSandbox(),
-    )) as SandboxSession;
 
     const content = await live.readTextFile({ path: "note.txt" });
     await live.writeTextFile({ content: "updated", path: "note.txt" });
@@ -159,10 +143,6 @@ describe("buildCallbackContext – getSandbox", () => {
 });
 
 describe("buildCallbackContext – getSkill", () => {
-  it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active eve context");
-  });
-
   it("throws when authored runtime execution does not include skill access", async () => {
     const runtime = await createTestRuntime();
 

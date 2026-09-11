@@ -161,7 +161,7 @@ describe("approval response authorization", () => {
 });
 
 describe("tool-hosted authorization", () => {
-  it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
+  it("exposes call metadata before resolving and caching an inline provider on an authored tool", async () => {
     let calls = 0;
     const auth: AuthorizationDefinition = {
       principalType: "app",
@@ -173,9 +173,10 @@ describe("tool-hosted authorization", () => {
     const tool = authoredTool({
       name: "list_groups",
       async execute(_input, ctx) {
+        const metadata = { callId: ctx.callId, toolName: ctx.toolName };
         const first = await ctx.getToken(auth);
         const second = await ctx.getToken(auth);
-        return { first: first.token, second: second.token };
+        return { ...metadata, first: first.token, second: second.token };
       },
     });
     const runtime = await createTestRuntime({ tools: [tool] });
@@ -183,47 +184,12 @@ describe("tool-hosted authorization", () => {
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
     // Both reads return the same cached token; getToken ran once.
-    expect(result).toEqual({ first: "tok-1", second: "tok-1" });
-    expect(calls).toBe(1);
-  });
-
-  it("exposes the tool call metadata on the authored context", async () => {
-    const tool = authoredTool({
-      name: "observe_call_metadata",
-      execute(_input, ctx) {
-        return { callId: ctx.callId, toolName: ctx.toolName };
-      },
+    expect(result).toEqual({
+      callId: "call_test",
+      toolName: "list_groups",
+      first: "tok-1",
+      second: "tok-1",
     });
-    const runtime = await createTestRuntime({ tools: [tool] });
-
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
-
-    // The test harness dispatches every executeTool call as "call_test".
-    expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
-  });
-
-  it("resolves and caches an inline provider on a plain tool", async () => {
-    let calls = 0;
-    const inlineAuth: AuthorizationDefinition = {
-      principalType: "app",
-      async getToken(): Promise<TokenResult> {
-        calls += 1;
-        return { token: `inline-${calls}` };
-      },
-    };
-    const tool = authoredTool({
-      name: "sync_ticket",
-      async execute(_input, ctx) {
-        const first = await ctx.getToken(inlineAuth);
-        const second = await ctx.getToken(inlineAuth);
-        return { first: first.token, second: second.token };
-      },
-    });
-    const runtime = await createTestRuntime({ tools: [tool] });
-
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
-
-    expect(result).toEqual({ first: "inline-1", second: "inline-1" });
     expect(calls).toBe(1);
   });
 

@@ -21,10 +21,15 @@ function buildSerializedContext(overrides: {
 }
 
 describe("AppHarness pilot", () => {
-  it("runs a task-mode turn end-to-end against an in-memory test runtime", async () => {
+  it("runs a task-mode turn with artifacts scoped to the test runtime session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "pilot-agent" } });
 
+    expect(runtime.session.compiledArtifacts).toBeNull();
     const output = await runtime.run(async () => {
+      // Check installation before the workflow can populate its own runtime state.
+      expect(getActiveRuntimeSession()).toBe(runtime.session);
+      expect(runtime.session.compiledArtifacts).not.toBeNull();
+      expect(runtime.session.compiledArtifacts?.manifest.config.name).toBe("pilot-agent");
       const run = await start(workflowEntry, [
         {
           input: { message: "hello pilot harness" },
@@ -42,20 +47,6 @@ describe("AppHarness pilot", () => {
 
     expect(typeof output).toBe("string");
     expect(output).toContain("hello pilot harness");
-  });
-
-  it("keeps compiled artifacts scoped to the test runtime session", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
-
-    // Before `run`, the session has no artifacts installed.
-    expect(runtime.session.compiledArtifacts).toBeNull();
-
-    await runtime.run(async () => {
-      // Inside `run`, reads hit the scoped session (installed on entry).
-      expect(getActiveRuntimeSession()).toBe(runtime.session);
-      expect(runtime.session.compiledArtifacts).not.toBeNull();
-      expect(runtime.session.compiledArtifacts?.manifest.config.name).toBe("scope-probe");
-    });
 
     // After `run`, the active session falls back to the process default, and
     // the process default never saw the test artifacts.

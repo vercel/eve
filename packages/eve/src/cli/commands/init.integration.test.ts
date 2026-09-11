@@ -194,7 +194,7 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
   });
 
-  it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
+  it("creates the default agent with the invoking eve dependency and hands off to dev exactly once", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();
     const deps = dependencies();
@@ -226,6 +226,7 @@ describe("runInitCommand", () => {
       expect.any(Object),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+    expect(deps.spawnPackageManager).toHaveBeenCalledTimes(1);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "exec",
       "eve",
@@ -1238,22 +1239,6 @@ describe("runInitCommand", () => {
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-  });
-
-  it("hands off to pnpm dev without extra configuration", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dev-"));
-    const output = logger();
-    const deps = dependencies();
-
-    await expect(
-      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
-    ).resolves.toBeUndefined();
-    expect(deps.spawnPackageManager).toHaveBeenCalledTimes(1);
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith(
-      "pnpm",
-      join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--onboard"],
-    );
   });
 
   it("categorizes a missing package manager without collecting process output", async () => {

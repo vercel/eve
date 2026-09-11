@@ -27,46 +27,8 @@ import {
  */
 
 describe("stageAttachmentsToSandbox (integration)", () => {
-  it("writes FilePart bytes into the active sandbox and rewrites data to an eve-sandbox: ref", async () => {
+  it("stages exact FilePart bytes behind a sandbox ref readable by authored tools", async () => {
     const sandbox = mockSandbox({ id: "sbx_integration" });
-    const runtime = await createTestRuntime();
-    const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
-
-    const content: UserContent = [
-      { type: "text", text: "summarize this csv" },
-      { data: csvBytes, filename: "report.csv", mediaType: "text/csv", type: "file" },
-    ];
-
-    const staged = (await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox(content),
-    )) as UserContent;
-
-    expect(Array.isArray(staged)).toBe(true);
-    expect(staged).toHaveLength(2);
-    expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
-
-    const filePart = staged[1] as FilePart;
-    expect(filePart.mediaType).toBe("text/csv");
-    // Staged `data` is an eve-sandbox: ref (NOT raw bytes). The
-    // refactor's key invariant: bytes never travel on the message,
-    // only the ref does.
-    expect(isSandboxRefUrl(filePart.data)).toBe(true);
-    const ref = decodeSandboxRef(filePart.data as URL);
-    expect(ref.mediaType).toBe("text/csv");
-    expect(ref.size).toBe(csvBytes.byteLength);
-    expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/report\.csv$/);
-    expect(filePart.filename).toBe(ref.path);
-
-    expect(sandbox.writes).toHaveLength(1);
-    const write = sandbox.writes[0];
-    expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`));
-    const writtenBytes = write?.content as Buffer;
-    expect(Buffer.isBuffer(writtenBytes)).toBe(true);
-    expect(writtenBytes.equals(csvBytes)).toBe(true);
-  });
-
-  it("exposes the staged path to authored tools via getSandbox().readFile", async () => {
-    const sandbox = mockSandbox({ id: "sbx_roundtrip" });
     const readTool = mockTool({
       name: "read_attachment",
       async execute(input, ctx) {
@@ -76,24 +38,45 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     });
     const runtime = await createTestRuntime({ tools: [readTool] });
-    const payload = "id,name\n1,alpha\n";
-    const bytes = Buffer.from(payload, "utf8");
+    const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
 
     const content: UserContent = [
-      { data: bytes, filename: "quarterly.csv", mediaType: "text/csv", type: "file" },
+      { type: "text", text: "summarize this csv" },
+      { data: csvBytes, filename: "report.csv", mediaType: "text/csv", type: "file" },
     ];
 
-    const result = await runtime.runAsSession({ sandbox }, async () => {
+    await runtime.runAsSession({ sandbox }, async () => {
       const staged = (await stageAttachmentsToSandbox(content)) as UserContent;
-      const filePart = staged[0] as FilePart;
+
+      expect(Array.isArray(staged)).toBe(true);
+      expect(staged).toHaveLength(2);
+      expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
+
+      const filePart = staged[1] as FilePart;
+      expect(filePart.mediaType).toBe("text/csv");
+      // Staged `data` is an eve-sandbox: ref (NOT raw bytes). The
+      // refactor's key invariant: bytes never travel on the message,
+      // only the ref does.
+      expect(isSandboxRefUrl(filePart.data)).toBe(true);
+      const ref = decodeSandboxRef(filePart.data as URL);
+      expect(ref.mediaType).toBe("text/csv");
+      expect(ref.size).toBe(csvBytes.byteLength);
+      expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/report\.csv$/);
+      expect(filePart.filename).toBe(ref.path);
+
+      expect(sandbox.writes).toHaveLength(1);
+      const write = sandbox.writes[0];
+      expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`));
+      const writtenBytes = write?.content as Buffer;
+      expect(Buffer.isBuffer(writtenBytes)).toBe(true);
+      expect(writtenBytes.equals(csvBytes)).toBe(true);
       const stagedPath = filePart.filename;
       if (typeof stagedPath !== "string") {
         throw new Error("Expected staged FilePart to carry a string filename.");
       }
-      return await runtime.executeTool(readTool, { filePath: stagedPath });
+      const result = await runtime.executeTool(readTool, { filePath: stagedPath });
+      expect(result).toBe(csvBytes.toString("utf8"));
     });
-
-    expect(result).toBe(payload);
   });
 
   it("passes text-only messages through without touching the sandbox", async () => {
@@ -165,7 +148,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(sandbox.writes).toHaveLength(2);
   });
 
-  it("resolves URL FileParts via the bound adapter's fetchFile", async () => {
+  it("resolves URL FileParts with adapter state and preserves MIME type for bare Buffer results", async () => {
     const resolvedBytes = Buffer.from("resolved-ref-bytes", "utf8");
     let fetchFileCalls = 0;
     const adapter: ChannelAdapter<any> = {
@@ -199,6 +182,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(fetchFileCalls).toBe(1);
     expect(staged).toHaveLength(2);
     const filePart = staged[1] as FilePart;
+    expect(filePart.mediaType).toBe("text/csv");
     expect(filePart.filename).toMatch(
       new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`),
     );
@@ -247,34 +231,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     const filePart = staged[0] as FilePart;
     // Resolver's mediaType wins over the ingestion-time guess.
     expect(filePart.mediaType).toBe("image/png");
-  });
-
-  it("preserves FilePart.mediaType when fetchFile returns a bare Buffer", async () => {
-    const resolvedBytes = Buffer.from("CSV", "utf8");
-    const adapter: ChannelAdapter<any> = {
-      async fetchFile() {
-        return resolvedBytes;
-      },
-      kind: "custom-channel",
-      state: {},
-    };
-    const sandbox = mockSandbox({ id: "sbx_preserve" });
-    const runtime = await createTestRuntime();
-    const content: UserContent = [
-      {
-        data: new URL("https://example.com/report.csv"),
-        filename: "report.csv",
-        mediaType: "text/csv",
-        type: "file",
-      },
-    ];
-
-    const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
-      stageAttachmentsToSandbox(content),
-    )) as UserContent;
-
-    const filePart = staged[0] as FilePart;
-    expect(filePart.mediaType).toBe("text/csv");
   });
 
   it("passes URL FileParts through unchanged when the active adapter has no fetchFile function", async () => {

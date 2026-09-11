@@ -154,7 +154,7 @@ describe("just-bash sandbox file API", () => {
     await handle.shutdown();
   });
 
-  it("writes a file via the public session and reads it back", async () => {
+  it("round-trips text and binary files with missing paths, parent creation, overwrites, ranges, and removal", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedLocalHandle({
       appRoot: cacheDirectory,
@@ -162,13 +162,64 @@ describe("just-bash sandbox file API", () => {
       templateKey: "tpl-write-read",
     });
 
-    await handle.session.writeTextFile({ content: "hello world", path: "note.txt" });
-    const content = await handle.session.readTextFile({ path: "note.txt" });
+    try {
+      await expect(handle.session.readTextFile({ path: "does-not-exist.txt" })).resolves.toBeNull();
+      await handle.session.writeTextFile({ content: "hello world", path: "note.txt" });
+      await expect(handle.session.readTextFile({ path: "note.txt" })).resolves.toBe("hello world");
 
-    expect(content).toBe("hello world");
+      await handle.session.writeTextFile({
+        content: "nested content",
+        path: "deep/nested/dir/file.txt",
+      });
+      await expect(handle.session.readTextFile({ path: "deep/nested/dir/file.txt" })).resolves.toBe(
+        "nested content",
+      );
+
+      await handle.session.writeTextFile({ content: "original", path: "file.txt" });
+      await handle.session.writeTextFile({ content: "replaced", path: "file.txt" });
+      await expect(handle.session.readTextFile({ path: "file.txt" })).resolves.toBe("replaced");
+
+      await handle.session.writeTextFile({
+        content: "dynamic skill",
+        path: "skills/tenant/SKILL.md",
+      });
+      await handle.session.writeTextFile({
+        content: "policy",
+        path: "skills/tenant/references/policy.md",
+      });
+      await handle.session.removePath({ force: true, path: "skills/tenant", recursive: true });
+      await expect(
+        handle.session.readTextFile({ path: "skills/tenant/SKILL.md" }),
+      ).resolves.toBeNull();
+      await expect(
+        handle.session.readTextFile({ path: "skills/tenant/references/policy.md" }),
+      ).resolves.toBeNull();
+
+      await handle.session.writeTextFile({
+        content: "alpha\nbeta\ngamma\ndelta\n",
+        path: "lines.txt",
+      });
+      await expect(
+        handle.session.readTextFile({ path: "lines.txt", startLine: 2, endLine: 3 }),
+      ).resolves.toBe("beta\ngamma\n");
+
+      await handle.session.writeTextFile({ content: "relative write", path: "rel.txt" });
+      await expect(handle.session.readTextFile({ path: "/workspace/rel.txt" })).resolves.toBe(
+        "relative write",
+      );
+
+      // Non-UTF-8 bytes must survive without a text encoding round trip.
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
+      await handle.session.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
+      const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
+      expect(result.exitCode).toBe(0);
+      expect(Number(result.stdout.trim())).toBe(bytes.length);
+    } finally {
+      await handle.shutdown();
+    }
   });
 
-  it("passes env vars to a command run via the public session", async () => {
+  it("passes distinct env vars to commands and spawned processes through the public session", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("run-env");
     const handle = await createPrewarmedLocalHandle({
       appRoot: cacheDirectory,
@@ -183,15 +234,6 @@ describe("just-bash sandbox file API", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("staging");
-  });
-
-  it("passes env vars to a process spawned via the public session", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("spawn-env");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-spawn-env",
-      templateKey: "tpl-spawn-env",
-    });
 
     const process = await handle.session.spawn({
       command: 'echo "$DEPLOY_ENV"',
@@ -215,77 +257,6 @@ describe("just-bash sandbox file API", () => {
     await expect(handle.session.setNetworkPolicy("deny-all")).rejects.toThrow(
       "not supported on the just-bash sandbox backend",
     );
-  });
-
-  it("readFile returns null for a missing file", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-missing",
-      templateKey: "tpl-missing",
-    });
-
-    const content = await handle.session.readTextFile({ path: "does-not-exist.txt" });
-
-    expect(content).toBeNull();
-  });
-
-  it("writeFile creates parent directories recursively", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-mkdir",
-      templateKey: "tpl-mkdir",
-    });
-
-    await handle.session.writeTextFile({
-      content: "nested content",
-      path: "deep/nested/dir/file.txt",
-    });
-    const content = await handle.session.readTextFile({ path: "deep/nested/dir/file.txt" });
-
-    expect(content).toBe("nested content");
-  });
-
-  it("writeFile overwrites an existing file", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-overwrite",
-      templateKey: "tpl-overwrite",
-    });
-
-    await handle.session.writeTextFile({ content: "original", path: "file.txt" });
-    await handle.session.writeTextFile({ content: "replaced", path: "file.txt" });
-    const content = await handle.session.readTextFile({ path: "file.txt" });
-
-    expect(content).toBe("replaced");
-  });
-
-  it("removePath deletes a recursive directory tree", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-remove",
-      templateKey: "tpl-remove",
-    });
-
-    await handle.session.writeTextFile({
-      content: "dynamic skill",
-      path: "skills/tenant/SKILL.md",
-    });
-    await handle.session.writeTextFile({
-      content: "policy",
-      path: "skills/tenant/references/policy.md",
-    });
-    await handle.session.removePath({ force: true, path: "skills/tenant", recursive: true });
-
-    await expect(
-      handle.session.readTextFile({ path: "skills/tenant/SKILL.md" }),
-    ).resolves.toBeNull();
-    await expect(
-      handle.session.readTextFile({ path: "skills/tenant/references/policy.md" }),
-    ).resolves.toBeNull();
   });
 
   it("preserves files across capture and reconnect", async () => {
@@ -348,60 +319,6 @@ describe("just-bash sandbox file API", () => {
 
     expect(content).toBe("survives reconnect");
   });
-
-  it("supports readFile with line range options", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-line-range",
-      templateKey: "tpl-line-range",
-    });
-
-    await handle.session.writeTextFile({
-      content: "alpha\nbeta\ngamma\ndelta\n",
-      path: "lines.txt",
-    });
-    const range = await handle.session.readTextFile({
-      path: "lines.txt",
-      startLine: 2,
-      endLine: 3,
-    });
-
-    expect(range).toBe("beta\ngamma\n");
-  });
-
-  it("resolves relative paths from the sandbox working directory", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-relative",
-      templateKey: "tpl-relative",
-    });
-
-    await handle.session.writeTextFile({ content: "relative write", path: "rel.txt" });
-    const content = await handle.session.readTextFile({ path: "/workspace/rel.txt" });
-
-    expect(content).toBe("relative write");
-  });
-
-  it("preserves Buffer bytes written through the public session", async () => {
-    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
-    const handle = await createPrewarmedLocalHandle({
-      appRoot: cacheDirectory,
-      sessionKey: "session-buffer",
-      templateKey: "tpl-buffer",
-    });
-
-    // A PNG header plus a handful of non-UTF-8 bytes. Reading this
-    // back as UTF-8 text would throw, so the roundtrip check uses the
-    // `wc -c` command to confirm the on-disk byte length matches.
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
-    await handle.session.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
-
-    const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
-    expect(result.exitCode).toBe(0);
-    expect(Number(result.stdout.trim())).toBe(bytes.length);
-  });
 });
 
 describe("just-bash custom commands", () => {
@@ -463,7 +380,7 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
     expect(result.stdout.trim()).toBe("");
   });
 
-  it("reports a fresh build on first prewarm and a reuse on the second", async () => {
+  it("creates a session from the first seeded prewarm and reports reuse on the second", async () => {
     const appRoot = await createTemporaryCacheDirectory("reuse-report");
     const backend = createJustBashBackend();
 
@@ -472,14 +389,7 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
       seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
       templateKey: "tpl-reuse-report",
     });
-    const second = await backend.prewarm({
-      runtimeContext: { appRoot },
-      seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
-      templateKey: "tpl-reuse-report",
-    });
-
     expect(first).toEqual({ reused: false });
-    expect(second).toEqual({ reused: true });
     await expect(
       readFile(
         join(
@@ -497,6 +407,27 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
         "utf8",
       ),
     ).resolves.toBe("# Weather skill\n");
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot },
+      sessionKey: "session-from-seeded-template",
+      templateKey: "tpl-reuse-report",
+    });
+    try {
+      const result = await handle.session.run({
+        command: "find /workspace -maxdepth 3 -type f | sort",
+      });
+      expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
+    } finally {
+      await handle.shutdown();
+    }
+
+    const second = await backend.prewarm({
+      runtimeContext: { appRoot },
+      seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
+      templateKey: "tpl-reuse-report",
+    });
+    expect(second).toEqual({ reused: true });
   });
 
   it("prunes stale cached templates while preserving retained and recent templates", async () => {
@@ -571,33 +502,6 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
     });
 
     expect(existsSync(templateRoot)).toBe(true);
-  });
-
-  it("creates a session from a prewarmed template with seed files", async () => {
-    const appRoot = await createTemporaryCacheDirectory("seed-template");
-    const backend = createJustBashBackend();
-
-    await backend.prewarm({
-      runtimeContext: { appRoot },
-      seedFiles: [
-        {
-          content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
-        },
-      ],
-      templateKey: "template-seeded-later",
-    });
-
-    const seededHandle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-from-repaired-template",
-      templateKey: "template-seeded-later",
-    });
-    const result = await seededHandle.session.run({
-      command: "find /workspace -maxdepth 3 -type f | sort",
-    });
-
-    expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
   });
 
   it("writes seed files before bootstrap and captures bootstrap outputs", async () => {

@@ -36,13 +36,25 @@ const METRICS_HOOK_SOURCE = `export default {
 `;
 
 describe("authored hooks end-to-end", () => {
-  it("compiles, resolves, and dispatches stream event hooks from disk", async () => {
+  it("resolves typed and wildcard hooks from disk while isolating parent and child registries", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-hooks-scenario-", APP_ROOT_OPTIONS);
     await mkdir(join(agentRoot, "hooks"), { recursive: true });
     await writeFile(join(agentRoot, "agent.mjs"), AGENT_SOURCE);
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise agent.\n");
     await writeFile(join(agentRoot, "hooks", "audit.mjs"), AUDIT_HOOK_SOURCE);
     await writeFile(join(agentRoot, "hooks", "metrics.mjs"), METRICS_HOOK_SOURCE);
+    const childRoot = join(agentRoot, "subagents", "researcher");
+    await mkdir(join(childRoot, "hooks"), { recursive: true });
+    await writeFile(
+      join(childRoot, "agent.mjs"),
+      `export default {
+  model: "openai/gpt-5.4",
+  description: "Investigate one task in depth.",
+};
+`,
+    );
+    await writeFile(join(childRoot, "instructions.md"), "Investigate research tasks thoroughly.\n");
+    await writeFile(join(childRoot, "hooks", "subagent-only.mjs"), METRICS_HOOK_SOURCE);
 
     await compileAgent({ startPath: appRoot });
 
@@ -53,6 +65,9 @@ describe("authored hooks end-to-end", () => {
     ]);
 
     expect(manifest.hooks.map((entry) => entry.slug).sort()).toEqual(["audit", "metrics"]);
+    expect(manifest.subagents[0]?.agent.hooks.map((entry) => entry.slug)).toEqual([
+      "subagent-only",
+    ]);
 
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
     const registry = graph.root.hookRegistry;
@@ -64,6 +79,12 @@ describe("authored hooks end-to-end", () => {
       "audit",
     ]);
     expect(registry.streamEventsWildcard.map((e) => e.slug)).toEqual(["metrics"]);
+    const subagentNode = graph.nodesByNodeId.get("subagents/researcher");
+    if (subagentNode === undefined) throw new Error("expected the researcher node");
+    expect(subagentNode.hookRegistry.streamEventsByType.size).toBe(0);
+    expect(subagentNode.hookRegistry.streamEventsWildcard.map((e) => e.slug)).toEqual([
+      "subagent-only",
+    ]);
   });
 
   it("rejects authored hook filenames that violate the hook charset at compile time", async () => {
@@ -78,58 +99,5 @@ describe("authored hooks end-to-end", () => {
     await writeFile(join(agentRoot, "hooks", "1bad.mjs"), AUDIT_HOOK_SOURCE);
 
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(/hook/i);
-  });
-
-  it("isolates subagent hook registries from the parent", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-hooks-scenario-subagent-",
-      APP_ROOT_OPTIONS,
-    );
-    await mkdir(join(agentRoot, "hooks"), { recursive: true });
-    await mkdir(join(agentRoot, "subagents", "researcher", "hooks"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), AGENT_SOURCE);
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise agent.\n");
-    await writeFile(join(agentRoot, "hooks", "audit.mjs"), AUDIT_HOOK_SOURCE);
-    await writeFile(
-      join(agentRoot, "subagents", "researcher", "agent.mjs"),
-      `export default {
-  model: "openai/gpt-5.4",
-  description: "Investigate one task in depth.",
-};
-`,
-    );
-    await writeFile(
-      join(agentRoot, "subagents", "researcher", "instructions.md"),
-      "Investigate research tasks thoroughly.\n",
-    );
-    await writeFile(
-      join(agentRoot, "subagents", "researcher", "hooks", "subagent-only.mjs"),
-      METRICS_HOOK_SOURCE,
-    );
-
-    await compileAgent({ startPath: appRoot });
-
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMap({ compiledArtifactsSource }),
-    ]);
-
-    expect(manifest.hooks.map((entry) => entry.slug)).toEqual(["audit"]);
-    expect(manifest.subagents[0]?.agent.hooks.map((entry) => entry.slug)).toEqual([
-      "subagent-only",
-    ]);
-
-    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
-    const subagentNode = graph.nodesByNodeId.get("subagents/researcher");
-    if (subagentNode === undefined) throw new Error("expected the researcher node");
-
-    expect(
-      graph.root.hookRegistry.streamEventsByType.get("turn.completed")?.map((e) => e.slug),
-    ).toEqual(["audit"]);
-    expect(subagentNode.hookRegistry.streamEventsByType.size).toBe(0);
-    expect(subagentNode.hookRegistry.streamEventsWildcard.map((e) => e.slug)).toEqual([
-      "subagent-only",
-    ]);
   });
 });

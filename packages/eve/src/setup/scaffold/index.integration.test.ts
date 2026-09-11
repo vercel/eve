@@ -433,7 +433,7 @@ describe("ensureChannel", () => {
     });
   });
 
-  test("scaffolds Web Chat with the source app channel definition", async () => {
+  test("scaffolds the source Web Chat channel, question forms, and cancellation control", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
     await writeFile(
@@ -460,22 +460,6 @@ describe("ensureChannel", () => {
     // CRLF (no repo .gitattributes), so compare line content, not line endings.
     const normalizeEol = (text: string): string => text.replaceAll("\r\n", "\n");
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
-  });
-
-  test("scaffolds Web Chat questions as visible response forms", async () => {
-    const projectRoot = await createTempDir();
-    await mkdir(join(projectRoot, "agent"), { recursive: true });
-    await writeFile(
-      join(projectRoot, "package.json"),
-      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
-      "utf8",
-    );
-
-    await ensureChannel({
-      projectRoot,
-      kind: "web",
-      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
-    });
 
     const agentMessageSource = await readFile(
       join(projectRoot, "app/_components/agent-message.tsx"),
@@ -491,22 +475,6 @@ describe("ensureChannel", () => {
     expect(questionSource).toContain("export const Question");
     expect(questionSource).toContain("export const QuestionInput");
     expect(questionSource).toContain("export const QuestionOption");
-  });
-
-  test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
-    const projectRoot = await createTempDir();
-    await mkdir(join(projectRoot, "agent"), { recursive: true });
-    await writeFile(
-      join(projectRoot, "package.json"),
-      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
-      "utf8",
-    );
-
-    await ensureChannel({
-      projectRoot,
-      kind: "web",
-      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
-    });
 
     const agentChatSource = await readFile(
       join(projectRoot, "app/_components/agent-chat.tsx"),
@@ -794,25 +762,16 @@ describe("ensureChannel", () => {
   });
 });
 
-describe("isNextJsProject", () => {
-  test("reads as no app when package.json is missing", async () => {
+describe("host framework detection", () => {
+  test("reports no Next.js app, host framework, or preset when package.json is missing", async () => {
     const projectRoot = await createTempDir();
 
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
   });
 
-  test("finds a next dependency in the Vercel framework dependency fields", async () => {
-    const projectRoot = await createTempDir();
-    await writeFile(
-      join(projectRoot, "package.json"),
-      JSON.stringify({ name: "demo", devDependencies: { next: "16.2.6" } }),
-      "utf8",
-    );
-
-    await expect(isNextJsProject(projectRoot)).resolves.toBe(true);
-  });
-
-  test("ignores a project without a next dependency", async () => {
+  test("reports no Next.js app, host framework, or preset for standalone eve projects", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
@@ -821,33 +780,32 @@ describe("isNextJsProject", () => {
     );
 
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
-  });
-});
-
-describe("hasVercelHostFramework", () => {
-  test("reads as no host app when package.json is missing", async () => {
-    const projectRoot = await createTempDir();
-
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
   });
 
   test.each([
-    ["Next.js", { next: "16.2.6" }],
-    ["Nuxt", { nuxt: "4.3.3" }],
-    ["Nuxt 3", { nuxt3: "3.19.7" }],
-    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }],
-    ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }],
-    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }],
-  ])("recognizes %s as the root Vercel framework", async (_label, dependencies) => {
-    const projectRoot = await createTempDir();
-    await writeFile(
-      join(projectRoot, "package.json"),
-      JSON.stringify({ name: "demo", devDependencies: dependencies }),
-      "utf8",
-    );
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ] as const)(
+    "recognizes %s and resolves its Vercel preset",
+    async (_label, dependencies, preset) => {
+      const projectRoot = await createTempDir();
+      await writeFile(
+        join(projectRoot, "package.json"),
+        JSON.stringify({ name: "demo", devDependencies: dependencies }),
+        "utf8",
+      );
 
-    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
-  });
+      await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
+      await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+      await expect(isNextJsProject(projectRoot)).resolves.toBe(preset === "nextjs");
+    },
+  );
 
   test("does not infer a host framework from ancestor node_modules alone", async () => {
     const workspaceRoot = await createTempDir();
@@ -893,53 +851,6 @@ describe("hasVercelHostFramework", () => {
     );
 
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
-  });
-
-  test("ignores standalone eve projects", async () => {
-    const projectRoot = await createTempDir();
-    await writeFile(
-      join(projectRoot, "package.json"),
-      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
-      "utf8",
-    );
-
-    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
-  });
-});
-
-describe("resolveVercelHostFrameworkPreset", () => {
-  test("reads as no host framework when package.json is missing", async () => {
-    const projectRoot = await createTempDir();
-
-    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
-  });
-
-  test.each([
-    ["Next.js", { next: "16.2.6" }, "nextjs"],
-    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
-    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
-    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
-    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
-  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
-    const projectRoot = await createTempDir();
-    await writeFile(
-      join(projectRoot, "package.json"),
-      JSON.stringify({ name: "demo", devDependencies: dependencies }),
-      "utf8",
-    );
-
-    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
-  });
-
-  test("returns undefined for a standalone eve project", async () => {
-    const projectRoot = await createTempDir();
-    await writeFile(
-      join(projectRoot, "package.json"),
-      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
-      "utf8",
-    );
-
-    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
   });
 });
 
@@ -1021,7 +932,7 @@ describe("scaffoldExtensionProject", () => {
 });
 
 describe("scaffoldBaseProject", () => {
-  test("writes a base eve project with the catalog TypeScript version", async () => {
+  test("writes a base eve project with the catalog TypeScript version and default Web Chat channel", async () => {
     const targetDirectory = await createTempDir();
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -1036,6 +947,9 @@ describe("scaffoldBaseProject", () => {
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
     expect(agentSource).toContain('model: "openai/gpt-5-mini"');
     expect(agentSource).not.toContain("modelOptions");
+    await expect(readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8")).resolves.toBe(
+      WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
+    );
     const readme = await readFile(join(projectRoot, "README.md"), "utf8");
     expect(readme).toContain("# demo-agent");
     expect(readme).toContain("## Getting started");
@@ -1423,24 +1337,6 @@ describe("scaffoldBaseProject", () => {
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
-  });
-
-  test("scaffolds the default eve channel from the Web Chat channel template", async () => {
-    const targetDirectory = await createTempDir();
-    const projectRoot = await scaffoldBaseProject({
-      projectName: "demo-agent",
-      model: "openai/gpt-5-mini",
-      targetDirectory,
-      evePackage: TEST_EVE_PACKAGE,
-      aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.5.4",
-      typescriptPackageVersion: "7.0.2",
-    });
-
-    const channelPath = join(projectRoot, "agent/channels/eve.ts");
-    const channelSource = await readFile(channelPath, "utf8");
-
-    expect(channelSource).toBe(WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"]);
   });
 
   test("overwrites existing in-place scaffold files only when explicitly allowed", async () => {

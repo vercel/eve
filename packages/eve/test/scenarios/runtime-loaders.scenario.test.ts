@@ -325,7 +325,7 @@ describe("runtime compiled artifact loaders", () => {
     });
   });
 
-  it("loads the compiled manifest and module map from disk-backed compiler artifacts", async () => {
+  it("loads disk-backed artifacts and preserves their contract in an app-root-free bundled runtime", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-runtime-loaders-", APP_ROOT_OPTIONS);
     await writeRuntimeLoaderFixture(agentRoot);
 
@@ -448,28 +448,6 @@ describe("runtime compiled artifact loaders", () => {
       rootEntries: [],
     });
     expect(Object.keys(moduleMap.nodes)).toEqual([ROOT_COMPILED_AGENT_NODE_ID]);
-  });
-
-  it("loads bundled compiled artifacts when no app root is available", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-runtime-loaders-bundled-",
-      APP_ROOT_OPTIONS,
-    );
-    await writeRuntimeLoaderFixture(agentRoot);
-
-    await compileAgent({
-      startPath: appRoot,
-    });
-
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({
-        compiledArtifactsSource,
-      }),
-      loadCompiledModuleMap({
-        compiledArtifactsSource,
-      }),
-    ]);
 
     await withRuntimeSession(createRuntimeSession("runtime-loaders-bundled-test"), async () => {
       installBundledCompiledArtifacts({
