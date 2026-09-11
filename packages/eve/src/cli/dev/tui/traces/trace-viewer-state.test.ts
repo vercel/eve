@@ -62,7 +62,9 @@ function conversationTrace(options: { readonly longReply?: boolean } = {}): Loca
     spanId: "c".repeat(16),
     parentSpanId: step.spanId,
     attributes: {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": options.longReply === true ? "a long reply. ".repeat(60) : "reply",
     },
   });
@@ -543,7 +545,9 @@ describe("applyLoadedTrace", () => {
           spanId: "c".repeat(16),
           parentSpanId: "b".repeat(16),
           attributes: {
-            "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+            "gen_ai.input.messages": JSON.stringify([
+              { parts: [{ content: "hi", type: "text" }], role: "user" },
+            ]),
             "ai.prompt.system": "system prompt",
             "ai.response.text": "reply",
           },

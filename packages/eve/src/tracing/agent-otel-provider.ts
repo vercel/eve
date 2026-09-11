@@ -20,7 +20,6 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
-  messagesContentAttribute,
   systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
@@ -382,8 +381,6 @@ export function createAgentOtelInstrumentation(
       attempt.context,
     );
     if (recordInputs && event.input !== undefined) {
-      const messages = messagesContentAttribute(event.input.messages);
-      if (messages !== undefined) span.setAttribute("ai.prompt.messages", messages);
       const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
       if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
       const system = systemPromptAttribute(event.input.instructions);
@@ -445,7 +442,7 @@ export function createAgentOtelInstrumentation(
           .filter((part) => part.type === "tool-call")
           .map((part) => ({ callId: part.callId, input: part.input, toolName: part.toolName }));
         if (toolCalls.length > 0) {
-          const json = contentAttribute(toolCalls, false);
+          const json = contentAttribute(toolCalls);
           if (json !== undefined) state.span.setAttribute("ai.response.tool_calls", json);
         }
         // Provider-executed tools (e.g. web_search) run inside the model call,

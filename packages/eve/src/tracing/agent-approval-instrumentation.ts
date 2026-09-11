@@ -79,7 +79,7 @@ export function createAgentApprovalInstrumentation(input: {
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
     };
-    const requestAttribute = contentAttribute(event.request, false);
+    const requestAttribute = contentAttribute(event.request);
     if (requestAttribute !== undefined) state["requestAttribute"] = requestAttribute;
     ctx.state.set(state);
   };
@@ -128,7 +128,7 @@ export function createAgentApprovalInstrumentation(input: {
       span.setAttribute("agent.approval.request", state.requestAttribute);
     }
     if (event.response !== undefined) {
-      const response = contentAttribute(event.response, false);
+      const response = contentAttribute(event.response);
       if (response !== undefined) span.setAttribute("agent.approval.response", response);
     }
     if (event.outcome === "failed") recordError(span, event.error);

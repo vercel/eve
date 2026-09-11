@@ -181,7 +181,7 @@ export function createAgentToolInstrumentation(input: {
       ),
     );
     if (input.recordInputs) {
-      const args = contentAttribute(state.event.input, false);
+      const args = contentAttribute(state.event.input);
       if (args !== undefined) state.span.setAttribute("gen_ai.tool.call.arguments", args);
     }
   }
@@ -203,7 +203,7 @@ export function createAgentToolInstrumentation(input: {
     } else if (terminal?.output.type === "error") {
       recordError(span, terminal.output.error);
     } else if (terminal !== undefined && input.recordOutputs) {
-      const result = contentAttribute(terminal.output.output, false);
+      const result = contentAttribute(terminal.output.output);
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
     span.end();

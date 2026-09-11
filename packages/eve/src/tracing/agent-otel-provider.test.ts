@@ -2344,10 +2344,6 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
-    // Provider transport noise (signatures et al.) is stripped at capture time.
-    expect(model.attributes["ai.prompt.messages"]).toBe(
-      '[{"content":"real user text","role":"user"}]',
-    );
     expect(model.attributes["ai.prompt.system"]).toBe(
       "You are a weather assistant (system prompt).",
     );
@@ -2472,14 +2468,11 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const model = byName(runtime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
-    const raw = model.attributes["ai.prompt.messages"];
+    const raw = model.attributes["gen_ai.input.messages"];
     expect(typeof raw).toBe("string");
     expect((raw as string).length).toBeLessThanOrEqual(32 * 1024);
     const parsed = JSON.parse(raw as string) as Array<Record<string, unknown>>;
     expect(parsed.length).toBeGreaterThan(1);
-    expect(parsed[0]).toMatchObject({
-      "eve.truncated": { omittedMessages: expect.any(Number) },
-    });
     expect(JSON.stringify(parsed)).toContain("message 199");
     expect(JSON.stringify(parsed)).not.toContain("message 0 ");
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
@@ -2665,8 +2658,8 @@ describe("createAgentOtelInstrumentation", () => {
       '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
     );
     expect(secondModel.attributes["agent.input.messages.delta"]).toBeUndefined();
-    expect(secondModel.attributes["ai.prompt.messages"]).toBe(
-      '[{"content":"real user text","role":"user"}]',
+    expect(secondModel.attributes["gen_ai.input.messages"]).toBe(
+      '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
     );
     expect([
       ...byName(firstRuntime.exporter.getFinishedSpans(), "agent.session"),

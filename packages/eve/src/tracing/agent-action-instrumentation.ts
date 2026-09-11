@@ -78,7 +78,7 @@ export function createAgentActionInstrumentation(input: {
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
-      inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
+      inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -234,7 +234,7 @@ export function createAgentActionInstrumentation(input: {
         setAgentUsage(span, event.usage);
       }
       if (input.recordOutputs && !isAgentInvocation(state.kind)) {
-        const result = contentAttribute(event.output.output, false);
+        const result = contentAttribute(event.output.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
       }
     }
@@ -304,7 +304,7 @@ function recordActionError(span: Span, error: unknown, errorType?: string): void
 
 function serializedErrorDetail(error: unknown): string | undefined {
   if (typeof error === "string") return textContentAttribute(error);
-  const serialized = contentAttribute(error, false);
+  const serialized = contentAttribute(error);
   if (typeof error !== "object" || error === null || Array.isArray(error)) return serialized;
   const message = Reflect.get(error, "message");
   if (typeof message !== "string") return serialized;

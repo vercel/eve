@@ -105,11 +105,11 @@ describe("managed export policy", () => {
     spanProcessor.onEnd(
       testSpan({
         "agent.channel.audience": "private",
-        "ai.prompt.messages": "private input",
+        "gen_ai.input.messages": "private input",
       }),
     );
 
-    expect(visibleAttributes).toHaveProperty("ai.prompt.messages", "private input");
+    expect(visibleAttributes).toHaveProperty("gen_ai.input.messages", "private input");
   });
 
   it("runs composed export policies in declaration order", () => {
@@ -132,7 +132,7 @@ describe("managed export policy", () => {
     spanProcessor.onEnd(
       testSpan({
         "agent.channel.audience": "private",
-        "ai.prompt.messages": "private input",
+        "gen_ai.input.messages": "private input",
       }),
     );
 
@@ -154,7 +154,7 @@ describe("managed export policy", () => {
 
     const spanProcessor = integration.spanProcessors[0];
     if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
-    spanProcessor.onEnd(testSpan({ "ai.prompt.messages": "private input" }));
+    spanProcessor.onEnd(testSpan({ "gen_ai.input.messages": "private input" }));
 
     expect(visibleAttributes).toEqual({});
   });
