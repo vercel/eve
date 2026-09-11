@@ -48,7 +48,7 @@ import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
-import { parseTraceparent } from "#protocol/traceparent.js";
+import { parseTraceparent, readAgentDispatchTraceContext } from "#protocol/traceparent.js";
 import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { readConversationBaggage } from "#tracing/conversation-context.js";
 import {
@@ -151,10 +151,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        const parsedParentTraceContext =
+        const transportParentTraceContext =
           body.callback === undefined
             ? undefined
             : parseTraceparent(req.headers.get("traceparent"));
+        const parsedParentTraceContext =
+          body.callback === undefined
+            ? undefined
+            : (readAgentDispatchTraceContext(
+                req.headers.get("tracestate"),
+                transportParentTraceContext,
+              ) ?? transportParentTraceContext);
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -189,13 +196,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         const forwardedTraceAssertion =
-          parsedParentTraceContext === undefined
+          transportParentTraceContext === undefined
             ? "absent"
             : readForwardedAudienceBaggage(req.headers.get("baggage"));
         const acceptsForwardedTracePolicy =
           forwarded.accepted &&
-          parsedParentTraceContext !== undefined &&
-          (parsedParentTraceContext.traceFlags & 1) === 1;
+          transportParentTraceContext !== undefined &&
+          (transportParentTraceContext.traceFlags & 1) === 1;
         const acceptedForwardedTracePolicy = !acceptsForwardedTracePolicy
           ? undefined
           : typeof forwardedTraceAssertion === "object"

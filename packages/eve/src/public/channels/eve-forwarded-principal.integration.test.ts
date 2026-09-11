@@ -136,7 +136,8 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         headers: {
           "content-type": "application/json",
           baggage: "vendor=value,eve.audience=private;ceiling=i1o0",
-          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+          tracestate: `eve=${"2".repeat(16)}`,
+          traceparent: `00-${"1".repeat(32)}-${"3".repeat(16)}-01`,
         },
         method: "POST",
       }),

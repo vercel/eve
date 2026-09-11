@@ -232,6 +232,7 @@ describe("startRemoteAgentSession", () => {
           ...createRemoteAgent(),
           headers: {
             Traceparent: "operator-context",
+            Tracestate: `eve=${"a".repeat(16)},vendor=opaque`,
             baggage: "eve.conversation.id=operator-id,vendor=value",
           },
         },
@@ -251,6 +252,9 @@ describe("startRemoteAgentSession", () => {
       const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
       expect(headers.get("traceparent")).toBe(
         hasContext ? `00-${"1".repeat(32)}-${"2".repeat(16)}-01` : "operator-context",
+      );
+      expect(headers.get("tracestate")).toBe(
+        hasContext ? `eve=${"2".repeat(16)},vendor=opaque` : "vendor=opaque",
       );
       expect(headers.get("baggage")).toBe(
         hasContext
@@ -310,6 +314,7 @@ describe("startRemoteAgentSession", () => {
       headers: {
         authorization: "Bearer remote-token",
         "content-type": "application/json",
+        tracestate: `eve=${"2".repeat(16)}`,
         traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
         "x-static": "yes",
       },

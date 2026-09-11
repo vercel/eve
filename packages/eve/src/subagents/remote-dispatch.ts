@@ -19,7 +19,7 @@ import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
-import { formatTraceparent } from "#protocol/traceparent.js";
+import { formatTraceparent, writeAgentDispatchTracestate } from "#protocol/traceparent.js";
 import {
   formatSubagentInput,
   normalizeRequestedOutputSchema,
@@ -133,6 +133,11 @@ export async function startRemoteAgentSession(input: {
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const traceparent = formatTraceparent(input.parent?.traceContext);
   if (traceparent !== undefined) setHeader(headers, "traceparent", traceparent);
+  setHeader(
+    headers,
+    "tracestate",
+    writeAgentDispatchTracestate(readHeader(headers, "tracestate"), input.parent?.traceContext),
+  );
   const baggage = writeForwardedAudienceBaggage(
     readHeader(headers, "baggage"),
     buildForwardedTraceAssertion({

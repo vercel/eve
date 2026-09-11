@@ -198,8 +198,10 @@ A conversation remains durable state; `gen_ai.conversation.id` joins the activat
 
 Each activation owns a fresh trace identity, including local and remote
 subagents. The first child activation links to its caller with
-`eve.link.type=agent.dispatch`; incoming `traceparent` provides that link, not
-the child trace ID. Later turns do not reuse the original caller link.
+`eve.link.type=agent.dispatch`; remote dispatch preserves that caller separately
+in W3C `tracestate` while HTTP intermediaries update `traceparent`. Older peers
+fall back to the incoming transport context. Later turns do not reuse the
+original caller link.
 Conversation baggage is independent of execution lineage and trace-policy
 ceilings, which remain in force across the boundary.
 
@@ -279,7 +281,7 @@ invoke_agent support                 session=S, turn=turn_1, conversation=S
 
 The conversation filter finds all three retained traces. eve initializes the conversation ID once and carries it through the existing parent context for local dispatch and `eve.conversation.id` baggage for remote dispatch. Remote session creation does not carry execution lineage or add authorization requirements for tracing. Existing authentication, principal forwarding, and root-session limits remain unchanged.
 
-`traceparent` carries the caller's trace and span IDs for the causal link; adopting it as the child's parent would instead keep both in the same trace. Resolved trace-policy decisions and trusted remote content ceilings continue across this boundary independently of correlation, and an unsampled caller cannot be widened into a sampled child. No synthetic session span is needed.
+Remote dispatch records the caller's span ID in eve's W3C `tracestate` entry because HTTP intermediaries may advance `traceparent` to their own request span. The receiver combines that prior parent with the current trace identity for the causal link and retains the transport context for `channel.request`; adopting either as the child's parent would instead keep both in the same trace. Resolved trace-policy decisions and trusted remote content ceilings continue across this boundary independently of correlation, and an unsampled caller cannot be widened into a sampled child. No synthetic session span is needed.
 
 Activation duration is elapsed time for that activation, including waits inside it, not the lifetime of the conversation or CPU time. Idle time between ended activations is not part of their durations. For token totals, choose one level: filter to `chat` model spans and sum `gen_ai.usage.*`, or filter to activations and sum their `agent.usage.input_tokens` and `agent.usage.output_tokens`. Exclude caller summaries from the activation total. Query cache usage on model spans. Do not add model, step, activation, and caller counters together.
 
