@@ -97,9 +97,6 @@ catalogs:
       specifier: 4.5.4
       version: 4.5.4
 
-patchedDependencies:
-  '@workflow/core@5.0.0-beta.50': 88852906f53ab7edd9858c3461fe09ae9d8f3812bf7e3f6f4b2b08920bb279fe
-
 importers:
 
   .:
@@ -1442,7 +1439,7 @@ importers:
         version: 5.0.0-beta.50(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/core':
         specifier: 5.0.0-beta.50
-        version: 5.0.0-beta.50(patch_hash=88852906f53ab7edd9858c3461fe09ae9d8f3812bf7e3f6f4b2b08920bb279fe)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        version: 5.0.0-beta.50(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/errors':
         specifier: 5.0.0-beta.21
         version: 5.0.0-beta.21
@@ -23402,7 +23399,7 @@ snapshots:
   '@workflow/builders@5.0.0-beta.50(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@swc/core': 1.15.3(@swc/helpers@0.5.23)
-      '@workflow/core': 5.0.0-beta.50(patch_hash=88852906f53ab7edd9858c3461fe09ae9d8f3812bf7e3f6f4b2b08920bb279fe)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+      '@workflow/core': 5.0.0-beta.50(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/errors': 5.0.0-beta.21
       '@workflow/swc-plugin': 5.0.0-beta.6(@swc/core@1.15.3(@swc/helpers@0.5.23))
       '@workflow/utils': 5.0.0-beta.10
@@ -23421,7 +23418,7 @@ snapshots:
       - utf-8-validate
       - ws
 
-  '@workflow/core@5.0.0-beta.50(patch_hash=88852906f53ab7edd9858c3461fe09ae9d8f3812bf7e3f6f4b2b08920bb279fe)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/core@5.0.0-beta.50(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31

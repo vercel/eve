@@ -29,8 +29,6 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
-  // A pnpm patch changes installed code without changing its package version.
-  join(packageRoot, "../../pnpm-lock.yaml"),
   join(here, "nitro-rolldown.mjs"),
   join(here, "vendor-warning-log.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
