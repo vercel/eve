@@ -1071,6 +1071,13 @@ describe("workflowEntry integration", () => {
       ]);
       try {
         await expect(contender.returnValue).resolves.toEqual({ output: "" });
+        const contenderReader = contender.readable.getReader();
+        try {
+          const end = await withTimeout(contenderReader.read(), "competing continuation EOF");
+          expect(end.done).toBe(true);
+        } finally {
+          contenderReader.releaseLock();
+        }
         const ownerFollowUp = await ownerStream.nextTurn();
 
         expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
