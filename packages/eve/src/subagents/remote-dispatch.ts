@@ -73,7 +73,9 @@ export async function startRemoteAgentSession(input: {
    * created instead of starting a second one.
    */
   readonly operationId?: string;
-  readonly parent?: Omit<SubagentParentContext, "lineage">;
+  readonly parent?: Omit<SubagentParentContext, "lineage"> & {
+    readonly lineage?: SubagentParentContext["lineage"];
+  };
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
   readonly taskId?: string;
@@ -91,6 +93,8 @@ export async function startRemoteAgentSession(input: {
     capabilities: {};
     callback: {
       callId: string;
+      parentRunId?: string;
+      parentTurnId?: string;
       subagentName: string;
       taskId?: string;
       token: string;
@@ -106,6 +110,8 @@ export async function startRemoteAgentSession(input: {
     capabilities: {},
     callback: {
       callId: input.action.callId,
+      parentRunId: input.parent?.lineage?.sessionId,
+      parentTurnId: input.parent?.lineage?.turn.id,
       subagentName: input.action.remoteAgentName,
       taskId: input.taskId ?? readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,

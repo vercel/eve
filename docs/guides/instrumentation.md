@@ -193,7 +193,12 @@ the failure outcome, error status, and error type. The initiating turn can
 finish or be cancelled while the action remains open. Ending the session closes
 an action whose task never reported a terminal result.
 
-Schema v4 removes the session-long `agent.session` root and duplicate agent session and lineage attributes. Every eve span carries `agent.trace.schema.version=4` and `gen_ai.conversation.id`; Vercel deployments additionally carry `vercel.session_id`.
+Schema v4 removes the session-long `agent.session` root. Every eve span carries
+`agent.trace.schema.version=4`, `agent.run.id`, and
+`gen_ai.conversation.id`. Vercel deployments additionally carry
+`vercel.session_id`, which stays fixed to the root session across local and
+remote subagents. Child activation roots carry `agent.parent_run.id` and
+`agent.parent_call.id`.
 Only activations use the `invoke_agent` operation. A workflow tool invocation
 that coordinates at least one nested agent uses `invoke_workflow`, with its
 path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without
@@ -261,7 +266,8 @@ This workflow applies to schema v4 from the [instrumentation provider layout](./
 | Agent activations        | `agent.trace.schema.version=4` and `gen_ai.operation.name=invoke_agent` |
 | One logical conversation | `gen_ai.conversation.id=<conversation ID>`                              |
 | One turn                 | Both `gen_ai.conversation.id` and `agent.turn.id`                       |
-| One Vercel Workflow run  | `vercel.session_id=<session ID>`                                        |
+| One Vercel root session  | `vercel.session_id=<root session ID>`                                   |
+| One agent run            | `agent.run.id=<run ID>`                                                 |
 | Delegated dispatches     | `agent.invocation.role=caller`                                          |
 
 Start with an activation filter for latency, failure, or turn-count dashboards. Every activation is a trace root. Within a conversation, group by trace ID, order activations by `agent.turn.sequence` or start time, and open the selected trace ID. Child activations link to their caller with `eve.link.type=agent.dispatch`; remote workflows keep their own execution lineage, so use conversation IDs and caller links for cross-deployment correlation.

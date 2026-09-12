@@ -38,7 +38,25 @@ describe("parent trace lineage", () => {
     ).toBe("continued-remote-call");
   });
 
-  it("does not invent delegated lineage from callback metadata", () => {
+  it("uses explicit callback lineage for a remote child", () => {
+    expect(
+      resolveParentLineage(undefined, undefined, {
+        callId: "remote-call",
+        parentRunId: "remote-parent",
+        parentTurnId: "parent-turn",
+        subagentName: "research",
+        token: "callback-token",
+        url: "https://parent.example/callback",
+      }),
+    ).toEqual({
+      callId: "remote-call",
+      sessionId: "remote-parent",
+      subagentName: "research",
+      turnId: "parent-turn",
+    });
+  });
+
+  it("does not invent delegated lineage from incomplete callback metadata", () => {
     expect(resolveParentLineage(undefined, adapter)).toBeUndefined();
     expect(resolveParentLineage(parent, undefined)?.callId).toBe("initial-call");
   });

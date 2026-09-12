@@ -13,7 +13,16 @@ export function resolveParentLineage(
   adapter: { readonly state?: unknown } | undefined,
   callback?: SessionCallback,
 ): InstrumentationParentLineage | undefined {
-  if (parent === undefined) return undefined;
+  if (parent === undefined) {
+    return callback?.parentRunId && callback.parentTurnId
+      ? {
+          callId: callback.callId,
+          sessionId: callback.parentRunId,
+          subagentName: callback.subagentName,
+          turnId: callback.parentTurnId,
+        }
+      : undefined;
+  }
   const state = adapter?.state;
   const subagent = isSubagentAdapterState(state) ? state : undefined;
   return {

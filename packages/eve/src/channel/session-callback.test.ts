@@ -5,6 +5,8 @@ import { parseSessionCallback } from "#channel/session-callback.js";
 function createCallback(url: string, token = "tok123"): Record<string, unknown> {
   return {
     callId: "call-1",
+    parentRunId: "parent-run",
+    parentTurnId: "parent-turn",
     subagentName: "research",
     token,
     url,

@@ -300,6 +300,12 @@ describe("startRemoteAgentSession", () => {
         state: {},
       },
       parent: {
+        lineage: {
+          callId: "parent-call",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
         traceContext: {
           spanId: "2".repeat(16),
           traceFlags: 1,
@@ -323,6 +329,8 @@ describe("startRemoteAgentSession", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       callback: {
         callId: "call-remote",
+        parentRunId: "parent-session",
+        parentTurnId: "parent-turn",
         subagentName: "research",
         token: "eve:parent-token",
         url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token",

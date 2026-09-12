@@ -13,6 +13,7 @@ describe("agentTraceIdentityAttributes", () => {
     vi.stubEnv("VERCEL_ENV", undefined);
 
     expect(agentTraceIdentityAttributes(input)).toEqual({
+      "agent.run.id": "session-1",
       "agent.trace.schema.version": 4,
       "gen_ai.conversation.id": "conversation-1",
     });
@@ -22,9 +23,10 @@ describe("agentTraceIdentityAttributes", () => {
     vi.stubEnv("VERCEL_ENV", "preview");
 
     expect(agentTraceIdentityAttributes(input)).toEqual({
+      "agent.run.id": "session-1",
       "agent.trace.schema.version": 4,
       "gen_ai.conversation.id": "conversation-1",
-      "vercel.session_id": "session-1",
+      "vercel.session_id": "conversation-1",
     });
   });
 });
