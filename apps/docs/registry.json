@@ -593,6 +593,31 @@
       ]
     },
     {
+      "name": "connection/sent",
+      "type": "registry:item",
+      "title": "Sent",
+      "description": "Send and track SMS, WhatsApp, and RCS through Sent's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "sent", "mcp.sent.dm", "sent"]
+          },
+          "requires": ">=0.52.3"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/sent.ts",
+          "type": "registry:file",
+          "target": "agent/connections/sent.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/notion",
       "type": "registry:item",
       "title": "Notion",
