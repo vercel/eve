@@ -15,6 +15,13 @@ import {
   toTerminalStreamFailureError,
   updatePendingAuthorizations,
 } from "#client/eve-agent-store-helpers.js";
+import {
+  bindPendingMessageSubmission,
+  recordReceivedFollowUpDeliveryIds,
+  replaceProjectionEvent,
+  settlePendingSubmissions,
+  type PendingMessageSubmission,
+} from "#client/eve-agent-store-submission-helpers.js";
 import { toError } from "#shared/errors.js";
 import type {
   CancelSessionResult,
@@ -95,26 +102,18 @@ export interface EveAgentStoreInit<TData> {
   readonly session?: ClientSession;
 }
 
-interface PendingMessageSubmission {
-  readonly createdAt: number;
-  readonly id: string;
-  readonly message: string;
-}
-
 const detachStore = Symbol("detachEveAgentStore");
-
 interface ActiveTurn {
   readonly abortController: AbortController;
-  acceptedFollowUps: number;
+  readonly acceptedFollowUpDeliveryIds: Set<string>;
   readonly cancel: () => Promise<CancelSessionResult>;
   readonly completion: Promise<void>;
   readonly followUpDispatches: Set<Promise<void>>;
-  receivedFollowUps: number;
+  readonly receivedFollowUpDeliveryIds: Set<string>;
   readonly resolveCompletion: () => void;
   readonly response: Promise<MessageResponse | undefined>;
   readonly resolveResponse: (response: MessageResponse | undefined) => void;
 }
-
 /**
  * Framework-agnostic state machine for an eve agent session.
  *
@@ -208,9 +207,9 @@ export class EveAgentStore<TData> {
     const completion = Promise.withResolvers<void>();
     const turn: ActiveTurn = {
       abortController: new AbortController(),
-      acceptedFollowUps: 0,
+      acceptedFollowUpDeliveryIds: new Set(),
       cancel: () =>
-        turn.acceptedFollowUps > 0 && this.#session !== undefined
+        turn.acceptedFollowUpDeliveryIds.size > 0 && this.#session !== undefined
           ? this.#session.cancel()
           : response.promise.then((messageResponse) =>
               messageResponse === undefined
@@ -219,7 +218,7 @@ export class EveAgentStore<TData> {
             ),
       completion: completion.promise,
       followUpDispatches: new Set(),
-      receivedFollowUps: 0,
+      receivedFollowUpDeliveryIds: new Set(),
       resolveCompletion: completion.resolve,
       response: response.promise,
       resolveResponse: response.resolve,
@@ -237,7 +236,7 @@ export class EveAgentStore<TData> {
         return;
       }
 
-      this.#projectOptimisticMessage(preparedInput);
+      const submissionId = this.#projectOptimisticMessage(preparedInput);
       this.#projectInputResponses(preparedInput);
       this.#publish();
 
@@ -248,6 +247,11 @@ export class EveAgentStore<TData> {
       const response = await this.#dispatchTurn(turnInput);
 
       if (!this.#isActiveTurn(turn)) return;
+      this.#pendingMessageSubmissions = bindPendingMessageSubmission(
+        this.#pendingMessageSubmissions,
+        submissionId ?? "",
+        response.deliveryId,
+      );
       turn.resolveResponse(response);
 
       for await (const event of response) {
@@ -318,11 +322,11 @@ export class EveAgentStore<TData> {
     const session = this.#session;
     const turn: ActiveTurn = {
       abortController: new AbortController(),
-      acceptedFollowUps: 0,
+      acceptedFollowUpDeliveryIds: new Set(),
       cancel: () => session.cancel(),
       completion: completion.promise,
       followUpDispatches: new Set(),
-      receivedFollowUps: 0,
+      receivedFollowUpDeliveryIds: new Set(),
       resolveCompletion: completion.resolve,
       response: response.promise,
       resolveResponse: response.resolve,
@@ -438,7 +442,6 @@ export class EveAgentStore<TData> {
     this.#callbacks.onSessionChange?.(this.#session?.state);
     this.#publish();
   }
-
   async #sendFollowUp<TOutput>(turn: ActiveTurn, input: SendTurnPayload<TOutput>): Promise<void> {
     if (input.message === undefined || input.turnPolicy !== "steer") {
       throw new Error(
@@ -464,8 +467,15 @@ export class EveAgentStore<TData> {
           throw new Error("The active eve turn ended before the follow-up could be sent.");
         }
         const { message, ...options } = preparedInput;
-        await this.#session.send(message, options);
-        turn.acceptedFollowUps += 1;
+        const response = await this.#session.send(message, options);
+        if (response.deliveryId !== undefined) {
+          turn.acceptedFollowUpDeliveryIds.add(response.deliveryId);
+        }
+        this.#pendingMessageSubmissions = bindPendingMessageSubmission(
+          this.#pendingMessageSubmissions,
+          submissionId ?? "",
+          response.deliveryId,
+        );
       } catch (error) {
         this.#failPendingMessageSubmission(toError(error), submissionId);
         this.#publish();
@@ -475,7 +485,6 @@ export class EveAgentStore<TData> {
       }
     })();
     turn.followUpDispatches.add(dispatch);
-
     await dispatch;
     await turn.completion;
   }
@@ -484,18 +493,27 @@ export class EveAgentStore<TData> {
     while (turn.followUpDispatches.size > 0) {
       await Promise.allSettled(turn.followUpDispatches);
     }
-    if (turn.receivedFollowUps >= turn.acceptedFollowUps || this.#session === undefined) return;
+    if (
+      turn.receivedFollowUpDeliveryIds.size >= turn.acceptedFollowUpDeliveryIds.size ||
+      this.#session === undefined
+    )
+      return;
 
     for await (const event of this.#session.stream({ signal: turn.abortController.signal })) {
       if (!this.#isActiveTurn(turn)) return;
-      if (event.type === "message.received") turn.receivedFollowUps += 1;
+      if (event.type === "message.received")
+        recordReceivedFollowUpDeliveryIds(
+          turn.acceptedFollowUpDeliveryIds,
+          turn.receivedFollowUpDeliveryIds,
+          event.meta?.deliveryIds,
+        );
       this.#acceptServerEvent(event);
 
       if (isCurrentTurnBoundaryEvent(event)) {
         while (turn.followUpDispatches.size > 0) {
           await Promise.allSettled(turn.followUpDispatches);
         }
-        if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
+        if (turn.receivedFollowUpDeliveryIds.size >= turn.acceptedFollowUpDeliveryIds.size) return;
       }
     }
   }
@@ -583,16 +601,15 @@ export class EveAgentStore<TData> {
   }
 
   #applyServerEvent(event: MessageStreamEvent): void {
-    const pendingSubmission = this.#pendingMessageSubmissions[0];
-    if (event.type === "message.received" && pendingSubmission !== undefined) {
-      const submissionId = pendingSubmission.id;
-      this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.slice(1);
-      this.#replaceProjectionEvent(
-        (candidate) =>
-          candidate.type === "client.message.submitted" &&
-          candidate.data.submissionId === submissionId,
+    if (event.type === "message.received") {
+      const settled = settlePendingSubmissions(
+        this.#pendingMessageSubmissions,
+        this.#projectionEvents,
         event,
       );
+      this.#pendingMessageSubmissions = settled.pendingSubmissions;
+      this.#projectionEvents = settled.projectionEvents;
+      this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
       return;
     }
 
@@ -624,7 +641,8 @@ export class EveAgentStore<TData> {
     this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.filter(
       (candidate) => candidate.id !== pending.id,
     );
-    this.#replaceProjectionEvent(
+    this.#projectionEvents = replaceProjectionEvent(
+      this.#projectionEvents,
       (event) =>
         event.type === "client.message.submitted" && event.data.submissionId === pending.id,
       {
@@ -639,31 +657,12 @@ export class EveAgentStore<TData> {
         type: "client.message.failed",
       },
     );
+    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
   }
 
   #appendProjectionEvent(event: EveAgentReducerEvent): void {
     this.#projectionEvents = [...this.#projectionEvents, event];
     this.#data = this.#reducer.reduce(this.#data, event);
-  }
-
-  #replaceProjectionEvent(
-    predicate: (event: EveAgentReducerEvent) => boolean,
-    replacement: EveAgentReducerEvent,
-  ): void {
-    let replaced = false;
-    this.#projectionEvents = this.#projectionEvents.map((event) => {
-      if (!replaced && predicate(event)) {
-        replaced = true;
-        return replacement;
-      }
-      return event;
-    });
-
-    if (!replaced) {
-      this.#projectionEvents = [...this.#projectionEvents, replacement];
-    }
-
-    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
   }
 
   #reduceProjectionEvents(events: readonly EveAgentReducerEvent[]): TData {

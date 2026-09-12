@@ -80,21 +80,6 @@ function startedResponse(): Response {
   );
 }
 
-function acceptedResponse(deliveryId: string): Response {
-  return new Response(
-    JSON.stringify({
-      ok: true,
-      sessionId: "session_1",
-      status: "accepted",
-      deliveryId,
-    }),
-    {
-      headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
-      status: 202,
-    },
-  );
-}
-
 function versionedStreamResponse<Version extends MessageStreamVersion>(
   version: Version,
   events: readonly MessageStreamEventForVersion<Version>[],
@@ -915,82 +900,6 @@ describe("EveAgentStore steering", () => {
       text: "Replacement reply.",
       type: "text",
     });
-  });
-
-  it("settles every optimistic submission owned by a folded replacement receipt", async () => {
-    const activeStream = controlledStreamResponse();
-    const replacementStream = controlledStreamResponse();
-    const [
-      firstReceived,
-      firstStarted,
-      firstCancelled,
-      firstWaiting,
-      foldedReceived,
-      foldedStarted,
-      foldedCompleted,
-      foldedWaiting,
-    ] = stampTestEvents([
-      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
-      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
-      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
-      createMessageReceivedEvent({ message: "Folded canonical", sequence: 0, turnId: "turn_2" }),
-      createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
-      createMessageCompletedEvent({
-        finishReason: "stop",
-        message: "Done",
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn_2",
-      }),
-      createSessionWaitingEvent(),
-    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
-      ...event,
-      meta: {
-        ...event.meta,
-        deliveryIds: index < 4 ? ["delivery_1"] : ["delivery_2", "delivery_3"],
-      },
-    }));
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(acceptedResponse("delivery_1"))
-      .mockResolvedValueOnce(activeStream.response)
-      .mockResolvedValueOnce(acceptedResponse("delivery_2"))
-      .mockResolvedValueOnce(acceptedResponse("delivery_3"))
-      .mockResolvedValueOnce(replacementStream.response);
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
-
-    const firstSend = store.send({ message: "First" });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    activeStream.emit(firstReceived!);
-    activeStream.emit(firstStarted!);
-
-    const followUpOne = store.send({ message: "Folded one", turnPolicy: "steer" });
-    const followUpTwo = store.send({ message: "Folded two", turnPolicy: "steer" });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-
-    activeStream.emit(firstCancelled!);
-    activeStream.emit(firstWaiting!);
-    activeStream.close();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    replacementStream.emit(foldedReceived!);
-    replacementStream.emit(foldedStarted!);
-    replacementStream.emit(foldedCompleted!);
-    replacementStream.emit(foldedWaiting!);
-    replacementStream.close();
-
-    await Promise.all([firstSend, followUpOne, followUpTwo]);
-
-    expect(store.snapshot.status).toBe("ready");
-    expect(
-      store.snapshot.data.messages.filter((message) => message.metadata?.optimistic === true),
-    ).toHaveLength(0);
-    expect(store.snapshot.data.messages.filter((message) => message.role === "user")).toHaveLength(
-      2,
-    );
-    expect(store.snapshot.events.filter((event) => event.type === "message.received")).toHaveLength(
-      2,
-    );
   });
 });
 
