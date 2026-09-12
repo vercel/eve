@@ -24,7 +24,8 @@ import {
   optimisticUserMessageId,
   partKey,
   projectReceivedParts,
-  removeStreamingToolPartsForTurn,
+  isUnsettledToolPart,
+  removeUnsettledToolPartsForTurn,
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
@@ -253,6 +254,17 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "action.result": {
+      if (
+        event.data.error?.code === "MODEL_CALL_ATTEMPT_RETRIED" ||
+        event.data.error?.code === "MODEL_CALL_ATTEMPT_FAILED"
+      ) {
+        return updateAssistantMessage(data, event.data.turnId, (message) => ({
+          ...message,
+          parts: message.parts.filter(
+            (part) => part.type !== "dynamic-tool" || part.toolCallId !== event.data.result.callId,
+          ),
+        }));
+      }
       const descriptor = normalizeActionResult(event.data.result);
       const existing = findToolPart(data, event.data.result.callId);
       const denied = event.data.error?.code === "TOOL_EXECUTION_DENIED";
@@ -379,7 +391,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(message.parts),
+        parts: removeUnsettledToolParts(message.parts),
       }));
 
     case "turn.cancelled":
@@ -388,7 +400,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(
+        parts: removeUnsettledToolParts(
           message.parts.map((part) =>
             (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
               ? { ...part, state: "done" }
@@ -398,7 +410,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       }));
 
     case "turn.failed":
-      return removeStreamingToolPartsForTurn(data, event.data.turnId);
+      return removeUnsettledToolPartsForTurn(data, event.data.turnId);
 
     case "session.failed":
       return data;
@@ -408,8 +420,8 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
   }
 }
 
-function removeStreamingToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
-  return parts.filter((part) => part.type !== "dynamic-tool" || part.state !== "input-streaming");
+function removeUnsettledToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
+  return parts.filter((part) => !isUnsettledToolPart(part));
 }
 
 function respondToInputRequest(data: EveMessageData, response: InputResponse): EveMessageData {

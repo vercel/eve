@@ -11,18 +11,24 @@ interface ActionEventCoordinates {
   readonly turnId: string;
 }
 
+interface EmittedProviderAction {
+  readonly request: RuntimeActionRequestProjection;
+  readonly toolName: string;
+}
+
 interface ProviderStreamActionBatch {
   cancel(): Promise<void>;
   flush(): Promise<void>;
-  observe(action: RuntimeActionRequestProjection): void;
+  observe(action: RuntimeActionRequestProjection, toolName: string): void;
 }
 
 /** Batches provider-managed calls that arrive in one streamed model response. */
 export function createProviderStreamActionBatch(input: {
   readonly emitFn: HarnessEmitFn;
+  readonly onActionsEmitted?: (actions: readonly EmittedProviderAction[]) => void;
   readonly state: ActionEventCoordinates;
 }): ProviderStreamActionBatch {
-  const pendingActions = new Map<string, RuntimeActionRequestProjection>();
+  const pendingActions = new Map<string, EmittedProviderAction>();
   let actionFlush: Promise<void> = Promise.resolve();
   let actionFlushError: unknown;
   let actionFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -36,7 +42,8 @@ export function createProviderStreamActionBatch(input: {
     }
     if (pendingActions.size === 0) return;
 
-    const projections = [...pendingActions.values()];
+    const actions = [...pendingActions.values()];
+    const projections = actions.map(({ request }) => request);
     pendingActions.clear();
     await input.emitFn(
       createActionsRequestedEvent({
@@ -47,6 +54,7 @@ export function createProviderStreamActionBatch(input: {
         turnId: input.state.turnId,
       }),
     );
+    input.onActionsEmitted?.(actions);
   };
 
   const scheduleFlush = (): void => {
@@ -88,9 +96,9 @@ export function createProviderStreamActionBatch(input: {
       releaseFlushTimer();
       await actionFlush;
     },
-    observe(action) {
+    observe(action, toolName) {
       if (cancelled) return;
-      pendingActions.set(action.action.callId, action);
+      pendingActions.set(action.action.callId, { request: action, toolName });
       scheduleFlush();
     },
     async flush() {
