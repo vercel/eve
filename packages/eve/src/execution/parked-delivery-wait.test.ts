@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
+import { SessionBacklog } from "#execution/session-backlog.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -49,7 +50,7 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
     hasReadyAuthorization() {
       return authorizationReady;
     },
-    async hasPending() {
+    hasPending() {
       return remaining.length > 0;
     },
     async next() {
@@ -99,15 +100,34 @@ function messageRead(message: string): ScriptedRead {
 
 const sessionState = createTestSessionState({ sessionId: "ses-parked-wait" });
 
-function waitInput(inbox: SessionInbox): Parameters<typeof nextTurnDelivery>[0] {
+type WaitInput = {
+  -readonly [K in keyof Parameters<typeof nextTurnDelivery>[0]]: Parameters<
+    typeof nextTurnDelivery
+  >[0][K];
+};
+
+function waitInput(inbox: SessionInbox): WaitInput {
   return {
     awaitAuthorizationCallbacks: true,
-    bufferedDeliveries: [],
-    bufferedSessionControls: [],
+    backlog: new SessionBacklog(),
     commandInbox: inbox,
-    sessionWritable: new WritableStream<Uint8Array>(),
-    stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
+    cursor: createCursor(inbox),
   };
+}
+
+function createCursor(inbox: SessionInbox, state = sessionState): SessionStateCursor {
+  return new SessionStateCursor({
+    commandInbox: inbox,
+    parentWritable: new WritableStream<Uint8Array>(),
+    serializedContext: {},
+    sessionState: state,
+  });
+}
+
+function backlogOf(...deliveries: DeliverHookPayload[]): SessionBacklog {
+  const backlog = new SessionBacklog();
+  backlog.deliveries.push(...deliveries);
+  return backlog;
 }
 
 describe("nextTurnDelivery", () => {
@@ -140,7 +160,7 @@ describe("nextTurnDelivery", () => {
         ],
       },
     });
-    expect(input.bufferedDeliveries).toEqual([]);
+    expect(input.backlog.deliveries).toEqual([]);
   });
 
   it("keeps different principals in FIFO turns without regrouping later messages", async () => {
@@ -166,7 +186,7 @@ describe("nextTurnDelivery", () => {
       delivery: { payloads: [{ message: "alice-3" }] },
       kind: "turn",
     });
-    expect(input.bufferedDeliveries).toEqual([]);
+    expect(input.backlog.deliveries).toEqual([]);
   });
 
   it.each([
@@ -182,7 +202,7 @@ describe("nextTurnDelivery", () => {
     const input = batchingInputFor([first, second]);
 
     await expect(nextTurnDelivery(input)).resolves.toEqual({ delivery: first, kind: "turn" });
-    expect(input.bufferedDeliveries).toEqual([second]);
+    expect(input.backlog.deliveries).toEqual([second]);
   });
 
   it.each([null, undefined])("does not batch deliveries with auth %j", async (auth) => {
@@ -191,7 +211,7 @@ describe("nextTurnDelivery", () => {
     const input = batchingInputFor([first, second]);
 
     await expect(nextTurnDelivery(input)).resolves.toEqual({ delivery: first, kind: "turn" });
-    expect(input.bufferedDeliveries).toEqual([second]);
+    expect(input.backlog.deliveries).toEqual([second]);
   });
 
   it("surfaces an authorization callback as its own instruction", async () => {
@@ -213,8 +233,8 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
-      serializedContext: input.stateCursor.serializedContext,
-      sessionState: input.stateCursor.sessionState,
+      serializedContext: input.cursor.serializedContext,
+      sessionState: input.cursor.sessionState,
     });
   });
 
@@ -232,31 +252,22 @@ describe("nextTurnDelivery", () => {
 
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
     const inbox = createMockInbox([authorizationRead()], true);
-    const bufferedDeliveries: DeliverHookPayload[] = [
-      { kind: "deliver", payloads: [{ message: "later" }] },
-    ];
+    const backlog = backlogOf({ kind: "deliver", payloads: [{ message: "later" }] });
 
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      bufferedDeliveries,
-    });
+    const next = await nextTurnDelivery({ ...waitInput(inbox), backlog });
 
     expect(next.kind).toBe("authorization");
-    expect(bufferedDeliveries).toHaveLength(1);
+    expect(backlog.deliveries).toHaveLength(1);
   });
 
   it("buffers task deliveries until the authorization callback arrives", async () => {
     const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const backlog = new SessionBacklog();
 
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      bufferedDeliveries,
-      deferDeliveries: true,
-    });
+    const next = await nextTurnDelivery({ ...waitInput(inbox), backlog, deferDeliveries: true });
 
     expect(next.kind).toBe("authorization");
-    expect(bufferedDeliveries).toMatchObject([
+    expect(backlog.deliveries).toMatchObject([
       { kind: "deliver", payloads: [{ message: "deferred" }] },
     ]);
   });
@@ -346,7 +357,7 @@ function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
       sessionState,
     }),
   );
-  return { ...input, bufferedDeliveries };
+  return { ...input, backlog: backlogOf(...bufferedDeliveries) };
 }
 
 describe("nextTurnDelivery routing", () => {
@@ -381,20 +392,18 @@ describe("nextTurnDelivery routing", () => {
       consumeNext: vi.fn(),
       drain: vi.fn(() => commands.splice(0)),
       hasReadyAuthorization: vi.fn(() => false),
-      hasPending: vi.fn(async () => commands.length > 0),
+      hasPending: vi.fn(() => commands.length > 0),
       next: vi.fn(async () => ({ done: false as const, value: commands.shift()! })),
       restore: vi.fn(),
       sessionHookTokens: ["stable"],
       setAuthorizationWindow: vi.fn(),
     };
 
-    const stateCursor = new SessionStateCursor({ serializedContext: {}, sessionState });
+    const cursor = createCursor(commandInbox, sessionState);
     const result = await nextTurnDelivery({
-      bufferedDeliveries: [],
-      bufferedSessionControls: [],
+      backlog: new SessionBacklog(),
       commandInbox,
-      sessionWritable: new WritableStream<Uint8Array>(),
-      stateCursor,
+      cursor,
     });
 
     expect(result).toMatchObject({
@@ -402,7 +411,7 @@ describe("nextTurnDelivery routing", () => {
       kind: "turn",
     });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
-    expect(stateCursor.sessionState).toBe(routedSessionState);
+    expect(cursor.sessionState).toBe(routedSessionState);
   });
 });
 
@@ -439,7 +448,7 @@ function completion(taskId: string): DeliverHookPayload {
 
 function batchingInput(count = 100, crossTurn = false) {
   const input = waitInput(createMockInbox([]));
-  input.stateCursor.adoptState({
+  input.cursor.adoptState({
     sessionState: {
       ...sessionState,
       snapshot: {
@@ -492,8 +501,8 @@ describe("buffered task completion batching", () => {
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
     const input = batchingInput();
     const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));
-    const bufferedDeliveries = [...deliveries];
-    const next = await nextTurnDelivery({ ...input, bufferedDeliveries });
+    const backlog = backlogOf(...deliveries);
+    const next = await nextTurnDelivery({ ...input, backlog });
 
     expect(next).toMatchObject({
       kind: "turn",
@@ -506,7 +515,7 @@ describe("buffered task completion batching", () => {
         })),
       },
     });
-    expect(bufferedDeliveries).toEqual([]);
+    expect(backlog.deliveries).toEqual([]);
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
   });
 
@@ -537,10 +546,10 @@ describe("buffered task completion batching", () => {
       const first = completion("task_0");
       const second = completion("task_1");
       const later = completion("task_3");
-      const bufferedDeliveries = [first, second, boundary, later];
-      const next = await nextTurnDelivery({ ...input, bufferedDeliveries });
+      const backlog = backlogOf(first, second, boundary, later);
+      const next = await nextTurnDelivery({ ...input, backlog });
       expect(next).toEqual({ kind: "turn", delivery: boundary });
-      expect(bufferedDeliveries).toEqual([first, second, later]);
+      expect(backlog.deliveries).toEqual([first, second, later]);
     },
   );
 
@@ -551,7 +560,7 @@ describe("buffered task completion batching", () => {
       const first = completion("task_0");
       const second = completion("task_1");
       const last = completion("task_2");
-      input.bufferedDeliveries.push(first);
+      input.backlog.deliveries.push(first);
       input.commandInbox = createMockInbox([
         { result: { done: false, value: second } },
         messageRead("user question"),
@@ -562,14 +571,14 @@ describe("buffered task completion batching", () => {
         kind: "turn",
         delivery: { payloads: [{ message: "user question" }] },
       });
-      expect(input.bufferedDeliveries).toEqual([first, second]);
+      expect(input.backlog.deliveries).toEqual([first, second]);
       expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
 
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
         delivery: { payloads: [...first.payloads, ...second.payloads, ...last.payloads] },
       });
-      expect(input.bufferedDeliveries).toEqual([]);
+      expect(input.backlog.deliveries).toEqual([]);
       expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
     },
   );
@@ -626,7 +635,7 @@ describe("buffered task completion batching", () => {
         },
       ],
     };
-    input.bufferedDeliveries.push(first, settlement, last);
+    input.backlog.deliveries.push(first, settlement, last);
     vi.mocked(routeDeliverToChildren).mockImplementation(
       async ({ delivery, sessionState, serializedContext }) => ({
         kind: "continue",
@@ -646,7 +655,7 @@ describe("buffered task completion batching", () => {
       settlement,
       expect.objectContaining({ payloads: [...first.payloads, ...last.payloads] }),
     ]);
-    expect(input.bufferedDeliveries).toEqual([]);
+    expect(input.backlog.deliveries).toEqual([]);
   });
 
   it("combines siblings across buffered deliveries from another cohort", async () => {
@@ -654,12 +663,12 @@ describe("buffered task completion batching", () => {
     const first = completion("task_0");
     const last = completion("task_1");
     const other = completion("other-cohort");
-    input.bufferedDeliveries.push(first, other, last);
+    input.backlog.deliveries.push(first, other, last);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
       delivery: { payloads: [...first.payloads, ...last.payloads] },
     });
-    expect(input.bufferedDeliveries).toEqual([other]);
+    expect(input.backlog.deliveries).toEqual([other]);
     await expect(nextTurnDelivery(input)).resolves.toEqual({ kind: "turn", delivery: other });
   });
 
@@ -668,12 +677,12 @@ describe("buffered task completion batching", () => {
     async (kind) => {
       const input = batchingInput(2);
       const first = completion("task_0");
-      input.bufferedDeliveries.push(first);
+      input.backlog.deliveries.push(first);
       input.commandInbox = createMockInbox([{ result: { done: false, value: { kind } } }]);
       await expect(nextTurnDelivery(input)).resolves.toEqual({
         kind: kind === "session-timeout" ? "expired" : kind,
       });
-      expect(input.bufferedDeliveries).toEqual([first]);
+      expect(input.backlog.deliveries).toEqual([first]);
       expect(routeDeliverToChildren).not.toHaveBeenCalled();
     },
   );
@@ -681,7 +690,7 @@ describe("buffered task completion batching", () => {
   it("does not wait for a cancelled sibling whose notifications are discarded", async () => {
     const input = batchingInput(2);
     const first = completion("task_0");
-    input.bufferedDeliveries.push(first);
+    input.backlog.deliveries.push(first);
     input.commandInbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
     await expect(nextTurnDelivery(input)).resolves.toEqual({ kind: "turn", delivery: first });
   });
@@ -719,7 +728,7 @@ describe("buffered task completion batching", () => {
         taskDeliveryId: `task_1:ready:${status}`,
         payloads: [{ message: status, task: { views: [view] } }],
       };
-      input.bufferedDeliveries.push(first, terminal);
+      input.backlog.deliveries.push(first, terminal);
       vi.mocked(routeDeliverToChildren).mockImplementation(
         async ({ delivery, sessionState, serializedContext }) => {
           const snapshot = sessionState.snapshot!;
@@ -741,21 +750,21 @@ describe("buffered task completion batching", () => {
         },
       );
       await expect(nextTurnDelivery(input)).resolves.toEqual({ kind: "turn", delivery: terminal });
-      expect(input.bufferedDeliveries).toEqual([first]);
+      expect(input.backlog.deliveries).toEqual([first]);
       await expect(nextTurnDelivery(input)).resolves.toEqual({ kind: "turn", delivery: first });
     },
   );
 
   it("services ready authorization before a buffered completion batch", async () => {
     const input = batchingInput();
-    const bufferedDeliveries = [completion("task_0"), completion("task_1")];
+    const backlog = backlogOf(completion("task_0"), completion("task_1"));
     const next = await nextTurnDelivery({
       ...input,
-      bufferedDeliveries,
+      backlog,
       commandInbox: createMockInbox([authorizationRead()], true),
     });
     expect(next.kind).toBe("authorization");
-    expect(bufferedDeliveries).toHaveLength(2);
+    expect(backlog.deliveries).toHaveLength(2);
     expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });
 });

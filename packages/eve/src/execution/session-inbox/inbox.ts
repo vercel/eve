@@ -6,11 +6,16 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 
 /** All session addresses accept the same protocol. Callback routes construct
  * their own message kind; they never accept arbitrary session commands. */
+export interface AuthorizationCallbackPayload {
+  readonly kind: "authorization-callback";
+  readonly payloads: DeliverPayload[];
+}
+
 export type SessionInboxPayload =
   | HookPayload
   | SessionCommand
   | WorkflowToolRunMessage
-  | { readonly kind: "authorization-callback"; readonly payloads: DeliverPayload[] };
+  | AuthorizationCallbackPayload;
 
 type ReadMode = "session" | "interrupt" | "runtime";
 interface Source {
@@ -33,7 +38,7 @@ export interface SessionInbox {
   next(mode?: ReadMode): Promise<IteratorResult<SessionInboxPayload>>;
   consumeNext(mode?: ReadMode): void;
   drain(): SessionInboxPayload[];
-  hasPending(): Promise<boolean>;
+  hasPending(): boolean;
   hasReadyAuthorization(): boolean;
   setAuthorizationWindow(open: boolean): void;
   restore(payloads: readonly SessionInboxPayload[]): void;
@@ -164,8 +169,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       invalidate(reads);
       return reads.map(({ value }) => value);
     },
-    async hasPending() {
-      await Promise.resolve();
+    hasPending() {
       if (failure !== undefined) throw failure.error;
       return queue.length > 0;
     },
@@ -190,10 +194,13 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     restore(payloads) {
       if (sources.length === 0)
         throw new Error("Cannot restore session commands before reclaiming the session hooks.");
-      queue.push(...payloads.map((value) => ({ value })));
+      // Restored payloads were accepted before anything the reclaimed pumps
+      // have enqueued since, so they must precede the current queue.
+      queue.unshift(...payloads.map((value) => ({ value })));
       notify();
     },
     async dispose() {
+      // Accepted-but-unread payloads are dropped: disposal ends the session.
       await this.release();
     },
     async release() {

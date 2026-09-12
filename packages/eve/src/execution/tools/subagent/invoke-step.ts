@@ -188,9 +188,11 @@ export async function dispatchAgentInvocation(input: {
       auth: prepared.auth,
       bundle,
       currentSession: session,
-      parentToken: input.replyTo,
       handle: claimed,
-      taskId: input.taskId,
+      reply:
+        input.taskId === undefined
+          ? { kind: "reply", parentToken: input.replyTo }
+          : { kind: "reply", parentToken: input.replyTo, taskId: input.taskId },
     });
     if (outcome.kind === "error" && outcome.deliveryPermanent === true) {
       applyHandleCommand({ agentId: entry.agentId, kind: "remove", ownerId: input.ownerId });

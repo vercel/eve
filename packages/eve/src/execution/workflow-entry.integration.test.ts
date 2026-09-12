@@ -14,7 +14,7 @@ import {
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -203,7 +203,10 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
-  it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
+  // Requires @workflow/core ≥ 5.0.0-beta.51 (vercel/workflow#3941), which drains
+  // released stream writers before step completion. Flip to `it` when the
+  // vendored SDK is bumped; see research/single-workflow-session-upgrades.md.
+  it.fails("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
     const world = await getWorld();
     const append = world.streams.writeMulti!.bind(world.streams);
@@ -1102,6 +1105,156 @@ describe("workflowEntry integration", () => {
         stream.dispose();
         await child.cancel();
       }
+    });
+  });
+
+  describe("deployment handoff", () => {
+    const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
+      auth: null,
+      delivery: {
+        acceptedDeploymentId,
+        channelKind: "http",
+        channelName: "test",
+        deliveryId,
+      },
+      kind: "send" as const,
+      payload: { message },
+    });
+
+    it("hands an idle session to the accepting deployment and keeps the original stream", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
+      const continuationToken = "http:workflow-entry-handoff";
+
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        let completed = false;
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchContinuation({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              continuationToken,
+            }),
+          ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+
+          // The stable inbox and the alias now belong to a successor run; the
+          // original run holds only its anchor (plus the SDK's abort-signal
+          // hook from its own earlier turn).
+          const successor = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+          expect(successor.runId).not.toBe(anchor.runId);
+          const alias = await waitForCommandHookOwner(continuationToken);
+          expect(alias.runId).toBe(successor.runId);
+          const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+          expect(
+            anchorHooks.data
+              .map((hook) => hook.token)
+              .filter((token) => !token.startsWith("abrt_")),
+          ).toEqual([`${anchor.runId}:anchor`]);
+
+          // A third delivery through the stable session id reaches the successor
+          // and still streams on the original run.
+          await expect(
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "third message", "delivery-c"),
+              sessionId: anchor.runId,
+            }),
+          ).resolves.toMatchObject({ status: "accepted" });
+          const thirdTurn = await stream.nextTurn();
+          expect(
+            thirdTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("third message") === true,
+            ),
+          ).toBe(true);
+
+          // Reset ends the session on the successor; the anchor closes the stream once.
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "handoff test" },
+            sessionId: anchor.runId,
+          });
+          await expect(anchor.returnValue).resolves.toEqual({ output: "" });
+          completed = true;
+          expect(await listCallerStepNames(anchor.runId)).toEqual([]);
+        } finally {
+          stream.dispose();
+          if (!completed) await anchor.cancel();
+        }
+      });
+    });
+
+    it("keeps the session on the current owner when it is not idle", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-busy" } });
+
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          // Two deliveries accepted back to back: the second is pending when the
+          // first is evaluated, so neither may trigger a handoff.
+          await Promise.all([
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "first burst", "delivery-1"),
+              sessionId: run.runId,
+            }),
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "second burst", "delivery-2"),
+              sessionId: run.runId,
+            }),
+          ]);
+          const turn = await stream.nextTurn();
+          expect(turn.at(-1)?.type).toBe("session.waiting");
+          const owner = await waitForCommandHookOwner(sessionCommandHookToken(run.runId));
+          expect(owner.runId).toBe(run.runId);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
     });
   });
 

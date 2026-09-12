@@ -150,6 +150,27 @@ describe("createSessionInbox", () => {
     await expect(inbox.release()).resolves.toEqual([send("during release")]);
   });
 
+  it("restores released payloads ahead of commands accepted after reclaiming", async () => {
+    installHooks(
+      createMockHook({ reads: [Promise.resolve(resolved(send("released")))], token: "stable" }),
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("after reclaim")))],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    const released = await inbox.release();
+    expect(released).toEqual([send("released")]);
+
+    await inbox.claimSessionHook("stable");
+    await expect(inbox.next()).resolves.toEqual(resolved(send("after reclaim")));
+    inbox.restore(released);
+
+    expect(inbox.drain()).toEqual([send("released"), send("after reclaim")]);
+    await inbox.dispose();
+  });
+
   it("keeps every continuation alias active after later claims", async () => {
     const oldRead = createDeferred<IteratorResult<SessionInboxPayload>>();
     const replacementRead = createDeferred<IteratorResult<SessionInboxPayload>>();

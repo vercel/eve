@@ -95,8 +95,7 @@ describe("owner agent invocation dispatch", () => {
           phase: "claimed",
           ownerId: "task-1",
         }),
-        parentToken: "agent-reply",
-        taskId: "task-1",
+        reply: { kind: "reply", parentToken: "agent-reply", taskId: "task-1" },
       }),
     );
     expect(dispatched).toMatchObject({ agentId: "agent-1", kind: "dispatched" });

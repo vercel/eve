@@ -5,7 +5,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { JsonObject } from "#shared/json.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
-import { steerClaimedAgent } from "#subagents/handle-dispatch.js";
+import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import type { TaskOwnedAgentHandle } from "#subagents/handles/store.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { resolveAgentInvocationAction } from "./invoke-preparation.js";
@@ -28,7 +28,7 @@ export async function steerBackgroundAgent(input: {
     },
   });
   const dynamic = getDynamicSubagentSelection(input.ctx, input.handle.identity.nodeId);
-  const outcome = await steerClaimedAgent({
+  const outcome = await dispatchToClaimedAgentAddress({
     action,
     auth: input.ctx.get(AuthKey) ?? null,
     bundle: createAgentContinuationBundle({
@@ -38,6 +38,7 @@ export async function steerBackgroundAgent(input: {
     }),
     currentSession: input.session,
     handle: input.handle,
+    reply: { kind: "steer" },
   });
   if (outcome.kind === "error") {
     throw new Error(JSON.stringify(outcome.result.output));

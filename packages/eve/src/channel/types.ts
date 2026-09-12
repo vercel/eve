@@ -498,7 +498,7 @@ export interface RunInput {
    * `ctx.session.continuation.alias(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
    * acceptable when full identity isn't known until the first message. Earlier
-   * addresses remain valid after a alias. ID-only
+   * addresses remain valid after an alias. ID-only
    * transports omit this field.
    */
   readonly continuationToken?: string;

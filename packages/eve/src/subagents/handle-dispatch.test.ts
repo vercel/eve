@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { dispatchToClaimedAgentAddress, steerClaimedAgent } from "./handle-dispatch.js";
+import { dispatchToClaimedAgentAddress } from "./handle-dispatch.js";
 import { continueRemoteAgentSession, resolveRemoteAgentForAction } from "./remote-dispatch.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ createWorkflowRuntime: vi.fn() }));
@@ -39,7 +39,8 @@ describe("claimed child delivery", () => {
       ownerId: "original-task",
       phase: "claimed",
     },
-  } satisfies Parameters<typeof steerClaimedAgent>[0];
+    reply: { kind: "steer" },
+  } satisfies Parameters<typeof dispatchToClaimedAgentAddress>[0];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,7 +49,7 @@ describe("claimed child delivery", () => {
   });
 
   it("steers without replacing the active turn's caller", async () => {
-    await expect(steerClaimedAgent(input)).resolves.toMatchObject({ kind: "called" });
+    await expect(dispatchToClaimedAgentAddress(input)).resolves.toMatchObject({ kind: "called" });
     expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child",
       command: {
@@ -63,8 +64,7 @@ describe("claimed child delivery", () => {
   it("supplies a new caller when continuing an idle child", async () => {
     await dispatchToClaimedAgentAddress({
       ...input,
-      parentToken: "reply-token",
-      taskId: "new-task",
+      reply: { kind: "reply", parentToken: "reply-token", taskId: "new-task" },
     });
     expect(dispatchSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -82,7 +82,7 @@ describe("claimed child delivery", () => {
 
   it("reports a missing child without starting a replacement", async () => {
     dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
-    await expect(steerClaimedAgent(input)).resolves.toMatchObject({
+    await expect(dispatchToClaimedAgentAddress(input)).resolves.toMatchObject({
       kind: "error",
       deliveryPermanent: true,
     });
@@ -105,7 +105,9 @@ describe("claimed child delivery", () => {
         },
       },
     };
-    await expect(steerClaimedAgent(remoteInput)).resolves.toMatchObject({ kind: "called" });
+    await expect(dispatchToClaimedAgentAddress(remoteInput)).resolves.toMatchObject({
+      kind: "called",
+    });
     expect(continueRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: null,
       callback: undefined,

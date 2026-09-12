@@ -17,7 +17,6 @@ import {
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   startSessionOwnerStep,
-  startWorkflowOnAcceptedDeployment,
   startWorkflowOnCurrentDeployment,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
@@ -133,8 +132,14 @@ describe("startWorkflowOnCurrentDeployment", () => {
 
 describe("session owner starts", () => {
   it("rejects non-exact deployment selectors", async () => {
+    getRunMock.mockReturnValue({ getWritable: () => new WritableStream<Uint8Array>() });
     await expect(
-      startWorkflowOnAcceptedDeployment(workflowEntryReference, [], "latest"),
+      startSessionOwnerStep({
+        activationToken: "owner-1:handoff",
+        checkpoint: { ownership: { anchorRunId: "anchor-1" } } as never,
+        delivery: { kind: "deliver", payloads: [] },
+        targetDeploymentId: "latest",
+      }),
     ).rejects.toThrow("exact deployment id");
     expect(startMock).not.toHaveBeenCalled();
   });
@@ -145,6 +150,7 @@ describe("session owner starts", () => {
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
       anchorToken: "session-1:anchor",
+      version: 1,
       hooks: {
         authorization: "custom-auth",
         session: ["custom-stable", "continuation-1", "continuation-2"],

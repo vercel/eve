@@ -4,12 +4,13 @@ import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js"
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { isWorkflowMessage, type SessionInbox } from "#execution/session-inbox/inbox.js";
+import type { SessionBacklog } from "#execution/session-backlog.js";
+import type { SessionInbox } from "#execution/session-inbox/inbox.js";
+import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { TurnRouting } from "#execution/turn-routing.js";
-import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
   DurableStepResult,
   RuntimeActionResultStepInput,
@@ -17,7 +18,7 @@ import type {
   TurnStepPayload,
 } from "#execution/turn-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { settleTurnStep, turnStep } from "#execution/workflow-steps.js";
+import { commitSettlementStep, turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   isInboxSubagentResultFromRecordedWorkflowToolRun,
@@ -30,63 +31,50 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
-/** Inputs shared by every turn executed inside the owning session workflow. */
-export interface SessionExecutionInput {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly cancelledTaskIds: Set<string>;
-  readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionInbox;
-  readonly mode: RunMode;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly seenTaskDeliveries: Set<string>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly stateCursor?: SessionExecutionCursor;
-}
+type RuntimeEvent =
+  | RuntimeActionResultStepInput
+  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
+  | "cancelled";
 
 /**
- * Executes all conversational work in the session owner. There is no child
- * turn run or private transport protocol: commands, cancellation, coordination, and
- * state adoption meet at this one boundary.
+ * Executes conversational turns inside the owning session workflow: runs
+ * `turnStep`, services the inbox at committed boundaries, coordinates waits,
+ * and settles locally. There is no child run and no transport protocol.
  */
-export class SessionExecution {
-  readonly cursor: SessionExecutionCursor;
+export interface SessionExecutionInput {
+  readonly backlog: SessionBacklog;
+  readonly capabilities?: SessionCapabilities;
+  readonly commandInbox: SessionInbox;
+  readonly cursor: SessionStateCursor;
+  readonly mode: RunMode;
+}
 
+export class SessionExecution {
   private readonly input: SessionExecutionInput;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
-    this.cursor =
-      input.stateCursor ??
-      new SessionExecutionCursor({
-        commandInbox: input.commandInbox,
-        parentWritable: input.parentWritable,
-        serializedContext: input.serializedContext,
-        sessionState: input.sessionState,
-      });
+  }
+
+  get cursor(): SessionStateCursor {
+    return this.input.cursor;
   }
 
   async runTurn(delivery: TurnStepPayload): Promise<TurnOutcome> {
+    const { backlog, commandInbox, cursor } = this.input;
     const control = new TurnRouting({
-      bufferedDeliveries: this.input.bufferedDeliveries,
-      bufferedSessionControls: this.input.bufferedSessionControls,
-      cancelledTaskIds: this.input.cancelledTaskIds,
-      commandInbox: this.input.commandInbox,
-      cursor: this.cursor,
-      expectedTurnId: activeTurnId(this.cursor.sessionState.emissionState),
-      seenTaskDeliveries: this.input.seenTaskDeliveries,
-      caller: delivery.kind === "deliver" ? delivery.caller : undefined,
+      backlog,
+      callerCallId: delivery.kind === "deliver" ? delivery.caller?.callId : undefined,
+      commandInbox,
+      cursor,
+      expectedTurnId: activeTurnId(cursor.sessionState.emissionState),
     });
     let nextStepInput: TurnStepPayload | undefined = delivery;
 
     while (true) {
-      const beforeStep = {
-        serializedContext: this.cursor.serializedContext,
-        sessionState: this.cursor.sessionState,
-      };
+      const beforeStepContext = cursor.serializedContext;
       const result: DurableStepResult = await control.waitFor(
-        turnStep(this.cursor.createStepInput(nextStepInput, control.signal)),
+        turnStep(cursor.createStepInput(nextStepInput, control.signal)),
       );
       const pendingCallIds =
         result.action === "dispatch-workflow-tasks"
@@ -100,14 +88,14 @@ export class SessionExecution {
         if (result.backgroundTaskState === undefined) {
           throw new Error("Background tasks were returned without their committed session state.");
         }
-        await this.cursor.adopt({
-          serializedContext: result.backgroundTaskContext ?? beforeStep.serializedContext,
+        await cursor.adopt({
+          serializedContext: result.backgroundTaskContext ?? beforeStepContext,
           sessionState: result.backgroundTaskState,
         });
         await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
       }
 
-      await this.cursor.adopt({
+      await cursor.adopt({
         serializedContext: result.serializedContext,
         sessionState:
           result.action === "cancelled" || control.signal.aborted
@@ -116,22 +104,13 @@ export class SessionExecution {
       });
       await control.admitBoundary();
 
-      if (result.action === "cancelled") {
-        return await this.finishCancelledTurn(control);
-      }
-
+      if (result.action === "cancelled") return await this.finishCancelledTurn(control);
       if (control.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
         return await this.finishCancelledTurn(control);
       }
 
       if (result.action === "done") {
-        if (result.settlement !== undefined)
-          await this.cursor.adopt(
-            await settleTurnStep({
-              ...this.cursor.createStepInput(undefined),
-              settlement: result.settlement,
-            }),
-          );
+        await this.commitSettlement(result);
         return this.outcome({
           isError: result.isError,
           kind: "done",
@@ -148,13 +127,13 @@ export class SessionExecution {
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          workflowToolRunOwner: { inbox: this.input.commandInbox.sessionHookTokens[0]! },
-          parentWritable: this.cursor.parentWritable,
-          serializedContext: this.cursor.serializedContext,
-          sessionState: this.cursor.sessionState,
+          workflowToolRunOwner: { inbox: commandInbox.sessionHookTokens[0]! },
+          parentWritable: cursor.parentWritable,
+          serializedContext: cursor.serializedContext,
+          sessionState: cursor.sessionState,
         });
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
-        await this.cursor.adopt(dispatchResult);
+        await cursor.adopt(dispatchResult);
         await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const results = await this.waitForRuntimeActionResults({
@@ -163,11 +142,7 @@ export class SessionExecution {
           initialResults: dispatchResult.results,
           pendingCallIds,
         });
-        if (results === "cancel-turn") return await this.finishCancelledTurn(control);
-        if (results === "cancelled") {
-          nextStepInput = undefined;
-          continue;
-        }
+        if (results === "cancelled") return await this.finishCancelledTurn(control);
         nextStepInput = results;
         continue;
       }
@@ -187,13 +162,7 @@ export class SessionExecution {
           nextStepInput = steering;
           continue;
         }
-        if (result.settlement !== undefined)
-          await this.cursor.adopt(
-            await settleTurnStep({
-              ...this.cursor.createStepInput(undefined),
-              settlement: result.settlement,
-            }),
-          );
+        await this.commitSettlement(result);
         return this.outcome({
           authorizationAttemptIds: result.authorizationAttemptIds,
           authorizationNames: result.authorizationNames,
@@ -207,25 +176,37 @@ export class SessionExecution {
   }
 
   async handleWorkflowMessage(
-    message: import("#execution/tools/workflow/messages.js").WorkflowToolRunMessage,
+    message: WorkflowToolRunMessage,
   ): Promise<RuntimeActionResult | undefined> {
     return await handleWorkflowToolRunMessage({
       callbackMetadataUrl: getWorkflowMetadata().url,
-      cursor: this.cursor,
+      cursor: this.input.cursor,
       message,
     });
   }
 
+  /** Commits terminal turn events only after steering had its chance at the boundary. */
+  private async commitSettlement(result: DurableStepResult): Promise<void> {
+    if (result.settlement === undefined) return;
+    await this.input.cursor.adopt(
+      await commitSettlementStep({
+        ...this.input.cursor.createStepInput(undefined),
+        settlement: result.settlement,
+      }),
+    );
+  }
+
   private async finishCancelledTurn(control: TurnRouting): Promise<TurnOutcome> {
+    const { cursor } = this.input;
     if (control.cancellation?.tasks === true) {
       await cancelAllIndexedSessionTasksStep({
-        serializedContext: this.cursor.serializedContext,
-        sessionState: this.cursor.sessionState,
+        serializedContext: cursor.serializedContext,
+        sessionState: cursor.sessionState,
       });
     }
     await cancelDescendantTurnsStep({
-      serializedContext: this.cursor.serializedContext,
-      sessionState: this.cursor.sessionState,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
     });
     return this.outcome({ cancelled: true, kind: "park" });
   }
@@ -235,8 +216,8 @@ export class SessionExecution {
   ): TurnOutcome {
     return {
       ...value,
-      serializedContext: this.cursor.serializedContext,
-      sessionState: this.cursor.sessionState,
+      serializedContext: this.input.cursor.serializedContext,
+      sessionState: this.input.cursor.sessionState,
     } as TurnOutcome;
   }
 
@@ -245,7 +226,7 @@ export class SessionExecution {
     readonly initialAcceptedAtMs: number | undefined;
     readonly initialResults: readonly RuntimeActionResult[];
     readonly pendingCallIds: readonly string[];
-  }): Promise<RuntimeActionResultStepInput | "cancelled" | "cancel-turn"> {
+  }): Promise<RuntimeActionResultStepInput | "cancelled"> {
     const results: RuntimeActionResult[] = [...input.initialResults];
     const acceptedAtMsByCallId = new Map<string, number>();
     if (input.initialAcceptedAtMs !== undefined) {
@@ -269,9 +250,9 @@ export class SessionExecution {
       }
 
       const next = await this.nextRuntimeEvent(input.control);
-      if (next === "cancelled" || next === "cancel-turn") return next;
+      if (next === "cancelled") return next;
       if (next.kind === "runtime-action-result") {
-        const snapshot = this.cursor.sessionState.snapshot.session.state;
+        const snapshot = this.input.cursor.sessionState.snapshot.session.state;
         const accepted = next.results.filter((result) => {
           if (result.kind === "tool-result") {
             return isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result);
@@ -299,30 +280,18 @@ export class SessionExecution {
     }
   }
 
-  private async nextRuntimeEvent(control: TurnRouting): Promise<
-    | RuntimeActionResultStepInput
-    | {
-        readonly kind: "workflow";
-        readonly message: import("#execution/tools/workflow/messages.js").WorkflowToolRunMessage;
-      }
-    | "cancelled"
-    | "cancel-turn"
-  > {
+  private async nextRuntimeEvent(control: TurnRouting): Promise<RuntimeEvent> {
+    const { commandInbox } = this.input;
     while (true) {
-      if (control.signal.aborted) return "cancel-turn";
-      const buffered = control.takeRuntimeResult();
-      if (buffered !== undefined) return buffered;
-      const result = await this.input.commandInbox.next("runtime");
-      if (result.done) throw new Error("Session inbox closed before runtime actions completed.");
-      this.input.commandInbox.consumeNext("runtime");
-      const value = result.value;
-      if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
-      if (value.kind === "runtime-action-result") {
-        return { kind: "runtime-action-result", results: value.results };
-      }
-      const command = await control.handle(value, true);
-      if (command === "cancel-turn") return command;
       if (control.signal.aborted) return "cancelled";
+      const result = control.takeRuntimeResult();
+      if (result !== undefined) return result;
+      const message = control.takeWorkflowMessage();
+      if (message !== undefined) return { kind: "workflow", message };
+      const read = await commandInbox.next("runtime");
+      if (read.done) throw new Error("Session inbox closed before runtime actions completed.");
+      commandInbox.consumeNext("runtime");
+      await control.handle(read.value, true);
     }
   }
 }

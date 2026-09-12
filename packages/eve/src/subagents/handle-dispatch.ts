@@ -71,35 +71,22 @@ export type DispatchOutcome =
       readonly session: RuntimeSession;
     };
 
+/**
+ * Where the callee reports its result. A new turn replies to the caller's
+ * hook; steering an active turn keeps that turn's original reply target.
+ */
+export type AgentReplyTarget =
+  | { readonly kind: "reply"; readonly parentToken: string; readonly taskId?: string }
+  | { readonly kind: "steer" };
+
 /** Delivers a continuation after the session handle store atomically claimed it for one owner. */
 export async function dispatchToClaimedAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
-  readonly parentToken: string;
   readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
-  readonly taskId?: string;
-}): Promise<DispatchOutcome> {
-  return await dispatchToAgentAddress(input);
-}
-
-/** Steering keeps the active turn's original result callback and owner. */
-export async function steerClaimedAgent(
-  input: Omit<Parameters<typeof dispatchToClaimedAgentAddress>[0], "parentToken" | "taskId">,
-): Promise<DispatchOutcome> {
-  return await dispatchToAgentAddress(input);
-}
-
-/** Delivers a continuation to an already-claimed local or remote agent address. */
-async function dispatchToAgentAddress(input: {
-  readonly action: RuntimeAgentHandleAction;
-  readonly auth: SessionAuthContext | null;
-  readonly bundle: CompiledBundle;
-  readonly currentSession: RuntimeSession;
-  readonly parentToken?: string;
-  readonly handle: { readonly address: AgentAddress; readonly identity: AgentIdentity };
-  readonly taskId?: string;
+  readonly reply: AgentReplyTarget;
 }): Promise<DispatchOutcome> {
   const { action, handle } = input;
   const agentId = handle.identity.id;
@@ -110,8 +97,7 @@ async function dispatchToAgentAddress(input: {
     auth: input.auth,
     bundle: input.bundle,
     identity: handle.identity,
-    parentToken: input.parentToken,
-    taskId: input.taskId,
+    reply: input.reply,
   });
   if (!delivery.ok) {
     const { cause, permanent } = delivery.error;
@@ -163,15 +149,18 @@ async function deliverToAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
-  readonly parentToken?: string;
-  readonly taskId?: string;
+  readonly reply: AgentReplyTarget;
 }): Promise<
   Result<
     void,
     { readonly cause: unknown; readonly deliveryAmbiguous: boolean; readonly permanent: boolean }
   >
 > {
-  const { action, address, bundle, identity } = input;
+  const { action, address, bundle, identity, reply } = input;
+  const taskId =
+    reply.kind === "reply"
+      ? (reply.taskId ?? readTaskIdFromInboxToken(reply.parentToken))
+      : undefined;
 
   if (address.kind === "agent/remote") {
     let resolvedRemote;
@@ -190,16 +179,16 @@ async function deliverToAgentAddress(input: {
       await continueRemoteAgentSession({
         auth: input.auth,
         callback:
-          input.parentToken === undefined
+          reply.kind === "steer"
             ? undefined
             : {
                 callId: action.callId,
                 subagentName: identity.name,
-                taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
-                token: input.parentToken,
+                taskId,
+                token: reply.parentToken,
                 url: createWorkflowCallbackUrl(
                   address.callbackBaseUrl,
-                  createEveCallbackRoutePath(input.parentToken),
+                  createEveCallbackRoutePath(reply.parentToken),
                 ),
               },
         message: readSubagentMessage(action),
@@ -226,13 +215,13 @@ async function deliverToAgentAddress(input: {
       command: {
         auth: input.auth,
         caller:
-          input.parentToken === undefined
+          reply.kind === "steer"
             ? undefined
             : {
                 callId: action.callId,
-                replyTo: { kind: "hook", token: input.parentToken },
+                replyTo: { kind: "hook", token: reply.parentToken },
                 subagentName: identity.name,
-                taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
+                taskId,
               },
         kind: "send",
         payload: {

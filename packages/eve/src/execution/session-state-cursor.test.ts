@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
-describe("SessionExecutionCursor", () => {
+describe("SessionStateCursor", () => {
   it("claims every new continuation address recorded during a step", async () => {
     const claimSessionHook = vi.fn(async () => {});
     const commandInbox = {
@@ -13,7 +13,7 @@ describe("SessionExecutionCursor", () => {
       sessionHookTokens: ["stable", "channel:initial"],
     };
     const initialState = state("channel:initial");
-    const cursor = new SessionExecutionCursor({
+    const cursor = new SessionStateCursor({
       commandInbox,
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {
@@ -40,7 +40,7 @@ describe("SessionExecutionCursor", () => {
 
   it("claims the current continuation when no address history was recorded", async () => {
     const claimSessionHook = vi.fn(async () => {});
-    const cursor = new SessionExecutionCursor({
+    const cursor = new SessionStateCursor({
       commandInbox: {
         claimSessionHook,
         sessionHookTokens: ["stable"],

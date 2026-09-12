@@ -2,11 +2,12 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
+import { SessionBacklog } from "#execution/session-backlog.js";
 import { SessionExecution } from "#execution/session-execution.js";
-import { SessionExecutionCursor } from "#execution/session-execution-cursor.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { turnStep, settleTurnStep } from "#execution/workflow-steps.js";
+import { turnStep, commitSettlementStep } from "#execution/workflow-steps.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 
@@ -18,7 +19,7 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 
 vi.mock("#execution/workflow-steps.js", () => ({
   turnStep: vi.fn(),
-  settleTurnStep: vi.fn(),
+  commitSettlementStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/parent/delegate.js", () => ({
   acknowledgeDelegatedTasksStep: vi.fn(),
@@ -39,24 +40,14 @@ describe("SessionExecution background task checkpoints", () => {
         .fn()
         .mockReturnValueOnce([{ kind: "cancel" }])
         .mockReturnValue([]),
-      hasPending: vi.fn(async () => false),
+      hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       next: vi.fn(() => new Promise<never>(() => {})),
       restore: vi.fn(),
       sessionHookTokens: ["parent-inbox"],
       setAuthorizationWindow: vi.fn(),
     };
-    const execution = new SessionExecution({
-      bufferedDeliveries: [],
-      bufferedSessionControls: [],
-      cancelledTaskIds: new Set(),
-      commandInbox: inbox,
-      mode: "conversation",
-      parentWritable: new WritableStream(),
-      seenTaskDeliveries: new Set(),
-      serializedContext: {},
-      sessionState,
-    });
+    const execution = createExecution({ inbox, sessionState });
     vi.mocked(turnStep)
       .mockReset()
       .mockResolvedValue({
@@ -91,29 +82,19 @@ describe("SessionExecution background task checkpoints", () => {
       kind: "deliver",
       payloads: [{ message: "Include Alice's update." }],
     };
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const backlog = new SessionBacklog();
     const inbox: SessionInbox = {
       claimSessionHook: vi.fn(),
       consumeNext: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([background, steering]).mockReturnValue([]),
-      hasPending: vi.fn(async () => false),
+      hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       next: vi.fn(() => new Promise<never>(() => {})),
       restore: vi.fn(),
       sessionHookTokens: [],
       setAuthorizationWindow: vi.fn(),
     };
-    const execution = new SessionExecution({
-      bufferedDeliveries,
-      bufferedSessionControls: [],
-      cancelledTaskIds: new Set(),
-      commandInbox: inbox,
-      mode: "conversation",
-      parentWritable: new WritableStream<Uint8Array>(),
-      seenTaskDeliveries: new Set(),
-      serializedContext: {},
-      sessionState: state(""),
-    });
+    const execution = createExecution({ backlog, inbox, sessionState: state("") });
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementation(async (input) => ({
@@ -128,13 +109,13 @@ describe("SessionExecution background task checkpoints", () => {
 
     expect(turnStep).toHaveBeenCalledTimes(2);
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steering);
-    expect(bufferedDeliveries).toEqual([background]);
+    expect(backlog.deliveries).toEqual([background]);
   });
 
   it.each(["cancelled", "done"] as const)(
     "retains task observability when a %s step races cancellation",
     async (action) => {
-      vi.mocked(settleTurnStep).mockClear();
+      vi.mocked(commitSettlementStep).mockClear();
       const initialState = state("");
       const backgroundState = state("http:background");
       const completedState = state("http:completed");
@@ -154,7 +135,7 @@ describe("SessionExecution background task checkpoints", () => {
         claimSessionHook: vi.fn(),
         consumeNext: vi.fn(),
         drain: vi.fn(() => []),
-        hasPending: vi.fn(async () => false),
+        hasPending: vi.fn(() => false),
         hasReadyAuthorization: vi.fn(() => false),
         next: vi
           .fn()
@@ -164,18 +145,12 @@ describe("SessionExecution background task checkpoints", () => {
         sessionHookTokens: [],
         setAuthorizationWindow: vi.fn(),
       };
-      const execution = new SessionExecution({
-        bufferedDeliveries: [],
-        bufferedSessionControls: [],
-        cancelledTaskIds: new Set(),
-        commandInbox: inbox,
-        mode: "conversation",
-        parentWritable: new WritableStream<Uint8Array>(),
-        seenTaskDeliveries: new Set(),
+      const execution = createExecution({
+        inbox,
         serializedContext: { state: "before" },
         sessionState: initialState,
       });
-      const adopt = vi.spyOn(SessionExecutionCursor.prototype, "adopt");
+      const adopt = vi.spyOn(SessionStateCursor.prototype, "adopt");
       vi.mocked(acknowledgeDelegatedTasksStep).mockImplementation(async () => {
         expect(execution.cursor.serializedContext).toEqual(backgroundContext);
         expect(execution.cursor.sessionState).toBe(backgroundState);
@@ -211,10 +186,29 @@ describe("SessionExecution background task checkpoints", () => {
         serializedContext: completedContext,
         sessionState: backgroundState,
       });
-      expect(settleTurnStep).not.toHaveBeenCalled();
+      expect(commitSettlementStep).not.toHaveBeenCalled();
     },
   );
 });
+
+function createExecution(input: {
+  readonly backlog?: SessionBacklog;
+  readonly inbox: SessionInbox;
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): SessionExecution {
+  return new SessionExecution({
+    backlog: input.backlog ?? new SessionBacklog(),
+    commandInbox: input.inbox,
+    cursor: new SessionStateCursor({
+      commandInbox: input.inbox,
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: input.serializedContext ?? {},
+      sessionState: input.sessionState,
+    }),
+    mode: "conversation",
+  });
+}
 
 function state(continuationToken: string): DurableSessionState {
   return createTestSessionState({
