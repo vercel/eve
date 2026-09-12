@@ -1,7 +1,15 @@
 import { isObject } from "#shared/guards.js";
 
-/** Max structural depth the schema dereferencer descends before truncating. */
-const MAX_DEREF_DEPTH = 12;
+/**
+ * Max structural depth the schema dereferencer descends before truncating.
+ *
+ * Every keyword level counts and a `properties` hop counts twice, so real
+ * API schemas run deep quickly: Notion's page properties reach the
+ * `title[].text.content` constraint at depth 14, and truncating alternatives
+ * of a `oneOf` there to `{}` makes every value match all of them (#3267).
+ * Reference cycles are cut by `seen`, so this only bounds inline nesting.
+ */
+const MAX_DEREF_DEPTH = 32;
 
 /** A path, query, header, or cookie parameter resolved from an operation. */
 export interface OpenApiParameter {
