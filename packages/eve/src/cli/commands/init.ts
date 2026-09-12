@@ -1,5 +1,5 @@
 import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import pc from "#compiled/picocolors/index.js";
@@ -15,7 +15,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
-import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
+import type { NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
   detectPackageManager,
@@ -58,13 +58,15 @@ import {
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
+import { tryInitializeGit } from "./init-git.js";
 import { InitTargetError } from "./init-telemetry.js";
 import {
-  cleanupFreshInitTarget,
-  workspaceFailureNote,
-  type InitFailurePolicy,
-} from "./init-recovery.js";
-import { tryInitializeGit, type GitInitResult } from "./init-git.js";
+  reportExistingProjectChanges,
+  type InitResult,
+  type PreparedInitProject,
+} from "./init-project.js";
+import { cleanupFreshInitTarget, workspaceFailureNote } from "./init-recovery.js";
+import { selectInitSelfModification } from "./init-self-modification.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 import { resolveInitTarget } from "./init-target.js";
 
@@ -80,6 +82,8 @@ export interface InitCommandDependencies {
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
   selectInitHandoff: typeof selectInitHandoff;
+  selectInitSelfModification: typeof selectInitSelfModification;
+  installSelfModification(appRoot: string): Promise<void>;
   spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
   tryInitializeGit: typeof tryInitializeGit;
@@ -96,6 +100,11 @@ const defaultDependencies: InitCommandDependencies = {
   runPackageManagerInstall,
   scaffoldBaseProject,
   selectInitHandoff,
+  selectInitSelfModification,
+  installSelfModification: async (appRoot) => {
+    const { installRegistryItem } = await import("./registry.js");
+    await installRegistryItem(appRoot, "experimental/self-modification", { silent: true });
+  },
   spawnCodingAgentRepl,
   spawnPackageManager,
   tryInitializeGit,
@@ -262,73 +271,11 @@ async function scaffoldProject(
   }
 }
 
-type PreparedInitProject =
-  | {
-      configurationFilesChanged: string[];
-      dependenciesAdded: string[];
-      failurePolicy: "preserve";
-      filesWritten: string[];
-      kind: "added";
-      nodeEngineOverride?: NodeEngineOverride;
-      packageManager: PackageManagerKind;
-      projectPath: string;
-    }
-  | {
-      failurePolicy: InitFailurePolicy;
-      kind: "created";
-      packageManager: PackageManagerKind;
-      preservedTargetEntries: readonly string[];
-      projectPath: string;
-      retryCommand: string;
-      workspaceMember: boolean;
-      workspaceRootMutations: WorkspaceRootMutation[];
-    };
-
 type InitTerminalTracker = (
   step: EveCliSetupStep,
   result: EveCliSetupTerminalResult,
   failureCode?: EveCliSetupFailureCode,
 ) => void;
-
-type InitResult = {
-  agentElapsedMs: number;
-  agentLaunched: boolean;
-  installElapsedMs: number;
-  packageManager: PackageManagerKind;
-  projectPath: string;
-} & (
-  | {
-      configurationFilesChanged: string[];
-      dependenciesAdded: string[];
-      filesWritten: string[];
-      kind: "added";
-      nodeEngineOverride?: NodeEngineOverride;
-    }
-  | {
-      gitResult: GitInitResult;
-      kind: "created";
-      workspaceRootMutations: WorkspaceRootMutation[];
-    }
-);
-
-function reportExistingProjectChanges(
-  logger: InitCliLogger,
-  project: Extract<PreparedInitProject, { kind: "added" }>,
-): void {
-  logger.log("Updated existing project:");
-  for (const path of project.filesWritten) {
-    logger.log(`  Created ${relative(project.projectPath, path).replaceAll("\\", "/")}`);
-  }
-  if (project.dependenciesAdded.length > 0) {
-    logger.log(`  Added dependencies: ${project.dependenciesAdded.join(", ")}`);
-  }
-  for (const path of project.configurationFilesChanged) {
-    logger.log(`  Updated ${path}`);
-  }
-  if (project.nodeEngineOverride !== undefined) {
-    logger.log(pc.yellow(`  ⚠ ${formatNodeEngineOverrideWarning(project.nodeEngineOverride)}`));
-  }
-}
 
 async function runInitSteps(input: {
   dependencies: InitCommandDependencies;
@@ -336,15 +283,27 @@ async function runInitSteps(input: {
   options: InitCommandOptions;
   parentDirectory: string;
   target: string | undefined;
+  agentLaunched: boolean;
   trackStep?: (step: EveCliSetupStep) => void;
   trackTerminal?: InitTerminalTracker;
 }): Promise<InitResult> {
-  const { dependencies, logger, options, parentDirectory, target, trackStep, trackTerminal } =
-    input;
+  const {
+    agentLaunched,
+    dependencies,
+    logger,
+    options,
+    parentDirectory,
+    target,
+    trackStep,
+    trackTerminal,
+  } = input;
   const debug = isLogLevelEnabled("debug");
-  const agentLaunched = await dependencies.isCodingAgentLaunch();
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
+  const selfModificationEnabled =
+    !agentLaunched && options.agents === undefined
+      ? await dependencies.selectInitSelfModification()
+      : false;
 
   let progress = startCliLiveRow(logger);
   let activeInitStep: EveCliSetupStep = "scaffold";
@@ -516,6 +475,13 @@ async function runInitSteps(input: {
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
+    if (selfModificationEnabled) {
+      activeInitStep = "registry_install";
+      trackStep?.(activeInitStep);
+      progress.update("Enabling self-modification");
+      await dependencies.installSelfModification(project.projectPath);
+    }
+
     if (project.kind === "created") {
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
@@ -527,10 +493,17 @@ async function runInitSteps(input: {
         agentLaunched,
         gitResult: await dependencies.tryInitializeGit(project.projectPath),
         installElapsedMs,
+        selfModificationEnabled,
       };
     }
 
-    return { ...project, agentElapsedMs, agentLaunched, installElapsedMs };
+    return {
+      ...project,
+      agentElapsedMs,
+      agentLaunched,
+      installElapsedMs,
+      selfModificationEnabled,
+    };
   } catch (error) {
     trackTerminal?.(
       activeInitStep,
@@ -570,6 +543,7 @@ export async function runInitCommand(
     }
 
     result = await runInitSteps({
+      agentLaunched: await dependencies.isCodingAgentLaunch(),
       dependencies,
       logger,
       options,
@@ -605,6 +579,9 @@ export async function runInitCommand(
   logger.log(
     `${pc.green("✓")} Installed dependencies ${pc.dim(`in ${formatElapsed(result.installElapsedMs)}`)}`,
   );
+  if (result.selfModificationEnabled) {
+    logger.log(`${pc.green("✓")} Enabled self-modification`);
+  }
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {
     logger.error(
@@ -639,11 +616,15 @@ export async function runInitCommand(
   }
 
   let handoff: InitHandoff;
-  try {
-    handoff = await dependencies.selectInitHandoff({ agentName: basename(result.projectPath) });
-  } catch (error) {
-    if (error instanceof WizardCancelledError) return;
-    throw error;
+  if (result.selfModificationEnabled) {
+    handoff = "eve-dev";
+  } else {
+    try {
+      handoff = await dependencies.selectInitHandoff({ agentName: basename(result.projectPath) });
+    } catch (error) {
+      if (error instanceof WizardCancelledError) return;
+      throw error;
+    }
   }
   if (handoff === "exit") return;
   if (handoff !== "eve-dev") {

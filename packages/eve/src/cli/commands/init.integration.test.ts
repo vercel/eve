@@ -71,7 +71,13 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  installSelfModification: ReturnType<
+    typeof vi.fn<InitCommandDependencies["installSelfModification"]>
+  >;
   selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  selectInitSelfModification: ReturnType<
+    typeof vi.fn<InitCommandDependencies["selectInitSelfModification"]>
+  >;
   spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
@@ -106,7 +112,9 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
+    installSelfModification: vi.fn(async () => {}),
     selectInitHandoff: vi.fn(async () => "eve-dev"),
+    selectInitSelfModification: vi.fn(async () => false),
     spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
     tryInitializeGit: vi.fn(async () => gitResult),
@@ -335,6 +343,42 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
+  it("installs self-modification before Git initialization and skips the coding-agent handoff", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-self-modification-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitSelfModification.mockResolvedValue(true);
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.installSelfModification).toHaveBeenCalledWith(projectPath);
+    expect(deps.installSelfModification.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.tryInitializeGit.mock.invocationCallOrder[0]!,
+    );
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "exec",
+      "eve",
+      "dev",
+      "--onboard",
+    ]);
+    expect(stripAnsi(output.messages.join("\n"))).toContain("✓ Enabled self-modification");
+  });
+
+  it("does not offer self-modification when init was launched by a coding agent", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-launched-selfmod-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(deps.selectInitSelfModification).not.toHaveBeenCalled();
+    expect(deps.installSelfModification).not.toHaveBeenCalled();
   });
 
   it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
