@@ -292,10 +292,27 @@ describe("tool loop streamed provider retries", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
+    let attempt = 0;
     const doStream = vi.fn(async () => ({
       stream: new ReadableStream<StreamPart>({
         start(controller) {
-          enqueueOverload(controller);
+          attempt += 1;
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({
+            id: `call_terminal_${attempt}`,
+            toolName: "save_note",
+            type: "tool-input-start",
+          });
+          controller.enqueue({
+            delta: '{"note":"partial',
+            id: `call_terminal_${attempt}`,
+            type: "tool-input-delta",
+          });
+          controller.enqueue({
+            error: { message: "Overloaded", type: "overloaded_error" },
+            type: "error",
+          });
+          controller.close();
         },
       }),
     }));
@@ -324,5 +341,27 @@ describe("tool loop streamed provider retries", () => {
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "session.failed")).toHaveLength(1);
+    const abandonedResults = events.filter(
+      (event) =>
+        event.type === "action.result" && event.data.result.callId.startsWith("call_terminal_"),
+    );
+    expect(abandonedResults).toHaveLength(3);
+    expect(
+      abandonedResults.map((event) =>
+        event.type === "action.result" ? event.data.result.callId : undefined,
+      ),
+    ).toEqual(["call_terminal_1", "call_terminal_2", "call_terminal_3"]);
+    expect(
+      abandonedResults.map((event) =>
+        event.type === "action.result" ? event.data.error?.message : undefined,
+      ),
+    ).toEqual([
+      "The model call attempt was retried before this tool could run.",
+      "The model call attempt was retried before this tool could run.",
+      "The model call attempt failed before this tool could run.",
+    ]);
+    expect(events.lastIndexOf(abandonedResults[2]!)).toBeLessThan(
+      events.findIndex((event) => event.type === "step.failed"),
+    );
   });
 });

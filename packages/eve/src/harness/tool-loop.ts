@@ -120,6 +120,7 @@ import {
   emitTurnPreamble,
   getHarnessEmissionState,
   setHarnessEmissionState,
+  type HarnessEmissionState,
 } from "#harness/emission.js";
 import {
   extractQuestionInputRequests,
@@ -129,7 +130,10 @@ import {
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
-import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
+import {
+  createRuntimeToolResultFromValue,
+  createToolResultMessagePartFromToolError,
+} from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   clearTurnClientContextState,
@@ -201,7 +205,10 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
 import { resolveInitiatingTaskContext } from "#tasks/delivery-context.js";
-import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
+import {
+  extractWorkflowStreamWriteErrorDetails,
+  isWorkflowStreamWriteError,
+} from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   BackgroundToolExecutorKey,
@@ -253,6 +260,7 @@ import {
 import {
   type CompactionConfig,
   type HarnessSession,
+  type HarnessEmitFn,
   type HarnessToolMap,
   requireSessionModelReference,
   type SettledTurn,
@@ -1344,7 +1352,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let modelCallCoordinationTools = config.tools;
 
     const runSingleModelCall = async (
-      opts: ModelCallOptions & { readonly attemptIndex: number },
+      opts: ModelCallOptions & {
+        readonly attemptIndex: number;
+        readonly unsettledActionToolNames?: Map<string, string>;
+      },
     ): Promise<HarnessStepResult> => {
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
@@ -1509,6 +1520,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: advertisedHarnessTools,
+            unsettledActionToolNames: opts.unsettledActionToolNames,
           });
           throwIfTurnAborted(config.abortSignal);
           const [stepResult, accumulatedResponseMessages] = await Promise.all([
@@ -1588,14 +1600,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let nextModelAttemptIndex = 0;
     const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> =>
       runModelCallWithRetries(
-        (attempt) =>
+        (attempt, unsettledActionToolNames) =>
           runSingleModelCall({
             ...opts,
             attemptIndex: nextModelAttemptIndex++,
             preparedInput: attempt === 1 ? opts.preparedInput : undefined,
             suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
+            unsettledActionToolNames,
           }),
         {
+          emissionState,
+          emit,
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
@@ -3336,17 +3351,33 @@ function resolveApprovalKeyFromTools(
  * transient.
  */
 async function runModelCallWithRetries<T>(
-  fn: (attempt: number) => Promise<T>,
-  diag: { readonly sessionId: string; readonly turnId: string },
+  fn: (attempt: number, unsettledActionToolNames: Map<string, string>) => Promise<T>,
+  diag: {
+    readonly emissionState: HarnessEmissionState;
+    readonly emit: HarnessEmitFn | undefined;
+    readonly sessionId: string;
+    readonly turnId: string;
+  },
   abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfTurnAborted(abortSignal);
+    const unsettledActionToolNames = new Map<string, string>();
     try {
-      return await fn(attempt);
+      return await fn(attempt, unsettledActionToolNames);
     } catch (error) {
       throwIfTurnAborted(abortSignal);
-      if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
+      const retrying =
+        attempt < MODEL_CALL_MAX_ATTEMPTS && classifyModelCallError(error) === "retry";
+      if (!isWorkflowStreamWriteError(error)) {
+        await emitAbandonedModelCallActionResults({
+          emissionState: diag.emissionState,
+          emit: diag.emit,
+          retrying,
+          unsettledActionToolNames,
+        });
+      }
+      if (!retrying) {
         throw error;
       }
       const delayMs =
@@ -3360,5 +3391,33 @@ async function runModelCallWithRetries<T>(
       });
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+  }
+}
+
+async function emitAbandonedModelCallActionResults(input: {
+  readonly emissionState: HarnessEmissionState;
+  readonly emit: HarnessEmitFn | undefined;
+  readonly retrying: boolean;
+  readonly unsettledActionToolNames: Map<string, string>;
+}): Promise<void> {
+  const code = input.retrying ? "MODEL_CALL_ATTEMPT_RETRIED" : "MODEL_CALL_ATTEMPT_FAILED";
+  const message = input.retrying
+    ? "The model call attempt was retried before this tool could run."
+    : "The model call attempt failed before this tool could run.";
+  for (const [callId, toolName] of input.unsettledActionToolNames) {
+    await input.emit?.(
+      createActionResultEvent({
+        result: createRuntimeToolResultFromValue({
+          callId,
+          isError: true,
+          output: { code, message },
+          toolName,
+        }),
+        sequence: input.emissionState.sequence,
+        stepIndex: input.emissionState.stepIndex,
+        turnId: input.emissionState.turnId,
+      }),
+    );
+    input.unsettledActionToolNames.delete(callId);
   }
 }

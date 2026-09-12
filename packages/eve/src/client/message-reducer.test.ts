@@ -18,6 +18,7 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnCompletedEvent,
   createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -251,6 +252,134 @@ describe("defaultMessageReducer", () => {
     ]);
 
     expect(data.messages[0]?.parts).toEqual([{ type: "step-start" }]);
+  });
+
+  it("removes unresolved tool parts on every turn end and preserves terminal and approval states", () => {
+    const terminalEvents = [
+      createTurnCompletedEvent({
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+      createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+      createTurnFailedEvent({
+        code: "MODEL_FAILED",
+        message: "model failed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ] as const;
+
+    for (const terminalEvent of terminalEvents) {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createActionInputAppendedEvent({
+          callId: "call_streaming",
+          inputTextDelta: "{",
+          sequence: 1,
+          stepIndex: 0,
+          toolName: "render",
+          turnId: "turn_1",
+        }),
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "call_available",
+              input: { title: "Pending" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+            {
+              callId: "call_approval",
+              input: { title: "Approve" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+            {
+              callId: "call_completed",
+              input: { title: "Done" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: {
+                callId: "call_approval",
+                input: { title: "Approve" },
+                kind: "tool-call",
+                toolName: "render",
+              },
+              kind: "tool-approval",
+              prompt: "Approve?",
+              requestId: "approval_1",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createActionResultEvent({
+          result: {
+            callId: "call_completed",
+            kind: "tool-result",
+            output: { saved: true },
+            toolName: "render",
+          },
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        terminalEvent,
+      ]);
+
+      expect(findToolPart(data, "call_streaming")).toBeUndefined();
+      expect(findToolPart(data, "call_available")).toBeUndefined();
+      expect(findToolPart(data, "call_approval")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(data, "call_completed")).toMatchObject({
+        output: { saved: true },
+        state: "output-available",
+      });
+    }
+  });
+
+  it("removes tool parts settled by an abandoned model-call attempt", () => {
+    for (const code of ["MODEL_CALL_ATTEMPT_RETRIED", "MODEL_CALL_ATTEMPT_FAILED"]) {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "call_abandoned",
+              input: { title: "Pending" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createActionResultEvent({
+          result: {
+            callId: "call_abandoned",
+            isError: true,
+            kind: "tool-result",
+            output: { code, message: "The model call attempt ended." },
+            toolName: "render",
+          },
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+
+      expect(findToolPart(data, "call_abandoned")).toBeUndefined();
+    }
   });
 
   it("does not create an assistant message when a turn fails before streaming", () => {
