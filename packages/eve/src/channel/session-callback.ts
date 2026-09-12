@@ -18,8 +18,6 @@ export type SessionCallbackParseResult =
 const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
-    parentRunId: z.string().min(1).optional(),
-    parentTurnId: z.string().min(1).optional(),
     subagentName: z.string().min(1),
     taskId: z.string().min(1).optional(),
     token: z.string().min(1),

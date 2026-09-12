@@ -407,8 +407,6 @@ export interface ActivityObserverConfig {
 
 export interface SessionCallback {
   readonly callId: string;
-  readonly parentRunId?: string;
-  readonly parentTurnId?: string;
   readonly subagentName: string;
   readonly taskId?: string;
   readonly token: string;

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ConversationIdKey } from "#context/keys.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 
 afterEach(() => {
@@ -7,7 +9,7 @@ afterEach(() => {
 });
 
 describe("agentTraceIdentityAttributes", () => {
-  const input = { rootSessionId: "conversation-1", sessionId: "session-1" };
+  const input = { rootSessionId: "root-session", sessionId: "session-1" };
 
   it("uses the GenAI conversation identifier outside Vercel", () => {
     vi.stubEnv("VERCEL_ENV", undefined);
@@ -15,18 +17,22 @@ describe("agentTraceIdentityAttributes", () => {
     expect(agentTraceIdentityAttributes(input)).toEqual({
       "agent.run.id": "session-1",
       "agent.trace.schema.version": 4,
-      "gen_ai.conversation.id": "conversation-1",
+      "gen_ai.conversation.id": "root-session",
     });
   });
 
   it("adds the Vercel session identifier on Vercel", () => {
     vi.stubEnv("VERCEL_ENV", "preview");
+    const context = new ContextContainer();
+    context.set(ConversationIdKey, "caller-conversation");
 
-    expect(agentTraceIdentityAttributes(input)).toEqual({
-      "agent.run.id": "session-1",
-      "agent.trace.schema.version": 4,
-      "gen_ai.conversation.id": "conversation-1",
-      "vercel.session_id": "conversation-1",
+    contextStorage.run(context, () => {
+      expect(agentTraceIdentityAttributes(input)).toEqual({
+        "agent.run.id": "session-1",
+        "agent.trace.schema.version": 4,
+        "gen_ai.conversation.id": "caller-conversation",
+        "vercel.session_id": "root-session",
+      });
     });
   });
 });

@@ -36,7 +36,6 @@
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import {
   ChannelRequestIdKey,
-  ConversationIdKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
@@ -163,15 +162,11 @@ export function readParentSessionId(
  * `eve.parentSession.rootSessionId` is denormalized at every dispatch
  * site (see {@link "#channel/types.js".SessionParent}) so a subagent
  * five levels deep can still attribute itself to the top user-facing
- * session without walking the chain. Remote-created sessions carry the same
- * root in the serialized conversation id even though they have no local
- * `eve.parentSession`. Independent top-level runs return `undefined`.
+ * session without walking the chain. Returns `undefined` for top-level
+ * runs, which carry no verified `eve.parentSession`.
  */
 export function readRootSessionId(serializedContext: Record<string, unknown>): string | undefined {
-  const parentRootSessionId = readParentLineage(serializedContext).rootSessionId;
-  if (parentRootSessionId !== undefined) return parentRootSessionId;
-  const conversationId = serializedContext[ConversationIdKey.name];
-  return isNonEmptyString(conversationId) ? conversationId : undefined;
+  return readParentLineage(serializedContext).rootSessionId;
 }
 
 /**
@@ -260,9 +255,8 @@ function collectMessageText(message: unknown): string | undefined {
  * Builds the `$eve.*` attribute payload for a top-level session run
  * (`workflowEntry` invoked without an `eve.parentSession`).
  *
- * Independent session rows omit `$eve.root` because their own `workflowRunId`
- * identifies the chain root. Remote-created sessions emit the inherited root
- * from the serialized conversation id.
+ * `$eve.root` is intentionally omitted — the session row IS the root,
+ * so its own `workflowRunId` already identifies the chain root.
  */
 export function buildSessionAttributes(input: {
   readonly inputMessage: unknown;
@@ -275,7 +269,6 @@ export function buildSessionAttributes(input: {
     "$eve.schedule": readScheduleId(input.serializedContext),
     "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
-    "$eve.root": readRootSessionId(input.serializedContext),
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),

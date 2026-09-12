@@ -34,7 +34,10 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
-import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import {
+  writeForwardedAudienceBaggage,
+  writeForwardedParentSessionBaggage,
+} from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import { writeConversationBaggage } from "#tracing/conversation-context.js";
 
@@ -93,8 +96,6 @@ export async function startRemoteAgentSession(input: {
     capabilities: {};
     callback: {
       callId: string;
-      parentRunId?: string;
-      parentTurnId?: string;
       subagentName: string;
       taskId?: string;
       token: string;
@@ -110,8 +111,6 @@ export async function startRemoteAgentSession(input: {
     capabilities: {},
     callback: {
       callId: input.action.callId,
-      parentRunId: input.parent?.lineage?.sessionId,
-      parentTurnId: input.parent?.lineage?.turn.id,
       subagentName: input.action.remoteAgentName,
       taskId: input.taskId ?? readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,
@@ -153,7 +152,12 @@ export async function startRemoteAgentSession(input: {
       traceparent,
     }),
   );
-  setHeader(headers, "baggage", writeConversationBaggage(baggage, input.parent?.conversationId));
+  const conversationBaggage = writeConversationBaggage(baggage, input.parent?.conversationId);
+  setHeader(
+    headers,
+    "baggage",
+    writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
+  );
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
