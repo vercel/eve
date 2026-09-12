@@ -76,6 +76,61 @@ describe("installSandboxShutdownHandlers", () => {
     expect(handle.shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it("waits once for the nitro close lifecycle before exiting on signals", async () => {
+    let finishClose: (() => void) | undefined;
+    const callHook = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve;
+        }),
+    );
+    const nitroApp = {
+      hooks: {
+        callHook,
+        hook: vi.fn(),
+      },
+    };
+    const fakeProcess = createFakeProcess();
+
+    installSandboxShutdownHandlers({ log: () => {}, nitroApp, process: fakeProcess });
+    fakeProcess.emit("SIGTERM");
+    fakeProcess.emit("SIGINT");
+    await Promise.resolve();
+
+    expect(callHook).toHaveBeenCalledWith("close");
+    expect(callHook).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exit).not.toHaveBeenCalled();
+
+    finishClose?.();
+    await vi.waitFor(() => {
+      expect(fakeProcess.exit).toHaveBeenCalledWith(143);
+    });
+    expect(fakeProcess.exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the complete nitro close lifecycle before exiting", async () => {
+    vi.useFakeTimers();
+    try {
+      const log = vi.fn();
+      const nitroApp = {
+        hooks: {
+          callHook: vi.fn(() => new Promise<void>(() => {})),
+          hook: vi.fn(),
+        },
+      };
+      const fakeProcess = createFakeProcess();
+
+      installSandboxShutdownHandlers({ log, nitroApp, process: fakeProcess });
+      fakeProcess.emit("SIGTERM");
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("server shutdown timed out"));
+      expect(fakeProcess.exit).toHaveBeenCalledWith(143);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops tracked sandboxes and exits 130 on SIGINT", async () => {
     const handle = { shutdown: vi.fn(async () => {}) };
     trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
