@@ -18492,7 +18492,7 @@ snapshots:
       consola: 3.4.2
       defu: 6.1.7
       destr: 2.0.5
-      devalue: 5.9.0
+      devalue: 5.9.2
       errx: 0.1.0
       escape-string-regexp: 5.0.0
       exsolve: 1.1.1
@@ -18570,7 +18570,7 @@ snapshots:
       consola: 3.4.2
       defu: 6.1.7
       destr: 2.0.5
-      devalue: 5.9.0
+      devalue: 5.9.2
       errx: 0.1.0
       escape-string-regexp: 5.0.0
       exsolve: 1.1.1
@@ -21615,7 +21615,7 @@ snapshots:
       '@types/cookie': 0.6.0
       acorn: 8.17.0
       cookie: 0.6.0
-      devalue: 5.9.0
+      devalue: 5.9.2
       esm-env: 1.2.2
       kleur: 4.1.5
       magic-string: 0.30.21
@@ -21637,7 +21637,7 @@ snapshots:
       '@types/cookie': 0.6.0
       acorn: 8.17.0
       cookie: 0.6.0
-      devalue: 5.9.0
+      devalue: 5.9.2
       esm-env: 1.2.2
       kleur: 4.1.5
       magic-string: 0.30.21
@@ -29296,7 +29296,7 @@ snapshots:
       consola: 3.4.2
       cookie-es: 3.1.1
       defu: 6.1.7
-      devalue: 5.9.0
+      devalue: 5.9.2
       errx: 0.1.0
       escape-string-regexp: 5.0.0
       exsolve: 1.1.1
@@ -29432,7 +29432,7 @@ snapshots:
       consola: 3.4.2
       cookie-es: 3.1.1
       defu: 6.1.7
-      devalue: 5.9.0
+      devalue: 5.9.2
       errx: 0.1.0
       escape-string-regexp: 5.0.0
       exsolve: 1.1.1
@@ -32071,7 +32071,7 @@ snapshots:
       aria-query: 5.3.1
       axobject-query: 4.1.0
       clsx: 2.1.1
-      devalue: 5.9.0
+      devalue: 5.9.2
       esm-env: 1.2.2
       esrap: 2.2.13(@typescript-eslint/types@8.59.4)
       is-reference: 3.0.3
