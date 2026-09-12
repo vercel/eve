@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -494,10 +494,11 @@ export interface RunInput {
   readonly activityObserver?: ActivityObserverConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
-   * re-key the session during the first turn via
-   * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
+   * add a continuation address during the first turn via
+   * `ctx.session.continuation.alias(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
-   * acceptable when full identity isn't known until the first message. ID-only
+   * acceptable when full identity isn't known until the first message. Earlier
+   * addresses remain valid after an alias. ID-only
    * transports omit this field.
    */
   readonly continuationToken?: string;

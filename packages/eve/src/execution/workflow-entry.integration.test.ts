@@ -8,12 +8,13 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -91,7 +92,7 @@ interface WeatherAuthRuntime {
  * A get_weather tool behind an interactive authorization: getToken always
  * requires sign-in, and completeAuthorization mints `weather-token` from the
  * `oauth-code` callback. Shared by the callback-resume and
- * challenge-stays-open driver tests.
+ * challenge-stays-open owner tests.
  */
 async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
@@ -202,6 +203,49 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
+    const world = await getWorld();
+    const append = world.streams.writeMulti!.bind(world.streams);
+    let delayedAppend: Promise<void> | undefined;
+    const write = vi.spyOn(world.streams, "writeMulti").mockImplementation(async (...args) => {
+      if (args[1].endsWith("_user") && delayedAppend === undefined) {
+        delayedAppend = new Promise((resolve) => setTimeout(resolve, 1_200));
+        await delayedAppend;
+      }
+      return await append(...args);
+    });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Say hello to Alice." },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const events = await stream.nextTurn();
+          expect(delayedAppend).toBeDefined();
+          expect(filterEventsByType(events, "message.completed")).toHaveLength(1);
+          expectSingleTurn(events, "turn_0");
+          expect(events.at(-1)?.type).toBe("session.waiting");
+        } finally {
+          await delayedAppend;
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-followup",
@@ -211,6 +255,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -250,9 +296,10 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
         expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId), continuationToken]);
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -329,6 +376,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -390,8 +439,8 @@ describe("workflowEntry integration", () => {
 
         // The callback still lands on the retained read and closes the
         // challenge exactly once.
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -465,6 +514,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -493,8 +544,8 @@ describe("workflowEntry integration", () => {
           kind: "send",
           payload: { message: "This must not become a second task turn." },
         });
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -532,6 +583,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -583,11 +636,17 @@ describe("workflowEntry integration", () => {
             connectionName: "weather",
           },
         };
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -619,6 +678,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -650,17 +711,17 @@ describe("workflowEntry integration", () => {
         // A cancel with no active turn is consumed by the parked wait
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
-        // session activity re-parks the driver.
+        // session activity re-parks the owner.
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, { kind: "cancel" });
-        // Let the driver consume the no-op cancel and re-enter the parked
+        // Let the owner consume the no-op cancel and re-enter the parked
         // wait before the callback fires; back-to-back resumes could
         // otherwise surface the callback in the first wait iteration and
         // mask a wait that ignores callbacks after a consumed cancel.
         await new Promise((resolve) => setTimeout(resolve, 250));
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -703,6 +764,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             acceptedDeploymentId: "dpl_inline",
@@ -798,6 +861,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -812,6 +877,7 @@ describe("workflowEntry integration", () => {
           data: { continuationToken: run.runId },
           type: "session.waiting",
         });
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -826,6 +892,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "identify these events" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -892,6 +960,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -957,6 +1027,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const child = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "delegated first turn" },
           serializedContext: buildSerializedContext({
             channelKind: "subagent",
@@ -1033,6 +1105,156 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  describe("deployment handoff", () => {
+    const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
+      auth: null,
+      delivery: {
+        acceptedDeploymentId,
+        channelKind: "http",
+        channelName: "test",
+        deliveryId,
+      },
+      kind: "send" as const,
+      payload: { message },
+    });
+
+    it("hands an idle session to the accepting deployment and keeps the original stream", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
+      const continuationToken = "http:workflow-entry-handoff";
+
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        let completed = false;
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchContinuation({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              continuationToken,
+            }),
+          ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+
+          // The stable inbox and the alias now belong to a successor run; the
+          // original run holds only its anchor (plus the SDK's abort-signal
+          // hook from its own earlier turn).
+          const successor = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+          expect(successor.runId).not.toBe(anchor.runId);
+          const alias = await waitForCommandHookOwner(continuationToken);
+          expect(alias.runId).toBe(successor.runId);
+          const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+          expect(
+            anchorHooks.data
+              .map((hook) => hook.token)
+              .filter((token) => !token.startsWith("abrt_")),
+          ).toEqual([`${anchor.runId}:anchor`]);
+
+          // A third delivery through the stable session id reaches the successor
+          // and still streams on the original run.
+          await expect(
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "third message", "delivery-c"),
+              sessionId: anchor.runId,
+            }),
+          ).resolves.toMatchObject({ status: "accepted" });
+          const thirdTurn = await stream.nextTurn();
+          expect(
+            thirdTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("third message") === true,
+            ),
+          ).toBe(true);
+
+          // Reset ends the session on the successor; the anchor closes the stream once.
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "handoff test" },
+            sessionId: anchor.runId,
+          });
+          await expect(anchor.returnValue).resolves.toEqual({ output: "" });
+          completed = true;
+          expect(await listCallerStepNames(anchor.runId)).toEqual([]);
+        } finally {
+          stream.dispose();
+          if (!completed) await anchor.cancel();
+        }
+      });
+    });
+
+    it("keeps the session on the current owner when it is not idle", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-busy" } });
+
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          // Two deliveries accepted back to back: the second is pending when the
+          // first is evaluated, so neither may trigger a handoff.
+          await Promise.all([
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "first burst", "delivery-1"),
+              sessionId: run.runId,
+            }),
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "second burst", "delivery-2"),
+              sessionId: run.runId,
+            }),
+          ]);
+          const turn = await stream.nextTurn();
+          expect(turn.at(-1)?.type).toBe("session.waiting");
+          const owner = await waitForCommandHookOwner(sessionCommandHookToken(run.runId));
+          expect(owner.runId).toBe(run.runId);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    });
+  });
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";
@@ -1040,6 +1262,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const owner = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "owner message" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1056,6 +1280,8 @@ describe("workflowEntry integration", () => {
 
       const contender = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           continuationConflictCommand: {
             auth: null,
             kind: "send",
@@ -1103,6 +1329,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "summarize this", outputSchema },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1153,6 +1381,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1194,6 +1424,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1225,6 +1457,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1256,6 +1490,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "session tag round-trip" },
             serializedContext,
           },
@@ -1313,6 +1549,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "subagent tag round-trip" },
             serializedContext,
           },
@@ -1460,6 +1698,22 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
       clearTimeout(timeout);
     }
   }
+}
+
+async function expectHookClaims(runId: string, tokens: string[]): Promise<void> {
+  const events = await (
+    await getWorld()
+  ).events.list({
+    runId,
+    pagination: { limit: 1000 },
+    resolveData: "all",
+  });
+  const claims = events.data.flatMap((event) =>
+    event.eventType === "hook_created" ? [event.eventData.token] : [],
+  );
+  const cancellation = claims.filter((token) => token.startsWith("abrt_"));
+  expect(cancellation).toHaveLength(1);
+  expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual([...tokens].sort());
 }
 
 async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {

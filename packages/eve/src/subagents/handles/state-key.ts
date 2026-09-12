@@ -1,7 +1,7 @@
 /**
  * Session-state key for delegated agent handles.
  *
- * Lives apart from the store so schema-free readers (the workflow driver's
+ * Lives apart from the store so schema-free readers (the session owner's
  * handle query) can import the key without pulling the zod-backed store
  * module into their bundle.
  */

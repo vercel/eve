@@ -108,7 +108,7 @@ async function normalizeWorkflowTaskInterrupt(input: CoordinationDispatchInput):
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: CoordinationDispatchInput["sessionState"];
 }> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
   if (pending === undefined) {
     return { results: [], sessionState: input.sessionState };

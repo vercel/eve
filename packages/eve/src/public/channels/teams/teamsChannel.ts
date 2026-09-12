@@ -505,7 +505,7 @@ function buildTeamsHandle(input: {
     state.replyToActivityId = posted.id;
     const conversationId = state.conversationId;
     if (conversationId) {
-      input.session?.continuation?.rekey(
+      input.session?.continuation?.alias(
         teamsContinuationToken({
           conversationId,
           replyToActivityId: posted.id,

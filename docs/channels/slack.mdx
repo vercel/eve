@@ -286,7 +286,7 @@ export default slackChannel({
 
 #### Control overlapping turns
 
-Accepted Slack messages use cancellation-backed steering by default: eve buffers the new message, cancels the active turn, and starts a replacement turn. Admission happens first, so ignored mentions and messages rejected by your hooks never cancel work. Set `turnPolicy: "queue"` when every active turn should finish:
+Accepted Slack messages steer by default: eve buffers the new message and applies it to the same turn at the next committed workflow boundary. Ignored mentions and messages rejected by your hooks never enter the turn. Set `turnPolicy: "queue"` when every active turn should finish:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({

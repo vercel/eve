@@ -375,7 +375,7 @@ function buildTelegramHandle(input: {
     if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
     state.conversationId = posted.id;
     if (state.chatId) {
-      input.session?.continuation?.rekey(
+      input.session?.continuation?.alias(
         telegramContinuationToken({
           chatId: state.chatId,
           conversationId: posted.id,

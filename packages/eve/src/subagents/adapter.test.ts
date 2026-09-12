@@ -141,10 +141,10 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
 });
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
-  it("advertises the driver version from durable context, even when the adapter is newer", async () => {
+  it("advertises the durable public session address", async () => {
     resumeHookMock.mockClear();
     const ctx = makeContext();
-    ctx.ctx.set(SessionInboxKey, { sessionId: "child-session", version: 1 });
+    ctx.ctx.set(SessionInboxKey, { sessionId: "child-session" });
 
     await SUBAGENT_INPUT_REQUESTED(
       { requests: [sampleRequest()], sequence: 0, stepIndex: 0, turnId: "turn-1" },
@@ -153,7 +153,7 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith(
       "parent-token",
-      expect.objectContaining({ childSessionInbox: { sessionId: "child-session", version: 1 } }),
+      expect.objectContaining({ childSessionInbox: { sessionId: "child-session" } }),
     );
   });
 

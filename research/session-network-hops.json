@@ -1,0 +1,386 @@
+{
+  "title": "eve session network hops",
+  "captured": "2026-09-11",
+  "baseCommit": "adb6beff622b274970d4e48b7178b7d44c11d456",
+  "workingTree": true,
+  "sdk": "@workflow/core 5.0.0-beta.50",
+  "evidence": "Source-derived operation inventory, not a latency benchmark. World, cache, replay, payload size, and authored integrations change request counts.",
+  "clocks": [
+    "HTTP request to first provider request",
+    "HTTP request to dispatch acceptance / returned Session identity",
+    "HTTP request to visible turn settlement"
+  ],
+  "invariants": {
+    "sessionId": "original stream-owning run ID",
+    "ownerRunId": "current executor; changes on handoff",
+    "metadata": "{ sessionId }, accessed only when requested after resumption",
+    "startupHooks": "1 eve stable inbox + requested aliases + 1 SDK cancellation hook for the first turn"
+  },
+  "limitations": [
+    "Alias-only delivery cannot distinguish an unowned address from a handoff gap. Atomic handoff is an upstream requirement.",
+    "Rows name SDK operations, not a guaranteed count of lower-level HTTP retries or queue deliveries.",
+    "Authorization, sandbox, memory, telemetry and authored hooks must be measured for a specific deployed agent."
+  ],
+  "rows": [
+    {
+      "id": "ingress",
+      "title": "HTTP request + request authorization",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 HTTP request; auth-dependent I/O",
+      "why": "Authenticate and authorize the resource before delivery. Auth provider/cache costs are application dependent.",
+      "source": {
+        "path": "packages/eve/src/channel/channel-address.ts",
+        "symbol": "createChannelAddress"
+      }
+    },
+    {
+      "id": "lookup",
+      "title": "SDK hook lookup",
+      "modes": ["stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 hooks.getByToken",
+      "why": "resumeHook(token, command) resolves the live hook and its resume context. No eve preflight; no metadata hydration.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/resume-hook.js",
+        "symbol": "async function resumeHookImpl"
+      }
+    },
+    {
+      "id": "missing",
+      "title": "Try alias before creating",
+      "modes": ["new"],
+      "lane": "conditional",
+      "operations": "0 for ID-only; 1 hooks.getByToken for an unowned alias",
+      "why": "An ID-only create goes straight to start. A missing channel alias starts a candidate immediately; an ambiguous failure does not.",
+      "source": {
+        "path": "packages/eve/src/channel/channel-address.ts",
+        "symbol": "const existing = await dispatch()"
+      }
+    },
+    {
+      "id": "key",
+      "title": "Resume payload encryption",
+      "modes": ["stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "0 with stored public key; key/run reads on SDK fallback",
+      "why": "Current hooks carry resume context. Sealing to the public key is local; this is distinct from decrypting metadata.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/resume-hook.js",
+        "symbol": "async function resolveHookEncryptionKey"
+      }
+    },
+    {
+      "id": "receive",
+      "title": "Durably accept payload",
+      "modes": ["stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 hook_received event write",
+      "why": "Commit the command before publishing its wake. Backend retry/dedup capabilities control transport retries.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/resume-hook.js",
+        "symbol": "async function resumeHookImpl"
+      }
+    },
+    {
+      "id": "wake",
+      "title": "Publish owner wake",
+      "modes": ["stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 queue publish",
+      "why": "Targets the current owner on its pinned deployment; acceptance requires the durable write and publish.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/resume-hook.js",
+        "symbol": "async function resumeHookImpl"
+      }
+    },
+    {
+      "id": "identity",
+      "title": "Return stable identity to alias caller",
+      "modes": ["alias", "handoff"],
+      "lane": "response",
+      "operations": "0 hook reads; lazy metadata key access as needed",
+      "why": "Runs AFTER resume acceptance, concurrent with the awakened workflow. Known session addresses and forwarding-only senders do not access metadata.",
+      "source": {
+        "path": "packages/eve/src/execution/session-inbox/resume.ts",
+        "symbol": "get sessionId()"
+      }
+    },
+    {
+      "id": "start",
+      "title": "Start original session workflow",
+      "modes": ["new"],
+      "lane": "critical",
+      "operations": "run_created + queue publish",
+      "why": "One session workflow, no child turn workflow. SDK start may overlap publication and persistence.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "async createSession"
+      }
+    },
+    {
+      "id": "activation",
+      "title": "Workflow activation / event history",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "run lifecycle writes + history reads, capability/replay dependent",
+      "why": "Queue delivery is a compute hop, not an extra producer HTTP call. Retained VM and preload paths differ from cold replay.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/suspension-handler.js",
+        "symbol": "handleSuspension"
+      }
+    },
+    {
+      "id": "claims",
+      "title": "Register stable inbox and initial alias",
+      "modes": ["new"],
+      "lane": "critical",
+      "operations": "1 hook_created per address; one concurrent claim batch",
+      "why": "One stable address, plus the requested alias. getConflict is a registration fence preventing duplicate first-turn execution, not hooks.getByToken.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-entry.ts",
+        "symbol": "const [sessionCreation"
+      }
+    },
+    {
+      "id": "state",
+      "title": "Initialize or restore session state",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "new: createSessionStep lifecycle; existing: inline snapshot hydration",
+      "why": "New-session initialization overlaps address claiming. Current snapshots are carried in durable step results, not fetched from a per-turn snapshot stream.",
+      "source": {
+        "path": "packages/eve/src/execution/create-session-step.ts",
+        "symbol": "async function createSessionStep"
+      }
+    },
+    {
+      "id": "handoff-check",
+      "title": "Check idle handoff eligibility",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "isSessionIdleForHandoffStep lifecycle",
+      "why": "Only a fresh delivery to an idle session can trigger transfer. Same-deployment and busy sessions do not run this step.",
+      "source": {
+        "path": "packages/eve/src/execution/session-handoff.ts",
+        "symbol": "async checkpoint"
+      }
+    },
+    {
+      "id": "anchor",
+      "title": "Register terminal anchor, first handoff only",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "1 hook_created on original owner's first attempt",
+      "why": "Keeps the original run and its public stream alive after its execution ownership transfers.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-entry.ts",
+        "symbol": "const ensureAnchor"
+      }
+    },
+    {
+      "id": "release",
+      "title": "Release owned addresses and drain accepted reads",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "1 hook_disposed per address",
+      "why": "If another accepted command is found, reclaim and abandon handoff. Release and claim are not atomic.",
+      "source": {
+        "path": "packages/eve/src/execution/session-inbox/inbox.ts",
+        "symbol": "async release()"
+      }
+    },
+    {
+      "id": "successor",
+      "title": "Register activation callback and start successor",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "activation hook_created + startSessionOwnerStep lifecycle + run_created + publish",
+      "why": "Activation callback is registered before starting a run that can signal it. Successor receives explicit anchorRunId, snapshot, address set, deadline.",
+      "source": {
+        "path": "packages/eve/src/execution/session-handoff.ts",
+        "symbol": "async start"
+      }
+    },
+    {
+      "id": "reclaim",
+      "title": "Validate and claim transferred addresses",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "validation step lifecycle + 1 hook_created per address, batched",
+      "why": "No model work until all claims succeed. Preserves stable identity and uses the original stream writer.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-entry.ts",
+        "symbol": "await validateSessionCheckpointStep"
+      }
+    },
+    {
+      "id": "ack",
+      "title": "Acknowledge successor activation",
+      "modes": ["handoff"],
+      "lane": "critical",
+      "operations": "signalSessionOwnerActivationStep + resume lookup/write/publish",
+      "why": "Old owner can now exit or park as anchor. Later owners signal the anchor only at session end.",
+      "source": {
+        "path": "packages/eve/src/execution/session-handoff-steps.ts",
+        "symbol": "signalSessionOwnerActivationStep"
+      }
+    },
+    {
+      "id": "timeout",
+      "title": "Start deadline workflow concurrently",
+      "modes": ["new", "handoff"],
+      "lane": "background",
+      "operations": "startSessionTimeoutStep + timer run_created/publish/lifecycle + durable wait scheduling",
+      "why": "Default deadline infrastructure. Does not block the first model call; startup operations are joined before the session loop advances.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-entry.ts",
+        "symbol": "const initialTurn"
+      }
+    },
+    {
+      "id": "abort",
+      "title": "SDK cancellation hook and abort stream",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 abrt_* hook_created for the new turn; abort stream read",
+      "why": "AbortSignal transport is required for cancelling active durable steps. No eve getConflict call and no steering abort.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/serialization.js",
+        "symbol": "function reduceAbortWithListener"
+      }
+    },
+    {
+      "id": "step",
+      "title": "Execute turnStep",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "step_started; step_created/queue delivery when not inline",
+      "why": "SDK may execute inline or queue a step. Registration awaiters affect inline eligibility; do not equate a step call with exactly one network request.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/suspension-handler.js",
+        "symbol": "const lazyInlineCorrelationIds"
+      }
+    },
+    {
+      "id": "prepare",
+      "title": "Rehydrate context, deliver message, prepare model",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "local work + authored hooks/connections/sandbox I/O",
+      "why": "No universal count: authored integrations, dynamic model selection, memory, sandbox, and tracing can add work before the provider call.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-steps.ts",
+        "symbol": "async function turnStep"
+      }
+    },
+    {
+      "id": "writer",
+      "title": "Resolve stream writer encryption/routing",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "run/key reads depending on writable serialization and caches",
+      "why": "Original owner uses getWritable(); a successor uses the anchor run's forwarded writable. Stream names are run-scoped.",
+      "source": {
+        "path": "packages/eve/node_modules/@workflow/core/dist/runtime/run.js",
+        "symbol": "getWritable(options"
+      }
+    },
+    {
+      "id": "preamble",
+      "title": "Publish pre-model events",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "stream write batches; batch count is variable",
+      "why": "Lifecycle events and authored handlers can be awaited before the model call. Count actual stream batches, not individual events.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-steps.ts",
+        "symbol": "await emitTurnPreamble"
+      }
+    },
+    {
+      "id": "model",
+      "title": "MODEL REQUEST — stop time-to-model clock",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "critical",
+      "operations": "1 provider request for this first call",
+      "why": "Provider response latency is outside time-to-model. Subsequent tool/model cycles have their own costs.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-steps.ts",
+        "symbol": "await runModelCallBatch"
+      }
+    },
+    {
+      "id": "settle",
+      "title": "Commit results, admit steering, settle turn",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "completion",
+      "operations": "step_completed + optional next step + settleTurnStep + stream batches",
+      "why": "Steering uses the same turn after a committed boundary; queue waits for settlement. No child turn run or owner-release handshake per ordinary turn.",
+      "source": {
+        "path": "packages/eve/src/execution/session-execution.ts",
+        "symbol": "async runTurn"
+      }
+    },
+    {
+      "id": "read",
+      "title": "Client stream observer",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "observer",
+      "operations": "stream GET + read-key resolution as needed; tail-info only when requested",
+      "why": "Separate clock/branch. An already-open stream is not a new request per chunk. Reconnects target the original run.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "async getEventStream"
+      }
+    },
+    {
+      "id": "activity",
+      "title": "Optional channel activity collector",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "new root collector start; hook + activity resume/write/publish batches",
+      "why": "Only channels with activity renderers. Collector startup can precede session start; separate from the ordinary ID-only path.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "let collectorRunId"
+      }
+    },
+    {
+      "id": "reset",
+      "title": "Explicit reset release acknowledgement",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "bounded hooks.getByToken polling after reset acceptance",
+      "why": "Not an ordinary send cost. Confirms the previous owner released the stable address before reset returns.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "async function waitForCommandHookRelease"
+      }
+    },
+    {
+      "id": "resolve",
+      "title": "Explicit resolveSession()",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "1 hooks.getByToken + lazy metadata hydration",
+      "why": "Requested read-only identity resolution. Never used as a send preflight.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "async resolveContinuation"
+      }
+    },
+    {
+      "id": "task-owner",
+      "title": "Background task ownership resolution",
+      "modes": ["new", "stable", "alias", "handoff"],
+      "lane": "conditional",
+      "operations": "bounded hooks.getByToken polling inside durable work",
+      "why": "Not the ordinary turn path. Reads runId only; no metadata hydration.",
+      "source": {
+        "path": "packages/eve/src/execution/workflow-runtime.ts",
+        "symbol": "async function waitForCommandHookOwner"
+      }
+    }
+  ]
+}

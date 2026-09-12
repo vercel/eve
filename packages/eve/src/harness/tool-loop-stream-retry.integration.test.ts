@@ -179,8 +179,12 @@ describe("tool loop streamed provider retries", () => {
         "The model provider is overloaded or timing out upstream of AI Gateway. " +
         "This is transient — retry shortly, or switch models with `/model` in `eve dev`.",
     });
-    expect(events.filter((event) => event.type === "step.failed")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "session.failed")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);
+    // The failure cascade is proposed on the result for the owner to commit.
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
+      "step.failed",
+      "turn.failed",
+      "session.failed",
+    ]);
   });
 });

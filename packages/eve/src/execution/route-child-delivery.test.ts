@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -36,13 +37,14 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
 }));
 
-const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
-  continuationToken: "parent-token",
-  emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
-  hasProxyInputRequests,
-  sessionId: "parent-session",
-  version: 1,
-});
+const state = (hasProxyInputRequests: boolean): DurableSessionState =>
+  createTestSessionState({
+    continuationToken: "parent-token",
+    emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+    hasProxyInputRequests,
+    sessionId: "parent-session",
+    version: 1,
+  });
 
 const taskRequest = {
   replyTo: "eve:workflow-tool-run-answer:run-1:0",

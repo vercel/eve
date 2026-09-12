@@ -17,7 +17,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 /**
  * Result returned by {@link createSessionStep}.
  *
- * Exposes the projected {@link DurableSessionState} the driver needs to
+ * Exposes the projected {@link DurableSessionState} the owner needs to
  * drive the turn loop.
  */
 export interface CreateSessionStepResult {

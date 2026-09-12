@@ -1,25 +1,15 @@
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
-  dispatchDynamicInstructionEvent,
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
 import {
-  dispatchDynamicSubagentEvent,
-  refreshDynamicSessionSubagentsForRuntimeRevision,
-} from "#context/dynamic-subagent-lifecycle.js";
-import {
-  dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -42,29 +32,23 @@ import {
 } from "#harness/emission.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
-import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { DurableStepResult } from "#execution/next-driver-action.js";
+import { clearTurnClientContextState } from "#harness/turn-client-context.js";
+import type { HarnessSession, HarnessSettlement, StepInput, StepResult } from "#harness/types.js";
+import { takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import type { DurableStepResult, TurnStepInput } from "#execution/turn-step.js";
+import { resolveSessionStepResult } from "#execution/session-step-result.js";
+import { createSessionEventPipeline } from "#execution/session-event-pipeline.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
   createTurnStartedEvent,
-  encodeMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -73,10 +57,8 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
   getBackgroundTaskDelivery,
@@ -95,17 +77,12 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import * as activityCohort from "#execution/activity-cohort.js";
-
-const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
-  "Task mode cannot complete while input requests remain pending.";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -120,13 +97,79 @@ export type { TurnStepInput };
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
+  return runSessionStep(rawInput);
+}
 
-  const deferred = deferMismatchedInlineTurnStep(rawInput);
-  if (deferred !== undefined) return deferred;
+/**
+ * Commits the terminal events a turn step proposed. Runs only after the owner
+ * admitted boundary input, so steering can still extend the turn instead.
+ */
+export async function commitSettlementStep(
+  input: Omit<TurnStepInput, "input"> & { readonly settlement: HarnessSettlement },
+): Promise<DurableStepResult> {
+  "use step";
+  const { settlement } = input;
+  const ctx = await deserializeContext(input.serializedContext);
+  const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const initialSession = hydrateDurableSession({
+    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
+    durable: readDurableSession(input.sessionState),
+    turnAgent: effectiveAgent.turnAgent,
+  });
+  const history = createExecutionHistoryView(initialSession);
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    sessionId: initialSession.sessionId,
+  });
+  const { handleEvent, writer } = createSessionEventPipeline({
+    abortSignal: input.abortSignal,
+    adapter: ctx.require(ChannelKey),
+    bundle,
+    ctx,
+    effectiveAgent,
+    instrumentation,
+    parentWritable: input.parentWritable,
+    sessionId: initialSession.sessionId,
+  });
+  try {
+    const committed = await runBackgroundStep(ctx, initialSession, async (session) => {
+      ctx.setVirtualContext(HandleEventKey, handleEvent);
+      for (const event of settlement.events) await handleEvent(event, history.messages(session));
+      return {
+        next: null,
+        session: setHarnessEmissionState(
+          takeSessionUsageDelta(clearTurnClientContextState(session)).session,
+          settlement.emissionAfter,
+        ),
+      };
+    });
+    if (
+      settlement.events.some(
+        (event) => event.type === "session.completed" || event.type === "session.failed",
+      )
+    ) {
+      await writer.close();
+    }
+    return {
+      action: "continue",
+      serializedContext: serializeContext(ctx),
+      sessionState: createDurableSessionState({
+        session: reconcileSessionContinuationToken(ctx, committed.session),
+      }),
+    };
+  } finally {
+    writer.releaseLock();
+    await instrumentation?.flush();
+  }
+}
 
+async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   let input = rawInput;
 
-  let durableSession = await readDurableSession(input.sessionState);
+  let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
@@ -200,9 +243,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     rawInput.input?.kind === "deliver" &&
     rawInput.input.payloads.some((payload) => payload.message !== undefined)
   ) {
+    const ids = rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
     ctx.set(
       TurnDeliveryIdsKey,
-      rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [],
+      initialEmissionState.turnId
+        ? [...new Set([...(ctx.get(TurnDeliveryIdsKey) ?? []), ...ids])]
+        : ids,
     );
   } else if (!initialEmissionState.sessionStarted && ctx.get(ChannelDeliveryKey) !== undefined) {
     ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
@@ -234,7 +280,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     );
     await instrumentation?.flush();
   };
-  const adapterCtx = buildAdapterContext(adapter, ctx);
+  const pipeline = createSessionEventPipeline({
+    abortSignal: input.abortSignal,
+    adapter,
+    bundle,
+    ctx,
+    effectiveAgent,
+    instrumentation,
+    parentWritable: input.parentWritable,
+    sessionId: initialSession.sessionId,
+  });
+  const { adapterCtx, dynamicConnections, effectiveNode, handleEvent, writer } = pipeline;
 
   // Run the adapter's deliver hook for each queued payload and
   // coalesce the resulting StepInput values.
@@ -314,31 +370,23 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       }),
     );
     await instrumentation?.flush();
-    const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
+    const aliased = reconcileSessionContinuationToken(ctx, initialSession);
     const nextSerializedContext = serializeContext(ctx);
     const nextState =
-      rekeyed === initialSession
+      aliased === initialSession
         ? input.sessionState
-        : createDurableSessionState({ session: rekeyed });
+        : createDurableSessionState({ session: aliased });
 
     return {
       action: "park",
-      ...derivePendingState(rekeyed),
+      ...derivePendingState(aliased),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
   }
 
-  const hookRegistry = bundle.hookRegistry;
-  const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
-  const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
-  const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
-  const effectiveNode = {
-    ...bundle.graph.root,
-    turnAgent: effectiveAgent.turnAgent,
-  };
   const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
   try {
     const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -383,75 +431,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await failChannelDeliveries(error);
     throw error;
   }
-
-  const writer = input.parentWritable.getWriter();
-
-  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
-    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
-    await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
-  };
-  const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
-    activityCohort.updateActivityBlockers(ctx, event);
-    // A remote task's parent owns its HITL. Forward blocking events over
-    // the task callback and keep them out of the child's local channel;
-    // otherwise two TUIs can present and answer the same request.
-    const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
-    const emitted = forwardedToTaskParent
-      ? stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey))
-      : await emit(event);
-    const lifecycleMessages = await dispatchMemoryLifecycleEvent({
-      abortSignal: input.abortSignal,
-      appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
-      ctx,
-      event,
-      instrumentation: instrumentation?.memory,
-      memories: effectiveNode.agent?.memories ?? [],
-      messages,
-      nodeId: bundle.nodeId ?? "__root__",
-    });
-    void observeSessionActivity({ ctx, event: emitted, sessionId: initialSession.sessionId });
-    await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
-    if (emitted.type !== "step.started") {
-      await dispatchDynamicModelEvent({
-        ctx,
-        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted,
-        messages: lifecycleMessages,
-        scope: {
-          moduleMap: bundle.moduleMap,
-          nodeId: bundle.nodeId,
-        },
-      });
-    }
-    await dynamicConnections.dispatch(emitted);
-    await dispatchDynamicSubagentEvent({
-      ctx,
-      resolvers: dynamicSubagentResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicToolEvent({
-      ctx,
-      resolvers: dynamicToolResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicSkillEvent({
-      ctx,
-      resolvers: dynamicSkillResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicInstructionEvent({
-      ctx,
-      resolvers: dynamicInstructionsResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-  };
 
   const mode = ctx.require(ModeKey);
   const modelCallsPerStep =
@@ -590,101 +569,18 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   instrumentation?.rememberBackgroundTasks(stepResult.backgroundTasks ?? []);
-  // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
-  const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
-  agentTraceState.pruneAgentTraceState(ctx, rekeyed.sessionId, rekeyed.state);
+  // Re-stamp the current address after handlers add a continuation alias.
+  const aliased = reconcileSessionContinuationToken(ctx, stepResult.session);
+  agentTraceState.pruneAgentTraceState(ctx, aliased.sessionId, aliased.state);
   const nextSerializedContext = serializeContext(ctx);
-  stepResult = { ...stepResult, session: rekeyed };
-
-  const nextState = createDurableSessionState({ session: stepResult.session });
-  const backgroundTransition =
-    stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
-      ? {}
-      : {
-          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
-            input.serializedContext,
-            nextSerializedContext,
-            stepResult.backgroundTasks,
-          ),
-          backgroundTaskState: createDurableSessionState({
-            session: stepResult.backgroundTaskSession,
-          }),
-          backgroundTasks: stepResult.backgroundTasks,
-        };
-
-  if (
-    stepResult.next !== null &&
-    typeof stepResult.next === "object" &&
-    "done" in stepResult.next
-  ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
-      writer.releaseLock();
-      throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
-    }
-    await writer.close();
-    const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
-    return {
-      action: "done",
-      ...backgroundTransition,
-      output: stepResult.next.output,
-      isError: stepResult.next.isError,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-      usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
-      usageDelta: takeSessionUsageDelta(stepResult.session).delta,
-    };
-  }
-
-  if (stepResult.next === null) {
-    writer.releaseLock();
-
-    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
-    if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
-      return {
-        action: "dispatch-workflow-tasks",
-        ...backgroundTransition,
-        pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
-      };
-    }
-
-    const pending = derivePendingState(stepResult.session);
-
-    // `settledTurn` is the harness's explicit settlement verdict. Pending
-    // state may predate this turn, while newly created parks omit the verdict.
-    // `usage` carries only this turn's delta: the take marks the totals
-    // reported, so a persistent child never re-reports earlier spend.
-    if (stepResult.settledTurn !== undefined) {
-      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
-      return {
-        action: "park",
-        ...backgroundTransition,
-        ...pending,
-        serializedContext: nextSerializedContext,
-        sessionState: createDurableSessionState({ session: reportedSession }),
-        settled: {
-          output: stepResult.settledTurn.output,
-          isError: stepResult.settledTurn.isError,
-          usage: delta,
-        },
-      };
-    }
-
-    return {
-      action: "park",
-      ...backgroundTransition,
-      ...pending,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
-  }
+  stepResult = { ...stepResult, session: aliased };
 
   writer.releaseLock();
-  return {
-    action: "continue",
-    ...backgroundTransition,
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
+  return resolveSessionStepResult(
+    stepResult,
+    nextSerializedContext,
+    mode,
+    stepResult.settlement,
+    input.serializedContext,
+  );
 }

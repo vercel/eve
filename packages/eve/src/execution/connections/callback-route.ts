@@ -27,35 +27,10 @@ import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
-/**
- * Logical name prefix of the framework-shipped connection callback
- * channel. The trailing method segment (`get` or `post`) keeps each
- * `(method, urlPath)` pair distinct in the channel registry.
- */
-
-/**
- * Inbound handler for the connection callback route. Exported for test
- * coverage; the framework channel resolver wires it into Nitro via
- * {@link getConnectionCallbackChannelDefinitions}.
- */
+/** Resumes the exact authorization attempt through the session inbox. */
 export async function handleConnectionCallbackRequest(
   request: Request,
   ctx: RouteContext,
-): Promise<Response> {
-  return handleCallbackRequest(request, ctx, false);
-}
-
-export async function handleLegacyConnectionCallbackRequest(
-  request: Request,
-  ctx: RouteContext,
-): Promise<Response> {
-  return handleCallbackRequest(request, ctx, true);
-}
-
-async function handleCallbackRequest(
-  request: Request,
-  ctx: RouteContext,
-  legacy: boolean,
 ): Promise<Response> {
   const name = ctx.params.name;
   const attemptId = ctx.params.attemptId;
@@ -66,7 +41,7 @@ async function handleCallbackRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
-  if (!legacy && (typeof attemptId !== "string" || attemptId.length === 0)) {
+  if (typeof attemptId !== "string" || attemptId.length === 0) {
     return Response.json(
       { error: "Missing authorization attempt ID.", ok: false },
       { status: 400 },
@@ -75,16 +50,10 @@ async function handleCallbackRequest(
 
   const callback = await projectAuthorizationCallback(request);
 
-  // Deliver the callback through the per-session auth hook token
-  // embedded in the URL by getHookUrl(). The workflow body creates
-  // this hook upfront (before any turns run) so it always exists
-  // when the callback arrives.
   try {
-    const authorizationCallback = legacy
-      ? { callback, connectionName: name, legacy: true as const }
-      : { attemptId: attemptId!, callback, connectionName: name };
+    const authorizationCallback = { attemptId, callback, connectionName: name };
     await resumeHook(token, {
-      kind: "deliver" as const,
+      kind: "authorization-callback" as const,
       payloads: [{ authorizationCallback }],
     });
   } catch {

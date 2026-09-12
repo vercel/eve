@@ -154,15 +154,6 @@ Every memory span includes `gen_ai.operation.name` and `gen_ai.memory.store.id`.
 
 `gen_ai.memory.records` contains recalled record content only when `recordInputs` is enabled. eve classifies recalled records as input content because they become part of the model context. eve does not set `gen_ai.memory.query.text` because a memory provider receives structured conversation messages, not a standalone search-query string. The `agent.memory.slot` and `agent.memory.phase` attributes identify the eve slot and lifecycle boundary without adding either to the span name.
 
-Messages in `gen_ai.input.messages` include a `kind` for user-role entries.
-New human input uses `user`; framework-authored input uses namespaced kinds
-such as `context.instruction` and `execution.background_task`. When resuming
-history saved before eve 0.54, entries without a kind use `legacy.unknown`:
-the old format did not reliably distinguish human input from framework input.
-Their content and metadata remain unchanged, and already classified entries
-retain their kind. Unknown legacy entries are not replayed as the latest human
-request after compaction.
-
 ## Agent trace contract
 
 The provider layout and zero-config local tracing emit the following spans.

@@ -7,7 +7,7 @@ import type {
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
@@ -107,7 +107,7 @@ export async function appendTaskProgressStep(input: {
  *
  * Rides the ordinary session delivery path: a parked parent starts a
  * turn carrying this message, while an active turn observes it at the
- * next safe boundary through the driver's normal delivery routing. A
+ * next safe boundary through the owner's normal delivery routing. A
  * parent whose session already ended is a tolerated no-op.
  */
 export async function wakeTaskParentStep(input: {

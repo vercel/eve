@@ -47,10 +47,10 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("keeps eve workflow references stable when eve is the project root", async () => {
-    const filename = "src/execution/turn-workflow.ts";
+    const filename = "src/execution/workflow-entry.ts";
     const transformed = await applyWorkflowTransform(
       filename,
-      ["export async function turnWorkflow(): Promise<void> {", '  "use workflow";', "}", ""].join(
+      ["export async function workflowEntry(): Promise<void> {", '  "use workflow";', "}", ""].join(
         "\n",
       ),
       "workflow",
@@ -58,8 +58,8 @@ describe("applyWorkflowTransform", () => {
       resolvePackageRoot(),
     );
 
-    expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow).toEqual({
-      workflowId: "workflow//eve//turnWorkflow",
+    expect(transformed.workflowManifest.workflows?.[filename]?.workflowEntry).toEqual({
+      workflowId: "workflow//eve//workflowEntry",
     });
   });
 
@@ -299,11 +299,11 @@ describe("applyWorkflowTransform", () => {
     // version-stamped because they are per-deployment internal
     // identifiers, not cross-deployment routing keys.
     const transformed = await transformWorkflowDirectives({
-      filename: "src/execution/turn-workflow.ts",
+      filename: "src/execution/workflow-entry.ts",
       mode: "workflow",
       moduleSpecifier: "eve@1.2.3",
       source: [
-        "export async function turnWorkflow(input: { id: string }): Promise<string> {",
+        "export async function workflowEntry(input: { id: string }): Promise<string> {",
         '  "use workflow";',
         "  return input.id;",
         "}",
@@ -315,28 +315,30 @@ describe("applyWorkflowTransform", () => {
         "",
       ].join("\n"),
       stableModuleSpecifier: "eve",
-      stableWorkflowNames: new Set(["turnWorkflow"]),
+      stableWorkflowNames: new Set(["workflowEntry"]),
     });
 
     expect(transformed.workflowManifest).toEqual({
       steps: {
-        "src/execution/turn-workflow.ts": {
+        "src/execution/workflow-entry.ts": {
           notifyDriverStep: {
             stepId: "step//eve@1.2.3//notifyDriverStep",
           },
         },
       },
       workflows: {
-        "src/execution/turn-workflow.ts": {
-          turnWorkflow: {
-            workflowId: "workflow//eve//turnWorkflow",
+        "src/execution/workflow-entry.ts": {
+          workflowEntry: {
+            workflowId: "workflow//eve//workflowEntry",
           },
         },
       },
     });
-    expect(transformed.code).toContain('turnWorkflow.workflowId = "workflow//eve//turnWorkflow";');
     expect(transformed.code).toContain(
-      'globalThis.__private_workflows.set("workflow//eve//turnWorkflow", turnWorkflow);',
+      'workflowEntry.workflowId = "workflow//eve//workflowEntry";',
+    );
+    expect(transformed.code).toContain(
+      'globalThis.__private_workflows.set("workflow//eve//workflowEntry", workflowEntry);',
     );
   });
 });
@@ -521,10 +523,10 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
   it("treats eve package sources as framework modules even under the project root", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/turn-workflow.ts";
+    const filename = "src/execution/workflow-entry.ts";
     const transformed = await applyWorkflowTransform(
       filename,
-      ["export async function turnWorkflow(): Promise<void> {", '  "use workflow";', "}", ""].join(
+      ["export async function workflowEntry(): Promise<void> {", '  "use workflow";', "}", ""].join(
         "\n",
       ),
       "workflow",
@@ -532,14 +534,14 @@ describe("applyWorkflowTransform for authored application modules", () => {
       eveRoot,
     );
 
-    expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow?.workflowId).toBe(
-      "workflow//eve//turnWorkflow",
+    expect(transformed.workflowManifest.workflows?.[filename]?.workflowEntry?.workflowId).toBe(
+      "workflow//eve//workflowEntry",
     );
   });
 
   it("keeps the session command inbox factory visible in workflow driver builds", async () => {
     const eveRoot = resolvePackageRoot();
-    const filename = "src/execution/session-command-inbox.ts";
+    const filename = "src/execution/session-inbox/inbox.ts";
     const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
     const transformed = await applyWorkflowTransform(
       filename,
@@ -549,7 +551,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
       eveRoot,
     );
 
-    expect(transformed.code).toContain("export function createSessionCommandInbox");
+    expect(transformed.code).toContain("export function createSessionInbox");
     expect(transformed.code).not.toContain("subagent");
     expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });

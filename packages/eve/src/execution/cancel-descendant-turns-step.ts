@@ -39,7 +39,7 @@ export async function cancelDescendantTurnsStep(input: {
   let running: readonly RunningAgentHandle[];
   let workflowToolRuns: readonly WorkflowToolRunRecord[];
   try {
-    const session = await readDurableSession(input.sessionState);
+    const session = readDurableSession(input.sessionState);
     workflowToolRuns = getWorkflowToolRuns(session.state);
     const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.runId));
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(

@@ -2031,7 +2031,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
+  it("sends the oldest queued message on Esc without cancelling the turn", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
       input.send("\x1b");
@@ -2039,9 +2039,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     };
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const cancel = vi.fn();
+    const steer = vi.fn(async () => {});
     const rendering = renderer.renderStream(
       {
         cancel,
+        steer,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -2063,18 +2065,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     await escape();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(screen.snapshot()).toContain("Steering — cancelling the running turn…");
-    expect(screen.snapshot()).toContain("1/5 still queued");
+    expect(cancel).not.toHaveBeenCalled();
+    expect(steer).toHaveBeenCalledWith("go north");
+    expect(screen.snapshot()).toContain("Queue 1/5");
 
     // The server settles the cancelled turn and the stream reaches its boundary.
-    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await rendering;
-    expect(screen.snapshot()).toContain("Cancelled");
 
     // The popped message steers; the remaining one stays queued behind it.
-    expect(renderer.takeQueuedPrompt()).toBe("go north");
     expect(renderer.takeQueuedPrompt()).toBe("go south");
     renderer.shutdown();
   });
@@ -2178,7 +2178,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("marks drained prompts with the provenance arrow — above for steer, below for queue", async () => {
+  it("marks steered and queued prompts with their provenance arrow", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
       input.send("\x1b");
@@ -2195,7 +2195,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const first = renderer.renderStream(
       {
-        cancel: vi.fn(),
+        steer: vi.fn(async () => {}),
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -2210,16 +2210,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("go north");
     input.enter();
     await escape();
-    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await first;
 
-    const steered = renderer.takeQueuedPrompt();
-    expect(steered).toBe("go north");
-    await renderer.renderStream(
-      { events: closedStream() },
-      { submittedPrompt: steered, continueSession: true },
-    );
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
     let lines = screen.snapshot().split("\n");
     const steerIndex = lines.findIndex((line) => line.includes("│ go north"));
     expect(lines[steerIndex - 1]?.trim()).toBe("↑");

@@ -5,8 +5,8 @@
  * Enter queues the draft (up to {@link MESSAGE_QUEUE_LIMIT}); each queued
  * message waits for the turn to end, where the whole queue coalesces into
  * the next turn's message. Esc or Ctrl+C pops the oldest message to steer the
- * conversation instead of waiting: the renderer requests cooperative turn
- * cancellation and the runner submits the popped message as the next turn.
+ * conversation instead of waiting: the renderer sends the popped message to
+ * the active session for admission at its next execution boundary.
  * `/cancel` requests cancellation directly. Either key on an empty queue
  * cancels the turn immediately without a replacement message.
  *
@@ -24,9 +24,8 @@ export const MESSAGE_QUEUE_LIMIT = 5;
 /** What one Esc press did to the queue state. */
 export type MessageQueueEscapeOutcome =
   /**
-   * A message is (now) staged for steering — the caller should request
-   * cooperative turn cancellation. Repeated presses pop further messages
-   * into the same staged steer payload and re-request cancellation.
+   * A message is staged for steering. The caller sends it to the active
+   * session; repeated presses may select more queued messages.
    */
   | "steer"
   /** Empty queue — the caller should cancel the turn. */
@@ -36,7 +35,7 @@ export type MessageQueueEscapeOutcome =
 export interface MessageQueueView {
   readonly messages: readonly string[];
   readonly full: boolean;
-  /** A popped message is staged and turn cancellation was requested. */
+  /** A popped message is awaiting steering admission. */
   readonly steering: boolean;
   /** A cancel key on an empty queue landed; cancellation was requested. */
   readonly cancelling: boolean;
@@ -81,7 +80,7 @@ export class MessageQueue {
       return "steer";
     }
     if (this.#steerMessage !== undefined) {
-      // Already steering: re-request cancellation (idempotent server-side).
+      // Retry an unaccepted steering message before requesting cancellation.
       return "steer";
     }
     this.#cancelRequested = true;
@@ -111,6 +110,18 @@ export class MessageQueue {
       return steer;
     }
     return this.#takeAllMessages();
+  }
+
+  /** Takes only a key-selected message for immediate boundary steering. */
+  takeSteering(): string | undefined {
+    const message = this.#steerMessage;
+    this.#steerMessage = undefined;
+    return message;
+  }
+
+  /** Preserves an unaccepted steering message for a later retry. */
+  restoreSteering(message: string): void {
+    this.#steerMessage = joinOptionalMessages(message, this.#steerMessage);
   }
 
   /**
@@ -207,7 +218,7 @@ function headerBody(view: MessageQueueView, working: boolean, theme: Theme): str
   const count = `${String(view.messages.length)}/${String(MESSAGE_QUEUE_LIMIT)}`;
   if (view.steering) {
     const remaining = view.messages.length > 0 ? `${dot}${count} still queued` : "";
-    return c.dim(`Steering — cancelling the running turn…${remaining}`);
+    return c.dim(`Steering — waiting for the next boundary…${remaining}`);
   }
   const fullness = view.full ? `${dot}queue full` : "";
   const hint = working ? `${dot}esc or ctrl+c steers with the next message` : "";

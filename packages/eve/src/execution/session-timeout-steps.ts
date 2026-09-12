@@ -10,7 +10,7 @@ import {
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
@@ -24,7 +24,7 @@ export async function startSessionTimeoutStep(
   return { runId: run.runId };
 }
 
-/** Resumes the owning driver when its durable timer elapses. */
+/** Resumes the owning session when its durable timer elapses. */
 export async function signalSessionTimeoutStep(input: { readonly token: string }): Promise<void> {
   "use step";
 

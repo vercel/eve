@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata, sleep } from "#compiled/@workflow/core/index.js";
 
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { appendTaskViewStep } from "#execution/tasks/child/steps.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
@@ -63,9 +63,9 @@ export async function taskCancelNotificationWorkflow() {
   "use workflow";
 
   const { workflowRunId: sessionId } = getWorkflowMetadata();
-  const inbox = createSessionCommandInbox();
+  const inbox = createSessionInbox(sessionId);
   try {
-    await inbox.claimStable(sessionCommandHookToken(sessionId));
+    await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
     const entry = await startSlowCancelledTaskStep({ sessionId });
     const cancelled = await cancelSlowTaskFromParentStep({ entry, sessionId });
     const next = await inbox.next();

@@ -1,7 +1,7 @@
 /**
  * Authored workflow tool bodies for integration tests. Each exported
  * `"use workflow"` function stands in for a tool's `execute`: the test tier's
- * bundler registers them in the driver, and the harness sees the stubs the
+ * bundler registers them in the workflow owner, and the harness sees the stubs the
  * client transform leaves behind, exactly as it would for an application's
  * `agent/tools/*.ts`.
  */
@@ -13,7 +13,6 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import type { TaskExec, TaskMessage } from "#tools/task.js";
 import {
   ConnectionAuthorizationFailedError,
@@ -248,13 +247,4 @@ export async function askThenRaceWorkflow(
   });
   const answer = await Promise.race([pending, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
-}
-
-/** Runs the actual workflow body with the capability passed by its launching turn. */
-export async function workflowAuthorizationCapabilityProbe(
-  input: WorkflowBodyInput & { execution: "background" | "blocking" },
-) {
-  "use workflow";
-
-  return executeWorkflowBody(input, new AbortController().signal);
 }

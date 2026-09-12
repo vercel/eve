@@ -1,6 +1,10 @@
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSessionState,
+  readDurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -35,7 +39,7 @@ export async function recordTaskInputRequestStep(input: {
 > {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
@@ -94,14 +98,10 @@ export async function recordTaskInputRequestStep(input: {
   return {
     accepted: true,
     request,
-    sessionState: {
-      ...input.sessionState,
-      hasProxyInputRequests: true,
-      snapshot: {
-        session: { ...durableSession, state },
-        version: input.sessionState.version,
-      },
-    },
+    sessionState: replaceDurableSessionSnapshot({
+      session: { ...durableSession, state },
+      state: input.sessionState,
+    }),
   };
 }
 
@@ -115,7 +115,7 @@ export async function recordTerminalTaskViewsStep(input: {
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
   for (const view of input.views) {
@@ -136,13 +136,7 @@ export async function recordTerminalTaskViewsStep(input: {
   const sessionState =
     session === durableSession
       ? input.sessionState
-      : {
-          ...input.sessionState,
-          snapshot: {
-            session,
-            version: input.sessionState.version,
-          },
-        };
+      : replaceDurableSessionSnapshot({ session, state: input.sessionState });
   return { serializedContext, sessionState };
 }
 

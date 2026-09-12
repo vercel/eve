@@ -28,8 +28,8 @@ const log = createLogger("channel.adapter");
  * {@link ContextAccessor} that tools and providers use).
  *
  * `session` is a live handle to the current session — id, auth,
- * optional channel continuation address, including an imperative `rekey()`
- * for channels that need to re-key the session mid-turn (e.g. Slack's
+ * optional channel continuation address, including an imperative `alias()`
+ * for channels that need to add an alias for the session mid-turn (e.g. Slack's
  * auto-anchor on first post).
  */
 export interface ChannelAdapterContext<TState = Record<string, unknown>> {

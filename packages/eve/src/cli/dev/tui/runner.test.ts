@@ -4326,8 +4326,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
         gate.resolve();
         return { sessionId: "session_test", status: "accepted" as const };
       }
-      // The first request raced the dispatch window: the turn workflow has
-      // not claimed its cancel hook yet, so the server reports no turn.
+      // The first request arrived before the owner began the turn.
       return { status: "no_active_turn" as const };
     });
     const prompts: Array<string | undefined> = ["hello", undefined];
@@ -4456,7 +4455,7 @@ describe("EveTUIRunner session id reporting", () => {
 });
 
 describe("EveTUIRunner cancelled-turn subagent settling", () => {
-  it("settles subagent sections when the turn is cancelled by a steer", async () => {
+  it("settles subagent sections when the turn is explicitly cancelled", async () => {
     // A child stream that never ends on its own — it only stops when the
     // pump aborts it (the scoped cancellation path under test).
     const client = stubClient();

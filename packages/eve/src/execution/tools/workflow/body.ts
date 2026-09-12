@@ -18,8 +18,6 @@ import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
-  /** Advertised by the parent driver; absent on runs started before this capability. */
-  readonly authorizationSupported?: boolean;
   readonly callId: string;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
@@ -59,7 +57,6 @@ export async function executeWorkflowBody(
   attachWorkflowToolRunContext(ctx, {
     from,
     owner: input.owner,
-    authorizationSupported: input.execution === "blocking" || input.authorizationSupported === true,
   });
   let reportCount = 0;
 

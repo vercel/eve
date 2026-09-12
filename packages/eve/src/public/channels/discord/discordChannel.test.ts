@@ -481,7 +481,7 @@ describe("discordChannel() default event handlers", () => {
     );
   });
 
-  it("edits the original response and rekeys the session on the first post", async () => {
+  it("edits the original response and aliases the session on the first post", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ channel_id: "C01", id: "M01" }), {
         headers: { "content-type": "application/json" },

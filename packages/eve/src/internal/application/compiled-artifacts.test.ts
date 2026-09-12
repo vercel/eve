@@ -53,6 +53,10 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
+    expect(source).toContain("applyVercelWorkflowWorldDefaults(workflowWorld);");
+    expect(source.indexOf("applyVercelWorkflowWorldDefaults(workflowWorld);")).toBeLessThan(
+      source.indexOf("setWorld(workflowWorld);"),
+    );
   });
 });
 

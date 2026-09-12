@@ -69,13 +69,15 @@ export default cases.map(({ parentActive, steering, description }) =>
         if (parentActive) {
           // Establish a running child before holding another parent turn;
           // holding the launch turn can delay dispatch until its wait ends.
-          parent = await parent.session.start("Please wait for cancellation.");
+          parent = await parent.session.start(
+            "Alice is preparing an update. Call wait-for-boundary once before responding.",
+          );
           await parent.waitForEvent("actions.requested", {
             data: {
               actions: (actions) =>
                 actions.some(
                   (action) =>
-                    action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
+                    action.kind === "tool-call" && action.toolName === "wait-for-boundary",
                 ),
             },
           });
@@ -94,7 +96,7 @@ export default cases.map(({ parentActive, steering, description }) =>
           ),
         );
 
-        const interruptedParent = parentActive ? parent : undefined;
+        const activeParent = parentActive ? parent : undefined;
         parent = await parent.session.start(
           steering
             ? "Actually, use STEERED instead of ORIGINAL."
@@ -103,13 +105,20 @@ export default cases.map(({ parentActive, steering, description }) =>
         );
         await t.require(parent.sessionId, equals(sessionId));
 
-        if (interruptedParent !== undefined) {
-          // A send is correlated to its new delivery; the previous handle
-          // observes the turn that steering interrupts.
-          const cancelled = await interruptedParent.result();
-          cancelled.notEvent("turn.failed");
-          cancelled.event("turn.cancelled", { count: 1 });
-          parentTurns.push(cancelled);
+        if (activeParent !== undefined) {
+          const continued = await activeParent.result();
+          continued.expectOk();
+          continued.notEvent("turn.cancelled");
+          continued.event("turn.started", { count: 1 });
+          continued.event("turn.completed", { count: 1 });
+          continued.event("message.received", {
+            data: {
+              message: steering
+                ? "Actually, use STEERED instead of ORIGINAL."
+                : "What is 2 + 2? Reply with just the number.",
+            },
+            count: 1,
+          });
         }
         // Observe through the result-bearing task wake, not just the parent's
         // acknowledgment of the steering message or an AGENT_BUSY failure wake.
@@ -154,22 +163,21 @@ export default cases.map(({ parentActive, steering, description }) =>
         );
 
         const firstChildTurn = await child.result();
-        const childWasCancelled = firstChildTurn.events.some(
-          (event) => event.type === "turn.cancelled",
+        const receipts = parentTurns.flatMap((turn) =>
+          turn.events.flatMap((event) =>
+            event.type === "subagent.completed" && event.data.backgroundTask !== undefined
+              ? [event.data.backgroundTask.taskId]
+              : [],
+          ),
         );
-        if (steering && childWasCancelled) {
-          // Also permits cancel-and-resume of the same child; no specific
-          // control API or task-id lifetime is required by these assertions.
-          const resumed = await t.target
-            .watchTurn(called.data.childSessionId, { startIndex: child.session.state!.streamIndex })
-            .result();
-          resumed.expectOk();
-          resumed.messageIncludes(expected);
-        } else {
-          firstChildTurn.expectOk();
-          firstChildTurn.notEvent("turn.cancelled");
-          firstChildTurn.messageIncludes(expected);
+        await t.require(new Set(receipts).size, equals(1));
+        if (steering) {
+          await t.require(receipts.length >= 2, equals(true));
         }
+        firstChildTurn.expectOk();
+        firstChildTurn.notEvent("turn.cancelled");
+        firstChildTurn.event("turn.started", { count: 1 });
+        firstChildTurn.messageIncludes(expected);
         if (steering) {
           firstChildTurn.eventsSatisfy(
             "the original child never emits the superseded result",

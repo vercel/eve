@@ -30,7 +30,7 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   kind: "authorization-proxy-test",
   "authorization.required"(data, ctx) {
     ctx.state.pendingName = data.name;
-    ctx.session.continuation?.rekey("auth-thread");
+    ctx.session.continuation?.alias("auth-thread");
   },
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;
@@ -238,7 +238,7 @@ describe("subagent authorization proxy", () => {
     };
     const completed = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: required.serializedContext }),
-      durableSession: required.sessionState.snapshot!.session,
+      durableSession: required.sessionState.snapshot.session,
       hookPayload: authorizationPayload(completedEvent),
       parentWritable,
     });

@@ -1,3 +1,4 @@
+import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
   type ActionResultStreamEvent,
   type ActionsRequestedStreamEvent,
@@ -150,6 +151,7 @@ async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export type AgentTUIStreamResult = {
+  steer?: (message: string) => Promise<void>;
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
   abort?: () => void;
   /**
@@ -1519,9 +1521,8 @@ export class EveTUIRunner {
 
   /**
    * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. A key-driven cancel that lands in the dispatch
-   * window — after the turn was sent but before the turn workflow claims its
-   * cancel hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * while the turn stays live. A key-driven cancel that lands before the owner
+   * begins the turn (i.e. before `turn.started` reaches the client) resolves as a
    * benign `no_active_turn` and would otherwise be silently lost, leaving
    * the TUI showing "Cancelling…" while the turn runs to completion.
    * Retrying until the stream reaches its boundary closes that window.
@@ -1583,17 +1584,21 @@ export class EveTUIRunner {
     sourceSession: ClientSession | undefined,
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
+    const steering =
+      sourceSession === undefined ? undefined : new SteeringStream(events, sourceSession);
     return {
+      steer: steering === undefined ? undefined : (message) => steering.send(message),
       abort: () => {
         turnState.aborted = true;
         this.#failedSession = sourceSession;
+        steering?.abort();
         abort();
       },
       cancel: () => {
         void this.#requestTurnCancellation(turnState, sourceSession);
       },
       events: eveEventsToTUIStream({
-        events,
+        events: steering ?? events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
@@ -2547,7 +2552,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.cancelled":
-        // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
+        // Explicit cooperative cancellation preserves the session.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);

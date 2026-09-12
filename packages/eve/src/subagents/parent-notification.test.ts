@@ -313,10 +313,10 @@ describe("turn caller notification", () => {
       },
       lifecycle: "terminal",
       sessionId: "child-session",
-      settled: { isError: true, output: new Error("driver crashed") },
+      settled: { isError: true, output: new Error("session owner crashed") },
     });
 
-    const error = { code: "SUBAGENT_EXECUTION_FAILED", message: "driver crashed" };
+    const error = { code: "SUBAGENT_EXECUTION_FAILED", message: "session owner crashed" };
     expect(resumeHookMock).toHaveBeenCalledWith("parent-turn-3", {
       kind: "runtime-action-result",
       results: [
