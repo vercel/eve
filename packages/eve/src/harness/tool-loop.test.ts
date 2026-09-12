@@ -10964,7 +10964,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  describe("gateway app attribution headers", () => {
+  describe("model request headers", () => {
     function setupStopResultForAttribution(): void {
       setupMockAgent({
         finishReason: "stop",
@@ -10974,6 +10974,80 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
     }
+
+    it("keeps ChatGPT cache identity stable across turns and separate across sessions", async () => {
+      setupStopResultForAttribution();
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          resolveModel: vi.fn().mockResolvedValue(
+            new MockLanguageModelV3({
+              provider: "codex.responses",
+              modelId: "gpt-5.6-luna",
+            }),
+          ),
+        }),
+      );
+      const first = await runStep(createTestSession({ sessionId: "session-a" }), { message: "Hi" });
+      await runStep(first.session, { message: "Continue" });
+      await runStep(createTestSession({ sessionId: "session-b" }), {
+        message: "Hi",
+      });
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls.map(([settings]) => settings.headers)).toEqual([
+        { "session-id": "session-a" },
+        { "session-id": "session-a" },
+        { "session-id": "session-b" },
+      ]);
+    });
+
+    it.each([
+      ["codex.responses", "codex.responses"],
+      ["openai.responses", "codex.responses"],
+      ["codex.responses", "openai.responses"],
+      ["openai.responses", "openai.responses"],
+    ])(
+      "uses each request's provider for %s replies and %s compaction",
+      async (provider, compactionProvider) => {
+        setupStopResultForAttribution();
+        vi.mocked(shouldCompact).mockReturnValueOnce(true);
+        vi.mocked(compactMessages).mockResolvedValueOnce([
+          createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
+          { content: "summary", role: "assistant" },
+        ]);
+        const runStep = createToolLoopHarness(
+          createTestConfig("conversation", undefined, {
+            resolveModel: vi.fn().mockImplementation(
+              async (reference) =>
+                new MockLanguageModelV3({
+                  provider: reference.id === "compaction-model" ? compactionProvider : provider,
+                  modelId: "gpt-5.6-luna",
+                }),
+            ),
+          }),
+        );
+        const session = createTestSession();
+        await runStep(
+          {
+            ...session,
+            agent: {
+              ...session.agent,
+              compactionModelReference: { id: "compaction-model" },
+            },
+          },
+          { message: "Hi" },
+        );
+
+        expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].headers).toEqual(
+          provider === "codex.responses" ? { "session-id": session.sessionId } : undefined,
+        );
+        expect(compactMessages).toHaveBeenCalledOnce();
+        expect(vi.mocked(compactMessages).mock.calls[0]?.[5]).toEqual(
+          compactionProvider === "codex.responses"
+            ? { "session-id": session.sessionId }
+            : undefined,
+        );
+      },
+    );
 
     it("sets x-title and http-referer headers for gateway-routed string models", async () => {
       setupStopResultForAttribution();

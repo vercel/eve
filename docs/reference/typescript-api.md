@@ -186,6 +186,8 @@ Pass another bare OpenAI model slug to override the default. `experimental_chatg
 
 `chatgpt()` uses stateless requests (`store: false`). eve retains reasoning summaries and encrypted reasoning in session history and replays them after tool calls and on later turns. You do not need to configure `reasoning.encrypted_content` explicitly.
 
+eve sends a stable session identity with ChatGPT subscription requests, including context compaction, so requests from the same eve session can reuse cached prompt prefixes. Cache reuse still depends on the backend and the prompt; a stable session identity does not guarantee a cache hit.
+
 Sign in directly from eve; the Codex CLI is not required:
 
 1. Run `eve dev`, open `/model`, and select **Provider** → **ChatGPT subscription**.
