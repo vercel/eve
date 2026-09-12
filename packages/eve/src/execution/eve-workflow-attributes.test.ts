@@ -18,6 +18,7 @@ import {
 import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
+  ConversationIdKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
@@ -181,6 +182,14 @@ describe("readRootSessionId", () => {
     expect(readRootSessionId({})).toBeUndefined();
   });
 
+  it("reads the inherited root from a remote session conversation", () => {
+    expect(
+      readRootSessionId({
+        [ConversationIdKey.name]: "wrun_remote_root",
+      }),
+    ).toBe("wrun_remote_root");
+  });
+
   it("returns undefined when a malformed parent omits the root", () => {
     expect(
       readRootSessionId({
@@ -255,12 +264,25 @@ describe("buildSessionAttributes", () => {
       "$eve.channel_request_id": undefined,
       "$eve.is_otel_trace_enabled": false,
       "$eve.is_trace_content_visible": true,
+      "$eve.root": undefined,
       "$eve.schedule": undefined,
       "$eve.trace_id": undefined,
       "$eve.type": "session",
       "$eve.trigger": "slack",
       "$eve.title": "ship the thing please",
     });
+  });
+
+  it("emits the inherited root on a remote-created session", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "remote task",
+      serializedContext: {
+        [ConversationIdKey.name]: "wrun_remote_root",
+      },
+    });
+
+    expect(attrs["$eve.root"]).toBe("wrun_remote_root");
+    expect(attrs["$eve.type"]).toBe("session");
   });
 
   it("marks unknown sessions denied while retaining their stored title", () => {
