@@ -819,7 +819,9 @@ describe("createVercelSandbox", () => {
       .mockResolvedValueOnce(templateSandbox)
       .mockResolvedValueOnce(sessionSandbox);
     const resolveSessionCreateOptions = vi.fn(({ session }) => ({
-      mounts: { "/workspace/repos": { drive: `e0-${session.id}` } },
+      mounts: {
+        "/workspace/repos": { drive: `e0-${session.id}`, mode: "read-write" as const },
+      },
     }));
     const backend = createTestVercelSandbox({
       loadSandboxModule: async () =>
