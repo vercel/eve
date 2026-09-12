@@ -3,6 +3,18 @@ import { createInterface, type Interface } from "node:readline";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isErrnoCode, isObject } from "#shared/guards.js";
+import {
+  extractCodexAccountIdFromToken,
+  extractCodexAccountLabelFromToken,
+  readCodexJwtExpirationMs,
+} from "./auth.js";
+import { ChatGptSignInRequiredError } from "./oauth.js";
+import {
+  ChatGptSignedOutError,
+  isChatGptTokenFresh,
+  type ChatGptToken,
+  type ChatGptTokenResolutionInput,
+} from "./token.js";
 
 interface RpcError {
   readonly code?: number;
@@ -22,7 +34,7 @@ export interface CodexAuthStatus {
 }
 
 export interface CodexAppServer {
-  getAuthStatus(input: { readonly refreshToken: boolean }): Promise<CodexAuthStatus>;
+  resolveToken(input: ChatGptTokenResolutionInput): Promise<ChatGptToken>;
   restart?(): void;
 }
 
@@ -72,10 +84,30 @@ export class CodexAppServerClient implements CodexAppServer {
     this.#spawnProcess = options.spawnProcess ?? spawnCodexAppServer;
   }
 
-  async getAuthStatus(input: { readonly refreshToken: boolean }): Promise<CodexAuthStatus> {
+  async resolveToken(input: ChatGptTokenResolutionInput): Promise<ChatGptToken> {
+    let status = await this.#getAuthStatus(input.forceRefresh);
+    if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
+      throw input.forceRefresh
+        ? new ChatGptSignInRequiredError()
+        : new ChatGptSignedOutError(
+            "ChatGPT subscription is not signed in to Codex. Run `codex login` or sign in from /model.",
+          );
+    }
+    let token = tokenFromCodex(status.authToken);
+    if (!input.forceRefresh && !isChatGptTokenFresh(token, input.now())) {
+      status = await this.#getAuthStatus(true);
+      if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
+        throw new ChatGptSignInRequiredError();
+      }
+      token = tokenFromCodex(status.authToken);
+    }
+    return token;
+  }
+
+  async #getAuthStatus(refreshToken: boolean): Promise<CodexAuthStatus> {
     const connection = await this.#connect();
     try {
-      return await connection.getAuthStatus(input);
+      return await connection.getAuthStatus({ refreshToken });
     } catch (error) {
       if (connection.exited) this.#connection = undefined;
       throw error;
@@ -252,6 +284,18 @@ function spawnCodexAppServer(
 
 function unrefStream(stream: NodeJS.ReadableStream | NodeJS.WritableStream): void {
   if ("unref" in stream && typeof stream.unref === "function") stream.unref();
+}
+
+function tokenFromCodex(token: string): ChatGptToken {
+  const accountId = extractCodexAccountIdFromToken(token);
+  const accountLabel = extractCodexAccountLabelFromToken(token);
+  const expiresAt = readCodexJwtExpirationMs(token);
+  return {
+    token,
+    ...(accountId !== undefined && { accountId }),
+    ...(accountLabel !== undefined && { accountLabel }),
+    ...(expiresAt !== undefined && { expiresAt }),
+  };
 }
 
 function appServerError(error: unknown): Error {

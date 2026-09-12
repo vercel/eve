@@ -12,7 +12,11 @@ import {
   ChatGptInvalidStoredSessionError,
   type ChatGptCredentialStore,
 } from "#public/models/openai/chatgpt/credential-store.js";
-import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
+import {
+  ChatGptSignInRequiredError,
+  type ChatGptCredentials,
+} from "#public/models/openai/chatgpt/oauth.js";
+import { ChatGptSignedOutError } from "#public/models/openai/chatgpt/token.js";
 import {
   createCodexTokenBroker,
   type CodexTokenBroker,
@@ -45,6 +49,18 @@ function setup() {
   let credentials: ChatGptCredentials | undefined;
   const store: ChatGptCredentialStore = {
     read: async () => credentials,
+    resolveToken: vi.fn(async ({ forceRefresh }) => {
+      if (!credentials) {
+        if (forceRefresh) throw new ChatGptSignInRequiredError();
+        throw new ChatGptSignedOutError();
+      }
+      return {
+        token: credentials.accessToken,
+        expiresAt: credentials.expiresAt,
+        ...(credentials.accountId && { accountId: credentials.accountId }),
+        ...(credentials.accountLabel && { accountLabel: credentials.accountLabel }),
+      };
+    }),
     update: vi.fn<ChatGptCredentialStore["update"]>(async (callback) => {
       credentials = await callback(credentials);
       return credentials;
@@ -63,7 +79,7 @@ function setup() {
 
 function missingCodexAppServer(): CodexAppServer {
   return {
-    getAuthStatus: vi.fn(async () => {
+    resolveToken: vi.fn(async () => {
       throw new CodexBinaryNotFoundError();
     }),
   };
@@ -116,9 +132,10 @@ describe("ChatGPT device sign-in", () => {
     const restart = vi.fn();
     const appServer: CodexAppServer = {
       restart,
-      getAuthStatus: vi.fn(async () =>
-        signedIn ? { authMethod: "chatgpt", authToken: "codex-token" } : { authMethod: "chatgpt" },
-      ),
+      resolveToken: vi.fn(async () => {
+        if (!signedIn) throw new ChatGptSignedOutError();
+        return { token: "codex-token" };
+      }),
     };
     const broker = createCodexTokenBroker({ appServer, store: options.store });
     const codexLogin = vi.fn(async () => {
@@ -140,9 +157,10 @@ describe("ChatGPT device sign-in", () => {
     const restart = vi.fn();
     const appServer: CodexAppServer = {
       restart,
-      getAuthStatus: vi.fn(async () =>
-        signedIn ? { authMethod: "chatgpt", authToken: "codex-token" } : { authMethod: "chatgpt" },
-      ),
+      resolveToken: vi.fn(async () => {
+        if (!signedIn) throw new ChatGptSignedOutError();
+        return { token: "codex-token" };
+      }),
     };
     const broker = createCodexTokenBroker({ appServer, store: options.store });
     const stdout = new PassThrough();
@@ -172,7 +190,7 @@ describe("ChatGPT device sign-in", () => {
     const codexLogin = vi.fn();
     const broker = createCodexTokenBroker({
       appServer: {
-        getAuthStatus: vi.fn(async () => {
+        resolveToken: vi.fn(async () => {
           throw new Error("Codex protocol failed");
         }),
       },

@@ -8,7 +8,11 @@ import {
   CodexBinaryNotFoundError,
   type CodexAppServer,
 } from "#public/models/openai/chatgpt/codex-app-server.js";
-import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
+import {
+  ChatGptSignInRequiredError,
+  type ChatGptCredentials,
+} from "#public/models/openai/chatgpt/oauth.js";
+import { ChatGptSignedOutError } from "#public/models/openai/chatgpt/token.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 
 const controllers: AbortController[] = [];
@@ -20,6 +24,13 @@ function setup() {
   let credentials: ChatGptCredentials | undefined;
   const store: ChatGptCredentialStore = {
     read: async () => credentials,
+    resolveToken: vi.fn(async ({ forceRefresh }) => {
+      if (!credentials) {
+        if (forceRefresh) throw new ChatGptSignInRequiredError();
+        throw new ChatGptSignedOutError();
+      }
+      return { token: credentials.accessToken, expiresAt: credentials.expiresAt };
+    }),
     update: vi.fn<ChatGptCredentialStore["update"]>(async (callback) => {
       credentials = await callback(credentials);
       return credentials;
@@ -42,7 +53,7 @@ function setup() {
 
 function missingCodexAppServer(): CodexAppServer {
   return {
-    getAuthStatus: vi.fn(async () => {
+    resolveToken: vi.fn(async () => {
       throw new CodexBinaryNotFoundError();
     }),
   };
