@@ -205,7 +205,7 @@ export function resolveProvisioning(
       );
     }
     await deps.requireAuth(parent(), undefined, { signal });
-    await deps.validateTeam(options.prompter, parent(), projectArgs.team, { signal });
+    await deps.validateTeam(parent(), projectArgs.team, { signal });
     const team = await deps.resolveTeam(parent(), projectArgs.team, { signal });
     const aiGateway: ResolvedAiGateway =
       aiGatewayArgs.apiKey !== undefined
