@@ -155,7 +155,7 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
-  it("creates fresh Vercel sandboxes with eve's shared base image", async () => {
+  it("creates persistent Vercel sandbox templates with eve's shared base image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();
     const sandboxModule = {
