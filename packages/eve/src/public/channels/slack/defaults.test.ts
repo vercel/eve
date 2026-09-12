@@ -279,7 +279,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Connect with Notion to continue this agent session");
     expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
@@ -377,7 +377,9 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
-    expect(post.mock.calls[0]?.[0]).toBe("Connect with Notion Workspace to continue");
+    expect(post.mock.calls[0]?.[0]).toBe(
+      "Connect with Notion Workspace to continue this agent session",
+    );
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
     expect(message.text).toContain("Sign in with Notion Workspace");
   });
@@ -403,7 +405,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Connect with Notion to continue this agent session");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
