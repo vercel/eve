@@ -1,25 +1,15 @@
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
-  dispatchDynamicInstructionEvent,
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
 import {
-  dispatchDynamicSubagentEvent,
-  refreshDynamicSessionSubagentsForRuntimeRevision,
-} from "#context/dynamic-subagent-lifecycle.js";
-import {
-  dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -46,29 +36,19 @@ import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import type {
-  HandleEventFn,
-  HarnessSession,
-  HarnessSettlement,
-  StepInput,
-  StepResult,
-} from "#harness/types.js";
+import type { HarnessSession, HarnessSettlement, StepInput, StepResult } from "#harness/types.js";
 import { takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/turn-step.js";
 import { resolveSessionStepResult } from "#execution/session-step-result.js";
+import { createSessionEventPipeline } from "#execution/session-event-pipeline.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
   createTurnStartedEvent,
-  encodeMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -77,7 +57,6 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
@@ -98,7 +77,6 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
@@ -122,20 +100,73 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   return runSessionStep(rawInput);
 }
 
-/** Commits terminal effects only after the owner has admitted boundary input. */
-export async function settleTurnStep(
-  input: Omit<TurnStepInput, "input"> & {
-    readonly settlement: HarnessSettlement;
-  },
+/**
+ * Commits the terminal events a turn step proposed. Runs only after the owner
+ * admitted boundary input, so steering can still extend the turn instead.
+ */
+export async function commitSettlementStep(
+  input: Omit<TurnStepInput, "input"> & { readonly settlement: HarnessSettlement },
 ): Promise<DurableStepResult> {
   "use step";
-  return runSessionStep({ ...input, input: undefined }, input.settlement);
+  const { settlement } = input;
+  const ctx = await deserializeContext(input.serializedContext);
+  const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const initialSession = hydrateDurableSession({
+    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
+    durable: readDurableSession(input.sessionState),
+    turnAgent: effectiveAgent.turnAgent,
+  });
+  const history = createExecutionHistoryView(initialSession);
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    sessionId: initialSession.sessionId,
+  });
+  const { handleEvent, writer } = createSessionEventPipeline({
+    abortSignal: input.abortSignal,
+    adapter: ctx.require(ChannelKey),
+    bundle,
+    ctx,
+    effectiveAgent,
+    instrumentation,
+    parentWritable: input.parentWritable,
+    sessionId: initialSession.sessionId,
+  });
+  try {
+    const committed = await runBackgroundStep(ctx, initialSession, async (session) => {
+      ctx.setVirtualContext(HandleEventKey, handleEvent);
+      for (const event of settlement.events) await handleEvent(event, history.messages(session));
+      return {
+        next: null,
+        session: setHarnessEmissionState(
+          takeSessionUsageDelta(clearTurnClientContextState(session)).session,
+          settlement.emissionAfter,
+        ),
+      };
+    });
+    if (
+      settlement.events.some(
+        (event) => event.type === "session.completed" || event.type === "session.failed",
+      )
+    ) {
+      await writer.close();
+    }
+    return {
+      action: "continue",
+      serializedContext: serializeContext(ctx),
+      sessionState: createDurableSessionState({
+        session: reconcileSessionContinuationToken(ctx, committed.session),
+      }),
+    };
+  } finally {
+    writer.releaseLock();
+    await instrumentation?.flush();
+  }
 }
 
-async function runSessionStep(
-  rawInput: TurnStepInput,
-  commit?: HarnessSettlement,
-): Promise<DurableStepResult> {
+async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   let input = rawInput;
 
   let durableSession = readDurableSession(input.sessionState);
@@ -249,7 +280,17 @@ async function runSessionStep(
     );
     await instrumentation?.flush();
   };
-  const adapterCtx = buildAdapterContext(adapter, ctx);
+  const pipeline = createSessionEventPipeline({
+    abortSignal: input.abortSignal,
+    adapter,
+    bundle,
+    ctx,
+    effectiveAgent,
+    instrumentation,
+    parentWritable: input.parentWritable,
+    sessionId: initialSession.sessionId,
+  });
+  const { adapterCtx, dynamicConnections, effectiveNode, handleEvent, writer } = pipeline;
 
   // Run the adapter's deliver hook for each queued payload and
   // coalesce the resulting StepInput values.
@@ -344,16 +385,8 @@ async function runSessionStep(
     };
   }
 
-  const hookRegistry = bundle.hookRegistry;
-  const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
-  const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
-  const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
-  const effectiveNode = {
-    ...bundle.graph.root,
-    turnAgent: effectiveAgent.turnAgent,
-  };
   const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
   try {
     const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -399,109 +432,7 @@ async function runSessionStep(
     throw error;
   }
 
-  const writer = input.parentWritable.getWriter();
-
-  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
-    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
-    await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
-  };
-  const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
-    activityCohort.updateActivityBlockers(ctx, event);
-    // A remote task's parent owns its HITL. Forward blocking events over
-    // the task callback and keep them out of the child's local channel;
-    // otherwise two TUIs can present and answer the same request.
-    const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
-    const emitted = forwardedToTaskParent
-      ? stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey))
-      : await emit(event);
-    const lifecycleMessages = await dispatchMemoryLifecycleEvent({
-      abortSignal: input.abortSignal,
-      appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
-      ctx,
-      event,
-      instrumentation: instrumentation?.memory,
-      memories: effectiveNode.agent?.memories ?? [],
-      messages,
-      nodeId: bundle.nodeId ?? "__root__",
-    });
-    void observeSessionActivity({ ctx, event: emitted, sessionId: initialSession.sessionId });
-    await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
-    if (emitted.type !== "step.started") {
-      await dispatchDynamicModelEvent({
-        ctx,
-        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted,
-        messages: lifecycleMessages,
-        scope: {
-          moduleMap: bundle.moduleMap,
-          nodeId: bundle.nodeId,
-        },
-      });
-    }
-    await dynamicConnections.dispatch(emitted);
-    await dispatchDynamicSubagentEvent({
-      ctx,
-      resolvers: dynamicSubagentResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicToolEvent({
-      ctx,
-      resolvers: dynamicToolResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicSkillEvent({
-      ctx,
-      resolvers: dynamicSkillResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicInstructionEvent({
-      ctx,
-      resolvers: dynamicInstructionsResolvers,
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-  };
-
   const mode = ctx.require(ModeKey);
-  if (commit !== undefined) {
-    try {
-      const committed = await runBackgroundStep(ctx, initialSession, async (session) => {
-        ctx.setVirtualContext(HandleEventKey, handleEvent);
-        for (const event of commit.events) await handleEvent(event, history.messages(session));
-        return {
-          next: null,
-          session: setHarnessEmissionState(
-            takeSessionUsageDelta(clearTurnClientContextState(session)).session,
-            commit.emissionAfter,
-          ),
-        };
-      });
-      if (
-        commit.events.some(
-          (event) => event.type === "session.completed" || event.type === "session.failed",
-        )
-      ) {
-        await writer.close();
-      }
-      return {
-        action: "continue",
-        serializedContext: serializeContext(ctx),
-        sessionState: createDurableSessionState({
-          session: reconcileSessionContinuationToken(ctx, committed.session),
-        }),
-      };
-    } finally {
-      writer.releaseLock();
-      await instrumentation?.flush();
-    }
-  }
-  let settlement: HarnessSettlement | undefined;
   const modelCallsPerStep =
     bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
   const capabilities = ctx.get(CapabilitiesKey);
@@ -526,10 +457,6 @@ async function runSessionStep(
       compactOnly: input.input?.kind === "compact",
       createRuntime: createWorkflowRuntime,
       handleEvent,
-      handleSettlement: async (proposal) => {
-        if (settlement !== undefined) throw new Error("A turn step proposed multiple settlements.");
-        settlement = proposal;
-      },
       historyProjector: history.projector,
       historyView: history.prepare(modelSession),
       instrumentation,
@@ -653,7 +580,7 @@ async function runSessionStep(
     stepResult,
     nextSerializedContext,
     mode,
-    settlement,
+    stepResult.settlement,
     input.serializedContext,
   );
 }

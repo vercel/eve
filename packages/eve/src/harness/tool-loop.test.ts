@@ -89,7 +89,12 @@ import {
   getSessionTokenUsage,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type {
+  HarnessEmitFn,
+  HarnessSession,
+  StepResult,
+  ToolLoopHarnessConfig,
+} from "#harness/types.js";
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
@@ -391,6 +396,28 @@ function createEventCollector(): {
     events.push(event);
   };
   return { emit, events };
+}
+
+/**
+ * The stream a step would produce once its owner commits the proposed
+ * settlement: emitted events followed by the terminal events the harness
+ * returned on `result.settlement` instead of emitting.
+ */
+function eventsWithSettlement(
+  events: readonly UnstampedMessageStreamEvent[],
+  result: StepResult,
+): UnstampedMessageStreamEvent[] {
+  return [...events, ...(result.settlement?.events ?? [])];
+}
+
+/**
+ * The session the execution owner hands to the next turn after committing a
+ * proposed settlement: the turn closes and the emission state resets.
+ */
+function commitSettlement(result: StepResult): HarnessSession {
+  return result.settlement === undefined
+    ? result.session
+    : setHarnessEmissionState(result.session, result.settlement.emissionAfter);
 }
 
 function getCompatibilityEventTypes(events: readonly UnstampedMessageStreamEvent[]): string[] {
@@ -955,22 +982,13 @@ describe("createToolLoopHarness", () => {
       toolCalls: [],
       toolResults: [],
     });
-    const events: UnstampedMessageStreamEvent[] = [];
-    const proposals: import("#harness/types.js").HarnessSettlement[] = [];
-    const runStep = createToolLoopHarness(
-      createTestConfig(
-        "conversation",
-        async (event) => {
-          events.push(event);
-        },
-        {
-          handleSettlement: async (proposal) => {
-            proposals.push(proposal);
-          },
-        },
-      ),
-    );
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
     const first = await runStep(createTestSession(), { message: "First" });
+    expect(first.settlement?.events.map((event) => event.type)).toEqual([
+      "turn.completed",
+      "session.waiting",
+    ]);
     expect(getHarnessEmissionState(first.session.state)).toMatchObject({
       turnId: "turn_0",
       sequence: 0,
@@ -993,12 +1011,16 @@ describe("createToolLoopHarness", () => {
       { role: "user", kind: "user", content: "Use the updated instructions." },
       { role: "assistant", content: "Answer." },
     ]);
-    expect(proposals).toHaveLength(2);
-    expect(proposals[1]!.events.map((event) => event.type)).toEqual([
+    expect(second.settlement?.events.map((event) => event.type)).toEqual([
       "turn.completed",
       "session.waiting",
     ]);
-    expect(proposals[1]!.emissionAfter).toMatchObject({ turnId: "", sequence: 1, stepIndex: 0 });
+    expect(second.settlement?.emissionAfter).toEqual({
+      sessionStarted: true,
+      turnId: "",
+      sequence: 1,
+      stepIndex: 0,
+    });
   });
 
   it("omits user messages with no model-visible content", async () => {
@@ -1630,11 +1652,13 @@ describe("createToolLoopHarness", () => {
       "session.started",
       "turn.started",
       "message.received",
+    ]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "step.failed",
       "turn.failed",
       "session.failed",
     ]);
-    const turnFailed = events.find((event) => event.type === "turn.failed");
+    const turnFailed = result.settlement?.events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toContain("Dynamic model selection is required");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
@@ -1654,14 +1678,13 @@ describe("createToolLoopHarness", () => {
     });
 
     expect(result.next).toEqual({ done: true, output: "" });
-    expect(events.map((event) => event.type)).toEqual([
-      "session.started",
-      "turn.started",
+    expect(events.map((event) => event.type)).toEqual(["session.started", "turn.started"]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "step.failed",
       "turn.failed",
       "session.failed",
     ]);
-    const turnFailed = events.find((event) => event.type === "turn.failed");
+    const turnFailed = result.settlement?.events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toBe("flag service unavailable");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
@@ -1954,7 +1977,7 @@ describe("createToolLoopHarness", () => {
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
     expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
-    expect(events.at(-1)?.type).toBe("session.waiting");
+    expect(eventsWithSettlement(events, reparked).at(-1)?.type).toBe("session.waiting");
   });
 
   it("keeps declared subagent tools when Workflow is unavailable outside the root", async () => {
@@ -2162,11 +2185,15 @@ describe("createToolLoopHarness", () => {
         "turn.started",
         "message.received",
         "step.started",
+      ]);
+      expect(result.settlement?.events.map((event) => event.type)).toEqual([
         "step.failed",
         "turn.failed",
         "session.failed",
       ]);
-      expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
+      expect(
+        result.settlement?.events.find((event) => event.type === "step.failed")?.data,
+      ).toMatchObject({
         code: testCase.errorCode,
         details: testCase.details,
         message: testCase.message,
@@ -2210,6 +2237,8 @@ describe("createToolLoopHarness", () => {
       "message.received",
       "step.started",
       "input.requested",
+    ]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "turn.completed",
       "session.waiting",
     ]);
@@ -2657,11 +2686,13 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "step.completed",
+    ]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "result.completed",
       "turn.completed",
       "session.waiting",
     ]);
-    expect(events).toContainEqual(
+    expect(result.settlement?.events).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({ result: { title: "Done" } }),
         type: "result.completed",
@@ -2815,11 +2846,13 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "step.completed",
+    ]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "step.failed",
       "turn.failed",
       "session.waiting",
     ]);
-    expect(events).toContainEqual(
+    expect(result.settlement?.events).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({ code: "OUTPUT_SCHEMA_NOT_FULFILLED" }),
         type: "step.failed",
@@ -3263,7 +3296,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    await runStep(createTestSession(), { message: "Hi" });
+    const result = await runStep(createTestSession(), { message: "Hi" });
 
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
@@ -3272,6 +3305,8 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "step.completed",
+    ]);
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
       "turn.completed",
       "session.waiting",
     ]);
@@ -3289,11 +3324,11 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    await runStep(
+    const result = await runStep(
       createTestSession({ history: [{ content: "prior", kind: "user" as const, role: "user" }] }),
     );
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "step.started",
       "message.completed",
       "step.completed",
@@ -3450,7 +3485,9 @@ describe("createToolLoopHarness", () => {
       },
       type: "input.requested",
     });
-    expect(events.filter((event) => event.type === "turn.completed").at(-1)).toEqual({
+    expect(
+      secondResult.settlement?.events.find((event) => event.type === "turn.completed"),
+    ).toEqual({
       data: {
         sequence: 0,
         turnId: "turn_0",
@@ -3484,7 +3521,8 @@ describe("createToolLoopHarness", () => {
       );
 
       expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
-      expect(events.find((event) => event.type === "step.failed")).toMatchObject({
+      const allEvents = eventsWithSettlement(events, result);
+      expect(allEvents.find((event) => event.type === "step.failed")).toMatchObject({
         data: {
           code: "MODEL_CALL_FAILED",
           message: "The model provider filtered this response.",
@@ -3496,16 +3534,16 @@ describe("createToolLoopHarness", () => {
         },
       });
       expect(
-        events.some(
+        allEvents.some(
           (event) =>
             event.type === "step.completed" ||
             event.type === "turn.completed" ||
             event.type === "message.completed",
         ),
       ).toBe(false);
-      expect(JSON.stringify(events.filter((event) => event.type === "step.failed"))).not.toContain(
-        "not-for-clients",
-      );
+      expect(
+        JSON.stringify(allEvents.filter((event) => event.type === "step.failed")),
+      ).not.toContain("not-for-clients");
       if (mode === "task") {
         expect(result.next).toMatchObject({
           done: true,
@@ -3514,7 +3552,7 @@ describe("createToolLoopHarness", () => {
         });
       } else {
         expect(result.next).toBeNull();
-        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+        expect(allEvents.some((event) => event.type === "session.waiting")).toBe(true);
       }
     },
   );
@@ -3552,9 +3590,9 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("task", emit));
 
-    await runStep(createTestSession(), { message: "run task" });
+    const result = await runStep(createTestSession(), { message: "run task" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -4664,16 +4702,17 @@ describe("createToolLoopHarness", () => {
     expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
     expect(result.session.outputSchema).toBeUndefined();
 
-    const types = events.map((e) => e.type);
+    const allEvents = eventsWithSettlement(events, result);
+    const types = allEvents.map((e) => e.type);
     expect(types).toContain("session.started");
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.waiting");
-    // The recoverable path must not emit session.failed — that event
+    // The recoverable path must not propose session.failed — that event
     // signals a terminal outcome to channel adapters.
     expect(types).not.toContain("session.failed");
 
-    const stepFailed = events.find((e) => e.type === "step.failed");
+    const stepFailed = allEvents.find((e) => e.type === "step.failed");
     expect(stepFailed).toBeDefined();
     expect(stepFailed!.data).toMatchObject({
       code: "MODEL_CALL_FAILED",
@@ -4716,8 +4755,9 @@ describe("createToolLoopHarness", () => {
         isError: true,
         output: expect.stringContaining(hint),
       });
-      expect(events.map((event) => event.type)).toContain("session.waiting");
-      expect(events.map((event) => event.type)).not.toContain("session.failed");
+      const types = eventsWithSettlement(events, result).map((event) => event.type);
+      expect(types).toContain("session.waiting");
+      expect(types).not.toContain("session.failed");
     },
   );
 
@@ -4754,13 +4794,14 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
 
-    const types = events.map((e) => e.type);
+    const allEvents = eventsWithSettlement(events, result);
+    const types = allEvents.map((e) => e.type);
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.waiting");
     expect(types).not.toContain("session.failed");
 
-    const stepFailed = events.find((e) => e.type === "step.failed");
+    const stepFailed = allEvents.find((e) => e.type === "step.failed");
     expect(stepFailed).toBeDefined();
     expect(stepFailed!.data).toMatchObject({
       code: "MODEL_CALL_FAILED",
@@ -4797,7 +4838,7 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toEqual({ done: true, output: "" });
 
-    const types = events.map((e) => e.type);
+    const types = eventsWithSettlement(events, result).map((e) => e.type);
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
@@ -4831,7 +4872,7 @@ describe("createToolLoopHarness", () => {
       output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
     });
 
-    const types = events.map((e) => e.type);
+    const types = eventsWithSettlement(events, result).map((e) => e.type);
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
@@ -4859,7 +4900,7 @@ describe("createToolLoopHarness", () => {
       output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
     });
 
-    const types = events.map((e) => e.type);
+    const types = eventsWithSettlement(events, result).map((e) => e.type);
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
@@ -4881,13 +4922,14 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toEqual({ done: true, output: "" });
 
-    const types = events.map((e) => e.type);
+    const allEvents = eventsWithSettlement(events, result);
+    const types = allEvents.map((e) => e.type);
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
     expect(types).not.toContain("session.waiting");
 
-    const stepFailed = events.find((e) => e.type === "step.failed");
+    const stepFailed = allEvents.find((e) => e.type === "step.failed");
     expect(stepFailed).toBeDefined();
     expect(stepFailed!.data).toMatchObject({
       details: {
@@ -5198,11 +5240,12 @@ describe("createToolLoopHarness", () => {
         expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(3);
         expect(result.next).toBeNull();
 
-        const types = events.map((event) => event.type);
+        const allEvents = eventsWithSettlement(events, result);
+        const types = allEvents.map((event) => event.type);
         expect(types).toContain("step.failed");
         expect(types).toContain("turn.failed");
         expect(types).toContain("session.waiting");
-        const stepFailed = events.find((event) => event.type === "step.failed");
+        const stepFailed = allEvents.find((event) => event.type === "step.failed");
         expect((stepFailed!.data as { message: string }).message).toContain(
           "did not return a response",
         );
@@ -5268,7 +5311,7 @@ describe("createToolLoopHarness", () => {
         expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
         expect(result.next).toEqual({ done: true, output: "" });
 
-        const types = events.map((event) => event.type);
+        const types = eventsWithSettlement(events, result).map((event) => event.type);
         expect(types).toContain("step.failed");
         expect(types).toContain("session.failed");
         expect(types).not.toContain("session.waiting");
@@ -5431,7 +5474,7 @@ describe("createToolLoopHarness", () => {
       // 400 with no known summary classifies as terminal, so the
       // cascade is the terminal one.
       expect(result.next).toEqual({ done: true, output: "" });
-      const types = events.map((e) => e.type);
+      const types = eventsWithSettlement(events, result).map((e) => e.type);
       expect(types).toContain("step.failed");
       expect(types).toContain("turn.failed");
       expect(types).toContain("session.failed");
@@ -5442,12 +5485,12 @@ describe("createToolLoopHarness", () => {
 
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-      await runStep(createTestSession(), { message: "Hi" });
+      const result = await runStep(createTestSession(), { message: "Hi" });
 
       // Exactly one agent construction — no recovery retry was attempted.
       expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
 
-      const types = events.map((e) => e.type);
+      const types = eventsWithSettlement(events, result).map((e) => e.type);
       // The unrelated error still flows through the recoverable cascade
       // (plain Error defaults to recoverable classification).
       expect(types).toContain("session.waiting");
@@ -5785,13 +5828,14 @@ describe("createToolLoopHarness", () => {
         expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
         expect(result.next).toBeNull();
 
-        const types = events.map((event) => event.type);
+        const allEvents = eventsWithSettlement(events, result);
+        const types = allEvents.map((event) => event.type);
         expect(types).toContain("step.failed");
         expect(types).toContain("turn.failed");
         expect(types).toContain("session.waiting");
         // The channel-visible message is the normalized empty-response
         // text, not the SDK's "No output generated" internals.
-        const stepFailed = events.find((event) => event.type === "step.failed");
+        const stepFailed = allEvents.find((event) => event.type === "step.failed");
         expect((stepFailed!.data as { message: string }).message).toContain(
           "did not return a response",
         );
@@ -5815,11 +5859,12 @@ describe("createToolLoopHarness", () => {
         expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
         expect(result.next).toBeNull();
 
-        const types = events.map((event) => event.type);
+        const allEvents = eventsWithSettlement(events, result);
+        const types = allEvents.map((event) => event.type);
         expect(types).toContain("step.failed");
         expect(types).toContain("turn.failed");
         expect(types).toContain("session.waiting");
-        const stepFailed = events.find((event) => event.type === "step.failed");
+        const stepFailed = allEvents.find((event) => event.type === "step.failed");
         expect((stepFailed!.data as { message: string }).message).toContain(
           "did not return a response",
         );
@@ -5849,7 +5894,7 @@ describe("createToolLoopHarness", () => {
           output: expect.stringContaining("did not return a response"),
         });
 
-        const types = events.map((event) => event.type);
+        const types = eventsWithSettlement(events, result).map((event) => event.type);
         expect(types).not.toContain("session.waiting");
         expect(types).toContain("step.failed");
         expect(types).toContain("session.failed");
@@ -5968,9 +6013,9 @@ describe("createToolLoopHarness", () => {
       }),
     );
 
-    await runStep(session, { message: "Search for the answer" });
+    const result = await runStep(session, { message: "Search for the answer" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -6129,9 +6174,9 @@ describe("createToolLoopHarness", () => {
       }),
     );
 
-    await runStep(session, { message: "Get the weather for two cities" });
+    const result = await runStep(session, { message: "Get the weather for two cities" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -6224,9 +6269,9 @@ describe("createToolLoopHarness", () => {
       }),
     );
 
-    await runStep(session, { message: "Search for NYC weather" });
+    const result = await runStep(session, { message: "Search for NYC weather" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -6290,9 +6335,9 @@ describe("createToolLoopHarness", () => {
       }),
     );
 
-    await runStep(session, { message: "run pwd" });
+    const result = await runStep(session, { message: "run pwd" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -7887,9 +7932,9 @@ describe("createToolLoopHarness", () => {
       }),
     );
 
-    await runStep(session, { message: "Check two cities in sequence" });
+    const result = await runStep(session, { message: "Check two cities in sequence" });
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -7958,7 +8003,7 @@ describe("createToolLoopHarness", () => {
     expect(serializedProjection).toContain("approval-1");
     expect(serializedProjection).toContain("bash");
     expect(hasPendingInputBatch(result.session.state)).toBe(true);
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -9731,9 +9776,9 @@ describe("createToolLoopHarness", () => {
     const ctx = new ContextContainer();
     ctx.set(AuthKey, auth);
 
-    await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+    const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -10092,9 +10137,9 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    await runStep(createTestSession(), { message: "Hi" });
+    const result = await runStep(createTestSession(), { message: "Hi" });
 
-    expect(events.map((event) => event.type)).toEqual([
+    expect(eventsWithSettlement(events, result).map((event) => event.type)).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -10146,9 +10191,9 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    await runStep(createTestSession(), { message: "Hi" });
+    const result = await runStep(createTestSession(), { message: "Hi" });
 
-    expect(events.map((event) => event.type)).toEqual([
+    expect(eventsWithSettlement(events, result).map((event) => event.type)).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -10183,7 +10228,7 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       turnId: "turn_0",
     });
-    expect(getCompatibilityEventTypes(events)).toEqual([
+    expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
       "session.started",
       "turn.started",
       "message.received",
@@ -12087,7 +12132,7 @@ describe("createToolLoopHarness", () => {
       const result = await runStep(createTestSession(), { message: "hi" });
 
       expect(result.next).toBeNull();
-      expect(getCompatibilityEventTypes(events)).toEqual([
+      expect(getCompatibilityEventTypes(eventsWithSettlement(events, result))).toEqual([
         "session.started",
         "turn.started",
         "message.received",
@@ -12182,7 +12227,7 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      const thirdResult = await createToolLoopHarness(config)(secondResult.session, {
+      const thirdResult = await createToolLoopHarness(config)(commitSettlement(secondResult), {
         message: "Next turn.",
       });
       expect(thirdResult.next).toBeNull();
@@ -12667,16 +12712,24 @@ describe("createToolLoopHarness", () => {
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const failure = new Error("Failed to finish the turn");
+      // `step.completed` is the last event the harness emits itself; the turn
+      // epilogue is proposed on the result for the owner to commit.
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", async (event) => {
-          if (event.type === "session.waiting") throw failure;
+          if (event.type === "step.completed") throw failure;
         }),
       );
       setupMockAgent(defaultModelResult());
 
-      await expect(
-        contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Check progress." })),
-      ).rejects.toBe(failure);
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Check progress." }),
+      );
+      expect(result.next).toBeNull();
+      expect(result.settlement?.events.map((event) => event.type)).toEqual([
+        "step.failed",
+        "turn.failed",
+        "session.waiting",
+      ]);
       expect(getLastAgentSettings().messages).toContainEqual({
         role: "user",
         content: "Available skills\n- policy: Tenant policy",
@@ -13446,12 +13499,14 @@ describe("boundary event failures", () => {
       expect(result.settledTurn).toEqual({ isError: true, output: "admission denied" });
       expect(result.session.outputSchema).toBeUndefined();
       expect(ToolLoopAgent).not.toHaveBeenCalled();
-      expect(events.filter((event) => event.type === "turn.failed")).toMatchObject([
-        { data: { turnId: "turn_0", sequence: 0, code: "EVENT_HANDLER_FAILED" } },
-      ]);
-      expect(events.map((event) => event.type)).toContain("session.waiting");
-      expect(events.map((event) => event.type)).not.toContain("session.failed");
-      expect(getHarnessEmissionState(result.session.state)).toEqual({
+      expect(events.map((event) => event.type)).not.toContain("turn.failed");
+      const proposedTypes = result.settlement?.events.map((event) => event.type) ?? [];
+      expect(
+        result.settlement?.events.filter((event) => event.type === "turn.failed"),
+      ).toMatchObject([{ data: { turnId: "turn_0", sequence: 0, code: "EVENT_HANDLER_FAILED" } }]);
+      expect(proposedTypes).toContain("session.waiting");
+      expect(proposedTypes).not.toContain("session.failed");
+      expect(result.settlement?.emissionAfter).toEqual({
         sessionStarted: true,
         sequence: 1,
         stepIndex: 0,
@@ -13466,13 +13521,13 @@ describe("boundary event failures", () => {
         toolResults: [],
       });
       const recovered = await runStep(
-        JSON.parse(JSON.stringify(result.session)) as HarnessSession,
+        JSON.parse(JSON.stringify(commitSettlement(result))) as HarnessSession,
         { message: "Try again" },
       );
       expect(recovered.next).toBeNull();
-      expect(events.filter((event) => event.type === "turn.completed")).toMatchObject([
-        { data: { turnId: "turn_1", sequence: 1 } },
-      ]);
+      expect(
+        recovered.settlement?.events.filter((event) => event.type === "turn.completed"),
+      ).toMatchObject([{ data: { turnId: "turn_1", sequence: 1 } }]);
       expect(events.filter((event) => event.type === "session.started")).toHaveLength(1);
     },
   );
@@ -13492,23 +13547,28 @@ describe("boundary event failures", () => {
     });
     const result = await createToolLoopHarness(createTestConfig("conversation", emit))(session);
     expect(result.next).toBeNull();
-    expect(events[1]).toMatchObject({
+    expect(events.map((event) => event.type)).toEqual(["step.started"]);
+    expect(result.settlement?.events[0]).toMatchObject({
       type: "step.failed",
       data: { stepIndex: 3, turnId: "turn_2" },
     });
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
-  it("lets a failed failure handler escalate", async () => {
+  it("leaves the failure cascade for the owner to commit", async () => {
     const emit: HarnessEmitFn = async (event) => {
       if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
       if (event.type === "turn.failed") throw new Error("failure handler failed");
     };
-    await expect(
-      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
-        message: "Hi",
-      }),
-    ).rejects.toThrow("failure handler failed");
+    const result = await createToolLoopHarness(createTestConfig("conversation", emit))(
+      createTestSession(),
+      { message: "Hi" },
+    );
+    expect(result.settlement?.events.map((event) => event.type)).toEqual([
+      "step.failed",
+      "turn.failed",
+      "session.waiting",
+    ]);
   });
 
   it("keeps task failures terminal", async () => {

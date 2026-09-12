@@ -54,7 +54,7 @@ import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/par
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { settleTurnStep, turnStep } from "#execution/workflow-steps.js";
+import { commitSettlementStep, turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -1970,7 +1970,7 @@ describe("turnStep", () => {
       installSessionStoreMocks([createStubSession()]);
       const close = vi.fn();
       const parentWritable = new WritableStream<Uint8Array>({ write() {}, close });
-      await settleTurnStep({
+      await commitSettlementStep({
         parentWritable,
         serializedContext: createSerializedContext(),
         sessionState: createStubSessionState(),
@@ -2048,7 +2048,7 @@ describe("turnStep", () => {
     // Second turn: session totals are cumulative (150/60), but the settled
     // answer must only report what this turn added (50/20).
     installSessionStoreMocks([first.sessionState.snapshot.session as HarnessSession]);
-    const committed = await settleTurnStep({
+    const committed = await commitSettlementStep({
       parentWritable: createTestWritable(),
       serializedContext: first.serializedContext,
       sessionState: first.sessionState,
