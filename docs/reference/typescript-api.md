@@ -186,26 +186,29 @@ Pass another bare OpenAI model slug to override the default. `experimental_chatg
 
 `chatgpt()` uses stateless requests (`store: false`). eve retains reasoning summaries and encrypted reasoning in session history and replays them after tool calls and on later turns. You do not need to configure `reasoning.encrypted_content` explicitly.
 
-Sign in directly from eve; the Codex CLI is not required:
+eve uses one local authentication path with two credential owners:
 
 1. Run `eve dev`, open `/model`, and select **Provider** → **ChatGPT subscription**.
-2. Complete sign-in in the browser. If the browser does not open, use the URL printed in the terminal.
-3. Return to eve after the terminal confirms that your subscription is connected. Normal token expiry is refreshed automatically.
+2. If `codex` is on `PATH`, eve uses `codex app-server` and launches `codex login` when sign-in is needed. Codex owns credential storage and refresh.
+3. If the Codex binary is not found, eve falls back to direct browser sign-in and owns the saved session and refresh. If the browser does not open, use the URL printed in the terminal.
 
-eve stores your refresh token and account details in your operating system's credential store through [just-secrets](https://github.com/vercel-labs/just-secrets): the login Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. Access tokens stay in process memory; a new eve process refreshes the saved session when it first needs a token. The login is separate from Codex and is never written to your project.
+When Codex is available, eve asks app-server for tokens and does not read or write Codex login files. App-server errors other than a missing binary are reported instead of silently switching credential owners.
 
-If you previously signed in through Codex or used eve's `~/.eve/auth/chatgpt.json` file, sign in once through eve after upgrading. eve removes the old plaintext file after successfully saving the new session. It does not fall back to file storage if the OS credential store is unavailable.
+For the eve-owned fallback, eve stores your refresh token and account details in your operating system's credential store through [just-secrets](https://github.com/vercel-labs/just-secrets): the login Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. Access tokens stay in process memory; a new eve process refreshes the saved session when it first needs a token. The fallback login is separate from Codex and is never written to your project.
+
+If you previously used eve's `~/.eve/auth/chatgpt.json` file, sign in once through the eve-owned fallback after upgrading. A successful save removes the old plaintext session file. eve does not fall back to file storage if the OS credential store is unavailable.
 
 Linux, including WSL, requires `/usr/bin/secret-tool` (commonly provided by `libsecret-tools`), a session D-Bus, and an unlocked Secret Service keyring. On macOS, unlock your login keychain and allow credential access if prompted. On Windows, PowerShell and Credential Manager must be available in your user session. OS credential storage protects secrets at rest; it does not guarantee isolation from malicious processes running as your OS user.
 
-Over SSH, or if localhost port 1455 is occupied, eve shows a device code instead. Open the displayed link in a browser and enter the code. Device sign-in requires enabling device code authorization in **ChatGPT Settings → Security**, or having a workspace admin enable it in workspace permissions. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner. Device sign-in still requires an available OS credential store; use an API-key model in headless environments without one.
+For the eve-owned fallback, SSH sessions or a busy localhost port 1455 use a device code. Open the displayed link in a browser and enter the code. Device sign-in requires enabling device code authorization in **ChatGPT Settings → Security**, or having a workspace admin enable it in workspace permissions. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner. Device sign-in still requires an available OS credential store; use an API-key model in headless environments without one.
 
 ChatGPT subscription credentials are local user credentials. `eve deploy` blocks agents whose active model is `chatgpt()` because those credentials are not uploaded to a deployment. Use an environment branch with a deployable model, or switch to an AI Gateway model before deploying.
 
 Troubleshooting:
 
-- **`chatgpt-sub login`**: open `/model` and select **Provider** → **ChatGPT subscription** to sign in again. The running dev session picks up the new login.
-- **`chatgpt-sub unavailable`**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/model`. If eve reports an invalid stored session, sign in again to replace it.
+- **`chatgpt-sub login`**: open `/model` and select **Provider** → **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
+- **`chatgpt-sub unavailable` with Codex installed**: update or restart Codex and retry. eve does not mask app-server failures by switching to a different saved session.
+- **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/model`. If eve reports an invalid stored session, sign in again to replace it.
 - **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
 - **Device sign-in unavailable**: enable device code authorization in ChatGPT security settings, or sign in from a local terminal with port 1455 available.
 

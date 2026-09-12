@@ -11,8 +11,9 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
  * only, so any other provider-qualified id is rejected. Model availability is
  * enforced by the Codex backend per account at call time, not at compile time.
  *
- * eve stores and refreshes credentials locally without requiring the Codex
- * CLI. This model works in local dev and fails in a deployment.
+ * eve uses Codex app-server when the Codex CLI is installed. If the binary is
+ * not found, eve stores and refreshes its own local credentials instead. This
+ * model works in local dev and fails in a deployment.
  * Branch on environment for production:
  *
  * ```ts
