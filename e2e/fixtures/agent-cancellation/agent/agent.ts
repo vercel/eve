@@ -40,7 +40,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           input: {
             js: 'return await tools["sleeper"]({ message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
           },
-          name: "Workflow",
+          name: "workflow",
         },
       ],
     };
@@ -65,7 +65,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           input: {
             js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
-          name: "Workflow",
+          name: "workflow",
         },
       ],
     };
@@ -77,4 +77,8 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
+  experimental: {
+    ...base.experimental,
+    dynamicWorkflows: true,
+  },
 });

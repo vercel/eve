@@ -32,7 +32,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -199,7 +199,7 @@ eve lowers every subagent visible to the current agent (the root built-in copy, 
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
-Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. Background subagents run through the model tool loop and are not available inside a model-authored `Workflow` program.
+Child sessions can still call their own declared or remote subagents, but they receive neither the root-only `workflow` tool nor the built-in `agent`. On the root, enabling [dynamic workflows](./tools/dynamic-workflows) adds visible subagents to the model-authored program while keeping the same subagents available for direct background calls. Calls inside `workflow` await final child results instead of returning task receipts.
 
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 

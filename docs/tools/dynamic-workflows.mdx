@@ -1,0 +1,70 @@
+---
+title: "Dynamic Workflows"
+description: "Enable the root-only workflow tool to coordinate subagents from a model-authored JavaScript program."
+url: /tools/dynamic-workflows
+---
+
+Dynamic workflows let the root agent run one model-authored JavaScript program that coordinates child-agent calls and returns one JSON-serializable result. Enable the experimental `workflow` tool when the model needs loops, fan-out, dependent calls, filtering, or aggregation across subagents.
+
+The built-in `workflow` tool is distinct from both:
+
+- [`defineWorkflowTool`](./workflows), which authors a named tool whose implementation you write and run with the Workflow SDK.
+- `experimental.workflow`, which configures the Workflow SDK runtime used by eve, including its world, checkpoint batching, and retention.
+
+## Enable dynamic workflows
+
+Set `experimental.dynamicWorkflows` on the root agent:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    dynamicWorkflows: true,
+  },
+});
+```
+
+`true` uses the runtime defaults. Pass an object to set the maximum number of subagent calls allowed in one program:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    dynamicWorkflows: {
+      maxSubagents: 20,
+    },
+  },
+});
+```
+
+`maxSubagents` defaults to `100` and must be a positive integer. Parallel and sequential calls count toward the same per-program limit. A call over the limit fails with `WORKFLOW_SUBAGENT_LIMIT_REACHED` and does not start a child. Set `dynamicWorkflows: false` or omit the field to disable the tool.
+
+The `workflow` tool is available only in a root session and only when at least one subagent is visible for the current model step. Runtime subagent sessions do not receive it.
+
+## Available capabilities
+
+A dynamic workflow program is subagent-only: it can call only the subagents listed in the `workflow` tool description. This can include the built-in `agent` child, declared subagents, remote subagents, and subagents selected by [`defineDynamic`](../guides/dynamic-capabilities) when they are visible for that model step.
+
+The program cannot directly call ordinary authored or built-in tools. Search and describe helpers, connections, approvals, authentication helpers, and session state are also unavailable inside the program. A called subagent still runs with its own configured capabilities.
+
+Enabling `workflow` does not remove or wrap the root's direct subagent tools. The model can still call those tools directly for fixed delegation. Direct calls run in the background and return task receipts. Calls made inside `workflow` wait for each child's final result, so the program can use the returned values in later calls or in its final result.
+
+## Continue a child
+
+Each subagent call accepts the same input fields as direct delegation:
+
+```ts
+{
+  message: string;
+  agentId?: string;
+  outputSchema?: object;
+}
+```
+
+Pass a known `agentId` to the same subagent to continue or steer that child. Omitting `agentId` starts a new child. Every call, including a continuation, counts toward `maxSubagents`.
+
+For the full child-session lifecycle and `agentId` behavior, see [Subagents](../subagents).

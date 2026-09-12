@@ -16,6 +16,7 @@ export type {
   AgentModelResolver,
   AgentReasoningDefinition,
   AgentBuildDefinition,
+  AgentDynamicWorkflowsDefinition,
   PublicAgentDynamicModelDefinition as AgentDynamicModelDefinition,
   PublicAgentDynamicModelResult as AgentDynamicModelResult,
   AgentExperimentalDefinition,

@@ -211,6 +211,62 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it.each([
+    [true, true],
+    [false, false],
+    [{}, {}],
+    [{ maxSubagents: 4 }, { maxSubagents: 4 }],
+  ])("accepts dynamic workflow config %j", (value, expected) => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: { dynamicWorkflows: value },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.dynamicWorkflows).toEqual(expected);
+  });
+
+  it.each([null, 1, "yes", []])("rejects invalid dynamic workflow config %j", (value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: { dynamicWorkflows: value },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
+  it.each([0, 1.5, -1, Number.POSITIVE_INFINITY, "4", false])(
+    "rejects invalid dynamic workflow maxSubagents %j",
+    (value) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.5",
+            experimental: { dynamicWorkflows: { maxSubagents: value } },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(FAILURE_MESSAGE);
+    },
+  );
+
+  it("rejects unknown dynamic workflow config keys", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: { dynamicWorkflows: { maxSubagents: 4, maxDepth: 2 } },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "maxDepth"');
+  });
+
   it("accepts a workflow world package name", () => {
     const definition = normalizeAgentDefinition(
       {

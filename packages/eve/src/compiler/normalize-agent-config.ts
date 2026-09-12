@@ -182,6 +182,13 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
+  if (experimental.dynamicWorkflows !== undefined) {
+    compiledExperimental.dynamicWorkflows =
+      typeof experimental.dynamicWorkflows === "boolean"
+        ? experimental.dynamicWorkflows
+        : { maxSubagents: experimental.dynamicWorkflows.maxSubagents };
+  }
+
   if (experimental.instrumentationProviders !== undefined) {
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
   }

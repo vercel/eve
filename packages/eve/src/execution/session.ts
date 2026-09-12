@@ -75,7 +75,6 @@ export interface CreateSessionInput {
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly taskId?: string;
-  readonly workflowMaxSubagents?: number;
 }
 
 /** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
@@ -105,9 +104,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   }
   if (input.taskId !== undefined) {
     session.taskId = input.taskId;
-  }
-  if (input.workflowMaxSubagents !== undefined) {
-    session.workflowMaxSubagents = input.workflowMaxSubagents;
   }
 
   return session;
@@ -201,7 +197,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sessionId: string;
     state?: HarnessSession["state"];
     taskId?: string;
-    workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
@@ -235,9 +230,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.taskId !== undefined) {
     durable.taskId = session.taskId;
-  }
-  if (session.workflowMaxSubagents !== undefined) {
-    durable.workflowMaxSubagents = session.workflowMaxSubagents;
   }
   return durable;
 }
@@ -292,9 +284,6 @@ export function hydrateDurableSession(input: {
   }
   if (durable.taskId !== undefined) {
     session.taskId = durable.taskId;
-  }
-  if (durable.workflowMaxSubagents !== undefined) {
-    session.workflowMaxSubagents = durable.workflowMaxSubagents;
   }
   return session;
 }

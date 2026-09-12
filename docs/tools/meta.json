@@ -1,5 +1,5 @@
 {
   "title": "Tools",
   "defaultOpen": false,
-  "pages": ["overview", "human-in-the-loop", "workflows"]
+  "pages": ["overview", "human-in-the-loop", "dynamic-workflows", "workflows"]
 }

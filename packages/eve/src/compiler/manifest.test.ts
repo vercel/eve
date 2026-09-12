@@ -15,7 +15,10 @@ describe("compiled agent manifest v48", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       agent: {
-        experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
+        experimental: {
+          dynamicWorkflows: { maxSubagents: 3 },
+          workflow: { modelCallsPerStep: 4, retention: 0 },
+        },
         limits: { maxTokenCostUsdPerSession: 1.5 },
         model: "openai/gpt-5.4",
       },
@@ -25,11 +28,43 @@ describe("compiled agent manifest v48", () => {
 
     const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
+    expect(parsed.config.experimental?.dynamicWorkflows).toEqual({ maxSubagents: 3 });
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
     // `0` is falsy: a truthiness-based copy anywhere on the manifest path drops it.
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);
     expect(parsed.config.limits?.maxTokenCostUsdPerSession).toBe(1.5);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it.each([0, 1.5, -1, "4"])(
+    "rejects invalid compiled dynamic workflow maxSubagents %j",
+    async (maxSubagents) => {
+      const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+
+      expect(() =>
+        compiledAgentManifestSchema.parse({
+          ...manifest,
+          config: {
+            ...manifest.config,
+            experimental: { dynamicWorkflows: { maxSubagents } },
+          },
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("rejects unknown compiled dynamic workflow config keys", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: {
+          ...manifest.config,
+          experimental: { dynamicWorkflows: { maxSubagents: 2, maxDepth: 1 } },
+        },
+      }),
+    ).toThrow();
   });
 
   it("rejects a missing required binding", async () => {

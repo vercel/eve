@@ -1,6 +1,7 @@
 import type {
   AgentDefinition,
   AgentBuildDefinition,
+  AgentDynamicWorkflowsDefinition,
   AgentWorkflowDefinition,
 } from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
@@ -312,13 +313,43 @@ function normalizeAgentWorkflowWorldDefinition(
   return packageName;
 }
 
+function normalizeAgentDynamicWorkflowsDefinition(
+  value: unknown,
+  message: string,
+): boolean | AgentDynamicWorkflowsDefinition {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["maxSubagents"], message);
+  const normalizedDefinition: Mutable<AgentDynamicWorkflowsDefinition> = {};
+
+  if (record.maxSubagents !== undefined) {
+    normalizedDefinition.maxSubagents = expectPositiveInteger(record.maxSubagents, message);
+  }
+
+  return normalizedDefinition;
+}
+
 function normalizeAgentExperimentalDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["instrumentationProviders", "workflow"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["dynamicWorkflows", "instrumentationProviders", "workflow"],
+    message,
+  );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.dynamicWorkflows !== undefined) {
+    normalizedDefinition.dynamicWorkflows = normalizeAgentDynamicWorkflowsDefinition(
+      record.dynamicWorkflows,
+      message,
+    );
+  }
 
   if (record.instrumentationProviders !== undefined) {
     if (typeof record.instrumentationProviders !== "boolean") {

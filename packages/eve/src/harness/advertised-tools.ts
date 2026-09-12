@@ -4,7 +4,7 @@ import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
-import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
+import { applyDynamicWorkflows, DYNAMIC_WORKFLOW_TOOL_NAME } from "#harness/dynamic-workflows.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
 type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
@@ -23,7 +23,7 @@ type AdvertisedModelToolsInput = {
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
-  readonly workflow?: {
+  readonly dynamicWorkflows?: {
     readonly maxSubagents?: number;
   };
 };
@@ -63,36 +63,27 @@ async function getAdvertisedModelTools(
   input: AdvertisedModelToolsInput,
 ): Promise<AdvertisedModelTools> {
   const tools = filterUnavailableToolMap(input.tools, input.session);
-  if (input.workflow === undefined) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
+  const visibleModelTools = { ...input.modelTools };
+  if (!tools.has(DYNAMIC_WORKFLOW_TOOL_NAME)) {
+    delete visibleModelTools[DYNAMIC_WORKFLOW_TOOL_NAME];
   }
-
-  const workflowHostTools = filterWorkflowHostToolsForRootSession(tools, input.session);
-  if (workflowHostTools.size === 0) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
+  if (input.dynamicWorkflows === undefined) {
+    const harnessTools = new Map(tools);
+    harnessTools.delete(DYNAMIC_WORKFLOW_TOOL_NAME);
+    const modelTools = { ...visibleModelTools };
+    delete modelTools[DYNAMIC_WORKFLOW_TOOL_NAME];
+    return { harnessTools, modelTools, session: input.session };
   }
 
   const session = ensureWorkflowContinuationSecurity(input.session);
-  const { modelTools } = await applyWorkflowTool({
+  const applied = await applyDynamicWorkflows({
     continuationSecurity: getWorkflowContinuationSecurity(session),
-    harnessTools: workflowHostTools,
-    maxSubagents: input.workflow.maxSubagents,
-    tools: input.modelTools,
+    harnessTools: tools,
+    maxSubagents: input.dynamicWorkflows.maxSubagents,
+    tools: visibleModelTools,
   });
 
-  return {
-    harnessTools: tools,
-    modelTools,
-    session,
-  };
+  return { ...applied, session };
 }
 
 function filterUnavailableToolDefinitions(
@@ -121,24 +112,6 @@ function filterUnavailableToolMap(
       continue;
     }
     filteredTools.set(name, tool);
-  }
-  return filteredTools;
-}
-
-function filterWorkflowHostToolsForRootSession(
-  tools: HarnessToolMap,
-  session: AdvertisedToolSession,
-): HarnessToolMap {
-  const filteredTools = new Map<string, HarnessToolDefinition>();
-
-  if (session.rootSessionId !== undefined) {
-    return filteredTools;
-  }
-
-  for (const [name, tool] of tools) {
-    if (tool.resultKind === "subagent") {
-      filteredTools.set(name, tool);
-    }
   }
   return filteredTools;
 }

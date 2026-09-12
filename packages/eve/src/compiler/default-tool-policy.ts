@@ -8,6 +8,7 @@ import {
 } from "#compiler/source-graph.js";
 
 const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
+const DYNAMIC_WORKFLOW_TOOL_SLOT = "tools/workflow";
 
 export function assertFrameworkToolPolicy(
   candidate: AgentSourceCandidate,
@@ -17,6 +18,15 @@ export function assertFrameworkToolPolicy(
   if (slot === "tools/connection_search" && result.kind === "disabled") {
     throw new Error(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
+    );
+  }
+  if (
+    slot === DYNAMIC_WORKFLOW_TOOL_SLOT &&
+    candidate.layer !== "framework-default" &&
+    result.kind === "tool"
+  ) {
+    throw new Error(
+      'The framework "workflow" tool cannot be overridden. Remove "agent/tools/workflow.ts" or disable it with disableTool().',
     );
   }
   const closedDispatchSlots = {
@@ -41,7 +51,22 @@ export function applyDefaultToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
   config: CompiledAgentDefinition,
 ): void {
-  if (config.defaultTools !== false) return;
+  const dynamicWorkflows = config.experimental?.dynamicWorkflows;
+  const dynamicWorkflowsEnabled =
+    dynamicWorkflows === true ||
+    (typeof dynamicWorkflows === "object" && dynamicWorkflows !== null);
+  const candidates = phaseOne.graph.orderedCandidates.filter((candidate) => {
+    const slot = canonicalSourceSlot(candidate.logicalPath);
+    return (
+      slot !== DYNAMIC_WORKFLOW_TOOL_SLOT ||
+      candidate.layer !== "framework-default" ||
+      dynamicWorkflowsEnabled
+    );
+  });
+  if (config.defaultTools !== false) {
+    phaseOne.graph.composed = composeAgentModuleCandidates(candidates);
+    return;
+  }
 
   const overriddenSlots = new Set(
     phaseOne.graph.orderedCandidates
@@ -49,12 +74,13 @@ export function applyDefaultToolPolicy(
       .map((candidate) => canonicalSourceSlot(candidate.logicalPath)),
   );
   phaseOne.graph.composed = composeAgentModuleCandidates(
-    phaseOne.graph.orderedCandidates.filter((candidate) => {
+    candidates.filter((candidate) => {
       const slot = canonicalSourceSlot(candidate.logicalPath);
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
         REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
+        (dynamicWorkflowsEnabled && slot === DYNAMIC_WORKFLOW_TOOL_SLOT) ||
         overriddenSlots.has(slot)
       );
     }),

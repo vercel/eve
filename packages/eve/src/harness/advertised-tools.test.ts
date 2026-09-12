@@ -5,7 +5,7 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import { DYNAMIC_WORKFLOW_TOOL_NAME } from "#harness/dynamic-workflows.js";
 
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
@@ -61,22 +61,26 @@ describe("getAdvertisedTools", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
 
-  it("does not add Workflow in runtime subagent sessions", async () => {
-    const tools = new Map([["delegate", createSubagentTool("delegate")]]) satisfies HarnessToolMap;
+  it("does not add workflow in runtime subagent sessions", async () => {
+    const tools = new Map([
+      ["workflow", createWorkflowTool()],
+      ["delegate", createSubagentTool("delegate")],
+    ]) satisfies HarnessToolMap;
 
     const advertisedTools = await getAdvertisedTools({
       modelTools: buildToolSet({ tools }),
       session: createSession({ rootSessionId: "root-session" }),
       tools,
-      workflow: {},
+      dynamicWorkflows: {},
     });
 
     expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
+    expect(advertisedTools.modelTools[DYNAMIC_WORKFLOW_TOOL_NAME]).toBeUndefined();
   });
 
-  it("adds Workflow in root sessions", async () => {
+  it("configures workflow in root sessions", async () => {
     const tools = new Map([
+      ["workflow", createWorkflowTool()],
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
     ]) satisfies HarnessToolMap;
@@ -85,11 +89,11 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession(),
       tools,
-      workflow: {},
+      dynamicWorkflows: {},
     });
 
-    expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeDefined();
+    expect([...advertisedTools.harnessTools.keys()]).toEqual(["workflow", "add", "delegate"]);
+    expect(advertisedTools.modelTools[DYNAMIC_WORKFLOW_TOOL_NAME]).toBeDefined();
   });
 });
 
@@ -150,6 +154,13 @@ function createTool(name: string): HarnessToolDefinition {
     description: `${name} description`,
     inputSchema: jsonSchema({ type: "object" }),
     name,
+  };
+}
+
+function createWorkflowTool(): HarnessToolDefinition {
+  return {
+    ...createAvailableTool("workflow", ["root-session"]),
+    workflowId: "workflow//eve//dynamicWorkflow",
   };
 }
 

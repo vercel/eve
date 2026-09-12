@@ -205,6 +205,13 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Enables dynamic workflow delegation for this agent.
+   *
+   * Pass an object to configure dynamic workflow limits, or `true` to enable
+   * the runtime defaults. `false` explicitly disables the capability.
+   */
+  readonly dynamicWorkflows?: boolean | AgentDynamicWorkflowsDefinition;
+  /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.
    *
@@ -224,6 +231,18 @@ export interface AgentExperimentalDefinition {
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
+}
+
+/**
+ * Configuration for experimental dynamic workflow delegation.
+ */
+export interface AgentDynamicWorkflowsDefinition {
+  /**
+   * Maximum number of subagents a dynamic workflow may delegate to.
+   *
+   * When omitted, the runtime applies its default.
+   */
+  readonly maxSubagents?: number;
 }
 
 /**

@@ -278,7 +278,7 @@ function createSubagentDelegationResult(
     return null;
   }
 
-  const toolName = directive[1] === undefined ? SUBAGENT_TOOL_NAME : "Workflow";
+  const toolName = directive[1] === undefined ? SUBAGENT_TOOL_NAME : "workflow";
   const tool = getAvailableTools(options).find((entry) => entry.name === toolName);
 
   if (tool === undefined) {
@@ -287,7 +287,7 @@ function createSubagentDelegationResult(
 
   const message = directive[2].trim();
   const toolInput =
-    toolName === "Workflow"
+    toolName === "workflow"
       ? { js: `return await tools.agent({ message: ${JSON.stringify(message)} });` }
       : { message };
 

@@ -26,7 +26,6 @@ import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
-import { experimental_workflow } from "#tools/workflow.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -109,13 +108,7 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     },
   );
   const runtime = await createTestRuntime({
-    agent: { name: agentName },
-    modules: [
-      {
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-        logicalPath: "tools/workflow.ts",
-      },
-    ],
+    agent: { experimental: { dynamicWorkflows: true }, name: agentName },
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -826,13 +819,10 @@ describe("turn cancellation integration", () => {
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
     const runtime = await createTestRuntime({
-      agent: { name: "turn-cancel-hitl" },
-      modules: [
-        {
-          loadNamespace: async () => ({ default: experimental_workflow() }),
-          logicalPath: "tools/workflow.ts",
-        },
-      ],
+      agent: {
+        experimental: { dynamicWorkflows: true },
+        name: "turn-cancel-hitl",
+      },
     });
     const continuationToken = "http:turn-cancel-hitl";
 
@@ -841,7 +831,7 @@ describe("turn cancellation integration", () => {
         {
           input: {
             message:
-              "Delegate through Workflow to a subagent: Use the ask_question tool exactly once.",
+              "Delegate through workflow to a subagent: Use the ask_question tool exactly once.",
           },
           serializedContext: {
             ...buildSerializedContext({

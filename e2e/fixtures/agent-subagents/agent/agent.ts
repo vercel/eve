@@ -66,6 +66,10 @@ const workspaceDispatcher = mockModel({
 
 export default defineAgent({
   ...agentConfig,
+  experimental: {
+    ...agentConfig.experimental,
+    dynamicWorkflows: { maxSubagents: 2 },
+  },
   model: defineDynamic({
     events: {
       "step.started": (_event, ctx) => {

@@ -47,7 +47,9 @@ export async function computeDevelopmentHostFingerprint(
       // Authored workflow bodies and step registrations are bundled into the
       // host, so their sources are structural, not runtime, state.
       authoredSources: host.generation.workflowSourceFingerprint ?? null,
-      enabled: agentNodes.some((node) => node.workflowTool !== undefined),
+      enabled:
+        manifest.config.experimental?.dynamicWorkflows === true ||
+        typeof manifest.config.experimental?.dynamicWorkflows === "object",
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },
   };

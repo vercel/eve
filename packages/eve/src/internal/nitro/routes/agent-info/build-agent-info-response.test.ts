@@ -4,7 +4,6 @@ import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
 
@@ -154,35 +153,6 @@ describe("buildAgentInfoResponse", () => {
       binding: { backing: { kind: "programmatic" } },
       logicalPath: "instrumentation.ts",
       owner: { kind: "application" },
-    });
-  });
-
-  it("reports selected Workflow provenance from the compiled graph", async () => {
-    const { manifest } = await compileFromMemory({
-      model: "openai/gpt-5.4",
-      modules: [
-        {
-          loadNamespace: async () => ({ default: experimental_workflow({ maxSubagents: 5 }) }),
-          logicalPath: "tools/workflow.ts",
-        },
-      ],
-    });
-    const response = buildAgentInfoResponse(
-      { manifest, schedules: [] },
-      {
-        gatewayCredentials: { apiKey: false, oidc: false },
-        mode: "production",
-      },
-    );
-
-    expect(response.workflow).toMatchObject({
-      enabled: true,
-      source: {
-        binding: { backing: { kind: "programmatic" } },
-        logicalPath: "tools/workflow.ts",
-        owner: { kind: "application" },
-      },
-      toolName: "Workflow",
     });
   });
 

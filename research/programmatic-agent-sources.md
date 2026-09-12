@@ -593,17 +593,18 @@ through source composition:
 | `tools/task_update.ts`       | internal native tool + `dispatch`      | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
 | `tools/task_cancel.ts`       | internal native tool + `dispatch`      | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
 | `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                                  |
+| `tools/workflow.ts`          | internal workflow tool                 | root node        | enabled by `experimental.dynamicWorkflows`; closed framework slot     |
 | `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
 | `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                               |
 
-Every identity above is replaceable and disableable through ordinary slot
-composition. `glob` and `grep` are published at `eve/tools/glob` and
-`eve/tools/grep` but never registered. Workflow shares the slot pattern
-without a framework default: an authored `experimental_workflow()` sentinel
-at `tools/workflow.ts` opts in at that canonical identity. Authored
-`instrumentation.ts` likewise composes as an ordinary module slot with no
-framework default and no dedicated plan artifact. Native behavior outside
-these identities is limited to `final_output` and the closed host inventory.
+Most identities above are replaceable and disableable through ordinary slot
+composition; closed framework slots enforce their own policy. `glob` and `grep`
+are published at `eve/tools/glob` and `eve/tools/grep` but never registered.
+The closed `workflow` slot installs its framework default only when
+`experimental.dynamicWorkflows` is enabled. Authored `instrumentation.ts`
+composes as an ordinary module slot with no framework default and no dedicated
+plan artifact. Native behavior outside these identities is limited to
+`final_output` and the closed host inventory.
 
 ### Primitive ownership boundaries
 

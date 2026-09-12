@@ -48,6 +48,30 @@ it("binds workflow-only methods to the run context", async () => {
   });
 });
 
+it("preserves an explicitly transformed null input", async () => {
+  mocks.execute.mockResolvedValue("done");
+  await executeWorkflowBody(
+    {
+      callId: "call",
+      executeInput: null,
+      input: { original: true },
+      session: {
+        id: "session",
+        auth: { current: null, initiator: null },
+        turn: { id: "turn", sequence: 1 },
+      },
+      stepIndex: 0,
+      toolName: "workflow",
+      workflowId: "workflow//test//execute",
+      owner: { inbox: "inbox" },
+      execution: "blocking",
+      runId: "run",
+    },
+    new AbortController().signal,
+  );
+  expect(mocks.execute).toHaveBeenCalledWith(null, expect.anything(), undefined);
+});
+
 it.each([
   { execution: "background", authorizationSupported: undefined, expected: false },
   { execution: "background", authorizationSupported: false, expected: false },

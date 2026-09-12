@@ -164,12 +164,13 @@ Progress snapshots do not enter model history as intermediate tool results. For 
 executor, the final output selected by the rules above becomes the tool result. For a background
 executor, task messages and completion notifications provide input to later parent-agent turns.
 
+### Dynamic workflows
+
+Set `experimental.dynamicWorkflows: true` on the root agent to expose the built-in, model-facing `workflow` tool. It runs one model-authored JavaScript program that can coordinate visible subagents, but it cannot call ordinary tools. Calls inside the program await final child results, while the same subagents remain available as direct background tools outside the program. See [Dynamic workflows](/docs/tools/dynamic-workflows) for configuration and limits.
+
 ### Workflows as tools
 
-Use `defineWorkflowTool` from `eve/tools` to run each call as a durable Workflow run. Its
-executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The tool can
-wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
-examples.
+Use `defineWorkflowTool` from `eve/tools` to author a named tool whose implementation runs as a durable Workflow SDK run. Its executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The authored tool can wait for a person, webhook, or timer without holding compute, then return its result to the model. This API is separate from the built-in `workflow` tool and its `experimental.dynamicWorkflows` opt-in. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and examples.
 
 ### The `ctx` parameter
 

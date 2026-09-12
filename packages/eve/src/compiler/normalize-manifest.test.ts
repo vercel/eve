@@ -30,7 +30,6 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -73,6 +72,32 @@ describe("compileAgentManifest source graph", () => {
         "child",
       ),
     ).toThrow('Remove "experimental.workflow.world" from "child".');
+  });
+
+  it("preserves dynamic workflow config alongside Workflow SDK config", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            experimental: {
+              dynamicWorkflows: { maxSubagents: 4 },
+              workflow: { modelCallsPerStep: 2, retention: 0 },
+            },
+            model: "openai/gpt-5.4",
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.config.experimental).toEqual({
+      dynamicWorkflows: { maxSubagents: 4 },
+      workflow: { modelCallsPerStep: 2, retention: 0, world: undefined },
+    });
   });
 
   it("freezes source metadata behind an immutable registry map", () => {
@@ -238,6 +263,27 @@ describe("compileAgentManifest source graph", () => {
       );
     },
   );
+
+  it("rejects overriding the dynamic workflow framework tool", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Replacement tool.",
+            execute: async () => null,
+            inputSchema: {},
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'The framework "workflow" tool cannot be overridden. Remove "agent/tools/workflow.ts" or disable it with disableTool().',
+    );
+  });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
@@ -414,10 +460,6 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-      },
-      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -480,7 +522,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
-      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 

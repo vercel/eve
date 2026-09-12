@@ -5,8 +5,8 @@ url: /tools/workflows
 ---
 
 A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`, with
-`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
-delegate work to subagents, or coordinate retryable steps over a long period.
+`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow SDK run. Use one when a tool must wait for a person, webhook, or timer,
+delegate work to subagents, or coordinate retryable steps over a long period. This authored API is distinct from the built-in, model-facing [`workflow` tool](./dynamic-workflows), which is enabled with `experimental.dynamicWorkflows`.
 
 Durable suspension and background execution are independent. `defineWorkflowTool` lets the body
 suspend at durable waits without holding compute. `execution: "background"` determines whether

@@ -15,19 +15,19 @@ function isFanOutProgram(input: unknown): boolean {
   );
 }
 
-/** Dynamic Workflow smoke: sandboxed JavaScript fans out durable children. */
+/** Dynamic workflow smoke: sandboxed JavaScript fans out durable children. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Dynamic Workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
+    "Dynamic workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {
     const turn = await t.send(
-      "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
+      "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
 
     t.succeeded();
-    t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });
-    // Workflow delivery can replay either event; count logical calls, not deliveries.
+    t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
+    // workflow delivery can replay either event; count logical calls, not deliveries.
     turn.eventsSatisfy("both distinct children start before either completes", (events) => {
       const called = new Map<string, number>();
       const completed = new Map<string, number>();

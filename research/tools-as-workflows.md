@@ -1,14 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: implemented
-last_updated: "2026-09-10"
+last_updated: "2026-09-11"
 ---
 
 # Tools as workflows
 
 `defineWorkflowTool` is the authoring boundary for durable tools, and its executor context owns
 `agent` and `ask`. The executor must explicitly start with `"use workflow"`; the definition
-selects the eve tool contract and the directive marks the function's replay semantics.
+selects the eve tool contract and the directive marks the function's replay semantics. This authored API is separate from the model-facing `workflow` tool enabled by `experimental.dynamicWorkflows` and from the Workflow SDK settings under `experimental.workflow`.
 
 ## Authoring API
 

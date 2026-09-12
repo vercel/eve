@@ -1,13 +1,11 @@
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
-import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
-  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinition, ToolExecuteFn } from "#tools/definition.js";
@@ -54,7 +52,6 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
@@ -64,8 +61,7 @@ type NormalizedToolEntry =
 
 /**
  * Normalizes one authored tool default export. Recognizes real tool
- * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * experimental `Workflow` tool definition.
+ * definitions (`defineTool(...)`) and disable sentinels (`disableTool()`).
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
@@ -81,17 +77,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
   }
-  if (isExperimentalWorkflowToolDefinition(value)) {
-    const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
-    return {
-      kind: "workflow-tool",
-      maxSubagents:
-        record.maxSubagents === undefined
-          ? undefined
-          : expectPositiveInteger(record.maxSubagents, message),
-    };
-  }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(record, ["kind", "provider"], message);
@@ -104,6 +89,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   const record = expectObjectRecord(value, message);
   const workflowId = readWorkflowFunctionId(record.execute);
+  const behavior = readToolBehavior(value);
   if (isWorkflowToolDefinition(value)) {
     if (workflowId === undefined) {
       throw new Error(
@@ -111,9 +97,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       );
     }
   } else if (workflowId !== undefined) {
-    throw new Error(
-      `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
-    );
+    const attachedWorkflowId =
+      behavior?.handling?.kind === "workflow-tool" ? behavior.handling.workflowId : undefined;
+    if (attachedWorkflowId !== workflowId) {
+      throw new Error(
+        `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
+      );
+    }
   }
   expectOnlyKnownKeys(
     record,
@@ -136,7 +126,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       ? null
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
-  const behavior = readToolBehavior(value);
   const hasExecute = record.execute !== undefined;
   if (
     !hasExecute &&

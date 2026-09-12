@@ -1,4 +1,5 @@
 import {
+  CodeModeToolError,
   experimental_continueCodeModeInterrupt as continueCodeModeInterrupt,
   experimental_createCodeModeTool as createCodeModeTool,
   experimental_getCodeModeInterrupt as getCodeModeInterrupt,
@@ -8,6 +9,7 @@ import {
 import { installWorkflowSandboxModule } from "#shared/workflow-sandbox.js";
 
 installWorkflowSandboxModule({
+  CodeModeToolError,
   continueCodeModeInterrupt,
   createCodeModeTool,
   getCodeModeInterrupt,

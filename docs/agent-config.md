@@ -210,6 +210,34 @@ child grants without erasing lifetime usage. An authored child limit applies
 only when it is tighter than the parent's grant; an uncapped parent delegates
 uncapped children.
 
+## Dynamic workflows
+
+Enable the experimental, model-facing `workflow` tool on the root agent with `experimental.dynamicWorkflows`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    dynamicWorkflows: true,
+  },
+});
+```
+
+Pass `{ maxSubagents }` instead of `true` to limit the number of child-agent calls in one workflow program. The default is `100`:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    dynamicWorkflows: { maxSubagents: 20 },
+  },
+});
+```
+
+`maxSubagents` must be a positive integer. `false` explicitly disables dynamic workflows. This setting is distinct from `experimental.workflow`, which configures the Workflow SDK runtime used by eve. See [Dynamic workflows](./tools/dynamic-workflows) for tool availability and execution semantics.
+
 ## Workflow world
 
 By default, eve selects the Workflow SDK world for the host: Vercel Workflow on
@@ -321,14 +349,14 @@ it falls back to the World's default retention period.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                               |
-| -------------- | --------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                             |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                    |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                               |
-| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                                                              |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                  |
+| Field          | Type                                    | Default          | Description                                                                                                                                                                                              |
+| -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                            |
+| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                   |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                              |
+| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `dynamicWorkflows` enables the root-only `workflow` tool. The separate `workflow` object configures the Workflow SDK runtime: `world`, `modelCallsPerStep`, and `retention`.           |
+| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.             |
+| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output. |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

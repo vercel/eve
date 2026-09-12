@@ -66,7 +66,11 @@ export async function executeWorkflowBody(
   try {
     const execute = resolveWorkflowToolExecute(input);
     const task = input.execution === "background" ? createWorkflowTaskExec(input) : undefined;
-    const result = execute(input.executeInput ?? input.input, ctx, task);
+    const result = execute(
+      input.executeInput === undefined ? input.input : input.executeInput,
+      ctx,
+      task,
+    );
     let output: JsonValue;
     if (!isAsyncIterable(result)) {
       output = await result;

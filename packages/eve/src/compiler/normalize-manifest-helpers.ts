@@ -8,7 +8,6 @@ import type {
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import {
@@ -30,6 +29,11 @@ export function assertRootOnlyConfig(
   agentId: string,
 ): void {
   if (isRoot) return;
+  if (config.experimental?.dynamicWorkflows !== undefined) {
+    throw new Error(
+      `Dynamic Workflows are only supported on the root agent config. Remove "experimental.dynamicWorkflows" from "${agentId}".`,
+    );
+  }
   if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
       `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,
@@ -65,13 +69,6 @@ export function assertUniqueRegistryIds(registries: readonly AgentSourceRegistry
       ids.add(sourceId);
     }
   }
-}
-
-export function assertRootOwnedSpecialTool(candidate: AgentModuleCandidate, label: string): void {
-  if (candidate.nodeId !== ROOT_COMPILED_AGENT_NODE_ID) {
-    throw new Error(`${label} can only be enabled on the root agent.`);
-  }
-  assertNonExtensionSpecialTool(candidate, label);
 }
 
 export function assertNonExtensionSpecialTool(
