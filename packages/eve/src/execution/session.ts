@@ -308,17 +308,12 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
   }));
 }
 
-function resolveSessionLimits(input: {
-  readonly limits?: AuthoredSessionLimits;
-  readonly rootSessionId?: string;
-}): SessionLimits {
-  const isSubagent = input.rootSessionId !== undefined;
-
+function resolveSessionLimits(input: { readonly limits?: AuthoredSessionLimits }): SessionLimits {
   const maxInputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxInputTokensPerSession,
-    // Subagents have no fixed default: uncapped parents delegate uncapped
-    // children, capped parents delegate their remaining quota (inherited).
-    fallback: isSubagent ? undefined : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    // Local children carry an explicit inherited value, including `false` for
+    // an uncapped parent. Remote lineage alone must not remove this default.
+    fallback: DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
   });
   const maxOutputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxOutputTokensPerSession,

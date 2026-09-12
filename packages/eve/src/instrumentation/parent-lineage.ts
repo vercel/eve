@@ -19,7 +19,7 @@ export function resolveParentLineage(
   return {
     callId: callback?.callId ?? subagent?.callId ?? parent.callId,
     sessionId: parent.sessionId,
-    subagentName: subagent?.subagentName,
+    subagentName: callback?.subagentName ?? subagent?.subagentName,
     turnId: parent.turn.id,
   };
 }

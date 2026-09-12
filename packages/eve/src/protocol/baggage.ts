@@ -3,8 +3,10 @@ import type {
   TraceContentCeiling,
 } from "#shared/forwarded-trace-policy.js";
 import { formatTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
+import type { SessionParent } from "#channel/types.js";
 
 const EVE_AUDIENCE_KEY = "eve.audience";
+const EVE_PARENT_SESSION_KEY = "eve.parent_session";
 const CEILING_PROPERTY_KEY = "ceiling";
 const MAX_BAGGAGE_BYTES = 8192;
 const encoder = new TextEncoder();
@@ -21,6 +23,58 @@ interface BaggageMember {
 }
 
 export type ForwardedTraceBaggage = "absent" | "malformed" | ForwardedTraceAssertion;
+export type ForwardedParentSessionBaggage = "absent" | "malformed" | SessionParent;
+
+/** Reads remote parent lineage without trusting the caller that supplied it. */
+export function readForwardedParentSessionBaggage(
+  value: string | null,
+): ForwardedParentSessionBaggage {
+  const member = readBaggageMember(value, EVE_PARENT_SESSION_KEY);
+  if (typeof member === "string") return member;
+  if (member.properties.length !== 0) return "malformed";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(member.value);
+  } catch {
+    return "malformed";
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return "malformed";
+  const parent = parsed as Partial<SessionParent>;
+  const turn = parent.turn;
+  if (
+    typeof parent.callId !== "string" ||
+    parent.callId.length === 0 ||
+    typeof parent.rootSessionId !== "string" ||
+    parent.rootSessionId.length === 0 ||
+    typeof parent.sessionId !== "string" ||
+    parent.sessionId.length === 0 ||
+    turn === undefined ||
+    typeof turn.id !== "string" ||
+    turn.id.length === 0 ||
+    !Number.isSafeInteger(turn.sequence) ||
+    turn.sequence < 0
+  ) {
+    return "malformed";
+  }
+  return {
+    callId: parent.callId,
+    rootSessionId: parent.rootSessionId,
+    sessionId: parent.sessionId,
+    turn: { id: turn.id, sequence: turn.sequence },
+  };
+}
+
+/** Replaces Eve's remote parent lineage while preserving unrelated baggage. */
+export function writeForwardedParentSessionBaggage(
+  value: string | undefined,
+  parent: SessionParent | undefined,
+): string | undefined {
+  return replaceBaggageMember(
+    value,
+    EVE_PARENT_SESSION_KEY,
+    parent === undefined ? undefined : encodeURIComponent(JSON.stringify(parent)),
+  );
+}
 
 /** Reads eve's audience member without interpreting unrelated baggage. */
 export function readForwardedAudienceBaggage(value: string | null): ForwardedTraceBaggage {

@@ -3,12 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   readBaggageMember,
   readForwardedAudienceBaggage,
+  readForwardedParentSessionBaggage,
   writeForwardedAudienceBaggage,
+  writeForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
 
 const PUBLIC_OUTPUTS = {
   ceiling: { recordInputs: false, recordOutputs: true },
   originAudience: "public",
+} as const;
+const PARENT = {
+  callId: "call-1",
+  rootSessionId: "root-session",
+  sessionId: "parent-session",
+  turn: { id: "turn-1", sequence: 2 },
 } as const;
 
 describe("baggage member parsing", () => {
@@ -134,5 +142,26 @@ describe("writeForwardedAudienceBaggage", () => {
     expect(
       writeForwardedAudienceBaggage("eve.audience=public;ceiling=i1o1", undefined),
     ).toBeUndefined();
+  });
+});
+
+describe("forwarded parent session baggage", () => {
+  it("round-trips lineage while preserving unrelated members", () => {
+    const baggage = writeForwardedParentSessionBaggage("vendor=value", PARENT);
+    expect(baggage).toContain("vendor=value");
+    expect(readForwardedParentSessionBaggage(baggage!)).toEqual(PARENT);
+  });
+
+  it.each([null, "vendor=value"])("returns absent for %s", (value) => {
+    expect(readForwardedParentSessionBaggage(value)).toBe("absent");
+  });
+
+  it.each([
+    "eve.parent_session=not-json",
+    `eve.parent_session=${encodeURIComponent(JSON.stringify({ ...PARENT, callId: "" }))}`,
+    `eve.parent_session=${encodeURIComponent(JSON.stringify({ ...PARENT, turn: { id: "turn-1" } }))}`,
+    `eve.parent_session=${encodeURIComponent(JSON.stringify(PARENT))};extra=yes`,
+  ])("rejects malformed lineage %s", (value) => {
+    expect(readForwardedParentSessionBaggage(value)).toBe("malformed");
   });
 });
