@@ -203,10 +203,7 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
-  // Requires @workflow/core ≥ 5.0.0-beta.51 (vercel/workflow#3941), which drains
-  // released stream writers before step completion. Flip to `it` when the
-  // vendored SDK is bumped; see research/single-workflow-session-upgrades.md.
-  it.fails("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
+  it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
     const world = await getWorld();
     const append = world.streams.writeMulti!.bind(world.streams);

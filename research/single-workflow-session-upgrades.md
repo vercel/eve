@@ -227,18 +227,17 @@ work, not a prerequisite.
 
 ### Merge prerequisites from Workflow
 
-Two upstream changes gate merging this branch. Neither is worked around here:
-the branch carries no `@workflow/core` patch, and the handoff release/claim
-gap is left as-is rather than papered over.
+The branch carries no `@workflow/core` patch. One upstream change still gates
+merging; it is not worked around here, and the handoff release/claim gap is
+left as-is rather than papered over.
 
-1. **`@workflow/core` ≥ 5.0.0-beta.51** — includes
+1. ~~`@workflow/core` ≥ 5.0.0-beta.51~~ — landed. Includes
    [vercel/workflow#3941](https://github.com/vercel/workflow/pull/3941), which
-   drains released step stream writers before recording `step_completed`.
-   Without it, a slow stream PUT can outlive the step and a successful turn
-   can appear empty to clients. The
+   drains released step stream writers before recording `step_completed` so a
+   slow stream PUT cannot make a successful turn appear empty to clients. The
    `persists model output before settlement when a stream append exceeds the
 SDK flush window` integration test in `workflow-entry.integration.test.ts`
-   fails on beta.50 and passes once the vendored SDK is bumped.
+   covers it.
 2. **`createHook(token, { force: true })`** — the Workflow team's forced-claim
    API removes the interval between `dispose()` on the old owner and the
    successor's claim. `SessionHandoff.release()`/`recover()` and the bounded
