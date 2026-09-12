@@ -18,6 +18,7 @@ describe("ChatGPT streamed reasoning replay", () => {
   it("preserves all summaries and encrypted reasoning through a tool and durable history", async () => {
     const warnings = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
     const requests: RecordedRequest[] = [];
+    const sessionHeaders: (string | null)[] = [];
     const model = createCodexSubscriptionModel(
       { model: "gpt-5.6-luna" },
       {
@@ -27,6 +28,7 @@ describe("ChatGPT streamed reasoning replay", () => {
           state: () => ({ kind: "ready" }),
         },
         fetch: async (_input, init) => {
+          sessionHeaders.push(new Headers(init?.headers).get("session-id"));
           requests.push(JSON.parse(String(init?.body)));
           return sseResponse(requests.length === 1 ? reasoningAndToolEvents() : answerEvents());
         },
@@ -123,6 +125,16 @@ describe("ChatGPT streamed reasoning replay", () => {
     const replayedReasoning = (request: RecordedRequest | undefined) =>
       request?.input.filter((item) => item.type === "reasoning");
     expect(replayedReasoning(requests[2])).toEqual(replayedReasoning(requests[1]));
+
+    expect(sessionHeaders).toEqual(Array(3).fill(session.sessionId));
+
+    await runStep({ ...session, sessionId: "another-chatgpt-session" }, { message: "Hello." });
+    expect(sessionHeaders).toEqual([
+      session.sessionId,
+      session.sessionId,
+      session.sessionId,
+      "another-chatgpt-session",
+    ]);
 
     for (const request of requests) {
       expect(request.store).toBe(false);

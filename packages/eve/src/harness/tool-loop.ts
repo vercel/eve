@@ -346,15 +346,19 @@ function mergeSystemInstructions(
 }
 
 /**
- * Builds AI Gateway app attribution headers when the model is gateway-routed.
- *
- * Bare model ids and `gateway.*` model instances route through AI Gateway.
- * Direct-provider model instances receive no Gateway-specific headers.
+ * Builds provider-specific request headers for the active session.
  */
-function buildGatewayAttributionHeaders(
+function buildModelRequestHeaders(
   model: LanguageModel,
   runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
+  sessionId: string,
 ): Record<string, string> | undefined {
+  if (typeof model !== "string" && model.provider === "codex.responses") {
+    // ChatGPT derives cache identity from this header, overriding the body's
+    // prompt_cache_key. Without it, the backend assigns a new key per request.
+    return { "session-id": sessionId };
+  }
+
   const providerHeaders = resolveProviderHeaders(model);
   if (providerHeaders === undefined) return undefined;
 
@@ -1183,7 +1187,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     //
     // Runs before `agent.stream()` so the compacted messages flow through
     // `messages` (which the harness uses to rebuild session history).
-    const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
+    const requestHeaders = buildModelRequestHeaders(
+      model,
+      config.runtimeIdentity,
+      session.sessionId,
+    );
 
     const clientContextTailLength =
       turnClientContext === undefined
@@ -1440,7 +1448,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
 
       const agentSettings = {
-        headers: attributionHeaders,
+        headers: requestHeaders,
         instructions,
         model,
         onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
@@ -3273,7 +3281,7 @@ async function maybeCompact(input: {
         session.compaction,
         providerOptions,
         input.telemetry,
-        buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
+        buildModelRequestHeaders(compaction.model, input.runtimeIdentity, session.sessionId),
         input.abortSignal,
         input.force === true,
       )
