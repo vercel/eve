@@ -3,6 +3,7 @@ export { DISCORD_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario
 export { EXTENSION_AGENT_DESCRIPTOR } from "#internal/testing/scenario-apps/extension-agent.js";
 export { GITHUB_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/github-route-portability.js";
 export { EVE_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/eve-route-portability.js";
+export { LINEAR_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/linear-route-portability.js";
 export { SANDBOX_BUNDLING_DESCRIPTOR } from "#internal/testing/scenario-apps/sandbox-bundling.js";
 export { SANDBOX_WORKSPACES_DESCRIPTOR } from "#internal/testing/scenario-apps/sandbox-workspaces.js";
 export { SLACK_CUSTOM_CHANNEL_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/slack-custom-channel-portability.js";

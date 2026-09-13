@@ -59,6 +59,7 @@ export {
 } from "#public/channels/linear/linearChannel.js";
 export {
   signLinearWebhookBody,
+  verifyLinearRequest,
   type LinearVerifyOptions,
   type LinearWebhookVerifier,
 } from "#public/channels/linear/verify.js";

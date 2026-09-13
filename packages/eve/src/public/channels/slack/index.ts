@@ -73,7 +73,7 @@ export {
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
 
-export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+export { defaultInputRequestedHandler, defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
   experimental_slackActivityPlan,
