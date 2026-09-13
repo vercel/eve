@@ -38,6 +38,14 @@ export default {
       },
     },
     discoverExtraFiles: (distEntries) =>
-      distEntries.filter((name) => /^jsx-runtime-[^./]+\.d\.ts$/.test(name)),
+      // Co-copy the sibling content-hashed declaration chunks the upstream
+      // build emits that the entry .d.ts imports by relative path:
+      // `jsx-runtime-<hash>.d.ts` (pre-existing) and `messages-<hash>.d.ts`
+      // (previously missed — its absence with skipLibCheck:false produced
+      // TS2307 across ~120 chat exports, see #1500). The hash suffix is
+      // content-derived and drifts on every upstream build.
+      distEntries.filter((name) =>
+        /^(jsx-runtime|messages)-[^./]+\.d\.ts$/.test(name),
+      ),
   }),
 };

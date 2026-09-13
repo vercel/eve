@@ -6,8 +6,10 @@ import { photonInboundContent } from "#public/channels/photon/inboundContent.js"
 function message(text: string, attachments: Message["attachments"] = []): Message {
   return new Message({
     attachments,
-    author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+    author: { fullName: "user", isBot: false, isMe: false, userId: "user", userName: "user" },
+    formatted: { type: "root", children: [] },
     id: "message-id",
+    metadata: { dateSent: new Date(), edited: false },
     raw: {},
     text,
     threadId: "thread-id",
