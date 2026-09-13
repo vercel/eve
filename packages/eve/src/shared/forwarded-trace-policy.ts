@@ -1,5 +1,8 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { applyAudienceCeiling } from "#shared/instrumentation-content.js";
+import {
+  applyAudienceCeiling,
+  type InstrumentationContentContext,
+} from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   DROP_INSTRUMENTATION,
@@ -59,11 +62,12 @@ export function applyLiveDeliveryAudienceCeiling(
   decision: InstrumentationDecision,
   liveAudience: ChannelAudience,
   forwardedTracePolicy: ForwardedTraceAssertion | undefined,
+  environment: InstrumentationContentContext["environment"] = "production",
 ): InstrumentationDecision {
   return forwardedTracePolicy !== undefined &&
     (liveAudience === "unknown" || liveAudience === forwardedTracePolicy.originAudience)
     ? decision
-    : applyAudienceCeiling(decision, liveAudience);
+    : applyAudienceCeiling(decision, { audience: liveAudience, environment });
 }
 
 export function readForwardedTraceAssertion(value: unknown): ForwardedTraceAssertion | undefined {

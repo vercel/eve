@@ -1,7 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
+import { resolveAudience } from "#channel/audience.js";
+import type { AudienceInput } from "#shared/conversation-context.js";
+
+const audienceInput: AudienceInput<Record<string, unknown>> = {
+  auth: null,
+  channel: { kind: "channel:support", name: "support" },
+  environment: "production",
+  mode: "conversation",
+  state: {},
+};
 
 describe("channel instrumentation", () => {
   it("uses the registered path-derived channel name as the instrumentation kind", () => {
@@ -13,33 +23,88 @@ describe("channel instrumentation", () => {
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
       channelType: "slack",
       kind: "channel:support",
-      metadata: { audience: "unknown" },
+      metadata: {},
     });
   });
 
   it.each(["public", "private", "unknown"] as const)("preserves the %s audience", (audience) => {
     const adapter: ChannelAdapter = {
-      instrumentation: { metadata: () => ({ audience }) },
+      instrumentation: { audience: () => audience },
       kind: "slack",
       state: {},
     };
 
-    expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({ audience });
+    expect(resolveAudience(adapter, audienceInput)).toBe(audience);
   });
 
-  it("normalizes an invalid audience to unknown without dropping other metadata", () => {
+  it("normalizes an invalid audience to unknown", () => {
     const adapter: ChannelAdapter = {
       instrumentation: {
-        metadata: () => ({ audience: "everyone", threadId: "thread-1" }) as never,
+        audience: () => "everyone" as never,
       },
       kind: "slack",
       state: {},
     };
 
+    expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+  });
+
+  it("drops the former audience key from metadata", () => {
+    const adapter: ChannelAdapter = {
+      instrumentation: { metadata: () => ({ audience: "public", threadId: "thread-1" }) },
+      kind: "slack",
+      state: {},
+    };
+
     expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({
-      audience: "unknown",
       threadId: "thread-1",
     });
+  });
+
+  it("ignores an asynchronous audience classifier", () => {
+    const adapter: ChannelAdapter = {
+      instrumentation: { audience: () => Promise.resolve("public") as never },
+      kind: "slack",
+      state: {},
+    };
+
+    expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+  });
+
+  it("consumes a rejected classifier promise before failing closed", async () => {
+    const unhandledRejection = vi.fn();
+    process.once("unhandledRejection", unhandledRejection);
+    const adapter: ChannelAdapter = {
+      instrumentation: {
+        audience: () => Promise.reject(new Error("classifier failed")) as never,
+      },
+      kind: "slack",
+      state: {},
+    };
+
+    expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(unhandledRejection).not.toHaveBeenCalled();
+    process.removeListener("unhandledRejection", unhandledRejection);
+  });
+
+  it("does not log authored classifier failures verbatim", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const adapter: ChannelAdapter = {
+      instrumentation: {
+        audience() {
+          throw new Error("secret-classifier-failure");
+        },
+      },
+      kind: "slack",
+      state: {},
+    };
+
+    expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "ignoring channel audience classifier after failure",
+    );
   });
 
   it("observes rejected thenables before ignoring channel metadata", async () => {
@@ -63,7 +128,7 @@ describe("channel instrumentation", () => {
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
       channelType: "slack",
       kind: "channel:support",
-      metadata: { audience: "unknown" },
+      metadata: {},
     });
     await Promise.resolve();
 

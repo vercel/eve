@@ -16,7 +16,9 @@ export {
   type ResetSessionResult,
   type Channel,
   type ChannelAudience,
-  type ChannelAudienceMetadata,
+  type AudienceInput,
+  type AudiencePrincipal,
+  type ConversationEnvironment,
   type ChannelFrom,
   type ChannelReceiveContext,
   type ChannelResolveSession,
@@ -55,14 +57,10 @@ export {
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel, InferChannelMetadata } from "#public/definitions/channel.js";
-import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
-
 /**
  * Base channel metadata shape used by framework channel kinds.
  */
-export type InstrumentationChannelMetadata = Readonly<
-  Record<string, unknown> & ChannelAudienceMetadata
->;
+export type InstrumentationChannelMetadata = Readonly<Record<string, unknown>>;
 
 /**
  * Kind discriminator exposed to instrumentation and dynamic resolvers.

@@ -159,6 +159,36 @@ describe("defineChannel", () => {
     expect(adapter.instrumentation?.metadata?.(adapter.state)).toEqual({ threadTs: null });
   });
 
+  it("keeps the HTTP fast path when only an audience classifier is declared", () => {
+    const channel = defineChannel({
+      audience: () => "public",
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    const adapter = getAdapter(channel);
+    expect(adapter.kind).toBe("http");
+    expect(adapter.instrumentation?.metadata).toBeUndefined();
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "http" },
+        environment: "production",
+        mode: "conversation",
+        state: undefined,
+      }),
+    ).toBe("public");
+  });
+
+  it("drops the former audience key from custom metadata", () => {
+    const channel = defineChannel({
+      metadata: () => ({ audience: "public", custom: "value" }),
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    const adapter = getAdapter(channel);
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toEqual({ custom: "value" });
+  });
+
   it("infers channel metadata from metadata() return values", () => {
     const channel = defineChannel({
       state: { threadTs: null as string | null },

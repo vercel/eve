@@ -310,9 +310,29 @@ export default defineChannel({
 
 The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
 
-Metadata may include an `audience` classification: `public`, `private`, or `unknown`. Omit it when the channel cannot classify the conversation confidently; eve normalizes missing and invalid values to `unknown`. Consumers must treat `unknown` as non-public.
+### Conversation audience
 
-When a parent agent dispatches a subagent, the framework forwards the parent's channel metadata projection to the child. The same `metadata(state)` projector also serves instrumentation metadata resolvers.
+Use `audience(input)` to classify who can observe the conversation. The hook runs after route authentication and before the session is created:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: { visibility: "workspace" as "workspace" | "private" | "unknown" },
+  audience({ state, auth }) {
+    if (state.visibility === "workspace") return "public";
+    if (auth?.principalType === "user") return "private";
+    return "unknown";
+  },
+  routes: [POST("/webhook", async () => new Response("ok"))],
+});
+```
+
+The input contains the channel's `state`, authenticated `auth` principal, `channel`, `mode`, and `environment`. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+
+Classification is fixed when the session is created. Continuation turns from a different caller do not reclassify an existing session. When a parent dispatches a local subagent, the child inherits the parent's audience while the framework forwards the parent's custom channel metadata separately.
+
+`metadata(state)` remains a channel-owned projection of custom observability fields. It no longer carries a reserved `audience` key.
 
 ## Continuation tokens
 

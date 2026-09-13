@@ -9,6 +9,7 @@ import {
   ParentSessionKey,
 } from "#context/keys.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 const initiator: SessionAuthContext = {
   attributes: { email: "private@example.com" },
@@ -24,14 +25,22 @@ const current: SessionAuthContext = {
   principalType: "service",
 };
 
+function setConversation(context: ContextContainer, audience: "public" | "private"): void {
+  context.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
+  context.set(ConversationContextKey, {
+    audience,
+    channel: { kind: "channel:test", name: "test" },
+    environment: "production",
+    mode: "conversation",
+    principalType: "user",
+  });
+}
+
 describe("readInstrumentationSessionContext", () => {
   it("keeps the initiator stable while the current principal changes", () => {
     const context = new ContextContainer();
     context.set(AuthKey, current);
-    context.set(ChannelInstrumentationKey, {
-      kind: "channel:test",
-      metadata: { audience: "public" },
-    });
+    setConversation(context, "public");
     context.set(InitiatorAuthKey, initiator);
 
     const first = readInstrumentationSessionContext(context);
@@ -49,18 +58,12 @@ describe("readInstrumentationSessionContext", () => {
   it("uses the actual principal ID across a public delegated trace tree", () => {
     const parent = new ContextContainer();
     parent.set(AuthKey, initiator);
-    parent.set(ChannelInstrumentationKey, {
-      kind: "channel:test",
-      metadata: { audience: "public" },
-    });
+    setConversation(parent, "public");
     parent.set(InitiatorAuthKey, initiator);
 
     const child = new ContextContainer();
     child.set(AuthKey, initiator);
-    child.set(ChannelInstrumentationKey, {
-      kind: "channel:test",
-      metadata: { audience: "public" },
-    });
+    setConversation(child, "public");
     child.set(InitiatorAuthKey, initiator);
     child.set(ParentSessionKey, {
       callId: "call-1",
@@ -80,10 +83,7 @@ describe("readInstrumentationSessionContext", () => {
   it("keeps private principal metadata type-only", () => {
     const context = new ContextContainer();
     context.set(AuthKey, current);
-    context.set(ChannelInstrumentationKey, {
-      kind: "channel:test",
-      metadata: { audience: "private" },
-    });
+    setConversation(context, "private");
     context.set(InitiatorAuthKey, initiator);
 
     expect(readInstrumentationSessionContext(context).principals).toEqual({

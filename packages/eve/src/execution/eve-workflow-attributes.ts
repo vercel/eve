@@ -44,7 +44,10 @@ import {
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import {
+  ConversationContextKey,
+  normalizeConversationContext,
+} from "#shared/conversation-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
@@ -63,7 +66,6 @@ export interface SessionIdentitySummary {
 /** Untyped channel adapter snapshot as it survives serialization. */
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
-  readonly audience?: unknown;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -108,10 +110,11 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
       return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
     }
   }
-  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
-    | SerializedChannelAdapter
-    | undefined;
-  return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
+  const conversation = normalizeConversationContext(serializedContext[ConversationContextKey.name]);
+  return shouldCaptureInstrumentationContent({
+    audience: conversation?.audience ?? "unknown",
+    environment: conversation?.environment ?? "production",
+  });
 }
 
 export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {

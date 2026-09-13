@@ -5,7 +5,6 @@ import {
   resolveInstrumentationProjection,
 } from "#internal/instrumentation.js";
 import { createLogger } from "#internal/logging.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("channel.instrumentation");
 
@@ -51,7 +50,7 @@ function resolveKind(input: {
 function resolveMetadata(adapter: ChannelAdapter): ChannelInstrumentationMetadata {
   const project = adapter.instrumentation?.metadata;
   if (project === undefined) {
-    return { audience: "unknown" };
+    return {};
   }
 
   const projection = resolveInstrumentationProjection({
@@ -60,8 +59,6 @@ function resolveMetadata(adapter: ChannelAdapter): ChannelInstrumentationMetadat
     source: getAdapterKind(adapter),
   });
 
-  return {
-    ...projection,
-    audience: normalizeChannelAudience(projection?.audience),
-  };
+  const { audience: _ignoredAudience, ...metadata } = projection ?? {};
+  return metadata;
 }

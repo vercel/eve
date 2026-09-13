@@ -22,13 +22,32 @@ import {
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+
+const publicConversation = {
+  audience: "public",
+  channel: { kind: "channel:slack", name: "slack" },
+  environment: "production",
+  mode: "conversation",
+  principalType: "anonymous",
+} as const;
+
+const unknownConversation = {
+  audience: "unknown",
+  channel: { kind: "http" },
+  environment: "production",
+  mode: "conversation",
+  principalType: "anonymous",
+} as const;
 
 const slackChannelCtx = {
-  "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
+  "eve.channel": { kind: "slack", state: { team: "T1" } },
+  [ConversationContextKey.name]: publicConversation,
 } satisfies Record<string, unknown>;
 
 const subagentChainCtx = {
-  "eve.channel": { kind: "slack", state: {}, audience: "public" },
+  "eve.channel": { kind: "slack", state: {} },
+  [ConversationContextKey.name]: publicConversation,
   "eve.parentSession": {
     callId: "call_subagent_0",
     sessionId: "wrun_parent_subagent",
@@ -62,17 +81,15 @@ describe("readScheduleId", () => {
 });
 
 describe("isWorkflowTraceContentVisible", () => {
-  it("reads audience from the shared serialized channel slot", () => {
+  it("reads audience from the shared serialized conversation slot", () => {
     expect(
-      isWorkflowTraceContentVisible({
-        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "slack" },
-      }),
+      isWorkflowTraceContentVisible({ [ConversationContextKey.name]: publicConversation }),
     ).toBe(true);
   });
 
   it("uses the effective decision from a forwarded trace seed", () => {
     const serializedContext = {
-      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [ConversationContextKey.name]: unknownConversation,
       [SessionTraceSeedKey.name]: {
         decision: { action: "record", recordInputs: true, recordOutputs: true },
         forwardedTracePolicy: {
@@ -83,10 +100,7 @@ describe("isWorkflowTraceContentVisible", () => {
         traceFlags: 1,
         traceId: "2".repeat(32),
       },
-      [ChannelInstrumentationKey.name]: {
-        kind: "eve",
-        metadata: { audience: "public" },
-      },
+      [ChannelInstrumentationKey.name]: { kind: "eve", metadata: {} },
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
@@ -97,11 +111,8 @@ describe("isWorkflowTraceContentVisible", () => {
 
   it("does not infer forwarded acceptance from projected metadata", () => {
     const serializedContext = {
-      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
-      [ChannelInstrumentationKey.name]: {
-        kind: "eve",
-        metadata: { audience: "public" },
-      },
+      [ConversationContextKey.name]: unknownConversation,
+      [ChannelInstrumentationKey.name]: { kind: "eve", metadata: {} },
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
@@ -286,12 +297,12 @@ describe("buildSessionAttributes", () => {
     expect(attrs["$eve.title"]).toBe("private prompt");
   });
 
-  it("allows unknown session content during local eve dev", () => {
-    vi.stubEnv("EVE_DEV", "1");
-
+  it("allows unknown session content in development", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "local prompt",
-      serializedContext: {},
+      serializedContext: {
+        [ConversationContextKey.name]: { ...unknownConversation, environment: "development" },
+      },
     });
 
     expect(attrs["$eve.is_trace_content_visible"]).toBe(true);

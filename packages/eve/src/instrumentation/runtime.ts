@@ -62,7 +62,11 @@ import {
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import {
+  ConversationContextKey,
+  UNKNOWN_CONVERSATION_CONTEXT,
+  type ConversationContext,
+} from "#shared/conversation-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import type { AgentSamplingOperation } from "#tracing/agent-span-contract.js";
 import {
@@ -71,7 +75,7 @@ import {
   resolveTracePolicyDecision,
 } from "#tracing/sampled-trace.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
-import type { ChannelInstrumentationProjection, SessionTraceContext } from "#channel/types.js";
+import type { SessionTraceContext } from "#channel/types.js";
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import {
   intersectInstrumentationDecisions,
@@ -220,12 +224,10 @@ export function bindInstrumentationRuntime(
   const readSessionContext = () =>
     readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
-    const channel = sessionContext.instrumentation;
     return (
       baseHooks.forTrace?.({
         agentName: boundSession.agentName,
-        audience: sessionContext.audience,
-        channelType: channel?.channelType,
+        ...sessionContext.conversation,
       }) ?? baseHooks
     );
   };
@@ -245,15 +247,14 @@ export function bindInstrumentationRuntime(
     input: Parameters<ExecutionInstrumentation["preparePreamble"]>[0],
     sessionContext: ReturnType<typeof readSessionContext>,
   ) => {
-    const channel = sessionContext.instrumentation;
     return prepareTurnTraceContext({
       ...input,
       instrumentation: runtime,
       principals: sessionContext.principals,
       session: {
         agentName: boundSession.agentName,
-        channelAudience: sessionContext.audience,
-        channelType: channel?.channelType,
+        channelAudience: sessionContext.conversation.audience,
+        channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
         rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
@@ -286,7 +287,7 @@ export function bindInstrumentationRuntime(
         const decision = resolveStepInstrumentationDecision(
           settings,
           boundSession.agentName,
-          policyContext.instrumentation,
+          policyContext.conversation,
           policyContext.traceSeed,
           readSessionTraceDecision(policyContext.context, boundSession.sessionId),
         );
@@ -338,9 +339,9 @@ export function bindInstrumentationRuntime(
         const runtimeContextSnapshot = snapshotInstrumentationRuntimeContext(
           sessionContext.context,
         );
-        const channel = sessionContext.instrumentation;
-        const audience = normalizeChannelAudience(channel?.metadata.audience);
-        const capturesContent = shouldCaptureInstrumentationContent(audience);
+        const conversation = sessionContext.conversation;
+        const audience = conversation.audience;
+        const capturesContent = shouldCaptureInstrumentationContent(conversation);
         const effectiveDecision =
           decision === undefined
             ? decision
@@ -348,6 +349,7 @@ export function bindInstrumentationRuntime(
                 decision,
                 audience,
                 sessionContext.forwardedTracePolicy,
+                conversation.environment,
               );
         const capturesRuntimeContextInput =
           effectiveDecision === undefined
@@ -409,7 +411,7 @@ export function bindInstrumentationRuntime(
                 ...eventInput,
                 agentName: boundSession.agentName,
                 channelAudience: audience,
-                channelKind: channel?.kind,
+                channelKind: conversation.channel.kind,
                 hooks,
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
@@ -541,17 +543,24 @@ export function initializeSessionInstrumentation(input: {
   readonly ctx: ContextContainer;
 }): void {
   const runtime = getInstrumentationRuntime();
-  const channel = input.ctx.get(ChannelInstrumentationKey);
   const parentTraceContext = input.ctx.get(ParentTraceContextKey);
   const forwardedTracePolicy = readForwardedTraceAssertion(
     parentTraceContext?.forwardedTracePolicy,
   );
-  const audience =
-    forwardedTracePolicy?.originAudience ?? normalizeChannelAudience(channel?.metadata.audience);
+  const storedConversation = input.ctx.get(ConversationContextKey);
+  const conversation =
+    storedConversation === undefined
+      ? {
+          ...UNKNOWN_CONVERSATION_CONTEXT,
+          audience: forwardedTracePolicy?.originAudience ?? "unknown",
+        }
+      : forwardedTracePolicy === undefined
+        ? storedConversation
+        : { ...storedConversation, audience: forwardedTracePolicy.originAudience };
   const traceSeed = allocateSessionTraceSeed({
     agentName: input.agentName,
-    audience,
-    channelType: channel?.channelType,
+    conversation,
+    channelType: input.ctx.get(ChannelInstrumentationKey)?.channelType,
     forwardedTracePolicy,
     parentTraceContext,
     runtime,
@@ -583,7 +592,7 @@ export function initializeSessionInstrumentation(input: {
 
 function allocateSessionTraceSeed(input: {
   readonly agentName: string;
-  readonly audience: ReturnType<typeof normalizeChannelAudience>;
+  readonly conversation: ConversationContext;
   readonly channelType?: string;
   readonly forwardedTracePolicy: ForwardedTraceAssertion | undefined;
   readonly parentTraceContext?: SessionTraceContext;
@@ -592,8 +601,7 @@ function allocateSessionTraceSeed(input: {
   const localDecision = () =>
     resolveTracePolicy(input.runtime?.otelSettings?.tracePolicy, {
       agentName: input.agentName,
-      audience: input.audience,
-      channelType: input.channelType,
+      ...input.conversation,
     });
   if (input.parentTraceContext !== undefined) {
     const forwardedCeiling = input.forwardedTracePolicy
@@ -607,7 +615,7 @@ function allocateSessionTraceSeed(input: {
           ? forwardedCeiling
           : intersectInstrumentationDecisions(forwardedCeiling, inheritedDecision)
         : (inheritedDecision ??
-          resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience));
+          resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.conversation));
     const decision = input.forwardedTracePolicy
       ? intersectInstrumentationDecisions(parentDecision, localDecision())
       : parentDecision;
@@ -638,21 +646,19 @@ function allocateSessionTraceSeed(input: {
 function resolveStepInstrumentationDecision(
   settings: OtelHarnessSettings | undefined,
   agentName: string,
-  channel: ChannelInstrumentationProjection | undefined,
+  conversation: ConversationContext,
   traceSeed: SessionTraceSeed | undefined,
   persisted: InstrumentationDecision | undefined,
 ): InstrumentationDecision | undefined {
   if (settings === undefined) return undefined;
   if (traceSeed?.decision !== undefined) return readInstrumentationDecision(traceSeed.decision);
   if (persisted !== undefined) return persisted;
-  const audience = normalizeChannelAudience(channel?.metadata.audience);
   if (traceSeed !== undefined) {
-    return resolveTracePolicyDecision(isSampledTrace(traceSeed), audience);
+    return resolveTracePolicyDecision(isSampledTrace(traceSeed), conversation);
   }
   return resolveTracePolicy(settings.tracePolicy, {
     agentName,
-    audience,
-    channelType: channel?.channelType,
+    ...conversation,
   });
 }
 

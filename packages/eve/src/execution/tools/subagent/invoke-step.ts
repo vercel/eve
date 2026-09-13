@@ -109,7 +109,7 @@ export async function dispatchAgentInvocation(input: {
   }
   const invocationAction = entry.kind === "start" ? entry.target.action : entry.action;
   const tracing = prepareAgentInvocationTrace({
-    channelMetadata: prepared.channelMetadata,
+    conversation: prepared.inheritedConversation,
     invocation: invocationAction,
     ownerId: input.ownerId,
     serializedContext: prepared.serializedContext,
@@ -240,6 +240,7 @@ export async function dispatchAgentInvocation(input: {
       callbackBaseUrl: input.callbackBaseUrl,
       capabilities: prepared.capabilities,
       channelMetadata: prepared.channelMetadata,
+      inheritedConversation: prepared.inheritedConversation,
       currentSession: session,
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,

@@ -141,7 +141,7 @@ describe("chatSdkChannel", () => {
     [{ isDM: true, channelVisibility: "unknown" }, "private"],
     [{ isDM: false, channelVisibility: "workspace" }, "public"],
     [{ isDM: false, channelVisibility: "private" }, "private"],
-  ] as const)("projects the $audience audience", (thread, audience) => {
+  ] as const)("classifies the $audience audience", (thread, audience) => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       state: memoryState(),
@@ -157,7 +157,15 @@ describe("chatSdkChannel", () => {
       ...thread,
     };
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:chat-sdk" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
   });
 
   it("mounts GET and POST webhook routes per Chat SDK adapter", () => {

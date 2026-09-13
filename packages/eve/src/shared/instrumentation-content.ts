@@ -1,19 +1,25 @@
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
-/** Hosted instrumentation records conversation content only for known-public channels. */
-export function shouldCaptureInstrumentationContent(audience: ChannelAudience): boolean {
-  if (audience === "public") return true;
-  return audience === "unknown" && isEveDevEnvironment();
+export interface InstrumentationContentContext {
+  readonly audience: ChannelAudience;
+  readonly environment: ConversationEnvironment;
+}
+
+/** Content is public evidence, or local debugging evidence in development. */
+export function shouldCaptureInstrumentationContent(
+  context: InstrumentationContentContext,
+): boolean {
+  return context.audience === "public" || context.environment === "development";
 }
 
 /** Per-delivery audience is a hard ceiling over the session-level trace decision. */
 export function applyAudienceCeiling(
   decision: InstrumentationDecision,
-  audience: ChannelAudience,
+  context: InstrumentationContentContext,
 ): InstrumentationDecision {
-  if (decision.action === "drop" || shouldCaptureInstrumentationContent(audience)) {
+  if (decision.action === "drop" || shouldCaptureInstrumentationContent(context)) {
     return decision;
   }
   return { action: "record", recordInputs: false, recordOutputs: false };

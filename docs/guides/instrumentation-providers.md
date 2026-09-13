@@ -65,10 +65,10 @@ Each provider has an independent `tracePolicy`. It decides whether the provider 
 import { defineInstrumentation } from "eve/instrumentation";
 
 export default defineInstrumentation({
-  tracePolicy: ({ audience }) => ({
+  tracePolicy: ({ audience, environment }) => ({
     emit: true,
-    recordInputs: audience === "public",
-    recordOutputs: audience === "public",
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
   }),
   events: {
     "model.call.started": (event) => {
@@ -81,9 +81,9 @@ export default defineInstrumentation({
 });
 ```
 
-The policy receives `agentName`, `audience`, and, when available, `channelType`. `audience` is `"public"`, `"private"`, or `"unknown"`.
+The policy receives `agentName`, `channel`, `audience`, `mode`, `environment`, and `principalType`. `audience` is `"public"`, `"private"`, or `"unknown"`. `environment` is `"development"`, `"preview"`, or `"production"`.
 
-The default policy emits metadata for every audience and includes inputs and outputs only for `public` conversations. Return an explicit decision to change that behavior:
+The default policy emits metadata for every audience and includes inputs and outputs for `public` conversations and for any audience in a development environment. Preview behaves like production: an `unknown` conversation records metadata only. Return an explicit decision to change that behavior:
 
 | Decision                                      | Result                                                       |
 | --------------------------------------------- | ------------------------------------------------------------ |
@@ -162,10 +162,10 @@ import { otel } from "eve/instrumentation/otel";
 
 export default otel({
   resource: { "deployment.environment": process.env.VERCEL_ENV ?? "development" },
-  tracePolicy: ({ audience }) => ({
+  tracePolicy: ({ audience, environment }) => ({
     emit: true,
-    recordInputs: audience === "public",
-    recordOutputs: audience === "public",
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
   }),
 });
 ```

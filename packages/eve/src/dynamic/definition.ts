@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { SessionAuth } from "#context/keys.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
@@ -60,6 +61,11 @@ export interface DynamicResolveContext {
     /** Free-form channel-specific metadata attached to the request. */
     readonly metadata?: Readonly<Record<string, unknown>>;
   };
+  /**
+   * Immutable classification and execution context for the active conversation.
+   * Absent on sessions persisted before this context key existed.
+   */
+  readonly conversation?: ConversationContext;
   /** Conversation history visible at this resolve point, oldest first. */
   readonly messages: readonly ModelMessage[];
 }

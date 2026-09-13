@@ -15,11 +15,11 @@ import { contextStorage } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import {
   AuthKey,
-  ChannelInstrumentationKey,
   InitiatorAuthKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildSessionAttributes } from "#execution/eve-workflow-attributes.js";
@@ -159,14 +159,14 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
     expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: false },
       originAudience: "private",
     });
 
     setChannelContext(ctx, { ...run.adapter, state: { persisted: true } });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
     ctx.set(SessionTraceSeedKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: false },
       forwardedTracePolicy: {
@@ -269,7 +269,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           ...options,
         },
       });
-      expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+      expect(ctx.get(ConversationContextKey)?.audience).toBe("unknown");
       expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
         ceiling: { recordInputs: false, recordOutputs: false },
         originAudience: "unknown",
@@ -349,7 +349,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         ...options,
       },
     });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("unknown");
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {

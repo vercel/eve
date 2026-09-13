@@ -428,12 +428,18 @@ describe("slackChannel()", () => {
     expect(channel).toMatchObject({ turnPolicy: "queue" });
   });
 
-  it("projects the durable audience into instrumentation metadata", () => {
+  it("classifies from durable state through the audience hook", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
-      audience: "private",
-    });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:slack" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe("private");
   });
 });
 
@@ -1889,7 +1895,6 @@ describe("slackChannel() inbound mention pipeline", () => {
       }),
       message: "Imperative follow-up",
       state: {
-        audience: "unknown",
         channelId: "C_BOUND",
         installationTeamId: null,
         teamId: "T01",

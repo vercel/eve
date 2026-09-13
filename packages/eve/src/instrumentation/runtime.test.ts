@@ -27,6 +27,7 @@ import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -56,7 +57,14 @@ function createContext(audience: "private" | "public" | "unknown" = "public"): C
   const ctx = new ContextContainer();
   ctx.set(ChannelInstrumentationKey, {
     kind: "channel:test",
-    metadata: { audience },
+    metadata: {},
+  });
+  ctx.set(ConversationContextKey, {
+    audience,
+    channel: { kind: "channel:test", name: "test" },
+    environment: "production",
+    mode: "conversation",
+    principalType: "anonymous",
   });
   return ctx;
 }
@@ -159,7 +167,14 @@ describe("initializeSessionInstrumentation", () => {
       const ctx = initializeRemoteSession(() => true);
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:test",
-        metadata: { audience: deliveryAudience },
+        metadata: {},
+      });
+      ctx.set(ConversationContextKey, {
+        audience: deliveryAudience,
+        channel: { kind: "channel:test", name: "test" },
+        environment: "production",
+        mode: "conversation",
+        principalType: "anonymous",
       });
 
       expect(
@@ -378,7 +393,7 @@ describe("bindInstrumentationRuntime", () => {
     expect(ctx.get(ConversationIdKey)).toBe("original-conversation");
   });
 
-  it("reads the channel audience when the step runs", async () => {
+  it("keeps the durable audience when projection metadata changes", async () => {
     const ctx = createContext("public");
     const instrumentation = bindInstrumentationRuntime(
       createRuntime({ capturesContent: true, publish: vi.fn() }),
@@ -392,8 +407,8 @@ describe("bindInstrumentationRuntime", () => {
     });
 
     expect(await readTelemetry(instrumentation)).toMatchObject({
-      recordInputs: false,
-      recordOutputs: false,
+      recordInputs: true,
+      recordOutputs: true,
     });
   });
 
@@ -401,11 +416,6 @@ describe("bindInstrumentationRuntime", () => {
     const boundHooks: InstrumentationHooks = { capturesContent: false, publish: vi.fn() };
     const forTrace = vi.fn(() => boundHooks);
     const ctx = createContext("private");
-    ctx.set(ChannelInstrumentationKey, {
-      channelType: "slack",
-      kind: "channel:test",
-      metadata: { audience: "private" },
-    });
     const instrumentation = bindInstrumentationRuntime(
       createRuntime({ capturesContent: false, forTrace, publish: vi.fn() }),
       ctx,
@@ -417,7 +427,10 @@ describe("bindInstrumentationRuntime", () => {
     expect(forTrace).toHaveBeenCalledExactlyOnceWith({
       agentName: "Weather Display Name",
       audience: "private",
-      channelType: "slack",
+      channel: { kind: "channel:test", name: "test" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
     });
   });
 
@@ -689,6 +702,13 @@ describe("bindInstrumentationRuntime", () => {
       kind: "channel:test",
       metadata: { audience: "public" },
     });
+    ctx.set(ConversationContextKey, {
+      audience: "public",
+      channel: { kind: "channel:test", name: "test" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
+    });
     const second = instrumentation?.runStep(stepInput, async (scope) => readScopedState(scope));
     releaseFirst();
 
@@ -798,7 +818,7 @@ describe("bindInstrumentationRuntime", () => {
 
     setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
 
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("public");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("public");
     expect(
       await readTelemetry(
         bindInstrumentationRuntime(

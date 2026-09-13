@@ -157,6 +157,45 @@ Neither admits browser users or external clients in production. For a public app
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
+## Audience
+
+The eve channel classifies who can observe a session when that session is created:
+
+| Session creator                           | Default audience |
+| ----------------------------------------- | ---------------- |
+| Anonymous caller                          | `public`         |
+| `user`, `service`, or `runtime` principal | `private`        |
+| Any other principal type                  | `unknown`        |
+
+Anonymous HTTP surfaces are public because anyone who can reach the surface can read it. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types remain `unknown`: trace consumers record metadata but omit content by default in preview and production.
+
+Pass a constant or a function to override the default:
+
+```ts title="agent/channels/eve.ts"
+import { none, vercelOidc } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  audience: "private",
+});
+```
+
+```ts title="agent/channels/eve.ts"
+import { vercelOidc } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [vercelOidc(), none()],
+  audience({ auth, environment }) {
+    if (auth === null) return environment === "development" ? "public" : "unknown";
+    return "private";
+  },
+});
+```
+
+The function receives the authenticated principal, channel, run mode, and deployment environment. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
+
 ## Customization
 
 Use `onMessage` to add request-specific context before the agent sees the user message, and `events` to observe stream events from sessions this channel created:
