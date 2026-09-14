@@ -12,11 +12,14 @@ function resolvedProject(appRoot: string) {
   return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
 }
 
-const { runDeployCommand, runInitCommand, runSetCommand } = vi.hoisted(() => ({
-  runDeployCommand: vi.fn(async () => {}),
-  runInitCommand: vi.fn(async () => {}),
-  runSetCommand: vi.fn(async () => {}),
-}));
+const { runDeployCommand, runInitCommand, runSetCommand, runWorkspaceDevelopment } = vi.hoisted(
+  () => ({
+    runDeployCommand: vi.fn(async () => {}),
+    runInitCommand: vi.fn(async () => {}),
+    runSetCommand: vi.fn(async () => {}),
+    runWorkspaceDevelopment: vi.fn(async () => {}),
+  }),
+);
 
 vi.mock("#cli/application-root.js", () => ({
   findCliApplicationRoot: vi.fn(async () => undefined),
@@ -25,6 +28,7 @@ vi.mock("#cli/application-root.js", () => ({
 vi.mock("#cli/commands/deploy.js", () => ({ runDeployCommand }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
+vi.mock("#cli/dev/workspace-dev.js", () => ({ runWorkspaceDevelopment }));
 vi.mock("#internal/project-context.js", () => ({
   findEveProjectContext: vi.fn(async () => undefined),
   resolveEveProjectContext: vi.fn(async (appRoot: string) => ({
@@ -453,6 +457,54 @@ describe("eve CLI malformed argument handling", () => {
         log: () => {},
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("eve dev in an agent workspace", () => {
+  it("delegates the workspace graph to Vercel dev", async () => {
+    const workspace = {
+      members: [{ appRoot: "/workspace/agents/support", name: "support" }],
+      root: "/workspace",
+    };
+    runWorkspaceDevelopment.mockClear();
+    const program = createCliProgram(
+      { error: () => {}, log: () => {} },
+      {},
+      {
+        resolve: async () => {},
+        resolveAgent: async () => ({ environmentRoot: "/workspace", kind: "workspace", workspace }),
+        root: "/workspace",
+      },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
+    );
+
+    await program.parseAsync(["dev", "--agent", "support", "--port", "4123"], { from: "user" });
+
+    expect(runWorkspaceDevelopment).toHaveBeenCalledWith({
+      options: expect.objectContaining({ agent: "support", port: 4123 }),
+      workspace,
+    });
+  });
+
+  it("rejects agent-specific TUI options", async () => {
+    const workspace = {
+      members: [{ appRoot: "/workspace/agents/support", name: "support" }],
+      root: "/workspace",
+    };
+    const program = createCliProgram(
+      { error: () => {}, log: () => {} },
+      {},
+      {
+        resolve: async () => {},
+        resolveAgent: async () => ({ environmentRoot: "/workspace", kind: "workspace", workspace }),
+        root: "/workspace",
+      },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
+    );
+
+    await expect(
+      program.parseAsync(["dev", "--name", "Support"], { from: "user" }),
+    ).rejects.toThrow("This option requires an individual agent.");
   });
 });
 

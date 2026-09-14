@@ -4,7 +4,11 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { packageProcessResult } from "#internal/testing/package-process.js";
 import type { DetectedPackageManager } from "#setup/package-manager.js";
 
-import { runInstallVercelCliFlow, type InstallVercelCliDeps } from "./install-vercel-cli.js";
+import {
+  offerVercelCliUpgrade,
+  runInstallVercelCliFlow,
+  type InstallVercelCliDeps,
+} from "./install-vercel-cli.js";
 
 const APP_ROOT = "/app/my-agent";
 
@@ -34,6 +38,43 @@ function run(
   if (spawnPackageManager !== undefined) merged.spawnPackageManager = spawnPackageManager;
   return runInstallVercelCliFlow({ appRoot: APP_ROOT, prompter, deps: merged, upgrade });
 }
+
+describe("offerVercelCliUpgrade", () => {
+  it("runs the shared upgrade flow after confirmation", async () => {
+    const { prompter, selectMessages } = createFakePrompter({ single: () => "upgrade" });
+    const runVercel = vi.fn<InstallVercelCliDeps["runVercel"]>(async () => true);
+
+    await expect(
+      offerVercelCliUpgrade({
+        appRoot: APP_ROOT,
+        message: "Upgrade now?",
+        prompter,
+        deps: { getVercelAuthStatus: statusProbe("authenticated"), runVercel },
+      }),
+    ).resolves.toEqual({ kind: "installed" });
+
+    expect(selectMessages).toEqual(["Upgrade now?"]);
+    expect(runVercel).toHaveBeenCalledWith(
+      ["upgrade"],
+      expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
+    );
+  });
+
+  it("returns declined without running the upgrade flow", async () => {
+    const { prompter } = createFakePrompter({ single: () => "later" });
+    const runVercel = vi.fn<InstallVercelCliDeps["runVercel"]>();
+
+    await expect(
+      offerVercelCliUpgrade({
+        appRoot: APP_ROOT,
+        message: "Upgrade now?",
+        prompter,
+        deps: { runVercel },
+      }),
+    ).resolves.toEqual({ kind: "declined" });
+    expect(runVercel).not.toHaveBeenCalled();
+  });
+});
 
 describe("runInstallVercelCliFlow", () => {
   it("short-circuits when the CLI already resolves and never installs", async () => {

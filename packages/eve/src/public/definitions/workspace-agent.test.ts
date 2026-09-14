@@ -2,11 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defineWorkspaceAgent } from "./workspace-agent.js";
 
-vi.mock("#compiled/@vercel/oidc/index.js", () => ({
+const { getVercelOidcToken } = vi.hoisted(() => ({
   getVercelOidcToken: vi.fn().mockResolvedValue("oidc-token"),
 }));
 
-afterEach(() => vi.unstubAllEnvs());
+vi.mock("#compiled/@vercel/oidc/index.js", () => ({ getVercelOidcToken }));
+
+afterEach(() => {
+  getVercelOidcToken.mockClear();
+  vi.unstubAllEnvs();
+});
 
 describe("defineWorkspaceAgent", () => {
   it("selects Vercel transport in a Vercel environment", async () => {
@@ -27,18 +32,41 @@ describe("defineWorkspaceAgent", () => {
     });
   });
 
-  it("uses the Next.js named-agent route when the caller is mounted through eve/next", async () => {
-    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/agents/support");
+  it("uses the local Vercel router without deployment credentials in development", async () => {
     vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "preview");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
-
+    vi.stubEnv("VERCEL_ENV", "development");
+    vi.stubEnv("VERCEL_URL", "localhost:3000");
     const subagent = defineWorkspaceAgent({ name: "research" });
 
-    expect((subagent.url as () => string)()).toBe(
-      "https://preview.example.com/eve/agents/research",
-    );
+    expect((subagent.url as () => string)()).toBe("http://localhost:3000/research");
+    await expect(subagent.auth?.()).resolves.toEqual({ headers: {} });
+    expect(getVercelOidcToken).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      expected: "http://localhost:3000/eve/agents/research",
+      environment: "development",
+      host: "localhost:3000",
+    },
+    {
+      expected: "https://preview.example.com/eve/agents/research",
+      environment: "preview",
+      host: "preview.example.com",
+    },
+  ])(
+    "uses the Next.js named-agent route in $environment",
+    async ({ environment, expected, host }) => {
+      vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/agents/support");
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("VERCEL_ENV", environment);
+      vi.stubEnv("VERCEL_URL", host);
+
+      const subagent = defineWorkspaceAgent({ name: "research" });
+
+      expect((subagent.url as () => string)()).toBe(expected);
+    },
+  );
 
   it("requires an explicit transport outside Vercel", async () => {
     vi.stubEnv("VERCEL", undefined);
