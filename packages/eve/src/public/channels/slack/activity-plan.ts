@@ -204,7 +204,7 @@ function taskChunk(work: ActivityWorkStateV1) {
   return {
     type: "task_update",
     id: safeId(work.id),
-    title: work.kind === "root-turn" ? "Agent turn" : (work.name ?? "Agent work"),
+    title: work.kind === "root-turn" ? "Agent turn" : (work.label ?? work.name ?? "Agent work"),
     status: status(work.phase),
   };
 }

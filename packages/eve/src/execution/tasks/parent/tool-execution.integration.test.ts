@@ -205,12 +205,16 @@ describe("background subagent steering", () => {
     };
     const scope = await createScope(createSession(), activityObserver);
 
-    await scope.execute(
-      "steering-call",
-      identity.id,
-      identity.name,
-      "subagent",
-      () => "Investigator",
+    await scope.execute("steering-call", identity.id, identity.name, "subagent", (input) => {
+      (input as { message: string }).message = "Mutated";
+      return "Investigator";
+    });
+    expect(startTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: expect.objectContaining({
+          input: { agentId: identity.id, message: "Use the updated instruction" },
+        }),
+      }),
     );
     const committed = await scope.commit();
     const task = getSessionTaskIndex(committed.state).find(
@@ -218,8 +222,8 @@ describe("background subagent steering", () => {
     );
 
     expect(task).toMatchObject({
-      activityWorkIdentity: { name: "Investigator" },
-      metadata: { label: "Investigator", name: "research" },
+      activityWorkIdentity: { label: "Investigator", name: "research" },
+      metadata: { name: "research" },
     });
   });
 

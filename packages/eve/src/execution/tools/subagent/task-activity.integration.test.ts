@@ -75,10 +75,11 @@ const bundle = {
   subagentRegistry: createRuntimeSubagentRegistry({ subagents: [] }),
 } as Parameters<typeof startSubagent>[0]["bundle"];
 
-function taskObserver(callId: string): Observer {
+function taskObserver(callId: string, label?: string): Observer {
   const observer = deriveBackgroundTaskActivityObserver({
     activityObserver: parentObserver,
     callId,
+    label,
     name: "research",
     parentSessionId: session.sessionId,
     parentTurnId: "parent-turn",
@@ -205,10 +206,11 @@ describe("task-owned subagent activity", () => {
   it.each(["local", "remote"] as const)(
     "keeps one task item through %s child activity and settlement",
     async (kind) => {
-      const task = taskObserver("task-a");
+      const task = taskObserver("task-a", "Investigator");
       const captured = await start(kind, task);
       if (captured === undefined) throw new Error("Expected child observer");
       expect(captured).toEqual(task);
+      expect(captured.workIdentity).toMatchObject({ label: "Investigator", name: "research" });
       let snapshot = apply(initialSnapshot(), taskEvents(task, "working"));
       snapshot = apply(snapshot, project(turn("turn.started", "child-turn"), captured));
       snapshot = apply(snapshot, project(tool("actions.requested", "child-turn"), captured));

@@ -34,11 +34,15 @@ import {
   encodeSessionCommandV6,
   type SessionInboxWireV6,
 } from "#execution/wire/session-inbox-wire.v6.js";
+import {
+  encodeSessionCommandV7,
+  type SessionInboxWireV7,
+} from "#execution/wire/session-inbox-wire.v7.js";
 
 type SessionInboxCommand = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
 /** Current wire type consumed after migration. */
-export type SessionInboxWire = SessionInboxWireV6;
+export type SessionInboxWire = SessionInboxWireV7;
 
 type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly version: 0 }>;
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
@@ -55,6 +59,7 @@ const versionedEncoders = {
   5: (command: SessionInboxCommand) =>
     encodeSessionCommandV5(withoutOwnedTaskCancellation(command)),
   6: encodeSessionCommandV6,
+  7: encodeSessionCommandV7,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
 /** Encodes a command for the selected session-inbox consumer. */
@@ -64,6 +69,7 @@ function encode(command: SessionInboxCommand, target: { readonly version: 3 }): 
 function encode(command: SessionInboxCommand, target: { readonly version: 4 }): SessionInboxWireV4;
 function encode(command: SessionInboxCommand, target: { readonly version: 5 }): SessionInboxWireV5;
 function encode(command: SessionInboxCommand, target: { readonly version: 6 }): SessionInboxWireV6;
+function encode(command: SessionInboxCommand, target: { readonly version: 7 }): SessionInboxWireV7;
 function encode(
   command: SessionInboxCommand,
   target: { readonly version: SessionInboxWireVersion },
@@ -82,6 +88,7 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown>;
 function encode(
   command: SessionInboxCommand,
@@ -93,21 +100,23 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown> {
   if (command.kind === "cancel" && command.tasks === true && target.version < 6) {
     throw new SessionInboxWireError(
       `Cannot encode session-owned task cancellation for wire version ${target.version}.`,
     );
   }
+  const encodable = target.version < 7 ? withoutActivityLabels(command) : command;
   if (target.version === 0) {
     const currentTaskWire =
-      target.variant === "send" && command.kind === "send" && command.payload.task !== undefined
-        ? encodeSessionCommandV5(command)
+      target.variant === "send" && encodable.kind === "send" && encodable.payload.task !== undefined
+        ? encodeSessionCommandV5(encodable)
         : undefined;
     let legacy = encodeSessionCommandV0(
       encodeSessionCommandV1(
         withoutCurrentTaskMessages(
-          withoutAcceptedDeployment(withoutOwnedTaskCancellation(command)),
+          withoutAcceptedDeployment(withoutOwnedTaskCancellation(encodable)),
         ),
       ),
       target.variant,
@@ -133,17 +142,35 @@ function encode(
     };
   }
   if (isSessionInboxWireVersion(target.version)) {
-    return versionedEncoders[target.version](command) as
+    return versionedEncoders[target.version](encodable) as
       | SessionInboxWireV1
       | SessionInboxWireV2
       | SessionInboxWireV3
       | SessionInboxWireV4
       | SessionInboxWireV5
-      | SessionInboxWireV6;
+      | SessionInboxWireV6
+      | SessionInboxWireV7;
   }
   throw new SessionInboxWireError(
     `Cannot encode session inbox payload for unknown wire version ${JSON.stringify((target as { version?: unknown }).version)}.`,
   );
+}
+
+function withoutActivityLabels(command: SessionInboxCommand): SessionInboxCommand {
+  if (
+    (command.kind !== "send" && command.kind !== "deliver") ||
+    command.caller?.activityObserver?.workIdentity?.label === undefined
+  ) {
+    return command;
+  }
+  const { label: _label, ...workIdentity } = command.caller.activityObserver.workIdentity;
+  return {
+    ...command,
+    caller: {
+      ...command.caller,
+      activityObserver: { ...command.caller.activityObserver, workIdentity },
+    },
+  };
 }
 
 function withoutOwnedTaskCancellation(command: SessionInboxCommand): SessionInboxCommand {

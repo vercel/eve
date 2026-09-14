@@ -2,6 +2,7 @@ import type { ToolSet, TypedToolCall } from "ai";
 
 import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import { normalizePresentationText } from "#shared/presentation-text.js";
@@ -17,13 +18,25 @@ export function createPresentedRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequestProjection {
   const action = createRuntimeActionRequestFromToolCall(input);
-  const start = input.tools.get(input.toolCall.toolName)?.label?.start;
-  if (start === undefined) return { action };
+  const presentationLabel = projectToolStartLabel(
+    input.tools.get(input.toolCall.toolName),
+    action.input,
+  );
+  return presentationLabel === undefined ? { action } : { action, presentationLabel };
+}
+
+/** Calls a tool's label callback with a detached, JSON-safe input copy. */
+export function projectToolStartLabel(
+  definition: { readonly label?: HarnessToolDefinition["label"] } | undefined,
+  input: unknown,
+): string | undefined {
+  const start = definition?.label?.start;
+  if (start === undefined) return undefined;
   try {
-    const label = normalizePresentationText(start(parseJsonObject(action.input)));
-    return label === "" ? { action } : { action, presentationLabel: label };
+    const label = normalizePresentationText(start(parseJsonObject(input)));
+    return label === "" ? undefined : label;
   } catch {
-    return { action };
+    return undefined;
   }
 }
 

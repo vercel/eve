@@ -19,7 +19,7 @@ import {
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
-import { normalizePresentationText } from "#shared/presentation-text.js";
+import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { createTaskMessage, isTaskMessage, type TaskExec } from "#tools/task.js";
 import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js";
@@ -377,18 +377,17 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         },
       });
     }
-    const metadata = {
-      ...(subagentProjection?.metadata ?? {
-        kind: "tool" as const,
-        name: input.input.definition.name,
-      }),
-      ...readTaskPresentationMetadata(input.input.definition, input.input.toolInput),
+    const metadata = subagentProjection?.metadata ?? {
+      kind: "tool" as const,
+      name: input.input.definition.name,
     };
+    const activityLabel = projectToolStartLabel(input.input.definition, input.input.toolInput);
     const taskInput = {
       activityObserver: deriveBackgroundTaskActivityObserver({
         activityObserver: input.ctx.get(ActivityObserverKey),
         callId: input.input.options.toolCallId,
-        name: metadata.label ?? metadata.name,
+        label: activityLabel,
+        name: metadata.name,
         parentSessionId: this.initialSession.sessionId,
         parentTurnId,
         rootSessionId: this.initialSession.rootSessionId ?? this.initialSession.sessionId,
@@ -633,20 +632,6 @@ async function executeBackgroundIterable(input: {
     next = await iterator.next();
   }
   return next.value ?? null;
-}
-
-function readTaskPresentationMetadata(
-  definition: BackgroundExecutableTool,
-  toolInput: unknown,
-): { readonly label?: string } {
-  const start = definition.label?.start;
-  if (start === undefined) return {};
-  try {
-    const label = normalizePresentationText(start(toolInput));
-    return label === "" ? {} : { label };
-  } catch {
-    return {};
-  }
 }
 
 function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
