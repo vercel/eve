@@ -768,14 +768,14 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.principal.initiator.type": "none",
       "agent.run.id": "child-session",
       "agent.run.type": "subagent",
-      "agent.schedule.id": "daily-report",
-      "agent.session.origin": "schedule",
-      "agent.session.title": "Research the incident",
+      "agent.session.origin": "unknown",
       "agent.trace.content.input": true,
       "agent.trace.content.output": true,
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
     });
+    expect(invocation.attributes).not.toHaveProperty("agent.schedule.id");
+    expect(invocation.attributes).not.toHaveProperty("agent.session.title");
     expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
     expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.id");
@@ -788,7 +788,6 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.prepareSessionTrace({
       agentName: "weather",
       channelAudience: "public",
-      channelKind: "http",
       idempotencyKey: sessionIdempotencyKey(sessionId),
       rootSessionId: sessionId,
       sessionId,
@@ -809,6 +808,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(
       byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]?.attributes,
     ).toMatchObject({
+      "agent.channel.kind": "http",
       "agent.schedule.id": "daily-report",
       "agent.session.origin": "schedule",
       "agent.session.title": "Prepared after trace allocation",

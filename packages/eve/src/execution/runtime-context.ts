@@ -17,7 +17,9 @@ import {
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SessionTitleKey,
 } from "#context/keys.js";
+import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { readConversationId } from "#tracing/conversation-context.js";
@@ -45,6 +47,10 @@ export function buildRunContext(input: {
     ConversationContextKey,
     buildConversationContext(run, resolveInstrumentationEnvironment()),
   );
+  if (run.parent === undefined) {
+    const title = deriveSessionTitle(run.title ?? run.input.message);
+    if (title !== undefined) ctx.set(SessionTitleKey, title);
+  }
 
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);

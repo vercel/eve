@@ -201,14 +201,17 @@ exception. Vercel deployments additionally carry
 trusted remote subagents. Remote lineage is accepted only when the receiver's
 `trustedForwarders` predicate approves the authenticated caller. Child
 activation roots carry `agent.parent_run.id` and `agent.parent_call.id`.
-Activation roots also carry `agent.run.type`, `agent.session.origin`,
-`agent.channel.audience`, directional `agent.trace.content.input` and
-`agent.trace.content.output` policy results, and `agent.schedule.id` when a
-schedule started the session. `agent.session.title` is present only when input
-content is allowed and is removed by destination input-redaction policies.
-`agent.run.type` is `session` or `subagent`; `agent.session.origin` is
-`schedule`, `channel`, or `unknown`; and the content-policy attributes are
-booleans from the resolved trace capture decision.
+Activation roots also carry `agent.run.type`, `agent.channel.kind`,
+`agent.channel.audience`, and directional `agent.trace.content.input` and
+`agent.trace.content.output` policy results. Root-session activations carry
+`agent.session.origin`, plus `agent.schedule.id` when a schedule started the
+session and `agent.session.title` when input capture permits. Subagent
+activations use `agent.session.origin=unknown` and omit the root-only schedule
+and title attributes; their delegation is described by `agent.run.type` and
+the parent attributes. `agent.run.type` is `session` or `subagent`;
+root-session origin is `schedule`, `channel`, or `unknown`; and each exported
+content-policy boolean reflects both the resolved trace capture decision and
+that destination's redaction policy.
 Only activations use the `invoke_agent` operation. A workflow tool invocation
 that coordinates at least one nested agent uses `invoke_workflow`, with its
 path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without
@@ -278,6 +281,12 @@ This workflow applies to schema v4 from the [instrumentation provider layout](./
 | One turn                 | Both `gen_ai.conversation.id` and `agent.turn.id`                       |
 | One Vercel root session  | `vercel.session_id=<root session ID>`                                   |
 | One agent run            | `agent.run.id=<run ID>`                                                 |
+| Root agent runs          | `agent.run.type=session`                                                |
+| Subagent runs            | `agent.run.type=subagent`                                               |
+| Scheduled root sessions  | `agent.session.origin=schedule`                                         |
+| One channel kind         | `agent.channel.kind=<channel kind>`                                     |
+| Exported input content   | `agent.trace.content.input=true`                                        |
+| Exported output content  | `agent.trace.content.output=true`                                       |
 | Delegated dispatches     | `agent.invocation.role=caller`                                          |
 
 Start with an activation filter for latency, failure, or turn-count dashboards. Every activation is a trace root. Within a conversation, group by trace ID, order activations by `agent.turn.sequence` or start time, and open the selected trace ID. Child activations link to their caller with `eve.link.type=agent.dispatch`; remote workflows keep their own execution lineage, so use conversation IDs and caller links for cross-deployment correlation.

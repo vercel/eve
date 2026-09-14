@@ -38,6 +38,7 @@ import {
   ChannelRequestIdKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
@@ -193,6 +194,12 @@ export function readScheduleId(serializedContext: Record<string, unknown>): stri
   return isNonEmptyString(scheduleId) ? scheduleId : undefined;
 }
 
+/** Reads the bounded title stored for a top-level session. */
+export function readSessionTitle(serializedContext: Record<string, unknown>): string | undefined {
+  const title = serializedContext[SessionTitleKey.name];
+  return isNonEmptyString(title) ? title : undefined;
+}
+
 /**
  * Maximum visible length (in code points) of a derived `$eve.title`.
  *
@@ -278,7 +285,8 @@ export function buildSessionAttributes(input: {
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
-    "$eve.title": deriveSessionTitle(input.inputMessage),
+    "$eve.title":
+      readSessionTitle(input.serializedContext) ?? deriveSessionTitle(input.inputMessage),
   };
 }
 

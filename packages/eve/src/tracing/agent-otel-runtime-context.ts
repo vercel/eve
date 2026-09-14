@@ -17,10 +17,15 @@ export function agentActivationAttributes(input: {
   const recordsTrace = input.session?.decision?.action === "record";
   const recordsInputs = recordsTrace && input.session?.decision?.recordInputs === true;
   const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
-  const origin =
-    input.session?.scheduleId !== undefined
+  const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
+  const isSubagent = parentLineage !== undefined;
+  const channelKind = input.turn.channelDelivery?.channelKind ?? input.session?.channelKind;
+  const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
+  const origin = isSubagent
+    ? "unknown"
+    : scheduleId !== undefined
       ? "schedule"
-      : input.session?.channelKind !== undefined
+      : channelKind !== undefined
         ? "channel"
         : "unknown";
   return {
@@ -31,15 +36,15 @@ export function agentActivationAttributes(input: {
     ...agentPrincipalAttributes(input.turn),
     "agent.channel.delivery.id": input.turn.channelDelivery?.deliveryId,
     "agent.channel.delivery.input": input.turn.channelDelivery?.inputAttribute,
-    "agent.channel.kind": input.turn.channelDelivery?.channelKind,
+    "agent.channel.kind": channelKind,
     "agent.channel.name": input.turn.channelDelivery?.channelName,
     "agent.channel.request.id": input.turn.channelDelivery?.requestId,
-    "agent.parent_call.id": input.turn.parentLineage?.callId,
-    "agent.parent_run.id": input.turn.parentLineage?.sessionId,
-    "agent.run.type": input.turn.parentLineage === undefined ? "session" : "subagent",
-    "agent.schedule.id": input.session?.scheduleId,
+    "agent.parent_call.id": parentLineage?.callId,
+    "agent.parent_run.id": parentLineage?.sessionId,
+    "agent.run.type": isSubagent ? "subagent" : "session",
+    "agent.schedule.id": scheduleId,
     "agent.session.origin": origin,
-    "agent.session.title": recordsInputs ? input.session?.title : undefined,
+    "agent.session.title": !isSubagent && recordsInputs ? input.session?.title : undefined,
     "agent.subagent.name": input.turn.subagentName,
     "agent.trace.content.input": recordsInputs,
     "agent.trace.content.output": recordsOutputs,

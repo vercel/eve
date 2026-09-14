@@ -45,6 +45,7 @@ describe("agentActivationAttributes", () => {
       }),
     ).toMatchObject({
       "agent.channel.audience": "public",
+      "agent.channel.kind": "slack",
       "agent.run.type": "session",
       "agent.session.origin": "channel",
       "agent.session.title": "Call the general agent",
@@ -53,7 +54,7 @@ describe("agentActivationAttributes", () => {
     });
   });
 
-  it("emits delegated schedule provenance without disclosing a hidden title", () => {
+  it("keeps root-only provenance and title off delegated activations", () => {
     const attributes = agentActivationAttributes({
       agentName: "general",
       frameworkVersion: "test",
@@ -76,12 +77,13 @@ describe("agentActivationAttributes", () => {
 
     expect(attributes).toMatchObject({
       "agent.channel.audience": "private",
+      "agent.channel.kind": "slack",
       "agent.run.type": "subagent",
-      "agent.schedule.id": "daily-report",
-      "agent.session.origin": "schedule",
+      "agent.session.origin": "unknown",
       "agent.trace.content.input": false,
       "agent.trace.content.output": true,
     });
+    expect(attributes["agent.schedule.id"]).toBeUndefined();
     expect(attributes["agent.session.title"]).toBeUndefined();
   });
 });
