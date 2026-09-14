@@ -23,8 +23,9 @@ async function resolveMainTarget(github, repo, run) {
 
 async function resolvePullRequestTarget(github, repo, run) {
   const headRepository = run.head_repository?.full_name;
-  if (typeof headRepository !== "string" || headRepository.length === 0) {
-    throw new Error("Package build is missing its head repository.");
+  const baseRepository = `${repo.owner}/${repo.repo}`;
+  if (headRepository !== baseRepository) {
+    throw new Error(`Refusing to publish package artifacts from ${String(headRepository)}.`);
   }
 
   const [headOwner] = headRepository.split("/");

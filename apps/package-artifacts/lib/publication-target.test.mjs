@@ -80,20 +80,13 @@ describe("package publication target", () => {
     });
   });
 
-  test("supports pull requests from forks", async () => {
+  test("rejects pull requests from forks", async () => {
     const run = workflowRun({ head_repository: { full_name: "alice/eve" } });
-    const api = github({
-      pulls: [pull({ head: { ref: "feature/package", repo: { full_name: "alice/eve" }, sha } })],
-    });
-    await expect(resolvePublicationTarget(api, context(run))).resolves.toEqual({
-      runId: "123",
-      sha,
-      ref: "456",
-    });
-    expect(api.paginate).toHaveBeenCalledWith(
-      api.rest.pulls.list,
-      expect.objectContaining({ head: "alice:feature/package" }),
+    const api = github();
+    await expect(resolvePublicationTarget(api, context(run))).rejects.toThrow(
+      "Refusing to publish package artifacts from alice/eve",
     );
+    expect(api.paginate).not.toHaveBeenCalled();
   });
 
   test("rejects stale, closed, mismatched, and ambiguous pull requests", async () => {
