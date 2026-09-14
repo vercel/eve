@@ -218,7 +218,7 @@ Enable the experimental, model-facing `workflow` tool on the root agent with `ex
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "openai/gpt-5.6-luna-fast",
   experimental: {
     dynamicWorkflows: true,
   },
@@ -229,7 +229,7 @@ Pass `{ maxSubagents }` instead of `true` to limit the number of child-agent cal
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "openai/gpt-5.6-luna-fast",
   experimental: {
     dynamicWorkflows: { maxSubagents: 20 },
   },

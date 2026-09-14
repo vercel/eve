@@ -19,7 +19,7 @@ Set `experimental.dynamicWorkflows` on the root agent:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "openai/gpt-5.6-luna-fast",
   experimental: {
     dynamicWorkflows: true,
   },
@@ -32,7 +32,7 @@ export default defineAgent({
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "openai/gpt-5.6-luna-fast",
   experimental: {
     dynamicWorkflows: {
       maxSubagents: 20,
