@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
+import { createMicrosandboxSandboxProvider } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   createMicrosandboxNetworkPlan,
   createTransformBrokerEnvironment,
@@ -23,13 +23,9 @@ vi.mock("#execution/sandbox/bindings/microsandbox-lifecycle.js", () => lifecycle
 // glibc Linux only; keep every microsandbox suite off Windows.
 const onWindows = process.platform === "win32";
 
-describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
+describe.skipIf(onWindows)("microsandbox provider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("exposes the stable backend name without loading microsandbox", () => {
-    expect(createMicrosandboxSandboxBackend().name).toBe("microsandbox");
   });
 
   it("defaults to eve's published sandbox runtime image", () => {
@@ -53,16 +49,16 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
     );
     lifecycleMocks.prewarmMicrosandboxTemplate.mockRejectedValueOnce(cause);
 
-    const prewarm = createMicrosandboxSandboxBackend().prewarm?.({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      seedFiles: [],
-      templateKey: "template-key",
+    const prewarm = createMicrosandboxSandboxProvider().prepare({
+      appRoot: "/tmp/eve-app",
+      resources: {},
+      runPreparation: async () => {},
+      templateName: "template-key",
     });
 
     await expect(prewarm).rejects.toMatchObject({
-      cause,
       message: expect.stringContaining(
-        'Failed to prewarm microsandbox template "template-key" [database]: ' +
+        'Failed to prepare microsandbox template "template-key" [database]: ' +
           "Migration file of version 'm20260606_000001_named_volume_kinds' is missing.",
       ),
       // The per-code remediation travels as a structured hint, not prose.

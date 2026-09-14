@@ -48,19 +48,19 @@ flowchart LR
   Parked --> Resume["Later callback reopens"]
 ```
 
-- Each built-in backend maps `stop()` to its native lifecycle operation:
+- Each built-in provider maps `stop()` to its native lifecycle operation:
   Vercel stops its persistent sandbox, Docker stops its session container,
   microsandbox stops and detaches its VM, and just-bash disposes its interpreter.
 - A resolved stop preserves the durable session state. A later callback opens
-  the same session through the normal backend `create()` path. Vercel also
+  the same session through the provider's normal `getOrCreate()` path. Vercel also
   automatically resumes the same handle on later I/O, matching its inactivity
   timeout behavior.
 - eve does not create stop-specific reconnect state. Ordinary step persistence
-  continues recording the backend's existing reconnect metadata.
+  continues recording the provider's existing reconnect metadata.
 - A provider stop failure rejects the authored call. Server-shutdown cleanup
   remains a separate best-effort lifecycle path.
-- Custom `SandboxBackend` handles implement `stop()` alongside `shutdown()` so
-  the runtime session contract is supported by every provider.
+- Custom `defineSandboxProvider()` handles implement `stop()` alongside
+  `shutdown()` so the runtime session contract is supported by every provider.
 
 ## Scope
 

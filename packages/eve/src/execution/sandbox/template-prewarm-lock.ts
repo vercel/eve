@@ -9,7 +9,7 @@ const STALE_LOCK_MS = 30 * 60 * 1000;
 
 export interface SandboxTemplatePrewarmLockInput {
   readonly appRoot: string;
-  readonly backendName: string;
+  readonly providerName: string;
   readonly log?: (message: string) => void;
   readonly templateKey: string;
 }
@@ -37,7 +37,7 @@ function resolveSandboxTemplatePrewarmLockPath(input: SandboxTemplatePrewarmLock
   return join(
     resolveSandboxCacheDirectory(input.appRoot),
     "template-locks",
-    input.backendName,
+    input.providerName,
     `${input.templateKey}.lock`,
   );
 }

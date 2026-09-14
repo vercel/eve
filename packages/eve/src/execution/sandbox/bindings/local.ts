@@ -1,11 +1,11 @@
 /**
- * Facade over every local sandbox backend (Docker, just-bash,
+ * Facade over every local sandbox provider (Docker, just-bash,
  * microsandbox) plus their availability probes and cache pruning.
  *
  * This module is the single import path for local-engine functionality
  * from the public surface, so the hosted (Vercel) server bundle can
  * prune all of it by stubbing one module — see
- * `createCompiledSandboxBackendPrunePlugin`. Anything exported here
+ * `createCompiledSandboxProviderPrunePlugin`. Anything exported here
  * must also exist on that stub.
  */
 import {
@@ -17,19 +17,19 @@ import { pruneJustBashSandboxTemplates } from "#execution/sandbox/bindings/just-
 import { pruneMicrosandboxTemplates } from "#execution/sandbox/bindings/microsandbox.js";
 
 export {
-  createDockerSandboxBackend,
-  DOCKER_BACKEND_NAME,
+  createDockerSandboxProvider,
+  DOCKER_PROVIDER_NAME,
   pruneDockerSandboxTemplates,
 } from "#execution/sandbox/bindings/docker.js";
 export { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/docker-cli.js";
 export {
-  createJustBashSandboxBackend,
-  JUST_BASH_BACKEND_NAME,
+  createJustBashSandboxProvider,
+  JUST_BASH_PROVIDER_NAME,
   pruneJustBashSandboxTemplates,
 } from "#execution/sandbox/bindings/just-bash.js";
 export {
-  createMicrosandboxSandboxBackend,
-  MICROSANDBOX_BACKEND_NAME,
+  createMicrosandboxSandboxProvider,
+  MICROSANDBOX_PROVIDER_NAME,
   pruneMicrosandboxTemplates,
 } from "#execution/sandbox/bindings/microsandbox.js";
 export { isMicrosandboxPlatformSupported } from "#execution/sandbox/bindings/microsandbox-platform.js";

@@ -171,7 +171,9 @@ matrices from the registry:
 - `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
   registry model is the default that every fixture runs on; the rest run only
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
-  A fixture can add a narrowly scoped leg with `e2e.additionalModels` entries
+  A fixture can set `e2e.localOnly: true` when it requires local-runner hardware
+  or daemons and must not enter world deployment matrices. A fixture can add a
+  narrowly scoped leg with `e2e.additionalModels` entries
   shaped as `{ "name": "short-check-name", "id": "provider/model" }`.
   `e2e.optionalModels` can name selected model legs that should still run and
   report failures without blocking the aggregate check.

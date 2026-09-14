@@ -3,7 +3,7 @@ import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import type { ResolvedDockerSandboxOptions } from "#execution/sandbox/bindings/docker-options.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
-import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
+import type { SandboxProviderTags } from "#shared/sandbox-provider.js";
 import type { DockerSandboxNetworkPolicy } from "#public/sandbox/docker-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 
@@ -20,8 +20,9 @@ export async function startDockerContainer(input: {
   readonly image: string;
   readonly initialNetworkPolicy: DockerSandboxNetworkPolicy;
   readonly options: ResolvedDockerSandboxOptions;
+  readonly resourcesPath?: string;
   readonly role: "session" | "template-build";
-  readonly tags?: SandboxBackendTags;
+  readonly tags?: SandboxProviderTags;
 }): Promise<void> {
   const args = [
     "run",
@@ -42,6 +43,9 @@ export async function startDockerContainer(input: {
   }
   if (input.initialNetworkPolicy === "deny-all") {
     args.push("--network", "none");
+  }
+  if (input.resourcesPath !== undefined) {
+    args.push("--mount", `type=bind,src=${input.resourcesPath},dst=/eve/resources,readonly`);
   }
 
   args.push(

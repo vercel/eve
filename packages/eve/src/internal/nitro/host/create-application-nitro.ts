@@ -17,7 +17,7 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
+import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   createExtensionExternalDependencyPlugin,
@@ -133,29 +133,29 @@ function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): 
  * and subagents) selected, so the host build can make backend-aware
  * packaging decisions.
  */
-function collectConfiguredSandboxBackendNames(manifest: CompiledAgentManifest): Set<string> {
+function collectConfiguredSandboxProviderNames(manifest: CompiledAgentManifest): Set<string> {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return new Set(
     nodes
-      .map((node) => node.sandbox?.backendName)
-      .filter((backendName): backendName is string => typeof backendName === "string"),
+      .map((node) => node.sandbox?.providerName)
+      .filter((providerName): providerName is string => typeof providerName === "string"),
   );
 }
 
 /**
- * Hosted Vercel builds can prune local sandbox backends only when the
+ * Hosted Vercel builds can prune local sandbox providers only when the
  * app did not explicitly configure one. Omitted backends resolve through
- * `defaultSandbox()`, which selects Vercel on hosted Vercel and never
+ * `DefaultSandbox.environment()`, which selects Vercel on hosted Vercel and never
  * needs local runtime code there.
  */
-export function shouldPruneLocalSandboxBackends(input: {
+export function shouldPruneLocalSandboxProviders(input: {
   readonly configuredBackendNames: ReadonlySet<string>;
   readonly preset: "vercel" | undefined;
 }): boolean {
   return (
     input.preset === "vercel" &&
-    ![...input.configuredBackendNames].some((backendName) =>
-      LOCAL_SANDBOX_BACKEND_NAMES.has(backendName),
+    ![...input.configuredBackendNames].some((providerName) =>
+      LOCAL_SANDBOX_BACKEND_NAMES.has(providerName),
     )
   );
 }
@@ -598,21 +598,21 @@ function createApplicationNitroBundlerConfiguration(
   preparedHost: PreparedApplicationHost,
   preset: "vercel" | undefined,
 ) {
-  const configuredBackendNames = collectConfiguredSandboxBackendNames(
+  const configuredBackendNames = collectConfiguredSandboxProviderNames(
     preparedHost.compileResult.manifest,
   );
-  const compiledSandboxBackendPrunePlugin = shouldPruneLocalSandboxBackends({
+  const compiledSandboxProviderPrunePlugin = shouldPruneLocalSandboxProviders({
     configuredBackendNames,
     preset,
   })
-    ? createCompiledSandboxBackendPrunePlugin()
+    ? createCompiledSandboxProviderPrunePlugin()
     : null;
   const configuredOptionalEnginePackages: string[] = [];
   const unconfiguredOptionalEnginePackages: string[] = [];
-  for (const [backendName, packageName] of Object.entries(
+  for (const [providerName, packageName] of Object.entries(
     OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
   )) {
-    (configuredBackendNames.has(backendName)
+    (configuredBackendNames.has(providerName)
       ? configuredOptionalEnginePackages
       : unconfiguredOptionalEnginePackages
     ).push(packageName);
@@ -633,7 +633,7 @@ function createApplicationNitroBundlerConfiguration(
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
   const nitroBundlerPlugins = [
-    compiledSandboxBackendPrunePlugin,
+    compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,

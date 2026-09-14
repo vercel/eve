@@ -32,17 +32,16 @@ describe("relocated production applications", () => {
         "apps/service/agent/skills/probe.md":
           "---\ndescription: Probe the sandbox.\n---\nProbe content.",
         "apps/service/agent/sandbox/sandbox.ts": [
-          'import { justbash } from "eve/sandbox/just-bash";',
+          'import { defineSandbox } from "eve/sandbox";',
+          'import { JustBashSandbox } from "eve/sandbox/just-bash";',
           'import { marker } from "@/marker";',
-          "export default {",
-          "  backend: justbash(),",
-          '  revalidationKey: () => "relocated-v1",',
-          "  async bootstrap({ use }) {",
-          "    const sandbox = await use();",
+          "export const environment = JustBashSandbox.environment({",
+          "  prepare: async (sandbox) => {",
           "    const result = await sandbox.run({ command: `echo ${marker}` });",
           '    if (result.stdout.trim() !== "app-bootstrap") throw new Error("Wrong app alias");',
           "  },",
-          "};",
+          "});",
+          "export default defineSandbox(() => environment.create());",
         ].join("\n"),
         "apps/service/agent/extensions/acme.ts":
           'import extension from "@acme/relocated"; export default extension();',
@@ -94,10 +93,14 @@ describe("relocated production applications", () => {
     const seededPaths: string[] = [];
     await prewarmBuiltAppSandboxes({
       appRoot: runtimeAppRoot,
-      dispatch: async ({ backend, input }) => {
-        prewarmedRoots.push(input.runtimeContext.appRoot);
-        seededPaths.push(...(input.seedFiles ?? []).map((file) => file.path));
-        return await backend.prewarm(input);
+      dispatch: async ({ context, provider }) => {
+        prewarmedRoots.push(context.appRoot);
+        seededPaths.push(
+          ...(context.resources.skills?.files.map(
+            (file) => `${context.resources.skills?.targetPath}/${file.relativePath}`,
+          ) ?? []),
+        );
+        return await provider.implementation.prepare(context);
       },
     });
     expect(prewarmedRoots).toEqual([runtimeAppRoot]);

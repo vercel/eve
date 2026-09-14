@@ -8,12 +8,14 @@ export const MICROSANDBOX_METADATA_VERSION = 2;
 export const MICROSANDBOX_METADATA_FILE_NAME = "metadata.json";
 
 export interface MicrosandboxTemplateMetadata {
+  readonly image?: string;
   readonly optionsHash: string;
   readonly snapshotName: string;
   readonly version: typeof MICROSANDBOX_METADATA_VERSION;
 }
 
 export interface MicrosandboxSessionMetadata {
+  readonly image?: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly optionsHash: string;
   readonly sandboxName: string;
@@ -37,6 +39,7 @@ export async function readTemplateMetadata(
     return null;
   }
   return {
+    image: typeof metadata.image === "string" ? metadata.image : undefined,
     optionsHash: metadata.optionsHash,
     snapshotName: metadata.snapshotName,
     version: MICROSANDBOX_METADATA_VERSION,
@@ -68,6 +71,7 @@ export function readSessionMetadataRecord(value: unknown): MicrosandboxSessionMe
     return null;
   }
   return {
+    image: typeof value.image === "string" ? value.image : undefined,
     networkPolicy: value.networkPolicy as SandboxNetworkPolicy | undefined,
     optionsHash: value.optionsHash,
     sandboxName: value.sandboxName,

@@ -1,11 +1,11 @@
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
-import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
+import type { SandboxProviderTags } from "#shared/sandbox-provider.js";
 
 const VERCEL_SANDBOX_TAG_LIMIT = 5;
 
 export function resolveVercelSandboxTags(
   userTags: VercelCreateOptions["tags"],
-  eveTags: SandboxBackendTags | undefined,
+  eveTags: SandboxProviderTags | undefined,
 ): Record<string, string> | undefined {
   const tags: Record<string, string> = {};
 
@@ -27,7 +27,7 @@ export function resolveVercelSandboxTags(
   if (count > VERCEL_SANDBOX_TAG_LIMIT) {
     throw new Error(
       `Vercel Sandbox supports at most ${VERCEL_SANDBOX_TAG_LIMIT} tags. ` +
-        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
+        'eve reserves "agent", "channel", "sessionId", and for named sharing "sandboxConfig"; remove or consolidate custom tags.',
     );
   }
 

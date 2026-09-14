@@ -132,7 +132,9 @@ import template from "../../prompts/template.txt?raw";
 | `eve/memory/file`                                                           | `fileMemory`, `inMemory`, and the conditional document backend contract                                 |
 | `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                                                            |
 | `eve/context`                                                               | `defineState`, session and state types                                                                  |
-| `eve/sandbox`                                                               | `defineSandbox`, backends                                                                               |
+| `eve/sandbox`                                                               | `defineSandbox`, `DefaultSandbox`, and live sandbox types                                               |
+| `eve/sandbox/provider`                                                      | `defineSandboxProvider` and provider resource and lifecycle types                                       |
+| `eve/sandbox/{docker,just-bash,microsandbox,vercel}`                        | built-in sandbox providers and their typed environment options                                          |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                    |
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                           |
 | `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                            |

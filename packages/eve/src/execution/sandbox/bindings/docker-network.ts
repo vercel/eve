@@ -14,9 +14,9 @@ export async function setDockerNetworkPolicy(
 ): Promise<void> {
   if (policy !== "allow-all" && policy !== "deny-all") {
     throw new Error(
-      'The local Docker sandbox backend supports only the "allow-all" and "deny-all" network ' +
+      'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
         "policies. Domain-level allow-lists and credential brokering require the Vercel backend " +
-        "(vercel()) or microsandbox().",
+        "(VercelSandbox) or MicrosandboxSandbox.",
     );
   }
 

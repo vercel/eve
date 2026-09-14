@@ -3,15 +3,15 @@
 // prove the corresponding surface actually ran. Kept in sync by hand because
 // the agent tree is compiled/deployed independently of the eval tree.
 
-/** Written by `bootstrap` into the reusable template snapshot. */
+/** Written by `prepare()` into the reusable environment snapshot. */
 export const BOOTSTRAP_MARKER_PATH = "/workspace/smoke-marker.txt";
 export const BOOTSTRAP_MARKER_TOKEN = "sandbox-bootstrap-ok-J3Q";
 
-/** Custom CLI installed on the PATH by `bootstrap`. */
+/** Custom CLI installed on the PATH by environment preparation. */
 export const SANDBOX_CLI_NAME = "eve-greet";
 export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 
-/** Written by `onSession` into each live session (not the template). */
+/** Written by the selector into each live session (not the template). */
 export const SESSION_MARKER_PATH = "/workspace/session-marker.txt";
 export const SESSION_MARKER_TOKEN = "sandbox-onsession-ok-X5T";
 

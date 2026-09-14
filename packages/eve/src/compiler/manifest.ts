@@ -740,19 +740,15 @@ const compiledScheduleDefinitionSchema = z.discriminatedUnion("sourceKind", [
 const compiledSandboxDefinitionSchema = z
   .object({
     /**
-     * Stable name of the authored backend (`"local"`, `"vercel"`,
-     * `"local-just-bash"`, or a custom backend's name), captured at
-     * compile time so build pipelines can make backend-aware decisions
-     * (for example including the optional just-bash engine package in
-     * hosted output). Absent when the definition omits `backend` or the
-     * backend's name could not be resolved at compile time.
+     * Stable provider name from the exported environment, captured at compile
+     * time so build pipelines can make provider-aware decisions.
      */
-    backendName: z.string().optional(),
-    description: z.string().optional(),
+    providerName: z.string().optional(),
+    dockerfileHash: z.string().optional(),
+    environmentExportName: z.string().optional(),
     inheritsParent: z.boolean().optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    revalidationKey: z.string().optional(),
     sourceHash: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),

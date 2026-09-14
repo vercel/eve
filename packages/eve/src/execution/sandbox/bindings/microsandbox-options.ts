@@ -10,7 +10,7 @@ export const MICROSANDBOX_DEFAULT_PULL_POLICY = "if-missing";
 export const MICROSANDBOX_USER = "vercel-sandbox";
 
 /**
- * Fully-defaulted microsandbox backend options consumed by the backend
+ * Fully-defaulted microsandbox provider options consumed by the backend
  * implementation.
  */
 export interface ResolvedMicrosandboxOptions {

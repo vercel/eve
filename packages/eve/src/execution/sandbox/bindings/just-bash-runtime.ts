@@ -6,12 +6,12 @@ import type { IFileSystem } from "just-bash";
 import {
   createFileBackedInternalSandboxSession,
   pathExists,
-} from "#execution/sandbox/bindings/local-backend-utils.js";
+} from "#execution/sandbox/bindings/local-provider-utils.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
-import type { SandboxBackendHandle } from "#public/definitions/sandbox-backend.js";
+import type { SandboxProviderHandle } from "#shared/sandbox-provider.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
@@ -61,9 +61,9 @@ async function loadJustBashModule(input: {
     autoInstall: input.autoInstall,
     importModule: async () => await import("just-bash"),
     missingMessage:
-      "The just-bash sandbox backend requires the `just-bash` package, which is not bundled " +
+      "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
       "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
-      "docker() / defaultSandbox() instead.",
+      "DockerSandbox or DefaultSandbox instead.",
     packageName: JUST_BASH_PACKAGE_NAME,
   }).catch((error: unknown) => {
     justBashModulePromise = undefined;
@@ -197,32 +197,24 @@ export async function createBashSandbox(input: {
  */
 export async function justBashSetNetworkPolicyUnsupported(): Promise<never> {
   throw new Error(
-    "setNetworkPolicy() is not supported on the just-bash sandbox backend. just-bash " +
+    "setNetworkPolicy() is not supported on the just-bash sandbox provider. just-bash " +
       "applies its network policy only at sandbox creation (no run-time update) and does not run " +
-      "git or other binaries. Use docker() for coarse egress control or vercel() / " +
+      "git or other binaries. Use DockerSandbox for coarse egress control or vercel() / " +
       "microsandbox() for credential brokering.",
   );
 }
 
 export function createJustBashHandle(
   sandbox: BashSandbox,
-  backendName: string,
-): SandboxBackendHandle {
+): SandboxProviderHandle<Record<string, unknown>> {
   const session = buildSandboxSession(
     createFileBackedInternalSandboxSession({ id: sandbox.sessionKey, sandbox }),
     justBashSetNetworkPolicyUnsupported,
   );
   return {
-    session,
-    useSessionFn: async () => session,
-    async captureState() {
-      const metadata = (await sandbox.captureState()) ?? {};
-      return {
-        backendName,
-        metadata,
-        sessionKey: sandbox.sessionKey,
-      };
-    },
+    captureMetadata: async () => (await sandbox.captureState()) ?? {},
+    metadata: {},
+    sandbox: session,
     async delete() {
       await sandbox.dispose();
       await rm(sandbox.rootPath, { force: true, recursive: true });

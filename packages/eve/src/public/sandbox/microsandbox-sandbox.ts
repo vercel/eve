@@ -1,9 +1,9 @@
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 /**
- * Options accepted by `microsandbox(opts)`.
+ * Options accepted by microsandbox environment constructors.
  *
- * The microsandbox backend runs sandboxes in lightweight local VMs via
+ * The microsandbox provider runs sandboxes in lightweight local VMs via
  * [microsandbox](https://www.npmjs.com/package/microsandbox). Options
  * are eve-owned rather than a raw passthrough so the public surface can
  * stay stable while the underlying runtime evolves. Supported hosts:
@@ -13,8 +13,8 @@ export interface MicrosandboxSandboxCreateOptions {
   /**
    * OCI image used as the base runtime. eve prepares this image with
    * Bash, the framework workspace, and the sandbox user before authored
-   * bootstrap code runs. Install authored runtime tools such as Node,
-   * Python, or ripgrep in sandbox bootstrap or provide them through a
+   * environment preparation runs. Install authored runtime tools such as Node,
+   * Python, or ripgrep during preparation or provide them through a
    * custom image.
    *
    * @default The `ghcr.io/vercel/eve` tag matching the installed eve version, or `EVE_SANDBOX_IMAGE_TAG` when set.
@@ -39,19 +39,5 @@ export interface MicrosandboxSandboxCreateOptions {
     readonly skipVerify?: boolean;
   };
   /** Initial network policy applied to sandboxes after framework setup. */
-  readonly networkPolicy?: SandboxNetworkPolicy;
-}
-
-/**
- * Options accepted by the microsandbox backend's `bootstrap({ use })` hook.
- */
-export interface MicrosandboxBootstrapUseOptions {
-  readonly networkPolicy?: SandboxNetworkPolicy;
-}
-
-/**
- * Options accepted by the microsandbox backend's `onSession({ use })` hook.
- */
-export interface MicrosandboxSessionUseOptions {
   readonly networkPolicy?: SandboxNetworkPolicy;
 }

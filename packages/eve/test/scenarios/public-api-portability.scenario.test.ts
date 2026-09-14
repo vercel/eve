@@ -65,42 +65,54 @@ export default withEve(config);
   {
     descriptor: {
       files: {
-        "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
-import { docker } from "eve/sandbox/docker";
-import { justbash } from "eve/sandbox/just-bash";
-import { microsandbox } from "eve/sandbox/microsandbox";
-import { Drive, vercel } from "eve/sandbox/vercel";
+        "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+import { defineSandboxProvider } from "eve/sandbox/provider";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
+import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
+import { Drive, VercelSandbox } from "eve/sandbox/vercel";
 
-const fallback = defaultBackend({
-  docker: { image: "ghcr.io/vercel/eve:latest" },
-  justBash: {},
-  microsandbox: {},
-  vercel: { resources: { vcpus: 2 } },
+const custom = defineSandboxProvider({
+  name: "custom",
+  environment() {
+    return {
+      async prepare() { return { artifact: {}, reused: true }; },
+      async getOrCreate() { throw new Error("unused"); },
+    };
+  },
 });
+void custom.environment();
+
+export const environment = process.env.VERCEL === "1"
+  ? VercelSandbox.environment({ resources: { vcpus: 2 } })
+  : DefaultSandbox.environment({ docker: { image: "ghcr.io/vercel/eve:latest" } });
 void Drive;
+void DockerSandbox.dockerfile({ networkPolicy: "deny-all" });
+void DockerSandbox.image("ghcr.io/acme/agent:latest");
+void JustBashSandbox.environment();
+void MicrosandboxSandbox.dockerfile();
+void MicrosandboxSandbox.image("ghcr.io/acme/agent:latest");
 
-void docker;
-void justbash;
-void microsandbox;
-
-export default defineSandbox({
-  backend: process.env.VERCEL === "1" ? vercel() : fallback,
-});
+export default defineSandbox(() => environment.create());
 `,
       },
       name: "sandbox-public-api-portability",
     },
     include: [
       "src/public/sandbox/index.ts",
+      "src/public/sandbox/provider.ts",
       "src/public/sandbox/docker.ts",
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
     ],
-    name: "lets tsc typecheck sandbox backend factories from nested subpath imports",
+    name: "lets tsc typecheck sandbox environments from nested subpath imports",
     packageExports: {
       "./sandbox": {
         types: "./dist/src/public/sandbox/index.d.ts",
+      },
+      "./sandbox/provider": {
+        types: "./dist/src/public/sandbox/provider.d.ts",
       },
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",

@@ -1,7 +1,7 @@
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
- * The slice of `SandboxBackendHandle` the shutdown registry needs.
+ * The provider handle capability the shutdown registry needs.
  * Structural so handles of any session-options generic register without
  * variance friction.
  */
@@ -10,7 +10,7 @@ export interface ShutdownCapableSandboxHandle {
 }
 
 /**
- * Process-level registry of live sandbox backend handles, keyed by
+ * Process-level registry of live sandbox provider handles, keyed by
  * backend name and session key so repeated `create` calls for the same
  * session replace rather than accumulate entries.
  *
@@ -20,8 +20,8 @@ export interface ShutdownCapableSandboxHandle {
  */
 const activeSandboxHandles = new Map<string, ShutdownCapableSandboxHandle>();
 
-function createActiveSandboxHandleKey(backendName: string, sessionKey: string): string {
-  return `${backendName}\0${sessionKey}`;
+function createActiveSandboxHandleKey(providerName: string, sessionKey: string): string {
+  return `${providerName}\0${sessionKey}`;
 }
 
 /**
@@ -30,12 +30,12 @@ function createActiveSandboxHandleKey(backendName: string, sessionKey: string): 
  * previous entry.
  */
 export function trackActiveSandboxHandle(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly handle: ShutdownCapableSandboxHandle;
   readonly sessionKey: string;
 }): void {
   activeSandboxHandles.set(
-    createActiveSandboxHandleKey(input.backendName, input.sessionKey),
+    createActiveSandboxHandleKey(input.providerName, input.sessionKey),
     input.handle,
   );
 }

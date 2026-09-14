@@ -103,6 +103,13 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Enable KVM for microsandbox
+        if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-microsandbox-dockerfile'
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          docker info
+
       - name: Build eve package
         if: needs.changes.outputs.relevant == 'true'
         # Full build, not build:js: the deployed/runtime bundles must carry the

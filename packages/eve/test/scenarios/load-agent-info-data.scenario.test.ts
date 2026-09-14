@@ -34,7 +34,12 @@ describe("loadAgentInfoData", () => {
     });
     await writeFile(
       join(agentRoot, "sandbox", "sandbox.ts"),
-      ["export default {};", ""].join("\n"),
+      [
+        'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+        "export const environment = DefaultSandbox.environment();",
+        "export default defineSandbox(() => environment.create());",
+        "",
+      ].join("\n"),
     );
 
     await compileAgent({

@@ -366,6 +366,27 @@ describe.skipIf(process.platform === "win32")("createPreparedMicrosandbox", () =
     }
   });
 
+  it("mounts compiled resources read-only", async () => {
+    const module = createCreationModule({
+      create: async () => createMockMicrosandbox(),
+      progress: [],
+    });
+
+    await createPreparedMicrosandbox({
+      module: module as never,
+      name: "template-vm",
+      networkPolicy: "deny-all",
+      options: resolveMicrosandboxOptions(undefined),
+      resourcesPath: "/tmp/resources",
+      sessionKey: "template-key",
+      setupBaseRuntime: false,
+    });
+
+    expect(module.mounts).toEqual([
+      { guest: "/eve/resources", host: "/tmp/resources", readonly: true },
+    ]);
+  });
+
   it("adds image and provider context when VM creation rejects", async () => {
     class TestMicrosandboxError extends Error {
       readonly code = "imageNotFound";
@@ -450,6 +471,7 @@ function createCreationModule(input: {
   readonly create: () => Promise<ReturnType<typeof createMockMicrosandbox>>;
   readonly progress: readonly Record<string, unknown>[];
 }) {
+  const mounts: Array<{ guest: string; host?: string; readonly: boolean }> = [];
   const builder = {
     cpus: returnBuilder,
     async create() {
@@ -472,6 +494,26 @@ function createCreationModule(input: {
     pullPolicy: returnBuilder,
     replace: returnBuilder,
     user: returnBuilder,
+    volume(guest: string, configure: (mount: unknown) => unknown) {
+      const record = { guest, readonly: false } as {
+        guest: string;
+        host?: string;
+        readonly: boolean;
+      };
+      const mount = {
+        bind(host: string) {
+          record.host = host;
+          return mount;
+        },
+        readonly() {
+          record.readonly = true;
+          return mount;
+        },
+      };
+      configure(mount);
+      mounts.push(record);
+      return builder;
+    },
     workdir: returnBuilder,
   };
 
@@ -480,6 +522,7 @@ function createCreationModule(input: {
   }
 
   return {
+    mounts,
     Sandbox: {
       builder() {
         return builder;

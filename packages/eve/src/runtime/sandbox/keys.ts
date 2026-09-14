@@ -22,10 +22,13 @@ const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
  * Input for deriving the stable runtime keys used for one sandbox definition.
  */
 interface CreateRuntimeSandboxKeysInput {
-  readonly backendName: string;
+  readonly providerName: string;
+  readonly configurationHash?: string;
+  readonly environmentConfigurationHash?: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
   readonly sessionId: string;
+  readonly shared?: boolean;
   readonly sourceId: string;
   readonly templatePlan: RuntimeSandboxTemplatePlan;
 }
@@ -59,8 +62,9 @@ export async function createRuntimeSandboxKeys(input: CreateRuntimeSandboxKeysIn
  * path.
  */
 export async function createRuntimeSandboxTemplateKey(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly configurationHash?: string;
   readonly nodeId: string;
   readonly sourceId: string;
   readonly templatePlan: RuntimeSandboxTemplatePlan;
@@ -74,45 +78,54 @@ export async function createRuntimeSandboxTemplateKey(input: {
  * version hash (`null` when the sandbox needs no template).
  */
 interface RuntimeSandboxKeyParts {
+  readonly environmentHash: string;
   readonly metadata: CompileMetadata | null;
   readonly scope: string;
-  readonly versionHash: string | null;
+  readonly templateHash: string | null;
 }
 
 async function deriveRuntimeSandboxKeyParts(input: {
-  readonly backendName: string;
+  readonly providerName: string;
+  readonly configurationHash?: string;
+  readonly environmentConfigurationHash?: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
+  readonly shared?: boolean;
   readonly sourceId: string;
   readonly templatePlan: RuntimeSandboxTemplatePlan;
 }): Promise<RuntimeSandboxKeyParts> {
   const metadata = await loadCompileMetadataForKeys(input.compiledArtifactsSource);
   const scope = await resolveRuntimeSandboxScope(input);
-  const versionHash =
+  const templateHash =
     input.templatePlan.kind === "none"
       ? null
-      : resolveRuntimeSandboxVersionHash({
-          nodeId: input.nodeId,
-          sourceId: input.sourceId,
-          templatePlan: input.templatePlan,
-        });
-  return { metadata, scope, versionHash };
+      : createStableHash(
+          `${resolveRuntimeSandboxTemplateHash({
+            nodeId: input.nodeId,
+            sourceId: input.sourceId,
+            templatePlan: input.templatePlan,
+          })}:${input.environmentConfigurationHash ?? input.configurationHash ?? ""}`,
+        );
+  const environmentHash = createStableHash(
+    `environment:${input.templatePlan.environmentHash}:${input.templatePlan.contentHash ?? ""}:${"dockerfileHash" in input.templatePlan ? (input.templatePlan.dockerfileHash ?? "") : ""}:${input.shared === true ? "shared" : (input.configurationHash ?? "")}:${input.nodeId}:${input.sourceId}`,
+  );
+  return { environmentHash, metadata, scope, templateHash };
 }
 
 function buildRuntimeSandboxTemplateKey(
-  input: { readonly backendName: string },
+  input: { readonly providerName: string },
   parts: RuntimeSandboxKeyParts,
 ): string | null {
-  if (parts.versionHash === null) {
+  if (parts.templateHash === null) {
     return null;
   }
 
   const templateHash = createStableHash(
-    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash}`,
+    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.templateHash}`,
   ).slice(0, 20);
 
   return sanitizeRuntimeSandboxKey(
-    `eve-sbx-tpl-${input.backendName}-${parts.scope}-${templateHash}`,
+    `eve-sbx-tpl-${input.providerName}-${parts.scope}-${templateHash}`,
   );
 }
 
@@ -123,22 +136,25 @@ function buildRuntimeSandboxTemplateKey(
  * deployments so a session reattaches to the same sandbox after a redeploy
  * and keeps its `/workspace` state. The key also folds in the sandbox
  * definition's version hash, so changing the sandbox itself (bootstrap
- * source, `revalidationKey`, or workspace seed content) rotates the
+ * source, Dockerfile, or workspace seed content) rotates the
  * session sandbox onto the new template — unrelated source changes do not.
  * The eve package version deliberately does not participate: upgrading
  * eve must not discard session sandbox state.
  */
 function buildRuntimeSandboxSessionKey(
-  input: { readonly backendName: string; readonly nodeId: string; readonly sessionId: string },
+  input: { readonly providerName: string; readonly nodeId: string; readonly sessionId: string },
   parts: RuntimeSandboxKeyParts,
 ): string {
   const version = createStableHash(
-    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash ?? "none"}`,
+    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.environmentHash}`,
   ).slice(0, 12);
-  const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId);
+  const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId).slice(0, 16);
+  const logicalName = sanitizeRuntimeSandboxKey(input.sessionId).slice(0, 24);
+  const logicalHash = createStableHash(input.sessionId).slice(0, 16);
 
+  const providerName = sanitizeRuntimeSandboxKey(input.providerName).slice(0, 20);
   return sanitizeRuntimeSandboxKey(
-    `eve-sbx-ses-${input.backendName}-${parts.scope}-${version}-${input.sessionId}-${nodeScope}`,
+    `eve-sbx-ses-${logicalHash}-${providerName}-${parts.scope}-${version}-${nodeScope}-${logicalName}`,
   );
 }
 
@@ -182,10 +198,10 @@ async function loadCompileMetadataForKeys(
  * compiled-artifacts cache key.
  */
 async function resolveRuntimeSandboxScope(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }): Promise<string> {
-  if (input.backendName === "vercel") {
+  if (input.providerName === "vercel") {
     const projectId = resolveVercelProjectIdFromEnvironment();
     if (projectId !== undefined) {
       return createStableHash(`vercel-project:${projectId}`).slice(0, 16);
@@ -203,7 +219,7 @@ async function resolveRuntimeSandboxScope(input: {
   );
 }
 
-function resolveRuntimeSandboxVersionHash(input: {
+function resolveRuntimeSandboxTemplateHash(input: {
   readonly nodeId: string;
   readonly sourceId: string;
   readonly templatePlan: Exclude<RuntimeSandboxTemplatePlan, { readonly kind: "none" }>;
@@ -211,13 +227,16 @@ function resolveRuntimeSandboxVersionHash(input: {
   // No seed files means empty content, independent of unrelated application source.
   const contentHash = input.templatePlan.contentHash ?? "";
 
-  if (input.templatePlan.kind === "bootstrap") {
-    const revalidationKey = input.templatePlan.revalidationKey ?? "";
+  if (input.templatePlan.kind === "prepared") {
     return createStableHash(
-      `bootstrap:${revalidationKey}:${input.templatePlan.sourceHash}:${contentHash}:${input.nodeId}:${input.sourceId}`,
+      `prepared:${input.templatePlan.environmentHash}:${input.templatePlan.dockerfileHash ?? ""}:${contentHash}:${input.nodeId}:${input.sourceId}`,
     );
   }
-
+  if (input.templatePlan.kind === "dockerfile") {
+    return createStableHash(
+      `dockerfile:${input.templatePlan.dockerfileHash}:${contentHash}:${input.nodeId}:${input.sourceId}`,
+    );
+  }
   return createStableHash(`workspace-content:${contentHash}:${input.nodeId}:${input.sourceId}`);
 }
 

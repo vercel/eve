@@ -6,7 +6,7 @@ import {
   resolveLocalBackendSessionRootPath,
   resolveLocalBackendTemplateRootPath,
   resolveLocalBackendTemplatesDirectory,
-} from "#execution/sandbox/bindings/local-backend-utils.js";
+} from "#execution/sandbox/bindings/local-provider-utils.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
   LOCAL_SANDBOX_TEMPLATE_RETAIN_COUNT,

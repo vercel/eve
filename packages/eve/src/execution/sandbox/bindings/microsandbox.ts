@@ -8,77 +8,45 @@ import {
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
 import { createStableHash } from "#execution/sandbox/bindings/microsandbox-runtime.js";
-import type {
-  SandboxBackend,
-  SandboxBackendCreateInput,
-  SandboxBackendHandle,
-  SandboxBackendPrewarmInput,
-  SandboxBackendPrewarmResult,
-} from "#public/definitions/sandbox-backend.js";
-import type {
-  MicrosandboxBootstrapUseOptions,
-  MicrosandboxSandboxCreateOptions,
-  MicrosandboxSessionUseOptions,
-} from "#public/sandbox/microsandbox-sandbox.js";
+import type { MicrosandboxSandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
+import type { SandboxProviderImplementation } from "#shared/sandbox-provider.js";
 
 export { pruneMicrosandboxTemplates } from "#execution/sandbox/bindings/microsandbox-templates.js";
 
-/**
- * Stable backend name. Participates in template/session key derivation
- * and persisted reconnect state.
- */
-export const MICROSANDBOX_BACKEND_NAME = "microsandbox";
+export const MICROSANDBOX_PROVIDER_NAME = "microsandbox";
 
-/**
- * Construction input for {@link createMicrosandboxSandboxBackend}.
- * Internal — the public surface is the `microsandbox()` factory
- * under `eve/sandbox`.
- */
-export interface CreateMicrosandboxSandboxBackendInput {
-  readonly createOptions?: MicrosandboxSandboxCreateOptions;
-}
-
-/**
- * Creates the microsandbox sandbox backend: lightweight local VMs with
- * snapshot-backed templates, running each command as the
- * `vercel-sandbox` user for parity with hosted Vercel Sandbox.
- */
-export function createMicrosandboxSandboxBackend(
-  input: CreateMicrosandboxSandboxBackendInput = {},
-): SandboxBackend<MicrosandboxBootstrapUseOptions, MicrosandboxSessionUseOptions> {
-  const options = resolveMicrosandboxOptions(input.createOptions);
+export function createMicrosandboxSandboxProvider(
+  createOptions: MicrosandboxSandboxCreateOptions = {},
+): SandboxProviderImplementation<undefined, Record<string, unknown>> {
+  const options = resolveMicrosandboxOptions(createOptions);
   const optionsHash = createStableHash(JSON.stringify(microsandboxOptionsForHash(options))).slice(
     0,
     20,
   );
 
   return {
-    name: MICROSANDBOX_BACKEND_NAME,
-    async prewarm(
-      prewarmInput: SandboxBackendPrewarmInput<MicrosandboxBootstrapUseOptions>,
-    ): Promise<SandboxBackendPrewarmResult> {
+    async prepare(context) {
       try {
         return await prewarmMicrosandboxTemplate({
-          backendName: MICROSANDBOX_BACKEND_NAME,
+          context,
           options,
           optionsHash,
-          prewarmInput,
+          providerName: MICROSANDBOX_PROVIDER_NAME,
         });
       } catch (error) {
         throw enrichMicrosandboxError({
-          context: `Failed to prewarm microsandbox template "${prewarmInput.templateKey}"`,
+          context: `Failed to prepare microsandbox template "${context.templateName}"`,
           error,
         });
       }
     },
-    async create(
-      createInput: SandboxBackendCreateInput,
-    ): Promise<SandboxBackendHandle<MicrosandboxSessionUseOptions>> {
+    async getOrCreate(context, prepared) {
       return await createMicrosandboxHandle({
-        backendName: MICROSANDBOX_BACKEND_NAME,
-        createInput,
+        context,
+        prepared,
         options,
         optionsHash,
+        providerName: MICROSANDBOX_PROVIDER_NAME,
       });
     },
   };

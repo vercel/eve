@@ -212,7 +212,7 @@ function ownerPlanSharesSandbox(input: {
     return (
       isSelfDelegation ||
       input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition
-        .inheritsParent === true
+        .kind === "parent"
     );
   });
 }

@@ -7,7 +7,7 @@ import { z } from "zod";
  * and reports whether it was blocked.
  *
  * The assertion the eval gates on is self-contained: under `deny-all` the
- * sandbox has no egress at all (the Docker backend detaches every network, the
+ * sandbox has no egress at all (the Docker provider detaches every network, the
  * Vercel firewall blocks the request), so `curl` fails without depending on
  * any external host being reachable. `blocked` plus a network-failure `stderr`
  * signature distinguishes a policy block from `curl` being missing.

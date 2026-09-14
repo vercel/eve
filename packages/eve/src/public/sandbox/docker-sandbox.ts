@@ -1,5 +1,5 @@
 /**
- * Image pull behavior for the Docker sandbox backend.
+ * Image pull behavior for the Docker sandbox provider.
  *
  * - `"if-not-present"` (default): pull the base image only when it is
  *   missing from the local image store.
@@ -10,16 +10,16 @@
 export type DockerSandboxPullPolicy = "if-not-present" | "always" | "never";
 
 /**
- * Initial network policy for sandboxes created by the Docker backend.
+ * Initial network policy for sandboxes created by the Docker provider.
  * Docker supports coarse-grained egress control only: `"allow-all"`
  * attaches the container to the default bridge network, `"deny-all"`
  * runs it with networking disabled. Domain-level policies and
- * credential brokering require `vercel()`.
+ * credential brokering require `VercelSandbox.environment()`.
  */
 export type DockerSandboxNetworkPolicy = "allow-all" | "deny-all";
 
 /**
- * Options accepted by `docker(opts)`.
+ * Options accepted by Docker sandbox environment constructors.
  */
 export interface DockerSandboxCreateOptions {
   /**
@@ -27,12 +27,12 @@ export interface DockerSandboxCreateOptions {
    * published `ghcr.io/vercel/eve` image, tagged with the installed eve
    * version or `EVE_SANDBOX_IMAGE_TAG` when set. Framework setup creates
    * `/workspace` and verifies Bash. Install
-   * any authored runtime tools in sandbox bootstrap or provide them through a
+   * any authored runtime tools during environment preparation or provide them through a
    * custom image.
    */
   readonly image?: string;
   /**
-   * Environment variables baked into every container the backend
+   * Environment variables baked into every container the provider
    * creates (template builds and sessions).
    */
   readonly env?: Readonly<Record<string, string>>;

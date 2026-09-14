@@ -17,7 +17,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -144,25 +144,24 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-const TEST_SANDBOX_BACKEND: SandboxBackend = {
+const TEST_SANDBOX_PROVIDER = defineSandboxProvider({
   name: "eve-test-memory",
-  async create(input) {
-    const sandbox = mockSandbox({ id: input.sessionKey });
-    return {
-      session: sandbox.session,
-      useSessionFn: async () => sandbox.session,
-      captureState: async () => ({
-        backendName: TEST_SANDBOX_BACKEND.name,
+  environment: () => ({
+    async prepare() {
+      return { artifact: {}, reused: true };
+    },
+    async getOrCreate(context) {
+      const sandbox = mockSandbox({ id: context.sandboxName });
+      return context.handle({
+        delete: async (options) => await sandbox.access.delete?.(options),
         metadata: {},
-        sessionKey: input.sessionKey,
-      }),
-      delete: async (options) => await sandbox.access.delete?.(options),
-      shutdown: async () => undefined,
-      stop: async () => undefined,
-    };
-  },
-  prewarm: async () => ({ reused: true }),
-};
+        sandbox: sandbox.session,
+        shutdown: async () => undefined,
+        stop: async () => undefined,
+      });
+    },
+  }),
+});
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
   const compileInput: CompileFromMemoryInput = {
@@ -171,9 +170,10 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     limits: descriptor.agent?.limits,
     modules: [
       {
-        loadNamespace: async () => ({
-          default: defineSandbox({ backend: TEST_SANDBOX_BACKEND }),
-        }),
+        loadNamespace: async () => {
+          const environment = TEST_SANDBOX_PROVIDER.environment();
+          return { environment, default: defineSandbox(() => environment.create()) };
+        },
         logicalPath: "sandbox.ts",
       },
       ...(descriptor.modules ?? []),

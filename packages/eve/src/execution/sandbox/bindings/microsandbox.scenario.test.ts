@@ -6,10 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import {
-  createMicrosandboxSandboxBackend,
+  createMicrosandboxSandboxProvider,
   pruneMicrosandboxTemplates,
 } from "#execution/sandbox/bindings/microsandbox.js";
 import { isMicrosandboxPlatformSupported } from "#execution/sandbox/bindings/microsandbox-platform.js";
+import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { resolveSandboxDockerfile } from "#execution/sandbox/dockerfile.js";
 
 // Microsandbox is unsupported on Windows (native bindings ship for
 // macOS Apple Silicon and glibc Linux only), so every suite in this
@@ -24,9 +26,13 @@ const runMicrosandboxVmScenarios =
 
 const createScratchDirectory = useTemporaryDirectories();
 
+function createProvider() {
+  return createSandboxProviderHarness(createMicrosandboxSandboxProvider(), undefined);
+}
+
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
   // The backend derives its cache directory from
-  // `runtimeContext.appRoot` via `resolveSandboxCacheDirectory`, so the
+  // `appRoot` via `resolveSandboxCacheDirectory`, so the
   // helper returns a temporary appRoot rather than a cache directory
   // directly.
   return await createScratchDirectory(`eve-microsandbox-${label}-`);
@@ -34,19 +40,19 @@ async function createTemporaryCacheDirectory(label: string): Promise<string> {
 
 async function createPrewarmedHandle(input: {
   readonly appRoot: string;
-  readonly sessionKey: string;
-  readonly templateKey: string;
+  readonly sandboxName: string;
+  readonly templateName: string;
 }) {
-  const backend = createMicrosandboxSandboxBackend();
-  await backend.prewarm({
-    runtimeContext: { appRoot: input.appRoot },
+  const backend = createProvider();
+  await backend.prepare({
+    appRoot: input.appRoot,
     seedFiles: [],
-    templateKey: input.templateKey,
+    templateName: input.templateName,
   });
-  return await backend.create({
-    runtimeContext: { appRoot: input.appRoot },
-    sessionKey: input.sessionKey,
-    templateKey: input.templateKey,
+  return await backend.getOrCreate({
+    appRoot: input.appRoot,
+    sandboxName: input.sandboxName,
+    templateName: input.templateName,
   });
 }
 
@@ -68,16 +74,61 @@ async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string
 }
 
 describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () => {
+  it("prewarms from a colocated Dockerfile", async () => {
+    const appRoot = await createTemporaryCacheDirectory("dockerfile");
+    const agentRoot = join(appRoot, "agent");
+    const sandboxRoot = join(agentRoot, "sandbox");
+    await mkdir(sandboxRoot, { recursive: true });
+    await writeFile(
+      join(sandboxRoot, "Dockerfile"),
+      [
+        "FROM ubuntu:24.04",
+        "RUN apt-get update && apt-get install -y bash sudo",
+        "RUN printf dockerfile-ready > /dockerfile-marker",
+        "",
+      ].join("\n"),
+    );
+    const resourcesPath = join(appRoot, "compiled-resources");
+    await mkdir(join(resourcesPath, "workspace"), { recursive: true });
+    await writeFile(join(resourcesPath, "workspace", "seed.txt"), "immutable seed");
+    const dockerfile = await resolveSandboxDockerfile(agentRoot);
+    const backend = createProvider();
+    await backend.prepare({
+      dockerfile,
+      resourcesKey: "resources-hash",
+      resourcesPath,
+      appRoot,
+      seedFiles: [],
+      templateName: "tpl-dockerfile",
+    });
+    const handle = await backend.getOrCreate({
+      resourcesKey: "resources-hash",
+      appRoot,
+      sandboxName: "session-dockerfile",
+      templateName: "tpl-dockerfile",
+    });
+
+    const result = await handle.sandbox.run({
+      command: [
+        "cat /dockerfile-marker",
+        "cat /workspace/seed.txt",
+        "! sh -c 'printf bad > /eve/resources/workspace/seed.txt' 2>/dev/null",
+        "printf changed > /workspace/seed.txt",
+      ].join(" && "),
+    });
+    expect(result).toMatchObject({ exitCode: 0, stdout: "dockerfile-readyimmutable seed" });
+  });
+
   it("writes a file via the public session and reads it back", async () => {
     const appRoot = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-write-read",
-      templateKey: "tpl-write-read",
+      sandboxName: "session-write-read",
+      templateName: "tpl-write-read",
     });
 
-    await handle.session.writeTextFile({ content: "hello world", path: "note.txt" });
-    const content = await handle.session.readTextFile({ path: "note.txt" });
+    await handle.sandbox.writeTextFile({ content: "hello world", path: "note.txt" });
+    const content = await handle.sandbox.readTextFile({ path: "note.txt" });
 
     expect(content).toBe("hello world");
   });
@@ -86,11 +137,11 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const appRoot = await createTemporaryCacheDirectory("run-env");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-run-env",
-      templateKey: "tpl-run-env",
+      sandboxName: "session-run-env",
+      templateName: "tpl-run-env",
     });
 
-    const result = await handle.session.run({
+    const result = await handle.sandbox.run({
       command: 'echo "$DEPLOY_ENV"',
       env: { DEPLOY_ENV: "staging" },
     });
@@ -103,11 +154,11 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const appRoot = await createTemporaryCacheDirectory("spawn-env");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-spawn-env",
-      templateKey: "tpl-spawn-env",
+      sandboxName: "session-spawn-env",
+      templateName: "tpl-spawn-env",
     });
 
-    const spawned = await handle.session.spawn({
+    const spawned = await handle.sandbox.spawn({
       command: 'echo "$DEPLOY_ENV"',
       env: { DEPLOY_ENV: "production" },
     });
@@ -122,22 +173,22 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const appRoot = await createTemporaryCacheDirectory("network-policy");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-network-policy",
-      templateKey: "tpl-network-policy",
+      sandboxName: "session-network-policy",
+      templateName: "tpl-network-policy",
     });
 
-    await expect(handle.session.setNetworkPolicy("deny-all")).resolves.toBeUndefined();
+    await expect(handle.sandbox.setNetworkPolicy("deny-all")).resolves.toBeUndefined();
   });
 
   it("readFile returns null for a missing file", async () => {
     const appRoot = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-missing",
-      templateKey: "tpl-missing",
+      sandboxName: "session-missing",
+      templateName: "tpl-missing",
     });
 
-    const content = await handle.session.readTextFile({ path: "does-not-exist.txt" });
+    const content = await handle.sandbox.readTextFile({ path: "does-not-exist.txt" });
 
     expect(content).toBeNull();
   });
@@ -146,64 +197,64 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const appRoot = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-remove",
-      templateKey: "tpl-remove",
+      sandboxName: "session-remove",
+      templateName: "tpl-remove",
     });
 
-    await handle.session.writeTextFile({
+    await handle.sandbox.writeTextFile({
       content: "dynamic skill",
       path: "skills/tenant/SKILL.md",
     });
-    await handle.session.writeTextFile({
+    await handle.sandbox.writeTextFile({
       content: "policy",
       path: "skills/tenant/references/policy.md",
     });
-    await handle.session.removePath({ force: true, path: "skills/tenant", recursive: true });
+    await handle.sandbox.removePath({ force: true, path: "skills/tenant", recursive: true });
 
     await expect(
-      handle.session.readTextFile({ path: "skills/tenant/SKILL.md" }),
+      handle.sandbox.readTextFile({ path: "skills/tenant/SKILL.md" }),
     ).resolves.toBeNull();
     await expect(
-      handle.session.readTextFile({ path: "skills/tenant/references/policy.md" }),
+      handle.sandbox.readTextFile({ path: "skills/tenant/references/policy.md" }),
     ).resolves.toBeNull();
   });
 
   it("preserves files across capture and reconnect", async () => {
     const appRoot = await createTemporaryCacheDirectory("file-api");
-    const backend = createMicrosandboxSandboxBackend();
+    const backend = createProvider();
 
-    await backend.prewarm({
-      runtimeContext: { appRoot },
+    await backend.prepare({
+      appRoot,
       seedFiles: [],
-      templateKey: "tpl-reconnect",
+      templateName: "tpl-reconnect",
     });
 
-    const firstHandle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-reconnect",
-      templateKey: "tpl-reconnect",
+    const firstHandle = await backend.getOrCreate({
+      appRoot,
+      sandboxName: "session-reconnect",
+      templateName: "tpl-reconnect",
     });
-    await firstHandle.session.writeTextFile({
+    await firstHandle.sandbox.writeTextFile({
       content: "survives reconnect",
       path: "persisted.txt",
     });
 
-    const state = await firstHandle.captureState();
+    const state = await firstHandle.captureMetadata?.();
+    if (state === undefined) throw new Error("Expected captured provider metadata.");
 
-    expect(state.backendName).toBe("microsandbox");
-    expect(state.metadata).toMatchObject({
+    expect(state).toMatchObject({
       optionsHash: expect.any(String),
       sandboxName: expect.any(String),
       version: 2,
     });
 
-    const reconnectedHandle = await backend.create({
-      existingMetadata: state.metadata,
-      runtimeContext: { appRoot },
-      sessionKey: "session-reconnect",
-      templateKey: "tpl-reconnect",
+    const reconnectedHandle = await backend.getOrCreate({
+      existing: state,
+      appRoot,
+      sandboxName: "session-reconnect",
+      templateName: "tpl-reconnect",
     });
-    const content = await reconnectedHandle.session.readTextFile({ path: "persisted.txt" });
+    const content = await reconnectedHandle.sandbox.readTextFile({ path: "persisted.txt" });
 
     expect(content).toBe("survives reconnect");
   });
@@ -212,45 +263,45 @@ describe.runIf(runMicrosandboxVmScenarios)("microsandbox sandbox file API", () =
     const appRoot = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedHandle({
       appRoot,
-      sessionKey: "session-buffer",
-      templateKey: "tpl-buffer",
+      sandboxName: "session-buffer",
+      templateName: "tpl-buffer",
     });
 
     // A PNG header plus a handful of non-UTF-8 bytes. Reading this
     // back as UTF-8 text would throw, so the roundtrip check uses the
     // `wc -c` command to confirm the on-disk byte length matches.
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
-    await handle.session.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
+    await handle.sandbox.writeBinaryFile({ content: bytes, path: "assets/fixture.bin" });
 
-    const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
+    const result = await handle.sandbox.run({ command: "wc -c < assets/fixture.bin" });
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(bytes.length);
   });
 
   it("reports a fresh build on first prewarm and a reuse on the second", async () => {
     const appRoot = await createTemporaryCacheDirectory("reuse-report");
-    const backend = createMicrosandboxSandboxBackend();
+    const backend = createProvider();
 
-    const first = await backend.prewarm({
-      runtimeContext: { appRoot },
+    const first = await backend.prepare({
+      appRoot,
       seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
-      templateKey: "tpl-reuse-report",
+      templateName: "tpl-reuse-report",
     });
-    const second = await backend.prewarm({
-      runtimeContext: { appRoot },
+    const second = await backend.prepare({
+      appRoot,
       seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
-      templateKey: "tpl-reuse-report",
+      templateName: "tpl-reuse-report",
     });
 
-    expect(first).toEqual({ reused: false });
-    expect(second).toEqual({ reused: true });
-    const handle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-reuse-report",
-      templateKey: "tpl-reuse-report",
+    expect(first).toMatchObject({ reused: false });
+    expect(second).toMatchObject({ reused: true });
+    const handle = await backend.getOrCreate({
+      appRoot,
+      sandboxName: "session-reuse-report",
+      templateName: "tpl-reuse-report",
     });
     await expect(
-      handle.session.readTextFile({ path: "/workspace/skills/weather.md" }),
+      handle.sandbox.readTextFile({ path: "/workspace/skills/weather.md" }),
     ).resolves.toBe("# Weather skill\n");
   });
 });

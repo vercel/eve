@@ -35,6 +35,7 @@ for (const root of roots) {
     let modelMatrix = "default";
     let additionalModels = [];
     let optionalModels = [];
+    let localOnly = false;
     const packageJsonPath = join(dir, "package.json");
     if (existsSync(packageJsonPath)) {
       const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
@@ -49,12 +50,16 @@ for (const root of roots) {
         pkg.e2e?.optionalModels ?? [],
         `${packageJsonPath}: e2e.optionalModels`,
       );
+      localOnly = pkg.e2e?.localOnly ?? false;
+      if (typeof localOnly !== "boolean") {
+        throw new Error(`${packageJsonPath}: e2e.localOnly must be a boolean.`);
+      }
     }
     if (modelMatrix !== "default" && modelMatrix !== "full") {
       throw new Error(`${packageJsonPath}: e2e.modelMatrix must be "default" or "full".`);
     }
 
-    fixtures.push({ name: entry, dir, modelMatrix, additionalModels, optionalModels });
+    fixtures.push({ name: entry, dir, modelMatrix, additionalModels, optionalModels, localOnly });
   }
 }
 
@@ -89,9 +94,11 @@ const modelMatrix = fixtures.flatMap(
 
 const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
 for (const world of worlds) {
-  const legs = fixtures.map(({ name, dir }) =>
-    world.package === undefined ? { name, dir } : { name, dir, world_package: world.package },
-  );
+  const legs = fixtures
+    .filter(({ localOnly }) => !localOnly)
+    .map(({ name, dir }) =>
+      world.package === undefined ? { name, dir } : { name, dir, world_package: world.package },
+    );
   outputs.push(`world_matrix_${world.name}=${JSON.stringify(legs)}`);
 }
 

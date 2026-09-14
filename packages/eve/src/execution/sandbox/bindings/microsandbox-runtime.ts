@@ -29,7 +29,7 @@ import {
   loadOptionalEnginePackage,
 } from "#internal/application/optional-package-install.js";
 import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
-import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
+import type { SandboxProviderTags } from "#shared/sandbox-provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type {
@@ -64,7 +64,7 @@ export class MicrosandboxVm {
     readonly module: MicrosandboxModule;
     readonly options: ResolvedMicrosandboxOptions;
     readonly sessionKey: string;
-    readonly tags?: SandboxBackendTags;
+    readonly tags?: SandboxProviderTags;
   };
   #metadataPath?: string;
   #networkPolicy?: SandboxNetworkPolicy;
@@ -78,7 +78,7 @@ export class MicrosandboxVm {
       readonly module: MicrosandboxModule;
       readonly options: ResolvedMicrosandboxOptions;
       readonly sessionKey: string;
-      readonly tags?: SandboxBackendTags;
+      readonly tags?: SandboxProviderTags;
     },
     sandbox: MicrosandboxSandbox,
     sandboxName: string,
@@ -285,6 +285,7 @@ export class MicrosandboxVm {
     this.#metadataPath = path;
     this.#optionsHash = optionsHash;
     await writeSessionMetadata(path, {
+      image: this.#input.options.image,
       networkPolicy: this.#networkPolicy,
       optionsHash,
       sandboxName: this.#sandboxName,
@@ -319,9 +320,10 @@ export async function createPreparedMicrosandbox(input: {
   readonly name: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly options: ResolvedMicrosandboxOptions;
+  readonly resourcesPath?: string;
   readonly sessionKey: string;
   readonly setupBaseRuntime: boolean;
-  readonly tags?: SandboxBackendTags;
+  readonly tags?: SandboxProviderTags;
 }): Promise<MicrosandboxVm> {
   const initialNetworkPolicy = input.setupBaseRuntime ? "allow-all" : input.networkPolicy;
   const sandbox = await createMicrosandbox({
@@ -331,6 +333,7 @@ export async function createPreparedMicrosandbox(input: {
     name: input.name,
     networkPolicy: initialNetworkPolicy,
     options: input.options,
+    resourcesPath: input.resourcesPath,
     tags: input.tags,
     user: input.setupBaseRuntime ? undefined : MICROSANDBOX_USER,
     workdir: input.setupBaseRuntime ? "/" : WORKSPACE_ROOT,
@@ -367,7 +370,7 @@ export async function connectMicrosandbox(input: {
   readonly module: MicrosandboxModule;
   readonly options: ResolvedMicrosandboxOptions;
   readonly sessionKey: string;
-  readonly tags?: SandboxBackendTags;
+  readonly tags?: SandboxProviderTags;
 }): Promise<MicrosandboxVm | null> {
   let handle;
   try {
@@ -417,7 +420,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
   readonly module: MicrosandboxModule;
   readonly options: ResolvedMicrosandboxOptions;
   readonly sessionKey: string;
-  readonly tags?: SandboxBackendTags;
+  readonly tags?: SandboxProviderTags;
 }): Promise<MicrosandboxVm | null> {
   if (
     input.metadata.stateSnapshotName === undefined ||
@@ -458,9 +461,9 @@ async function restoreMicrosandboxSessionSnapshot(input: {
 }
 
 const MICROSANDBOX_MISSING_PACKAGE_MESSAGE =
-  "The microsandbox sandbox backend requires the `microsandbox` package, which is not bundled " +
+  "The microsandbox sandbox provider requires the `microsandbox` package, which is not bundled " +
   "with eve. Install it in your application (for example `pnpm add -D microsandbox`), or use " +
-  "docker() / vercel() instead.";
+  "DockerSandbox or VercelSandbox instead.";
 
 /**
  * Loads the microsandbox npm package and ensures its VM runtime is
@@ -595,7 +598,8 @@ async function createMicrosandbox(input: {
   readonly name: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly options: ResolvedMicrosandboxOptions;
-  readonly tags?: SandboxBackendTags;
+  readonly resourcesPath?: string;
+  readonly tags?: SandboxProviderTags;
   readonly user?: string;
   readonly workdir: string;
 }): Promise<MicrosandboxSandbox> {
@@ -613,6 +617,15 @@ async function createMicrosandbox(input: {
     builder = builder.fromSnapshot(input.fromSnapshot);
   } else {
     builder = builder.image(input.options.image);
+  }
+
+  if (input.options.image.startsWith("127.0.0.1:")) {
+    builder = builder.registry((registry) => registry.insecure());
+  }
+  if (input.resourcesPath !== undefined) {
+    builder = builder.volume("/eve/resources", (mount) =>
+      mount.bind(input.resourcesPath).readonly(),
+    );
   }
 
   if (input.user !== undefined) {
@@ -660,7 +673,7 @@ async function removeSandboxIfExists(
   }
 }
 
-function resolveMicrosandboxLabels(tags: SandboxBackendTags | undefined): Record<string, string> {
+function resolveMicrosandboxLabels(tags: SandboxProviderTags | undefined): Record<string, string> {
   return {
     "eve.backend": "microsandbox",
     ...withDevelopmentSandboxTags(tags),

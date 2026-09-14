@@ -175,7 +175,7 @@ describe("eve eval environment loading", () => {
     const handle = { shutdown: vi.fn(async () => {}) };
     const evaluation = makeEvaluation("local");
 
-    trackActiveSandboxHandle({ backendName: "microsandbox", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ providerName: "microsandbox", handle, sessionKey: "session-1" });
     process.chdir(fixtureRoot);
     mockedEvalDependencies.createDevelopmentServer.mockReturnValue({
       close,

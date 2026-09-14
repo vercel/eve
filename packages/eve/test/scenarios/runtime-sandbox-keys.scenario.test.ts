@@ -50,7 +50,11 @@ async function createTemporaryAppRoot(options?: { sourceGraphHash?: string }): P
   return appRoot;
 }
 
-const WORKSPACE_PLAN = { contentHash: "workspace-hash", kind: "workspace-content" } as const;
+const WORKSPACE_PLAN = {
+  contentHash: "workspace-hash",
+  environmentHash: "environment-v1",
+  kind: "workspace-content",
+} as const;
 
 function stubEmptyVercelProjectSources(): void {
   vi.stubEnv("VERCEL_PROJECT_ID", "");
@@ -68,7 +72,7 @@ describe("createRuntimeSandboxTemplateKey", () => {
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource,
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
@@ -76,7 +80,7 @@ describe("createRuntimeSandboxTemplateKey", () => {
     });
 
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource,
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
@@ -94,14 +98,14 @@ describe("createRuntimeSandboxTemplateKey", () => {
     const secondAppRoot = await createTemporaryAppRoot();
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(firstAppRoot),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: WORKSPACE_PLAN,
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(secondAppRoot),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
@@ -115,7 +119,7 @@ describe("createRuntimeSandboxTemplateKey", () => {
     stubEmptyVercelProjectSources();
 
     const key = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
@@ -130,55 +134,61 @@ describe("createRuntimeSandboxTemplateKey", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_one");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        environmentHash: "environment-v1",
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+      },
     });
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_two");
 
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        environmentHash: "environment-v1",
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+      },
     });
 
     expect(secondKey).toBe(firstKey);
   });
 
-  it("uses stable Vercel project scope for bootstrap templates", async () => {
+  it("uses stable Vercel project scope for prepared templates", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_one");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_two");
 
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
 
@@ -191,11 +201,15 @@ describe("createRuntimeSandboxTemplateKey", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_team_parity");
 
     const input = {
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        environmentHash: "environment-v1",
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+      },
     } as const;
 
     vi.stubEnv("VERCEL_TEAM_ID", "team_build");
@@ -207,122 +221,87 @@ describe("createRuntimeSandboxTemplateKey", () => {
     expect(runtimeKey).toBe(buildKey);
   });
 
-  it("uses source and workspace inputs for bootstrap templates without a revalidation key", async () => {
+  it("uses source and workspace inputs for prepared templates without a revalidation key", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
 
     expect(secondKey).toBe(firstKey);
   });
 
-  it("changes bootstrap template keys when the revalidation key changes", async () => {
+  it("changes prepared template keys when authored sandbox source changes", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: "bootstrap-source-hash-one",
       },
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-2",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: "bootstrap-source-hash-two",
       },
     });
 
     expect(secondKey).not.toBe(firstKey);
   });
 
-  it("changes bootstrap template keys when authored sandbox source changes", async () => {
+  it("changes prepared template keys when workspace content changes", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
-      sourceId: "sandbox/sandbox.ts",
-      templatePlan: {
-        contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: "bootstrap-source-hash-one",
-      },
-    });
-    const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
-      sourceId: "sandbox/sandbox.ts",
-      templatePlan: {
-        contentHash: "workspace-hash",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: "bootstrap-source-hash-two",
-      },
-    });
-
-    expect(secondKey).not.toBe(firstKey);
-  });
-
-  it("changes bootstrap template keys when workspace content changes", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap");
-
-    const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash-one",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
       templatePlan: {
         contentHash: "workspace-hash-two",
-        kind: "bootstrap",
-        revalidationKey: "bootstrap-day-1",
-        sourceHash: BOOTSTRAP_SOURCE_HASH,
+        kind: "prepared",
+        environmentHash: BOOTSTRAP_SOURCE_HASH,
       },
     });
 
@@ -333,18 +312,26 @@ describe("createRuntimeSandboxTemplateKey", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
 
     const firstKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash-one", kind: "workspace-content" },
+      templatePlan: {
+        environmentHash: "environment-v1",
+        contentHash: "workspace-hash-one",
+        kind: "workspace-content",
+      },
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash-two", kind: "workspace-content" },
+      templatePlan: {
+        environmentHash: "environment-v1",
+        contentHash: "workspace-hash-two",
+        kind: "workspace-content",
+      },
     });
 
     expect(secondKey).not.toBe(firstKey);
@@ -352,11 +339,11 @@ describe("createRuntimeSandboxTemplateKey", () => {
 
   it("returns null for sandboxes that do not need a template", async () => {
     const key = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
+      providerName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { kind: "none" },
+      templatePlan: { environmentHash: "environment-v1", kind: "none" },
     });
 
     expect(key).toBeNull();

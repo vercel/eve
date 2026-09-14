@@ -54,7 +54,7 @@ export function createRuntimeSandboxRegistry(input: {
 }): RuntimeSandboxRegistry {
   const definition = input.sandbox;
   if (
-    definition.inheritsParent === true &&
+    definition.kind === "parent" &&
     (input.workspaceResourceRoot.contentHash !== undefined ||
       input.workspaceResourceRoot.rootEntries.length > 0)
   ) {

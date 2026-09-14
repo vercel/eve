@@ -211,11 +211,8 @@ const memory = source
 
 const sandbox = source
   .extend({
-    backendKind: z.string().optional(),
-    description: z.string().optional(),
-    hasBootstrap: z.boolean(),
-    hasOnSession: z.boolean(),
-    revalidationKey: z.string().optional(),
+    provider: z.string().optional(),
+    environmentExportName: z.string().optional(),
     sourceHash: z.string().optional(),
   })
   .strict();
@@ -318,7 +315,7 @@ export const AgentInfoResultSchema = z
     skills: z.object({ dynamic: z.array(dynamicResolver), static: z.array(skill) }).strict(),
     subagents: z.object({ local: z.array(subagent), total: z.number() }).strict(),
     tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }).strict(),
-    version: z.literal(4),
+    version: z.literal(5),
     workflow,
     workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }).strict(),
   })

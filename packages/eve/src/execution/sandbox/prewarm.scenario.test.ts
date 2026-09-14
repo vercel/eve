@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,10 +9,7 @@ import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/arti
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import type {
-  SandboxBackendPrewarmInput,
-  SandboxBackendPrewarmResult,
-} from "#public/definitions/sandbox-backend.js";
+import type { SandboxProviderPrepareContext } from "#shared/sandbox-provider.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -22,6 +19,70 @@ describe("prewarmAppSandboxes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("loads a Dockerfile from the stable authored root for isolated compiler artifacts", async () => {
+    const appRoot = await createScratchDirectory("eve-prewarm-authored-dockerfile-");
+    const agentRoot = join(appRoot, "agent");
+    await mkdir(join(agentRoot, "sandbox"), { recursive: true });
+    await writeFile(
+      join(appRoot, "package.json"),
+      JSON.stringify({ name: "dockerfile-prewarm-test", type: "module" }),
+    );
+    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };');
+    await writeFile(join(agentRoot, "instructions.md"), "Use the sandbox.");
+    await writeFile(join(agentRoot, "sandbox", "Dockerfile"), "FROM alpine:3.21\n");
+    await writeFile(
+      join(agentRoot, "sandbox", "sandbox.ts"),
+      [
+        'import { defineSandbox } from "eve/sandbox";',
+        'import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";',
+        "export const environment = MicrosandboxSandbox.dockerfile();",
+        "export default defineSandbox(() => environment.create());",
+      ].join("\n"),
+    );
+    const compilerAppRoot = join(appRoot, ".eve", "builds", "isolated", "compiler");
+    await compileAgentInWorkspace({
+      artifactLocations: {
+        publishedRoot: join(compilerAppRoot, ".eve"),
+        writeRoot: join(compilerAppRoot, ".eve"),
+      },
+      startPath: appRoot,
+    });
+    const dockerfilePaths: string[] = [];
+
+    await prewarmAppSandboxes({
+      appRoot,
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
+        moduleMapLoaderPath: resolvePackageSourceFilePath(
+          "src/internal/authored-module-map-loader.ts",
+        ),
+        sandboxAppRoot: appRoot,
+      }),
+      dispatch: async ({ context }) => {
+        if (context.dockerfile !== undefined) dockerfilePaths.push(context.dockerfile.path);
+        return { artifact: { imageReference: "registry.example/eve@sha256:test" }, reused: false };
+      },
+    });
+
+    expect(dockerfilePaths).toEqual([join(agentRoot, "sandbox", "Dockerfile")]);
+    const preparedManifest = JSON.parse(
+      await readFile(
+        join(compilerAppRoot, ".eve", "compile", "sandbox-prepared-artifacts.json"),
+        "utf8",
+      ),
+    );
+    expect(preparedManifest).toMatchObject({
+      entries: [
+        {
+          artifact: { imageReference: "registry.example/eve@sha256:test" },
+          providerName: "microsandbox",
+          templateName: expect.any(String),
+        },
+      ],
+      kind: "eve-sandbox-prepared-artifacts",
+      version: 1,
+    });
   });
 
   it("loads workspace seeds from an invocation-owned compiler directory", async () => {
@@ -58,7 +119,7 @@ describe("prewarmAppSandboxes", () => {
   });
 
   it("prewarms the root and subagent sandbox templates with per-agent skill seeds", async () => {
-    // Per-sandbox backend resolution falls back to defaultSandbox() when
+    // Per-sandbox provider resolution falls back to DefaultSandbox.environment() when
     // an authored sandbox does not declare `backend`. Mark this process
     // as running on Vercel so the test sandboxes resolve to a backend
     // whose `prewarm` is called by the orchestrator.
@@ -84,7 +145,7 @@ describe("prewarmAppSandboxes", () => {
       "$HOME/.agents/skills/research/SKILL.md",
       "$HOME/.agents/skills/route-weather/SKILL.md",
     ]);
-    expect([...events.bootstrapCommands].sort()).toEqual([
+    expect([...events.runPreparationCommands].sort()).toEqual([
       "echo child-bootstrap",
       "echo root-bootstrap",
     ]);
@@ -118,7 +179,7 @@ describe("prewarmAppSandboxes", () => {
     ]);
   });
 
-  it("skips framework default sandbox templates when nodes have no seeds or bootstrap", async () => {
+  it("skips framework default sandbox templates when nodes have no resources or preparation", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_default_per_node");
 
@@ -154,7 +215,7 @@ describe("prewarmAppSandboxes", () => {
     });
 
     expect(events.templateKeys).toHaveLength(1);
-    expect([...events.bootstrapCommands]).toEqual(["echo root-bootstrap"]);
+    expect([...events.runPreparationCommands]).toEqual(["echo root-bootstrap"]);
   });
 
   it("prewarms one template per node when every node authors a sandbox", async () => {
@@ -177,7 +238,7 @@ describe("prewarmAppSandboxes", () => {
 
     expect(events.templateKeys).toHaveLength(4);
     expect(new Set(events.templateKeys)).toHaveLength(4);
-    expect([...events.bootstrapCommands].sort()).toEqual([
+    expect([...events.runPreparationCommands].sort()).toEqual([
       "echo alpha-bootstrap",
       "echo bravo-bootstrap",
       "echo charlie-bootstrap",
@@ -257,13 +318,13 @@ describe("prewarmAppSandboxes", () => {
     expect(firstEvents.seededFilePaths).toEqual(["$HOME/.agents/skills/route-weather/SKILL.md"]);
   });
 
-  it("uses compiled bootstrap revalidation keys across deploy roots without re-evaluating at prewarm", async () => {
+  it("uses compiled environment source revisions across deploy roots without re-executing the selector at prewarm", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap_templates");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_one");
 
-    const firstAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: '() => "bootstrap-revalidation-v1"',
+    const firstAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: '() => "bootstrap-revalidation-v1"',
       skillBody: "Route weather content.",
     });
     const firstEvents = createPrewarmEvents();
@@ -271,10 +332,9 @@ describe("prewarmAppSandboxes", () => {
     await compileAgent({
       startPath: firstAppRoot,
     });
-    await writeBootstrapRevalidationKeySandbox({
+    await writePreparedEnvironmentSandbox({
       appRoot: firstAppRoot,
-      revalidationKeyExpression:
-        '() => { throw new Error("revalidationKey should not run during prewarm"); }',
+      environmentRevision: "environment-v1-changed-after-compile",
     });
     await prewarmAppSandboxes({
       appRoot: firstAppRoot,
@@ -283,8 +343,8 @@ describe("prewarmAppSandboxes", () => {
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_two");
 
-    const secondAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: '() => "bootstrap-revalidation-v1"',
+    const secondAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: '() => "bootstrap-revalidation-v1"',
       skillBody: "Route weather content.",
     });
     const secondEvents = createPrewarmEvents();
@@ -297,8 +357,8 @@ describe("prewarmAppSandboxes", () => {
       dispatch: createRecordingDispatch(secondEvents),
     });
 
-    const changedKeyAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: '() => "bootstrap-revalidation-v2"',
+    const changedKeyAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: '() => "bootstrap-revalidation-v2"',
       skillBody: "Route weather content.",
     });
     const changedKeyEvents = createPrewarmEvents();
@@ -311,8 +371,8 @@ describe("prewarmAppSandboxes", () => {
       dispatch: createRecordingDispatch(changedKeyEvents),
     });
 
-    const changedSeedAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: '() => "bootstrap-revalidation-v1"',
+    const changedSeedAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: '() => "bootstrap-revalidation-v1"',
       skillBody: "Changed route weather content.",
     });
     const changedSeedEvents = createPrewarmEvents();
@@ -325,9 +385,9 @@ describe("prewarmAppSandboxes", () => {
       dispatch: createRecordingDispatch(changedSeedEvents),
     });
 
-    const changedSourceAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      bootstrapCommand: "echo bootstrap-revalidation-key-changed-source",
-      revalidationKeyExpression: '() => "bootstrap-revalidation-v1"',
+    const changedSourceAppRoot = await createPreparedEnvironmentAppRoot({
+      runPreparationCommand: "echo prepared-environment-changed-source",
+      environmentRevision: '() => "bootstrap-revalidation-v1"',
       skillBody: "Route weather content.",
     });
     const changedSourceEvents = createPrewarmEvents();
@@ -345,16 +405,16 @@ describe("prewarmAppSandboxes", () => {
     expect(changedKeyEvents.templateKeys[0]).not.toBe(firstEvents.templateKeys[0]);
     expect(changedSeedEvents.templateKeys[0]).not.toBe(firstEvents.templateKeys[0]);
     expect(changedSourceEvents.templateKeys[0]).not.toBe(firstEvents.templateKeys[0]);
-    expect(firstEvents.bootstrapCommands).toEqual(["echo bootstrap-revalidation-key"]);
+    expect(firstEvents.runPreparationCommands).toEqual(["echo prepared-environment"]);
   });
 
-  it("keeps unseeded bootstrap templates stable across deploy roots and instruction changes", async () => {
+  it("keeps unseeded prepared templates stable across deploy roots and instruction changes", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap_templates");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_empty_one");
 
-    const firstAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: undefined,
+    const firstAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: undefined,
     });
     const firstEvents = createPrewarmEvents();
     const first = await compileAgent({ startPath: firstAppRoot });
@@ -364,8 +424,8 @@ describe("prewarmAppSandboxes", () => {
     });
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_empty_two");
-    const secondAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: undefined,
+    const secondAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: undefined,
     });
     await writeFile(join(secondAppRoot, "agent", "instructions.md"), "Changed system prompt.\n");
     const secondEvents = createPrewarmEvents();
@@ -386,13 +446,13 @@ describe("prewarmAppSandboxes", () => {
     expect(secondEvents.seededFilePaths).toEqual([]);
   });
 
-  it("uses authored sandbox source when bootstrap omits revalidationKey", async () => {
+  it("uses authored sandbox source when environment source changes", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_bootstrap_templates");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_no_key_one");
 
-    const firstAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: undefined,
+    const firstAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: undefined,
       skillBody: "Route weather content.",
     });
     const firstEvents = createPrewarmEvents();
@@ -407,8 +467,8 @@ describe("prewarmAppSandboxes", () => {
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_bootstrap_no_key_two");
 
-    const secondAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      revalidationKeyExpression: undefined,
+    const secondAppRoot = await createPreparedEnvironmentAppRoot({
+      environmentRevision: undefined,
       skillBody: "Route weather content.",
     });
     const secondEvents = createPrewarmEvents();
@@ -421,9 +481,9 @@ describe("prewarmAppSandboxes", () => {
       dispatch: createRecordingDispatch(secondEvents),
     });
 
-    const changedSourceAppRoot = await createBootstrapRevalidationKeyAppRoot({
-      bootstrapCommand: "echo bootstrap-without-revalidation-key-changed-source",
-      revalidationKeyExpression: undefined,
+    const changedSourceAppRoot = await createPreparedEnvironmentAppRoot({
+      runPreparationCommand: "echo bootstrap-without-revalidation-key-changed-source",
+      environmentRevision: undefined,
       skillBody: "Route weather content.",
     });
     const changedSourceEvents = createPrewarmEvents();
@@ -439,7 +499,7 @@ describe("prewarmAppSandboxes", () => {
     expect(firstEvents.templateKeys).toHaveLength(1);
     expect(secondEvents.templateKeys).toEqual(firstEvents.templateKeys);
     expect(changedSourceEvents.templateKeys[0]).not.toBe(firstEvents.templateKeys[0]);
-    expect(firstEvents.bootstrapCommands).toEqual(["echo bootstrap-revalidation-key"]);
+    expect(firstEvents.runPreparationCommands).toEqual(["echo prepared-environment"]);
   });
 
   it("authored default override produces a single prewarm target, not two", async () => {
@@ -467,7 +527,7 @@ describe("prewarmAppSandboxes", () => {
       "eve: initialized 1 sandbox template (0 reused, 1 built).",
     ]);
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("framework"));
-    expect([...events.bootstrapCommands]).toEqual(["echo default-bootstrap"]);
+    expect([...events.runPreparationCommands]).toEqual(["echo default-bootstrap"]);
   });
 
   it("does not report reused templates in the build log", async () => {
@@ -518,9 +578,22 @@ describe("prewarmAppSandboxes", () => {
         "$HOME/.agents/skills/route-weather/references/checklist.md",
       ].sort(),
     );
-    expect([...events.bootstrapCommands]).toEqual(["echo default-bootstrap"]);
+    expect([...events.runPreparationCommands]).toEqual(["echo default-bootstrap"]);
   });
 });
+
+function preparedSandboxSource(command: string): string {
+  return [
+    'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+    "export const environment = DefaultSandbox.environment({",
+    "  prepare: async (sandbox) => {",
+    `    await sandbox.run({ command: ${JSON.stringify(command)} });`,
+    "  },",
+    "});",
+    "export default defineSandbox(() => environment.create());",
+    "",
+  ].join("\n");
+}
 
 async function createScenarioAppRoot(): Promise<string> {
   const appRoot = await createScratchDirectory("eve-prewarm-");
@@ -559,19 +632,7 @@ async function createScenarioAppRoot(): Promise<string> {
   );
   await writeFile(
     join(agentRoot, "sandbox", "sandbox.ts"),
-    [
-      "export default {",
-      '  revalidationKey: () => "root-bootstrap-v1",',
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      '    await sandbox.run({ command: "echo root-bootstrap" });',
-      "  },",
-      "  onSession() {",
-      '    throw new Error("root onSession should not run during build prewarm");',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
+    preparedSandboxSource("echo root-bootstrap"),
   );
   await writeFile(
     join(subagentRoot, "agent.ts"),
@@ -590,19 +651,7 @@ async function createScenarioAppRoot(): Promise<string> {
   );
   await writeFile(
     join(subagentRoot, "sandbox", "sandbox.ts"),
-    [
-      "export default {",
-      '  revalidationKey: () => "child-bootstrap-v1",',
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      '    await sandbox.run({ command: "echo child-bootstrap" });',
-      "  },",
-      "  onSession() {",
-      '    throw new Error("child onSession should not run during build prewarm");',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
+    preparedSandboxSource("echo child-bootstrap"),
   );
 
   return appRoot;
@@ -643,16 +692,7 @@ async function createDefaultGraphAppRoot(
     });
     await writeFile(
       join(agentRoot, "sandbox", "sandbox.ts"),
-      [
-        "export default {",
-        '  revalidationKey: () => "root-bootstrap-v1",',
-        "  async bootstrap({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "echo root-bootstrap" });',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
+      preparedSandboxSource("echo root-bootstrap"),
     );
   }
 
@@ -679,16 +719,7 @@ async function createDefaultGraphAppRoot(
       });
       await writeFile(
         join(subagentRoot, "sandbox", "sandbox.ts"),
-        [
-          "export default {",
-          `  revalidationKey: () => "${name}-bootstrap-v1",`,
-          "  async bootstrap({ use }) {",
-          "    const sandbox = await use();",
-          `    await sandbox.run({ command: "echo ${name}-bootstrap" });`,
-          "  },",
-          "};",
-          "",
-        ].join("\n"),
+        preparedSandboxSource(`echo ${name}-bootstrap`),
       );
     }
   }
@@ -727,19 +758,7 @@ async function createAuthoredOverrideAppRoot(
   await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
   await writeFile(
     join(agentRoot, "sandbox", "sandbox.ts"),
-    [
-      "export default {",
-      '  revalidationKey: () => "default-bootstrap-v1",',
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      '    await sandbox.run({ command: "echo default-bootstrap" });',
-      "  },",
-      "  onSession() {",
-      '    throw new Error("onSession should not run during build prewarm");',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
+    preparedSandboxSource("echo default-bootstrap"),
   );
 
   if (input.withSkills) {
@@ -787,12 +806,12 @@ async function createSkillOnlyAppRoot(input: { readonly skillBody: string }): Pr
   return appRoot;
 }
 
-async function createBootstrapRevalidationKeyAppRoot(input: {
-  readonly bootstrapCommand?: string;
-  readonly revalidationKeyExpression: string | undefined;
+async function createPreparedEnvironmentAppRoot(input: {
+  readonly runPreparationCommand?: string;
+  readonly environmentRevision: string | undefined;
   readonly skillBody?: string;
 }): Promise<string> {
-  const appRoot = await createScratchDirectory("eve-prewarm-bootstrap-revalidation-key-");
+  const appRoot = await createScratchDirectory("eve-prewarm-prepared-environment-");
   const agentRoot = join(appRoot, "agent");
 
   await mkdir(join(agentRoot, "sandbox"), {
@@ -802,7 +821,7 @@ async function createBootstrapRevalidationKeyAppRoot(input: {
     join(appRoot, "package.json"),
     JSON.stringify(
       {
-        name: "execution-sandbox-prewarm-bootstrap-revalidation-key-test",
+        name: "execution-sandbox-prewarm-prepared-environment-test",
         type: "module",
       },
       null,
@@ -818,35 +837,32 @@ async function createBootstrapRevalidationKeyAppRoot(input: {
       ["---", "description: Route weather requests.", "---", input.skillBody].join("\n"),
     );
   }
-  await writeBootstrapRevalidationKeySandbox({
+  await writePreparedEnvironmentSandbox({
     appRoot,
-    bootstrapCommand: input.bootstrapCommand,
-    revalidationKeyExpression: input.revalidationKeyExpression,
+    runPreparationCommand: input.runPreparationCommand,
+    environmentRevision: input.environmentRevision,
   });
 
   return appRoot;
 }
 
-async function writeBootstrapRevalidationKeySandbox(input: {
+async function writePreparedEnvironmentSandbox(input: {
   readonly appRoot: string;
-  readonly bootstrapCommand?: string;
-  readonly revalidationKeyExpression: string | undefined;
+  readonly runPreparationCommand?: string;
+  readonly environmentRevision: string | undefined;
 }): Promise<void> {
-  const bootstrapCommand = input.bootstrapCommand ?? "echo bootstrap-revalidation-key";
-  const revalidationKeyLine =
-    input.revalidationKeyExpression === undefined
-      ? []
-      : [`  revalidationKey: ${input.revalidationKeyExpression},`];
+  const runPreparationCommand = input.runPreparationCommand ?? "echo prepared-environment";
   await writeFile(
     join(input.appRoot, "agent", "sandbox", "sandbox.ts"),
     [
-      "export default {",
-      ...revalidationKeyLine,
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      `    await sandbox.run({ command: ${JSON.stringify(bootstrapCommand)} });`,
+      'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+      `// Environment revision: ${input.environmentRevision ?? "source"}`,
+      "export const environment = DefaultSandbox.environment({",
+      "  prepare: async (sandbox) => {",
+      `    await sandbox.run({ command: ${JSON.stringify(runPreparationCommand)} });`,
       "  },",
-      "};",
+      "});",
+      "export default defineSandbox(() => environment.create());",
       "",
     ].join("\n"),
   );
@@ -856,79 +872,80 @@ function createRecordingDispatch(
   events: ReturnType<typeof createPrewarmEvents>,
   options: { readonly reused?: boolean } = {},
 ) {
-  return async ({
-    input,
-  }: {
-    input: SandboxBackendPrewarmInput;
-  }): Promise<SandboxBackendPrewarmResult> => {
-    events.templateKeys.push(input.templateKey);
-    events.runtimeContextAppRoots.push(input.runtimeContext.appRoot);
+  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+    events.templateKeys.push(context.templateName);
+    events.runtimeContextAppRoots.push(context.appRoot);
 
-    const seedFiles = input.seedFiles ?? [];
-    if (seedFiles.length > 0) {
+    const resourceFiles = [
+      ...(context.resources.workspace?.files.map((file) => ({
+        ...file,
+        path: `${context.resources.workspace?.targetPath}/${file.relativePath}`,
+      })) ?? []),
+      ...(context.resources.skills?.files.map((file) => ({
+        ...file,
+        path: `${context.resources.skills?.targetPath}/${file.relativePath}`,
+      })) ?? []),
+    ];
+    if (resourceFiles.length > 0) {
       events.seededTemplateCount += 1;
-      events.seededFilePaths.push(...seedFiles.map((file) => file.path));
+      events.seededFilePaths.push(...resourceFiles.map((file) => file.path));
     }
 
-    if (input.bootstrap !== undefined) {
-      await input.bootstrap({
-        use: async () => ({
-          id: "test-prewarm-session",
-          async readFile() {
-            return null;
+    await context.runPreparation({
+      id: "test-prewarm-session",
+      async readFile() {
+        return null;
+      },
+      async readBinaryFile() {
+        return null;
+      },
+      async readTextFile() {
+        return null;
+      },
+      async setNetworkPolicy() {},
+      async removePath() {},
+      resolvePath(path: string) {
+        return path;
+      },
+      async run({ command }: { command: string }) {
+        events.runPreparationCommands.push(command);
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "",
+        };
+      },
+      async spawn({ command }: { command: string }) {
+        events.runPreparationCommands.push(command);
+        return {
+          stdout: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          stderr: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          async wait() {
+            return { exitCode: 0 };
           },
-          async readBinaryFile() {
-            return null;
-          },
-          async readTextFile() {
-            return null;
-          },
-          async setNetworkPolicy() {},
-          async removePath() {},
-          resolvePath(path: string) {
-            return path;
-          },
-          async run({ command }: { command: string }) {
-            events.bootstrapCommands.push(command);
-            return {
-              exitCode: 0,
-              stderr: "",
-              stdout: "",
-            };
-          },
-          async spawn({ command }: { command: string }) {
-            events.bootstrapCommands.push(command);
-            return {
-              stdout: new ReadableStream<Uint8Array>({
-                start(controller) {
-                  controller.close();
-                },
-              }),
-              stderr: new ReadableStream<Uint8Array>({
-                start(controller) {
-                  controller.close();
-                },
-              }),
-              async wait() {
-                return { exitCode: 0 };
-              },
-              async kill() {},
-            };
-          },
-          async writeFile() {},
-          async writeBinaryFile() {},
-          async writeTextFile() {},
-        }),
-      });
-    }
+          async kill() {},
+        };
+      },
+      async writeFile() {},
+      async writeBinaryFile() {},
+      async writeTextFile() {},
+    });
 
-    return { reused: options.reused ?? false };
+    return { artifact: { templateName: context.templateName }, reused: options.reused ?? false };
   };
 }
 
 function createPrewarmEvents() {
   return {
-    bootstrapCommands: [] as string[],
+    runPreparationCommands: [] as string[],
     runtimeContextAppRoots: [] as string[],
     seededFilePaths: [] as string[],
     seededTemplateCount: 0,

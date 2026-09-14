@@ -190,7 +190,12 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
   );
   await writeFile(
     join(researcherRoot, "sandbox", "sandbox.mjs"),
-    ["export default {};\n"].join("\n"),
+    [
+      'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+      "export const environment = DefaultSandbox.environment();",
+      "export default defineSandbox(() => environment.create());",
+      "",
+    ].join("\n"),
   );
 }
 

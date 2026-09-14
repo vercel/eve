@@ -61,7 +61,7 @@ export function buildCallbackContext(): SessionContext {
   };
 }
 
-function withRuntimeSandboxLifecycle(
+export function withRuntimeSandboxLifecycle(
   sandbox: SandboxSession,
   deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,

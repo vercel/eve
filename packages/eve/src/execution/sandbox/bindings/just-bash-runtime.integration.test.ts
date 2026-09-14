@@ -26,7 +26,7 @@ describe("just-bash sandbox deletion", () => {
       },
       writeFiles: vi.fn(async () => {}),
     } satisfies BashSandbox;
-    const handle = createJustBashHandle(sandbox, "just-bash");
+    const handle = createJustBashHandle(sandbox);
 
     await handle.delete();
 

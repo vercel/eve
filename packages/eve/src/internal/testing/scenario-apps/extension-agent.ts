@@ -21,12 +21,15 @@ export const EXTENSION_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
 `,
     "agent/lib/weather/tail.mjs": `export const TOOL_TAIL = "across cjs/js/mts/mjs modules.";
 `,
-    "agent/sandbox/sandbox.cjs": `module.exports = {
-  async onSession({ use }) {
-    const sandbox = await use();
-    await sandbox.run({ command: "mkdir -p .extension-fixture" });
-  },
-};
+    "agent/sandbox/sandbox.cjs": `const { DefaultSandbox, defineSandbox } = require("eve/sandbox");
+Object.defineProperty(exports, "__esModule", { value: true });
+const environment = DefaultSandbox.environment();
+exports.environment = environment;
+exports.default = defineSandbox(async () => {
+  const sandbox = await environment.create();
+  await sandbox.run({ command: "mkdir -p .extension-fixture" });
+  return sandbox;
+});
 `,
     "agent/schedules/nightly.cts": `export default {
   cron: "0 0 * * *",

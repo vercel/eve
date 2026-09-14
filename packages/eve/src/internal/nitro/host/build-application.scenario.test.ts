@@ -85,6 +85,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
 const copyPublicAssetsMock = vi.fn(async () => undefined);
 const createProductionApplicationNitroMock = vi.fn();
 const prepareProductionApplicationHostMock = vi.fn();
+const refreshProductionCompiledArtifactsMock = vi.fn(async () => undefined);
 const prepareMock = vi.fn(async () => undefined);
 const prerenderMock = vi.fn(async () => undefined);
 const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
@@ -107,6 +108,7 @@ vi.mock("./create-application-nitro.js", () => ({
 
 vi.mock("./prepare-application-host.js", () => ({
   prepareProductionApplicationHost: prepareProductionApplicationHostMock,
+  refreshProductionCompiledArtifacts: refreshProductionCompiledArtifactsMock,
 }));
 
 vi.mock("#discover/project.js", () => ({

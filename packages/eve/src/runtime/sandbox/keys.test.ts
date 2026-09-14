@@ -46,20 +46,25 @@ function sha256(value: string): string {
 
 function expectedTemplateKey(input: { scopeSource: string; version: string }): string {
   const scope = sha256(input.scopeSource).slice(0, 16);
-  const versionHash = sha256(`workspace-content:${CONTENT_HASH}:__root__:eve:default-sandbox`);
+  const contentHash = sha256(`workspace-content:${CONTENT_HASH}:__root__:eve:default-sandbox`);
+  const templateVersion = sha256(`${contentHash}:`);
   const templateHash = sha256(
-    `${input.version}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${versionHash}`,
+    `${input.version}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${templateVersion}`,
   ).slice(0, 20);
   return `eve-sbx-tpl-local-${scope}-${templateHash}`;
 }
 
 async function deriveTemplateKey(): Promise<string | null> {
   return await createRuntimeSandboxTemplateKey({
-    backendName: "local",
+    providerName: "local",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
     sourceId: "eve:default-sandbox",
-    templatePlan: { contentHash: CONTENT_HASH, kind: "workspace-content" },
+    templatePlan: {
+      contentHash: CONTENT_HASH,
+      environmentHash: "environment-v1",
+      kind: "workspace-content",
+    },
   });
 }
 
@@ -78,16 +83,17 @@ async function withBundledMetadata<T>(
 }
 
 async function deriveSessionKey(input?: {
-  readonly backendName?: string;
+  readonly providerName?: string;
   readonly contentHash?: string;
 }): Promise<string> {
   const keys = await createRuntimeSandboxKeys({
-    backendName: input?.backendName ?? "local",
+    providerName: input?.providerName ?? "local",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
     sessionId: "session_1",
     sourceId: "eve:default-sandbox",
     templatePlan: {
+      environmentHash: "environment-v1",
       contentHash: input?.contentHash ?? CONTENT_HASH,
       kind: "workspace-content",
     },
@@ -96,13 +102,13 @@ async function deriveSessionKey(input?: {
 }
 
 async function deriveBootstrapKeys(
-  templatePlan: Extract<RuntimeSandboxTemplatePlan, { kind: "bootstrap" }> = {
-    kind: "bootstrap",
-    sourceHash: "sandbox-source-v1",
+  templatePlan: Extract<RuntimeSandboxTemplatePlan, { kind: "prepared" }> = {
+    kind: "prepared",
+    environmentHash: "sandbox-source-v1",
   },
 ) {
   return await createRuntimeSandboxKeys({
-    backendName: "vercel",
+    providerName: "vercel",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
     sessionId: "session_1",
@@ -128,7 +134,7 @@ async function deriveVercelSessionKey(env: Record<string, string>): Promise<stri
   }
 
   return await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-    deriveSessionKey({ backendName: "vercel" }),
+    deriveSessionKey({ providerName: "vercel" }),
   );
 }
 
@@ -185,6 +191,57 @@ describe("createRuntimeSandboxKeys", () => {
     expect(first).toBe(second);
   });
 
+  it("keeps long logical names collision-resistant", async () => {
+    const derive = async (sessionId: string) =>
+      (
+        await createRuntimeSandboxKeys({
+          providerName: "local",
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          nodeId: "__root__",
+          sessionId,
+          sourceId: "sandbox.ts",
+          templatePlan: { environmentHash: "environment-v1", kind: "none" },
+        })
+      ).sessionKey;
+    const prefix = "team-".repeat(40);
+    expect(await derive(`${prefix}alpha`)).not.toBe(await derive(`${prefix}bravo`));
+  });
+
+  it("rotates a named session key when constructor configuration changes", async () => {
+    const input = {
+      providerName: "vercel",
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      sessionId: "team-acme",
+      sourceId: "sandbox.ts",
+      templatePlan: { environmentHash: "environment-v1", kind: "none" } as const,
+    };
+    const first = await createRuntimeSandboxKeys({ ...input, configurationHash: "small" });
+    const second = await createRuntimeSandboxKeys({ ...input, configurationHash: "large" });
+    expect(second.sessionKey).not.toBe(first.sessionKey);
+  });
+
+  it("rotates a no-template session key when the environment changes", async () => {
+    const input = {
+      providerName: "local",
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      sessionId: "session_1",
+      sourceId: "sandbox.ts",
+    } as const;
+    const first = await createRuntimeSandboxKeys({
+      ...input,
+      templatePlan: { environmentHash: "environment-v1", kind: "none" },
+    });
+    const second = await createRuntimeSandboxKeys({
+      ...input,
+      templatePlan: { environmentHash: "environment-v2", kind: "none" },
+    });
+    expect(first.templateKey).toBeNull();
+    expect(second.templateKey).toBeNull();
+    expect(second.sessionKey).not.toBe(first.sessionKey);
+  });
+
   it("rotates the session key when the sandbox content changes", async () => {
     const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
       deriveSessionKey(),
@@ -196,7 +253,7 @@ describe("createRuntimeSandboxKeys", () => {
     expect(first).not.toBe(second);
   });
 
-  it("keeps unseeded bootstrap template and session keys stable across unrelated source changes", async () => {
+  it("keeps unseeded prepared template and session keys stable across unrelated source changes", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
     const metadata = createMetadataFixture("1.0.0");
     const first = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
@@ -212,7 +269,7 @@ describe("createRuntimeSandboxKeys", () => {
     expect(second).toEqual(first);
   });
 
-  it("does not use missing compile metadata as unseeded bootstrap content", async () => {
+  it("does not use missing compile metadata as unseeded prepared content", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
     const metadata = createMetadataFixture(resolveInstalledPackageInfo().version);
     const withMetadata = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
@@ -221,27 +278,49 @@ describe("createRuntimeSandboxKeys", () => {
     expect(withoutMetadata).toEqual(withMetadata);
   });
 
-  it.each([
-    { sourceHash: "sandbox-source-v2" },
-    { revalidationKey: "bootstrap-v2" },
-    { contentHash: CONTENT_HASH },
-  ])("rotates both bootstrap keys when sandbox inputs change: %j", async (change) => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
-    await withBundledMetadata(createMetadataFixture("1.0.0"), async () => {
-      const first = await deriveBootstrapKeys();
-      const second = await deriveBootstrapKeys({
-        kind: "bootstrap",
-        sourceHash: "sandbox-source-v1",
-        ...change,
-      });
+  it.each([{ environmentHash: "sandbox-source-v2" }, { contentHash: CONTENT_HASH }])(
+    "rotates both prepared keys when sandbox inputs change: %j",
+    async (change) => {
+      vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+      await withBundledMetadata(createMetadataFixture("1.0.0"), async () => {
+        const first = await deriveBootstrapKeys();
+        const second = await deriveBootstrapKeys({
+          kind: "prepared",
+          environmentHash: "sandbox-source-v1",
+          ...change,
+        });
 
-      expect(second.templateKey).not.toBe(first.templateKey);
-      expect(second.sessionKey).not.toBe(first.sessionKey);
-    });
-  });
+        expect(second.templateKey).not.toBe(first.templateKey);
+        expect(second.sessionKey).not.toBe(first.sessionKey);
+      });
+    },
+  );
 });
 
 describe("createRuntimeSandboxTemplateKey", () => {
+  it("rotates the template when provider environment options change", async () => {
+    const input = {
+      providerName: "docker",
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      sourceId: "sandbox.ts",
+      templatePlan: {
+        contentHash: CONTENT_HASH,
+        environmentHash: "environment-v1",
+        kind: "workspace-content",
+      } as const,
+    };
+    const first = await createRuntimeSandboxTemplateKey({
+      ...input,
+      configurationHash: "image-a",
+    });
+    const second = await createRuntimeSandboxTemplateKey({
+      ...input,
+      configurationHash: "image-b",
+    });
+    expect(second).not.toBe(first);
+  });
+
   it("derives the version segment from compile metadata so build and runtime agree", async () => {
     const templateKey = await withBundledMetadata(
       createMetadataFixture("9.9.9-test"),

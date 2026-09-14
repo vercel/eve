@@ -34,7 +34,10 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
-import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import {
+  prepareProductionApplicationHost,
+  refreshProductionCompiledArtifacts,
+} from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -341,6 +344,7 @@ async function buildApplicationInWorkspace(
           },
         }),
       );
+      await refreshProductionCompiledArtifacts(preparedHost, workspace.host.artifactsDir);
     }
     await buildNitroOutput(nitro, profiler, "nitro");
     if (isVercelBuild) {
