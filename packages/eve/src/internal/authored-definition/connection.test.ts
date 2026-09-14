@@ -143,11 +143,11 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         validInput({
           auth: {
             getToken: async () => ({ token: "x" }),
-            principalType: "app",
+            principalType: "user",
             vercelConnect: {
               connector: "oauth/mcp-linear-app",
               connectorType: "oauth",
-              principalTypes: ["app"],
+              principalTypes: ["user"],
             },
           },
         }),
@@ -157,7 +157,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect((result.auth as Record<string, unknown>).vercelConnect).toEqual({
         connector: "oauth/mcp-linear-app",
         connectorType: "oauth",
-        principalTypes: ["app"],
+        principalTypes: ["user"],
       });
     });
 
