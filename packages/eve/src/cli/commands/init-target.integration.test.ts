@@ -58,12 +58,26 @@ describe("resolveInitTarget", () => {
     });
   });
 
-  it("requires explicit current-directory syntax for an existing package", async () => {
-    const projectPath = await createScratchDirectory("eve-init-target-package-");
+  it.each([undefined, ".", "./", "nested/../."] as const)(
+    "adds to an existing package when target is %j",
+    async (target) => {
+      const projectPath = await createScratchDirectory("eve-init-target-package-");
+      await writeFile(join(projectPath, "package.json"), "{}\n");
+
+      await expect(resolveTarget(projectPath, target)).resolves.toEqual({
+        kind: "existing",
+        projectPath,
+      });
+    },
+  );
+
+  it("adds to an existing package addressed by a relative path", async () => {
+    const parentDirectory = await createScratchDirectory("eve-init-target-parent-package-");
+    const projectPath = join(parentDirectory, "existing-app");
+    await mkdir(projectPath);
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
-    await expect(resolveTarget(projectPath)).rejects.toThrow("explicit `eve init .`");
-    await expect(resolveTarget(projectPath, ".")).resolves.toEqual({
+    await expect(resolveTarget(parentDirectory, "existing-app")).resolves.toEqual({
       kind: "existing",
       projectPath,
     });

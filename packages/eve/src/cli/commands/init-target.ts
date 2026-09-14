@@ -89,7 +89,6 @@ function assertTargetStaysWithinParent(
 /** Classifies the target itself without walking ancestor projects. */
 export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
   const parentPath = resolve(input.parentDirectory);
-  const targetProvided = input.target !== undefined;
   const projectPath = resolve(parentPath, input.target ?? ".");
   assertTargetStaysWithinParent(parentPath, input.target, projectPath);
   const createInPlace = projectPath === parentPath;
@@ -164,17 +163,11 @@ export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<
   if (await isExistingEveProject(projectPath, entries)) {
     throw new InitTargetError(
       "target_conflict",
-      `An eve project already exists at "${projectPath}". Run an existing-project command from that directory instead.`,
+      `An eve project already exists at "${projectPath}". Run \`eve dev\` from that directory, or use an existing-project command.`,
     );
   }
 
   if (entries.includes("package.json")) {
-    if (!targetProvided || input.target !== ".") {
-      throw new InitTargetError(
-        "target_conflict",
-        `Adding eve to an existing package requires an explicit \`eve init .\` from "${projectPath}".`,
-      );
-    }
     return { kind: "existing", projectPath };
   }
 

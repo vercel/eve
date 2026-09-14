@@ -16,9 +16,10 @@ the interactive terminal UI.
 If the user wants a reusable extension package instead of an agent, run
 `npx eve@latest extension init <name>` and follow that command's next steps.
 
-For an existing app, run `npx eve@latest init .` from its directory. This adds the
-agent and missing dependencies while leaving the existing Git repository and app
-scripts alone. Append `--model provider/model-id` or `--reasoning effort` to
-either init command when the user chose those settings. If init cannot be used,
+For an existing app, run `npx eve@latest init` from its directory, or pass its
+path with `npx eve@latest init path/to/app`. This adds the agent and missing
+dependencies while leaving the existing Git repository and app scripts alone.
+Append `--model provider/model-id` or `--reasoning effort` to either init command
+when the user chose those settings. If init cannot be used,
 install by hand with
 `npm install eve@latest ai zod`; manual installation does not add package scripts.

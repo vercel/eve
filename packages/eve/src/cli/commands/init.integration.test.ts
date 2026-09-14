@@ -472,6 +472,41 @@ describe("runInitCommand", () => {
     expect(packageJson.dependencies.eve).toBe("file:/tmp/eve-0.11.5.tgz");
   });
 
+  it.each([undefined, "."] as const)(
+    "adds eve to the current existing project when target is %j",
+    async (target) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-existing-current-"));
+      const projectRoot = await createHostProject(parentDirectory);
+      const output = logger();
+      const deps = dependencies();
+
+      await runInitCommand(output, projectRoot, target, {}, deps);
+
+      await expect(pathExists(join(projectRoot, "agent", "agent.ts"))).resolves.toBe(true);
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        "pnpm",
+        projectRoot,
+        expect.anything(),
+      );
+    },
+  );
+
+  it("adds eve to an existing project addressed by a relative path", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-existing-path-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    await expect(pathExists(join(projectRoot, "agent", "agent.ts"))).resolves.toBe(true);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectRoot,
+      expect.anything(),
+    );
+  });
+
   it.each([undefined, ".", "./"] as const)(
     "scaffolds the current empty directory when target is %j",
     async (target) => {
