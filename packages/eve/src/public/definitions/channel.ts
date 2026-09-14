@@ -1,5 +1,8 @@
 import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
-import type { ChannelAudienceProjector } from "#channel/audience.js";
+import {
+  createMetadataAudienceProjector,
+  type ChannelAudienceProjector,
+} from "#channel/audience.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import {
   CHANNEL_SENTINEL,
@@ -338,6 +341,9 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
+  const legacyAudienceSource = {
+    kind: definition.kindHint ?? "defineChannel",
+  };
 
   const events = definition.events;
   for (const eventType of eventTypes) {
@@ -404,7 +410,14 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
                   },
                 }),
             ...(audience === undefined
-              ? undefined
+              ? metadata !== undefined
+                ? {
+                    audience: createMetadataAudienceProjector(
+                      legacyAudienceSource,
+                      metadata as (state: Record<string, unknown> | undefined) => unknown,
+                    ),
+                  }
+                : undefined
               : { audience: audience as ChannelAudienceProjector }),
           },
 

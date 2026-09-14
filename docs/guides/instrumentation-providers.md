@@ -83,6 +83,8 @@ export default defineInstrumentation({
 
 The policy receives `agentName`, `channel`, `audience`, `mode`, `environment`, and `principalType`. `audience` is `"public"`, `"private"`, or `"unknown"`. `environment` is `"development"`, `"preview"`, or `"production"`.
 
+`principalType` is the principal used for classification. Normal channels report their route or session principal; forwarded eve sessions report the calling deployment's principal. Sessions that predate the durable conversation key report their session initiator.
+
 The default policy emits metadata for every audience and includes inputs and outputs for `public` conversations and for any audience in a development environment. Preview behaves like production: an `unknown` conversation records metadata only. Return an explicit decision to change that behavior:
 
 | Decision                                      | Result                                                       |

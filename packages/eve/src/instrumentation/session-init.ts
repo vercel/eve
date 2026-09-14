@@ -50,7 +50,7 @@ export function initializeSessionInstrumentation(input: {
   const conversation = resolveConversationContext(
     storedConversation,
     {
-      channelKind: input.ctx.get(ChannelInstrumentationKey)?.channelType,
+      channelKind: input.ctx.get(ChannelInstrumentationKey)?.kind,
       environment: resolveInstrumentationEnvironment(),
       forwardedTracePolicy,
       mode: input.ctx.get(ModeKey),

@@ -2,7 +2,6 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { AudienceInput } from "#shared/conversation-context.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isThenable } from "#shared/guards.js";
-import { resolveInstrumentationProjection } from "#internal/instrumentation.js";
 
 type ChannelAudienceSource = {
   readonly kind: string;
@@ -32,6 +31,21 @@ export function resolveAudience(
   return normalize(adapter, input);
 }
 
+export function createMetadataAudienceProjector(
+  source: { readonly kind: string },
+  metadata: (state: Record<string, unknown> | undefined) => unknown,
+): ChannelAudienceProjector {
+  return (input) =>
+    resolveAudience(
+      {
+        kind: source.kind,
+        state: input.state,
+        instrumentation: { metadata },
+      },
+      input,
+    );
+}
+
 function normalize(
   adapter: ChannelAudienceSource,
   input: AudienceInput<Record<string, unknown> | undefined>,
@@ -41,14 +55,23 @@ function normalize(
   if (project === undefined) {
     const projectMetadata = instrumentation?.metadata;
     if (projectMetadata === undefined) return "unknown";
-    const projection = resolveInstrumentationProjection({
-      invoke: () => projectMetadata(adapter.state),
-      log: console,
-      source: adapter.kind,
-    });
-    if (projection?.audience === undefined) return "unknown";
+    let projection: unknown;
+    try {
+      projection = projectMetadata(adapter.state);
+    } catch {
+      console.warn(`ignoring deprecated channel audience metadata for channel ${adapter.kind}`);
+      return "unknown";
+    }
+    if (isThenable(projection)) {
+      console.warn(`ignoring deprecated channel audience metadata for channel ${adapter.kind}`);
+      void Promise.resolve(projection).catch(() => undefined);
+      return "unknown";
+    }
+    if (typeof projection !== "object" || projection === null) return "unknown";
+    const audience = (projection as Record<string, unknown>).audience;
+    if (audience === undefined) return "unknown";
     warnDeprecatedMetadataAudience(adapter.kind);
-    return normalizeChannelAudience(projection.audience);
+    return normalizeChannelAudience(audience);
   }
   try {
     const value = project(input);
