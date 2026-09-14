@@ -255,7 +255,6 @@ export async function dispatchAgentInvocation(input: {
       parentContinuationToken: input.replyTo,
       activityObserver: prepared.activityObserver,
       taskActivityObserver,
-      parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
       session,
       taskId: input.taskId,
