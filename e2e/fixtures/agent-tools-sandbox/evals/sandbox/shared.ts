@@ -7,8 +7,8 @@
 export const BOOTSTRAP_MARKER_PATH = "/workspace/smoke-marker.txt";
 export const BOOTSTRAP_MARKER_TOKEN = "sandbox-bootstrap-ok-J3Q";
 
-/** Custom CLI installed on the PATH by `bootstrap`. */
-export const SANDBOX_CLI_NAME = "eve-greet";
+/** Custom CLI installed by `bootstrap`. */
+export const SANDBOX_CLI_NAME = "/workspace/.eve/bin/eve-greet";
 export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 
 /** Written by `onSession` into each live session (not the template). */

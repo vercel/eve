@@ -2023,7 +2023,7 @@ describe("createVercelSandbox", () => {
       expect(setupScript).not.toContain("python3");
       expect(setupScript).not.toContain("ripgrep");
       expect(setupScript).not.toContain("sudo mkdir");
-      expect(setupScript).not.toContain("chown");
+      expect(setupScript).toContain('chown "${SUDO_UID}:${SUDO_GID}" /workspace');
     }
   });
 

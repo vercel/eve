@@ -22,19 +22,19 @@ describe("eve sandbox image", () => {
     expect(DEFAULT_EVE_SANDBOX_IMAGE).toBe("ghcr.io/vercel/eve:1.2.3");
   });
 
-  it("uses the versioned VCR image for Vercel Sandbox", () => {
-    expect(resolveVercelEveSandboxImage()).toBe("vcr.vercel.com/vercel/eve/base:1.2.3");
-    expect(VERCEL_EVE_SANDBOX_IMAGE).toBe("vcr.vercel.com/vercel/eve/base:1.2.3");
+  it("uses the managed universal image for Vercel Sandbox", () => {
+    expect(resolveVercelEveSandboxImage()).toBe("vercel/sandbox/universal:latest");
+    expect(VERCEL_EVE_SANDBOX_IMAGE).toBe("vercel/sandbox/universal:latest");
   });
 
-  it("uses EVE_SANDBOX_IMAGE_TAG for both registries", async () => {
+  it("uses EVE_SANDBOX_IMAGE_TAG only for the GHCR image", async () => {
     vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "latest");
     vi.resetModules();
 
     const images = await import("#execution/sandbox/bindings/eve-image.js");
     expect(images.resolveEveSandboxImage()).toBe("ghcr.io/vercel/eve:latest");
     expect(images.DEFAULT_EVE_SANDBOX_IMAGE).toBe("ghcr.io/vercel/eve:latest");
-    expect(images.resolveVercelEveSandboxImage()).toBe("vcr.vercel.com/vercel/eve/base:latest");
-    expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe("vcr.vercel.com/vercel/eve/base:latest");
+    expect(images.resolveVercelEveSandboxImage()).toBe("vercel/sandbox/universal:latest");
+    expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe("vercel/sandbox/universal:latest");
   });
 });
