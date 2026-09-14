@@ -233,6 +233,26 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
+  it("does not add a root agent when a path target is an eve workspace", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-workspace-path-parent-"));
+    const workspaceRoot = join(parentDirectory, "workspace");
+    await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
+    await writeFile(join(workspaceRoot, "agents", "support", "agent", "agent.ts"), "export {};\n");
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      '{"name":"workspace","dependencies":{"eve":"*"}}\n',
+    );
+    const output = logger();
+    const deps = dependencies();
+
+    await expect(runInitCommand(output, parentDirectory, "workspace", {}, deps)).rejects.toThrow(
+      "An eve project already exists",
+    );
+
+    await expect(pathExists(join(workspaceRoot, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
   it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();
@@ -1246,7 +1266,7 @@ describe("runInitCommand", () => {
     const deps = dependencies();
 
     await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toMatchObject({
-      message: `An eve project already exists at "${projectRoot}". Run an existing-project command from that directory instead.`,
+      message: `An eve project already exists at "${projectRoot}". Run \`eve dev\` from that directory, or use an existing-project command.`,
     });
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(false);

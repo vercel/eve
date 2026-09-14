@@ -47,15 +47,15 @@ eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channe
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
-| Target                                                                     | What happens                                                                                                           |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                |
-| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                      |
-| `eve init` or `eve init .` in a non-empty directory without `package.json` | Refuses to overwrite the directory. Pass a new directory name, such as `eve init my-agent`                             |
-| `eve init` or `eve init .` in an existing project                          | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files |
-| `eve init path/to/app`                                                     | Adds an agent to the existing package at `path/to/app`                                                                 |
+| Target                                                                                                     | What happens                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `eve init my-agent`                                                                                        | Creates an agent project in `my-agent/`                                                                                |
+| `eve init` or `eve init .` in an empty directory                                                           | Creates an agent project in the current directory                                                                      |
+| `eve init` or `eve init .` in a directory with files other than environment metadata and no `package.json` | Refuses to overwrite the directory. Pass a new directory name, such as `eve init my-agent`                             |
+| `eve init` or `eve init .` in an existing project                                                          | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files |
+| `eve init path/to/app`                                                                                     | Adds an agent to the existing package at `path/to/app`                                                                 |
 
-Existing packages do not prompt, so you can initialize them in non-interactive environments with `eve init` from the project directory or `eve init path/to/app`. New projects in those environments need a new directory name, such as `eve init my-agent`.
+Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
 
 After scaffolding, a human terminal usually continues into `eve dev`. Enable the self-modification subagent to edit your agent from the dev session. Otherwise, if a coding-agent REPL is on `PATH`, you can launch it to make changes instead of opening the TUI. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 

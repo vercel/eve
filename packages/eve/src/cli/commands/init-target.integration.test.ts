@@ -92,6 +92,18 @@ describe("resolveInitTarget", () => {
     await expect(resolveTarget(projectPath, ".")).rejects.toThrow("An eve project already exists");
   });
 
+  it("stops when a path target is an eve agent workspace", async () => {
+    const parentDirectory = await createScratchDirectory("eve-init-target-workspace-parent-");
+    const projectPath = join(parentDirectory, "workspace");
+    await mkdir(join(projectPath, "agents", "support", "agent"), { recursive: true });
+    await writeFile(join(projectPath, "agents", "support", "agent", "agent.ts"), "export {};\n");
+    await writeFile(join(projectPath, "package.json"), "{}\n");
+
+    await expect(resolveTarget(parentDirectory, "workspace")).rejects.toThrow(
+      "An eve project already exists",
+    );
+  });
+
   it("lists arbitrary content instead of guessing how to integrate it", async () => {
     const projectPath = await createScratchDirectory("eve-init-target-content-");
     await writeFile(join(projectPath, "README.md"), "# Existing\n");

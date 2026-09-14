@@ -63,11 +63,24 @@ async function isExistingEveProject(
   entries: readonly string[],
 ): Promise<boolean> {
   if (await isAgentRoot(projectPath)) return true;
-  return (
+  if (
     (entries.includes("package.json") || entries.includes("vercel.json")) &&
     entries.includes("agent") &&
     (await isAgentRoot(resolve(projectPath, "agent")))
-  );
+  ) {
+    return true;
+  }
+  if (!entries.includes("agents")) return false;
+  const agentDirectories = await readdir(resolve(projectPath, "agents"), {
+    withFileTypes: true,
+  }).catch(() => []);
+  if (!entries.includes("package.json")) return false;
+  for (const entry of agentDirectories) {
+    if (entry.isDirectory() && !entry.name.startsWith(".")) {
+      if (await isAgentRoot(resolve(projectPath, "agents", entry.name))) return true;
+    }
+  }
+  return false;
 }
 
 function listEntries(entries: readonly string[]): string {
