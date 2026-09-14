@@ -36,16 +36,18 @@ describe("current package publication target", () => {
     ).rejects.toThrow("stale build");
   });
 
-  test("accepts the current open pull request build", async () => {
+  test("accepts the current open pull request build without a GitHub token", async () => {
     const fetchImplementation = vi
       .fn()
       .mockResolvedValue(response({ state: "open", base: { ref: "main" }, head: { sha } }));
     await expect(
-      assertCurrentPublicationTarget(input, fetchImplementation),
+      assertCurrentPublicationTarget({ ...input, token: undefined }, fetchImplementation),
     ).resolves.toBeUndefined();
     expect(fetchImplementation).toHaveBeenCalledWith(
       "https://api.github.com/repos/vercel/eve/pulls/123",
-      expect.any(Object),
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+      }),
     );
   });
 
@@ -67,9 +69,6 @@ describe("current package publication target", () => {
     await expect(
       assertCurrentPublicationTarget({ ...input, repository: "eve" }, vi.fn()),
     ).rejects.toThrow("GITHUB_REPOSITORY");
-    await expect(assertCurrentPublicationTarget({ ...input, token: "" }, vi.fn())).rejects.toThrow(
-      "GITHUB_TOKEN",
-    );
     await expect(
       assertCurrentPublicationTarget(input, vi.fn().mockResolvedValue(response({}, 503))),
     ).rejects.toThrow("GitHub returned 503");

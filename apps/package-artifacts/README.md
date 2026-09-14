@@ -1,6 +1,6 @@
 # eve package artifacts
 
-A stable, read-only Vercel app at `pkg.eve.dev` proxies private Blob artifacts published by GitHub Actions. The app itself never packages source or writes Blob objects.
+The `eve-pkg` Vercel project builds and publishes eve tarballs to private Vercel Blob using deployment OIDC. Its production domain, `pkg.eve.dev`, serves both `main` and same-repository pull-request packages.
 
 ```text
 /main/eve.tgz
@@ -16,21 +16,17 @@ Initialize an agent from the current `main` build with:
 npm exec --yes --package=https://pkg.eve.dev/main/eve.tgz -- eve init my-agent
 ```
 
-A same-repository pull-request build is available at `/pr/<number>/eve.tgz` after its **Package artifact** commit status succeeds. Fork pull requests never build or publish package artifacts. The status is reported only after publication finishes, and no manual publishing step is required. Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact, and the packaged CLI stamps that immutable URL into generated projects.
-
-For example, after the package check passes on PR #123:
+A same-repository pull-request build is available after its **Vercel – eve-pkg** deployment succeeds. Fork pull requests and direct branch deployments never build or publish package artifacts. For example:
 
 ```bash
 npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
 ```
 
+Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact. The packaged CLI also stamps that immutable URL into generated projects.
+
 ## Publishing
 
-[Build tarball](../../.github/workflows/build-tarball.yml) runs for `main` pushes and same-repository pull requests without credentials. It checks out the exact source SHA, packages eve, and uploads the tarball and metadata as a short-lived GitHub Actions artifact.
-
-[Publish tarball](../../.github/workflows/publish-tarball.yml) is an automatic internal trust boundary. GitHub loads it from the default branch on successful package builds. It verifies that the build still represents the current `main` or pull-request head, downloads the artifact on a fresh runner, and uploads the bytes without executing or extracting them. It then reports the user-facing **Package artifact** commit status. Keeping publishing separate prevents pull-request code from changing the credentialed workflow or reading the Blob token.
-
-The publisher writes:
+Vercel deploys `main` to Production and same-repository pull requests to Preview. The build derives the source SHA and PR number from Vercel system environment variables, packages eve, verifies that the source still represents the current branch or pull-request head, and writes the following objects:
 
 ```text
 packages/<sha>/eve.tgz
@@ -41,16 +37,33 @@ packages/refs/pr/<number>.json
 
 SHA objects are immutable. Main and PR pointer objects are mutable and short-cached.
 
+The build requires `VERCEL_OIDC_TOKEN` and `BLOB_STORE_ID` and passes them explicitly to the Blob SDK. It does not accept or use a static Blob write token.
+
 ## Project setup
 
-The Vercel package project must:
+The `eve-pkg` Vercel project must:
 
 - use this directory as its project root;
-- connect the private package Blob store for reads;
+- enable Vercel system environment variables and OIDC;
+- connect the private package Blob store to Production and Preview;
 - deploy `main` to Production;
-- set its Ignored Build Step to `test "$VERCEL_GIT_COMMIT_REF" != "main"`; and
-- disable Deployment Protection so package managers can reach the public proxy.
+- omit `BLOB_READ_WRITE_TOKEN` from Production and Preview;
+- disable Deployment Protection so package managers can reach the production proxy; and
+- use the following trusted Ignored Build Step:
 
-Set the repository Actions secret `EVE_PACKAGE_BLOB_READ_WRITE_TOKEN` to the package store's write token. The user-facing workflow never references this secret. Successful same-repository pull-request builds publish automatically through the trusted default-branch publisher.
+```sh
+if [ "$VERCEL_ENV" = "production" ]; then
+  test "$VERCEL_GIT_COMMIT_REF" != "main"
+else
+  test "$VERCEL_ENV" != "preview" ||
+    test "$VERCEL_GIT_REPO_OWNER" != "vercel" ||
+    test "$VERCEL_GIT_REPO_SLUG" != "eve" ||
+    test -z "$VERCEL_GIT_PULL_REQUEST_ID"
+fi
+```
+
+Vercel interprets exit code `0` as “skip this build.” The command therefore permits only production `main` and same-repository PR Preview deployments, rejecting forks before dependency installation. The build repeats the repository and deployment checks as defense in depth.
+
+Same-repository PR code runs with package-store OIDC access during its Preview build. This is acceptable only while write access to `vercel/eve` is restricted to trusted employees. The Blob store must remain package-only and must not contain unrelated application data.
 
 The smoke check verifies public access and the downloaded main artifact's gzip signature.
